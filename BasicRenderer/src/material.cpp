@@ -2,12 +2,8 @@
 
 #include <stdexcept>
 
-// Helper function for throwing if a DirectX function fails
-inline void ThrowIfFailed(HRESULT hr) {
-    if (FAILED(hr)) {
-        throw std::runtime_error("HRESULT failed");
-    }
-}
+#include <DirectX/d3dx12.h>
+#include "utilities.h"
 
 Material::Material(ComPtr<ID3D12Device> device, const std::wstring& shaderFile)
     : device(device), pConstantBuffer(nullptr) {

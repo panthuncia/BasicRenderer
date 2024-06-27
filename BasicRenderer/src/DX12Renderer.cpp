@@ -9,31 +9,6 @@
 #include "utilities.h"
 #include "DirectX/d3dx12.h"
 
-struct Vertex {
-    DirectX::XMFLOAT3 position;
-    DirectX::XMFLOAT4 color;
-};
-
-const Vertex cubeVertices[] = {
-    {{-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-    {{1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-    {{ 1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-    {{ -1.0f, 1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-    {{-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-    {{1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
-    {{ 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
-    {{ -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-};
-
-const UINT16 cubeIndices[] = {
-    0, 1, 3, 3, 1, 2,
-    1, 5, 2, 2, 5, 6,
-    5, 4, 6, 6, 4, 7,
-    4, 0, 7, 7, 0, 3,
-    3, 2, 7, 7, 2, 6,
-    4, 5, 0, 0, 5, 1
-};
-
 void DX12Renderer::Initialize(HWND hwnd) {
     LoadPipeline(hwnd);
     LoadAssets();
@@ -230,55 +205,27 @@ void DX12Renderer::LoadAssets() {
         ThrowIfFailed(hr);
     }
 
-    // Create the vertex buffer
-    const UINT vertexBufferSize = sizeof(cubeVertices);
+    std::vector<Vertex> vertices = {
+        {{-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+        {{ 1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+        {{ -1.0f, 1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
+        {{-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
+        {{1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
+        {{ 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
+        {{ -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    };
 
-    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-    CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
+    std::vector<UINT16> indices = {
+        0, 1, 3, 3, 1, 2,
+        1, 5, 2, 2, 5, 6,
+        5, 4, 6, 6, 4, 7,
+        4, 0, 7, 7, 0, 3,
+        3, 2, 7, 7, 2, 6,
+        4, 5, 0, 0, 5, 1
+    };
 
-    ThrowIfFailed(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &bufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&vertexBuffer)));
-
-    // Copy the vertex data to the vertex buffer
-    UINT8* pVertexDataBegin;
-    CD3DX12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
-    ThrowIfFailed(vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)));
-    memcpy(pVertexDataBegin, cubeVertices, sizeof(cubeVertices));
-    vertexBuffer->Unmap(0, nullptr);
-
-    // Initialize the vertex buffer view
-    vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
-    vertexBufferView.StrideInBytes = sizeof(Vertex);
-    vertexBufferView.SizeInBytes = vertexBufferSize;
-
-    // Create the index buffer
-    const UINT indexBufferSize = sizeof(cubeIndices);
-
-    bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
-
-    ThrowIfFailed(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &bufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&indexBuffer)));
-
-    // Copy the index data to the index buffer
-    UINT8* pIndexDataBegin;
-    ThrowIfFailed(indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)));
-    memcpy(pIndexDataBegin, cubeIndices, sizeof(cubeIndices));
-    indexBuffer->Unmap(0, nullptr);
-
-    // Initialize the index buffer view
-    indexBufferView.BufferLocation = indexBuffer->GetGPUVirtualAddress();
-    indexBufferView.Format = DXGI_FORMAT_R16_UINT;
-    indexBufferView.SizeInBytes = indexBufferSize;
+    cubeMesh = std::make_unique<Mesh>(device.Get(), vertices, indices);
 }
 
 
@@ -368,11 +315,15 @@ void DX12Renderer::Render() {
     commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
     commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    D3D12_VERTEX_BUFFER_VIEW vertexBufferView = cubeMesh->GetVertexBufferView();
+    D3D12_INDEX_BUFFER_VIEW indexBufferView = cubeMesh->GetIndexBufferView();
+
+    // Pass the addresses of the local variables
     commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
     commandList->IASetIndexBuffer(&indexBufferView);
 
     // Draw the cube
-    commandList->DrawIndexedInstanced(_countof(cubeIndices), 1, 0, 0, 0);
+    commandList->DrawIndexedInstanced(cubeMesh->GetIndexCount(), 1, 0, 0, 0);
 
     // Indicate that the back buffer will now be used to present
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);

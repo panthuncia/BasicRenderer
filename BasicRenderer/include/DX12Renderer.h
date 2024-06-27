@@ -10,6 +10,9 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <directxmath.h>
+#include <memory>
+
+#include "Mesh.h"
 
 using namespace Microsoft::WRL;
 
@@ -37,10 +40,7 @@ private:
     // Cube components
     ComPtr<ID3D12PipelineState> pipelineState;
     ComPtr<ID3D12RootSignature> rootSignature;
-    ComPtr<ID3D12Resource> vertexBuffer;
-    ComPtr<ID3D12Resource> indexBuffer;
-    D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
-    D3D12_INDEX_BUFFER_VIEW indexBufferView;
+    std::unique_ptr<Mesh> cubeMesh;
 
     struct ConstantBuffer {
         DirectX::XMMATRIX model;
