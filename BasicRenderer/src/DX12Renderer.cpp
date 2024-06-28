@@ -122,8 +122,15 @@ void DX12Renderer::LoadAssets() {
     descRange.RegisterSpace = 0;
     descRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
+    D3D12_DESCRIPTOR_RANGE1 srvDescRange = {};
+    srvDescRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvDescRange.NumDescriptors = 1;
+    srvDescRange.BaseShaderRegister = 2; // b2 for lights
+    srvDescRange.RegisterSpace = 0;
+    srvDescRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
     // Root parameter for descriptor table (PerFrame buffer)
-    D3D12_ROOT_PARAMETER1 parameters[2] = {};
+    D3D12_ROOT_PARAMETER1 parameters[3] = {};
 
     // PerFrame buffer as a descriptor table
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -137,9 +144,14 @@ void DX12Renderer::LoadAssets() {
     parameters[1].Descriptor.RegisterSpace = 0;
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[2].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[2].DescriptorTable.pDescriptorRanges = &srvDescRange;
+    parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = 2; // Two parameters: one descriptor table and one direct CBV
+    rootSignatureDesc.NumParameters = 3; // three parameters: two descriptor tables and one direct CBV
     rootSignatureDesc.pParameters = parameters;
     rootSignatureDesc.NumStaticSamplers = 0;
     rootSignatureDesc.pStaticSamplers = nullptr;
@@ -290,7 +302,7 @@ void DX12Renderer::CreateConstantBuffer() {
 
     // Create descriptor heap for perFrame buffer
     D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
-    cbvHeapDesc.NumDescriptors = 1;
+    cbvHeapDesc.NumDescriptors = 2;
     cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&perFrameCBVHeap)));
@@ -340,6 +352,57 @@ void DX12Renderer::CreateConstantBuffer() {
 
     // Initialize the constant buffer data
     memcpy(pPerMeshConstantBuffer, &perMeshCBData, sizeof(perMeshCBData));
+
+    // Create structured buffer for lights
+    LightInfo light;
+    light.properties = DirectX::XMVectorSetInt(0, 0, 0, 0 );
+    light.posWorldSpace = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
+    light.dirWorldSpace = DirectX::XMVectorSet(0.0, 0.0, 0.0, 0.0);
+    light.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
+    light.color = DirectX::XMVectorSet(0.0, 1.0, 0.0, 1.0);
+    lightsData.push_back(light);
+
+    D3D12_RESOURCE_DESC structuredBufferDesc = {};
+    structuredBufferDesc.Alignment = 0;
+    structuredBufferDesc.DepthOrArraySize = 1;
+    structuredBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    structuredBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    structuredBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+    structuredBufferDesc.Height = 1;
+    structuredBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    structuredBufferDesc.MipLevels = 1;
+    structuredBufferDesc.SampleDesc.Count = 1;
+    structuredBufferDesc.SampleDesc.Quality = 0;
+    structuredBufferDesc.Width = sizeof(LightInfo) * lightsData.size(); // Size of all lights
+
+    //CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &structuredBufferDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&lightBuffer)));
+
+    // Upload light data to the buffer
+    void* mappedData;
+    //CD3DX12_RANGE readRange(0, 0);
+    ThrowIfFailed(lightBuffer->Map(0, &readRange, &mappedData));
+    memcpy(mappedData, lightsData.data(), sizeof(LightInfo) * lightsData.size());
+    lightBuffer->Unmap(0, nullptr);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Buffer.FirstElement = 0;
+    srvDesc.Buffer.NumElements = static_cast<UINT>(lightsData.size());
+    srvDesc.Buffer.StructureByteStride = sizeof(LightInfo);
+    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = perFrameCBVHeap->GetCPUDescriptorHandleForHeapStart(); 
+    srvHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); // Move to the next slot
+    device->CreateShaderResourceView(lightBuffer.Get(), &srvDesc, srvHandle);
 }
 
 void DX12Renderer::Render() {
@@ -353,8 +416,14 @@ void DX12Renderer::Render() {
     commandList->SetGraphicsRootSignature(rootSignature.Get());
     // Bind the constant buffer to the root signature
     commandList->SetDescriptorHeaps(1, perFrameCBVHeap.GetAddressOf());
-    commandList->SetGraphicsRootDescriptorTable(0, perFrameCBVHeap->GetGPUDescriptorHandleForHeapStart()); // Bind descriptor table for PerFrame
+
     commandList->SetGraphicsRootConstantBufferView(1, perMeshConstantBuffer->GetGPUVirtualAddress());
+
+    commandList->SetGraphicsRootDescriptorTable(0, perFrameCBVHeap->GetGPUDescriptorHandleForHeapStart()); // Bind descriptor table for PerFrame
+
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuSrvHandle = perFrameCBVHeap->GetGPUDescriptorHandleForHeapStart();
+    gpuSrvHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    commandList->SetGraphicsRootDescriptorTable(2, gpuSrvHandle);
 
     // Set viewports and scissor rect
     CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, 800.0f, 600.0f);

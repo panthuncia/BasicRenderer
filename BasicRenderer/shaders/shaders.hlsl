@@ -1,13 +1,21 @@
-
 cbuffer PerFrame : register(b0) {
     row_major matrix view;
     row_major matrix projection;
 };
 
-cbuffer PerMesh : register(b1)
-{
+cbuffer PerMesh : register(b1) {
     row_major matrix model;
 };
+
+struct LightInfo {
+    int4 properties;
+    float4 posWorldSpace;
+    float4 dirWorldSpace;
+    float4 attenuation;
+    float4 color;
+};
+
+StructuredBuffer<LightInfo> lights : register(t2);
 
 struct VSInput {
     float3 position : POSITION;

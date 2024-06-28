@@ -39,6 +39,9 @@ private:
     HANDLE fenceEvent;
     UINT64 fenceValue;
 
+    std::vector<LightInfo> lightsData;
+    ComPtr<ID3D12Resource> lightBuffer;
+
     // Cube components
     ComPtr<ID3D12PipelineState> pipelineState;
     ComPtr<ID3D12RootSignature> rootSignature;
