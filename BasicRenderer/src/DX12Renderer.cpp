@@ -114,22 +114,44 @@ void DX12Renderer::LoadPipeline(HWND hwnd) {
 
 void DX12Renderer::LoadAssets() {
     // Create root signature
-    D3D12_ROOT_PARAMETER parameter;
-    parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameter.Descriptor.ShaderRegister = 0; // corresponds to 'b0'
-    parameter.Descriptor.RegisterSpace = 0; // default register space
-    parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL; // or just VERTEX if only used in vertex shader
+    // Descriptor range for PerFrame buffer using a descriptor table
+    D3D12_DESCRIPTOR_RANGE1 descRange = {};
+    descRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    descRange.NumDescriptors = 1;
+    descRange.BaseShaderRegister = 0; // b0 for PerFrame
+    descRange.RegisterSpace = 0;
+    descRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-    rootSignatureDesc.NumParameters = 1;
-    rootSignatureDesc.pParameters = &parameter;
+    // Root parameter for descriptor table (PerFrame buffer)
+    D3D12_ROOT_PARAMETER1 parameters[2] = {};
+
+    // PerFrame buffer as a descriptor table
+    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[0].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[0].DescriptorTable.pDescriptorRanges = &descRange;
+    parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // PerMesh buffer as a direct root CBV
+    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    parameters[1].Descriptor.ShaderRegister = 1; // b1 for PerMesh
+    parameters[1].Descriptor.RegisterSpace = 0;
+    parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Root Signature Description
+    D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
+    rootSignatureDesc.NumParameters = 2; // Two parameters: one descriptor table and one direct CBV
+    rootSignatureDesc.pParameters = parameters;
     rootSignatureDesc.NumStaticSamplers = 0;
     rootSignatureDesc.pStaticSamplers = nullptr;
     rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
+    // Serialize and create the root signature
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
-    ThrowIfFailed(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
+    D3D12_VERSIONED_ROOT_SIGNATURE_DESC versionedDesc;
+    versionedDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
+    versionedDesc.Desc_1_1 = rootSignatureDesc;
+    ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &signature, &error));
     ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
 
     // Create the pipeline state, which includes compiling and loading shaders
@@ -248,27 +270,35 @@ void DX12Renderer::WaitForPreviousFrame() {
 }
 
 void DX12Renderer::UpdateConstantBuffer() {
-    cbData.model = DirectX::XMMatrixTranslation(0, 1, -2);
-    cbData.view = DirectX::XMMatrixLookAtLH(
+    perMeshCBData.model = DirectX::XMMatrixTranslation(0, 1, -2);
+    perFrameCBData.view = DirectX::XMMatrixLookAtLH(
         DirectX::XMVectorSet(0.0f, 2.0f, -5.0f, 1.0f), // Eye position
         DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),  // Focus point
         DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)   // Up direction
     );
-    cbData.projection = DirectX::XMMatrixPerspectiveFovLH(
+    perFrameCBData.projection = DirectX::XMMatrixPerspectiveFovLH(
         DirectX::XM_PIDIV2, // Field of View
         800.0f / 600.0f,    // Aspect ratio
         0.1f,               // Near clipping plane
         100.0f              // Far clipping plane
     );
-    memcpy(pConstantBuffer, &cbData, sizeof(cbData));
+    memcpy(pPerFrameConstantBuffer, &perFrameCBData, sizeof(perFrameCBData));
+    memcpy(pPerMeshConstantBuffer, &perMeshCBData, sizeof(perMeshCBData));
 }
 
 void DX12Renderer::CreateConstantBuffer() {
-    const UINT constantBufferSize = sizeof(ConstantBuffer);
 
-    // Describe and create a constant buffer view (CBV)
+    // Create descriptor heap for perFrame buffer
+    D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
+    cbvHeapDesc.NumDescriptors = 1;
+    cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ThrowIfFailed(device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&perFrameCBVHeap)));
+
+    // Describe and create a constant buffer and constant buffer view (CBV)
     D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize);
+    UINT perFrameBufferSize = (sizeof(PerFrameCB) + 255) & ~255; // CBV size is required to be 256-byte aligned.
+    D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(perFrameBufferSize);
 
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
@@ -276,14 +306,40 @@ void DX12Renderer::CreateConstantBuffer() {
         &bufferDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr,
-        IID_PPV_ARGS(&constantBuffer)));
+        IID_PPV_ARGS(&perFrameConstantBuffer)));
 
     // Map the constant buffer and initialize it
     D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
-    ThrowIfFailed(constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pConstantBuffer)));
+    ThrowIfFailed(perFrameConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pPerFrameConstantBuffer)));
 
     // Initialize the constant buffer data
-    memcpy(pConstantBuffer, &cbData, sizeof(cbData));
+    memcpy(pPerFrameConstantBuffer, &perFrameCBData, sizeof(perFrameCBData));
+
+    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+    cbvDesc.BufferLocation = perFrameConstantBuffer->GetGPUVirtualAddress();
+    cbvDesc.SizeInBytes = perFrameBufferSize; // CBV size is required to be 256-byte aligned.
+    device->CreateConstantBufferView(&cbvDesc, perFrameCBVHeap->GetCPUDescriptorHandleForHeapStart());
+
+    UINT constantBufferSize = sizeof(PerMeshCB);
+
+    // Describe and create a constant buffer
+    heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize);
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &bufferDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&perMeshConstantBuffer)));
+
+    // Map the constant buffer and initialize it
+    //D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
+    ThrowIfFailed(perMeshConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pPerMeshConstantBuffer)));
+
+    // Initialize the constant buffer data
+    memcpy(pPerMeshConstantBuffer, &perMeshCBData, sizeof(perMeshCBData));
 }
 
 void DX12Renderer::Render() {
@@ -295,13 +351,16 @@ void DX12Renderer::Render() {
 
     // Set necessary state
     commandList->SetGraphicsRootSignature(rootSignature.Get());
+    // Bind the constant buffer to the root signature
+    commandList->SetDescriptorHeaps(1, perFrameCBVHeap.GetAddressOf());
+    commandList->SetGraphicsRootDescriptorTable(0, perFrameCBVHeap->GetGPUDescriptorHandleForHeapStart()); // Bind descriptor table for PerFrame
+    commandList->SetGraphicsRootConstantBufferView(1, perMeshConstantBuffer->GetGPUVirtualAddress());
+
+    // Set viewports and scissor rect
     CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, 800.0f, 600.0f);
     commandList->RSSetViewports(1, &viewport);
     CD3DX12_RECT rect = CD3DX12_RECT(0, 0, 800, 600);
     commandList->RSSetScissorRects(1, &rect);
-
-    // Bind the constant buffer to the root signature
-    commandList->SetGraphicsRootConstantBufferView(0, constantBuffer->GetGPUVirtualAddress());
 
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);

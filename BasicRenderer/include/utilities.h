@@ -3,6 +3,8 @@
 //
 #include <windows.h>
 #include <iostream>
+#include <wrl.h>
+#include <d3dcompiler.h>
 
 #ifndef UTILITIES_H
 #define UTILITIES_H
@@ -14,4 +16,5 @@ void print(Args... args) {
     (std::cout << ... << args) << std::endl;
 }
 
+Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const std::wstring& filename, const std::string& entryPoint, const std::string& target);
 #endif //UTILITIES_H

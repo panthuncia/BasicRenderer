@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "Mesh.h"
+#include "buffers.h"
 
 using namespace Microsoft::WRL;
 
@@ -29,6 +30,7 @@ private:
     ComPtr<ID3D12CommandQueue> commandQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
     ComPtr<ID3D12Resource> renderTargets[2];
+    ComPtr<ID3D12DescriptorHeap> descriptorHeap;
     ComPtr<ID3D12CommandAllocator> commandAllocator;
     ComPtr<ID3D12GraphicsCommandList> commandList;
     ComPtr<ID3D12Fence> fence;
@@ -42,21 +44,22 @@ private:
     ComPtr<ID3D12RootSignature> rootSignature;
     std::unique_ptr<Mesh> cubeMesh;
 
-    struct ConstantBuffer {
-        DirectX::XMMATRIX model;
-        DirectX::XMMATRIX view;
-        DirectX::XMMATRIX projection;
-    };
-
     // Add a constant buffer resource and view
-    ComPtr<ID3D12Resource> constantBuffer;
-    UINT8* pConstantBuffer;
-    ConstantBuffer cbData;
+    ComPtr<ID3D12Resource> perFrameConstantBuffer;
+    UINT8* pPerFrameConstantBuffer;
+    PerFrameCB perFrameCBData;
+    ComPtr<ID3D12DescriptorHeap> perFrameCBVHeap;
+
+    ComPtr<ID3D12Resource> perMeshConstantBuffer;
+    UINT8* pPerMeshConstantBuffer;
+    PerMeshCB perMeshCBData;
 
     void LoadPipeline(HWND hwnd);
     void LoadAssets();
     void CreateConstantBuffer();
     void UpdateConstantBuffer();
+
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateRootSignatureFromShaders(const std::vector<Microsoft::WRL::ComPtr<ID3DBlob>>& shaderBlobs);
 
     void WaitForPreviousFrame();
     void CheckDebugMessages();
