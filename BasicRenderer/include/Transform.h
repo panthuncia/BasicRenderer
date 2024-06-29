@@ -9,7 +9,7 @@ public:
     XMVECTOR rot;
     XMFLOAT3 scale;
     bool isDirty;
-    XMFLOAT4X4 modelMatrix;
+    XMMATRIX modelMatrix;
 
     Transform(XMFLOAT3 pos = XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3 rotEuler = XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3 scale = XMFLOAT3(1.0f, 1.0f, 1.0f));
     Transform(const Transform& other);

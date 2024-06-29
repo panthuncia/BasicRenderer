@@ -8,13 +8,13 @@ class SceneNode;
 class AnimationController {
 public:
     SceneNode* node;
-    AnimationClip* animationClip;
+    std::shared_ptr<AnimationClip> animationClip;
     float currentTime;
     bool isPlaying;
 
     AnimationController(SceneNode* node);
 
-    void setAnimationClip(AnimationClip* animationClip);
+    void setAnimationClip(std::shared_ptr<AnimationClip> animationClip);
     void reset();
     void pause();
     void unpause();

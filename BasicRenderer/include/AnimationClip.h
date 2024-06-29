@@ -12,7 +12,7 @@ public:
     AnimationClip();
 
     void addPositionKeyframe(float time, const XMFLOAT3& position);
-    void addRotationKeyframe(float time, const XMFLOAT4& rotation);
+    void addRotationKeyframe(float time, const XMVECTOR& rotation);
     void addScaleKeyframe(float time, const XMFLOAT3& scale);
 
     std::pair<Keyframe, Keyframe> findBoundingKeyframes(float currentTime, const std::vector<Keyframe>& keyframes) const;

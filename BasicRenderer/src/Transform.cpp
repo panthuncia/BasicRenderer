@@ -3,7 +3,7 @@
 Transform::Transform(XMFLOAT3 pos, XMFLOAT3 rotEuler, XMFLOAT3 scale)
     : pos(pos), scale(scale), isDirty(false) {
     rot = XMQuaternionRotationRollPitchYawFromVector(XMLoadFloat3(&rotEuler));
-    XMStoreFloat4x4(&modelMatrix, XMMatrixIdentity());
+    modelMatrix = XMMatrixIdentity();
 }
 
 Transform::Transform(const Transform& other)
@@ -18,12 +18,12 @@ XMMATRIX Transform::getLocalModelMatrix() {
 }
 
 void Transform::computeLocalModelMatrix() {
-    XMStoreFloat4x4(&modelMatrix, getLocalModelMatrix());
+    modelMatrix = getLocalModelMatrix();
     isDirty = false;
 }
 
 void Transform::computeModelMatrixFromParent(const XMMATRIX& parentGlobalModelMatrix) {
-    XMStoreFloat4x4(&modelMatrix, getLocalModelMatrix() * parentGlobalModelMatrix);
+    modelMatrix = getLocalModelMatrix() * parentGlobalModelMatrix;
     isDirty = false;
 }
 
@@ -47,10 +47,12 @@ void Transform::rotatePitchYaw(float pitch, float yaw) {
     XMVECTOR pitchQuat = XMQuaternionRotationAxis(XMVectorSet(1, 0, 0, 0), pitch);
     rot = XMQuaternionMultiply(yawQuat, rot);
     rot = XMQuaternionMultiply(rot, pitchQuat);
+    isDirty = true;
 }
 
 void Transform::setLocalRotationFromQuaternion(const XMVECTOR& quaternion) {
     rot = quaternion;
+    isDirty = true;
 }
 
 void Transform::setDirection(const XMFLOAT3& dir) {
@@ -74,6 +76,7 @@ void Transform::setDirection(const XMFLOAT3& dir) {
         float rotationAngle = acosf(dotProduct);
         rot = XMQuaternionRotationAxis(rotationAxis, rotationAngle);
     }
+    isDirty = true;
 }
 
 void Transform::setLocalScale(const XMFLOAT3& newScale) {
@@ -82,5 +85,7 @@ void Transform::setLocalScale(const XMFLOAT3& newScale) {
 }
 
 XMFLOAT3 Transform::getGlobalPosition() const {
-    return XMFLOAT3(modelMatrix._41, modelMatrix._42, modelMatrix._43);
+    XMFLOAT4X4 modelFloats;
+    XMStoreFloat4x4(&modelFloats, modelMatrix);
+    return XMFLOAT3(modelFloats._41, modelFloats._42, modelFloats._43);
 }

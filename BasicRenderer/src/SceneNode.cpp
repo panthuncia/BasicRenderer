@@ -29,7 +29,7 @@ void SceneNode::update() {
 
 void SceneNode::forceUpdate() {
     if (parent) {
-        transform.computeModelMatrixFromParent(XMLoadFloat4x4(&parent->transform.modelMatrix));
+        transform.computeModelMatrixFromParent(parent->transform.modelMatrix);
     }
     else {
         transform.computeLocalModelMatrix();

@@ -69,5 +69,6 @@ SceneNode& Scene::GetRoot() {
 void Scene::Update() {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
+    lastUpdateTime = currentTime;
     this->sceneRoot.update();
 }

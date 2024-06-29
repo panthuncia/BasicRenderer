@@ -7,7 +7,7 @@ void AnimationClip::addPositionKeyframe(float time, const XMFLOAT3& position) {
     updateDuration(time);
 }
 
-void AnimationClip::addRotationKeyframe(float time, const XMFLOAT4& rotation) {
+void AnimationClip::addRotationKeyframe(float time, const XMVECTOR& rotation) {
     rotationKeyframes.emplace_back(time, rotation);
     updateDuration(time);
 }

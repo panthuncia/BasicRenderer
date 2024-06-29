@@ -6,7 +6,7 @@ AnimationController::AnimationController(SceneNode* node)
     : node(node), animationClip(nullptr), currentTime(0.0f), isPlaying(true) {
 }
 
-void AnimationController::setAnimationClip(AnimationClip* animationClip) {
+void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> animationClip) {
     this->animationClip = animationClip;
     node->forceUpdate();
     updateTransform();
@@ -60,39 +60,44 @@ void AnimationController::updateTransform() {
         return result;
         };
 
-    auto lerpRotation = [](const XMFLOAT4& start, const XMFLOAT4& end, float t) {
-        XMVECTOR s = XMLoadFloat4(&start);
-        XMVECTOR e = XMLoadFloat4(&end);
-        XMVECTOR lerped = XMQuaternionSlerp(s, e, t);
-        XMFLOAT4 result;
-        XMStoreFloat4(&result, lerped);
-        return result;
+    auto lerpRotation = [](const XMVECTOR& start, const XMVECTOR& end, float t) {
+        XMVECTOR lerped = XMQuaternionSlerp(start, end, t);
+        return lerped;
         };
 
-    auto boundingPositionFrames = findBoundingKeyframes(currentTime, animationClip->positionKeyframes);
-    if (boundingPositionFrames.first.time != boundingPositionFrames.second.time) {
-        float timeElapsed = currentTime - boundingPositionFrames.first.time;
-        float diff = boundingPositionFrames.second.time - boundingPositionFrames.first.time;
-        float t = diff > 0 ? timeElapsed / diff : 0;
-        XMFLOAT3 interpolatedPosition = lerpVec3(boundingPositionFrames.first.value, boundingPositionFrames.second.value, t);
-        node->transform.setLocalPosition(interpolatedPosition);
+    // Check if position keyframes are available
+    if (!animationClip->positionKeyframes.empty()) {
+        auto boundingPositionFrames = findBoundingKeyframes(currentTime, animationClip->positionKeyframes);
+        if (boundingPositionFrames.first.time != boundingPositionFrames.second.time) {
+            float timeElapsed = currentTime - boundingPositionFrames.first.time;
+            float diff = boundingPositionFrames.second.time - boundingPositionFrames.first.time;
+            float t = diff > 0 ? timeElapsed / diff : 0;
+            XMFLOAT3 interpolatedPosition = lerpVec3(boundingPositionFrames.first.value, boundingPositionFrames.second.value, t);
+            node->transform.setLocalPosition(interpolatedPosition);
+        }
     }
 
-    auto boundingRotationFrames = findBoundingKeyframes(currentTime, animationClip->rotationKeyframes);
-    if (boundingRotationFrames.first.time != boundingRotationFrames.second.time) {
-        float timeElapsed = currentTime - boundingRotationFrames.first.time;
-        float diff = boundingRotationFrames.second.time - boundingRotationFrames.first.time;
-        float t = diff > 0 ? timeElapsed / diff : 0;
-        XMFLOAT4 interpolatedRotation = lerpRotation(boundingRotationFrames.first.rotation, boundingRotationFrames.second.rotation, t);
-        node->transform.setLocalRotationFromQuaternion(XMLoadFloat4(&interpolatedRotation));
+    // Check if rotation keyframes are available
+    if (!animationClip->rotationKeyframes.empty()) {
+        auto boundingRotationFrames = findBoundingKeyframes(currentTime, animationClip->rotationKeyframes);
+        if (boundingRotationFrames.first.time != boundingRotationFrames.second.time) {
+            float timeElapsed = currentTime - boundingRotationFrames.first.time;
+            float diff = boundingRotationFrames.second.time - boundingRotationFrames.first.time;
+            float t = diff > 0 ? timeElapsed / diff : 0;
+            XMVECTOR interpolatedRotation = lerpRotation(boundingRotationFrames.first.rotation, boundingRotationFrames.second.rotation, t);
+            node->transform.setLocalRotationFromQuaternion(interpolatedRotation);
+        }
     }
 
-    auto boundingScaleFrames = findBoundingKeyframes(currentTime, animationClip->scaleKeyframes);
-    if (boundingScaleFrames.first.time != boundingScaleFrames.second.time) {
-        float timeElapsed = currentTime - boundingScaleFrames.first.time;
-        float diff = boundingScaleFrames.second.time - boundingScaleFrames.first.time;
-        float t = diff > 0 ? timeElapsed / diff : 0;
-        XMFLOAT3 interpolatedScale = lerpVec3(boundingScaleFrames.first.value, boundingScaleFrames.second.value, t);
-        node->transform.setLocalScale(interpolatedScale);
+    // Check if scale keyframes are available
+    if (!animationClip->scaleKeyframes.empty()) {
+        auto boundingScaleFrames = findBoundingKeyframes(currentTime, animationClip->scaleKeyframes);
+        if (boundingScaleFrames.first.time != boundingScaleFrames.second.time) {
+            float timeElapsed = currentTime - boundingScaleFrames.first.time;
+            float diff = boundingScaleFrames.second.time - boundingScaleFrames.first.time;
+            float t = diff > 0 ? timeElapsed / diff : 0;
+            XMFLOAT3 interpolatedScale = lerpVec3(boundingScaleFrames.first.value, boundingScaleFrames.second.value, t);
+            node->transform.setLocalScale(interpolatedScale);
+        }
     }
 }

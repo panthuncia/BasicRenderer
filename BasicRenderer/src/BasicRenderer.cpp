@@ -85,13 +85,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>("CubeObject", vec);
     renderer.GetCurrentScene().addObject(cubeObject);
 
+    auto animation = std::make_shared<AnimationClip>();
+    animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
+    animation->addRotationKeyframe(1.5, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, DirectX::XM_PI));
+    animation->addRotationKeyframe(3, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, DirectX::XM_2PI));
+    cubeObject->animationController->setAnimationClip(animation);
+
     MSG msg = {};
+    auto lastUpdateTime = std::chrono::system_clock::now();
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
         else {
+
+            auto currentTime = std::chrono::system_clock::now();
+            std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
+            lastUpdateTime = currentTime;
+            cubeObject->animationController->update(elapsed_seconds.count());
+
             print("Updating scene...");
             renderer.Update();
             print("Scene updated.");

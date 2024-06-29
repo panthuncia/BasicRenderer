@@ -44,7 +44,7 @@ void RenderableObject::CreateBuffers() {
 }
 
 void RenderableObject::UpdateBuffers() {
-    perMeshCBData.model = DirectX::XMMatrixMultiply(DirectX::XMMatrixRotationY(DirectX::XM_PIDIV4), DirectX::XMMatrixTranslation(0, 1, -2));
+    perMeshCBData.model = transform.modelMatrix;//DirectX::XMMatrixMultiply(DirectX::XMMatrixRotationY(DirectX::XM_PIDIV4), DirectX::XMMatrixTranslation(0, 1, -2));
     memcpy(pPerMeshConstantBuffer, &perMeshCBData, sizeof(perMeshCBData));
 }
 
