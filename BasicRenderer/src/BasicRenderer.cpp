@@ -4,7 +4,7 @@
 #include <dxgi1_6.h>
 #include <iostream>
 #include "DX12Renderer.h"
-#include "utilities.h"
+#include "Utilities.h"
 
 
 // Window callback procedure

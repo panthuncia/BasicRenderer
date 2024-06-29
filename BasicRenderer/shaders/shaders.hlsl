@@ -19,6 +19,7 @@ StructuredBuffer<LightInfo> lights : register(t2);
 
 struct VSInput {
     float3 position : POSITION;
+    float3 normal : NORMAL;
     float4 color : COLOR;
 };
 

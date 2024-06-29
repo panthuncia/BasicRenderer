@@ -1,6 +1,6 @@
-#include "mesh.h"
+#include "Mesh.h"
 #include "DirectX/d3dx12.h"
-#include "utilities.h"
+#include "Utilities.h"
 
 Mesh::Mesh(ID3D12Device* device, const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
     CreateBuffers(device, vertices, indices);

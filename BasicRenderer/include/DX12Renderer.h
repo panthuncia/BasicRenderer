@@ -13,7 +13,7 @@
 #include <memory>
 
 #include "Mesh.h"
-#include "buffers.h"
+#include "Buffers.h"
 
 using namespace Microsoft::WRL;
 
@@ -30,11 +30,14 @@ private:
     ComPtr<ID3D12CommandQueue> commandQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
     ComPtr<ID3D12Resource> renderTargets[2];
+    ComPtr<ID3D12DescriptorHeap> dsvHeap;
+    ComPtr<ID3D12Resource> depthStencilBuffer;
     ComPtr<ID3D12DescriptorHeap> descriptorHeap;
     ComPtr<ID3D12CommandAllocator> commandAllocator;
     ComPtr<ID3D12GraphicsCommandList> commandList;
     ComPtr<ID3D12Fence> fence;
     UINT rtvDescriptorSize;
+    UINT dsvDescriptorSize;
     UINT frameIndex;
     HANDLE fenceEvent;
     UINT64 fenceValue;

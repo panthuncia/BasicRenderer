@@ -5,7 +5,7 @@
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 #include <string>
-#include "buffers.h"
+#include "Buffers.h"
 
 using Microsoft::WRL::ComPtr;
 

@@ -1,9 +1,9 @@
-#include "material.h"
+#include "Material.h"
 
 #include <stdexcept>
 
 #include <DirectX/d3dx12.h>
-#include "utilities.h"
+#include "Utilities.h"
 
 Material::Material(ComPtr<ID3D12Device> device, const std::wstring& shaderFile)
     : device(device), pConstantBuffer(nullptr) {
