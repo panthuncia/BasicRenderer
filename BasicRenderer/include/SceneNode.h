@@ -23,4 +23,7 @@ public:
     void removeChild(unsigned int childId);
     void update();
     void forceUpdate();
+
+protected:
+    virtual void onUpdate() {} // Hook method for derived classes to extend update behavior
 };

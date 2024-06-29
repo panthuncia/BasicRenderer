@@ -21,6 +21,7 @@ void SceneNode::update() {
     if (transform.isDirty) {
         forceUpdate();
     }
+    onUpdate();
     for (auto& childPair : children) {
         childPair.second->update();
     }
@@ -33,6 +34,7 @@ void SceneNode::forceUpdate() {
     else {
         transform.computeLocalModelMatrix();
     }
+    onUpdate();
     for (auto& childPair : children) {
         childPair.second->forceUpdate();
     }

@@ -60,10 +60,6 @@ private:
     PerFrameCB perFrameCBData;
     ComPtr<ID3D12DescriptorHeap> perFrameCBVHeap;
 
-    ComPtr<ID3D12Resource> perMeshConstantBuffer;
-    UINT8* pPerMeshConstantBuffer;
-    PerMeshCB perMeshCBData;
-
     Scene currentScene;
 
     void LoadPipeline(HWND hwnd);

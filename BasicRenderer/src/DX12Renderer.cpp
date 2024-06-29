@@ -8,6 +8,7 @@
 
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
+#include "DeviceManager.h"
 
 void DX12Renderer::Initialize(HWND hwnd) {
     LoadPipeline(hwnd);
@@ -31,6 +32,9 @@ void DX12Renderer::LoadPipeline(HWND hwnd) {
 
     // Create device
     ThrowIfFailed(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)));
+
+    // Initialize device manager
+    DeviceManager::getInstance().initialize(device);
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> infoQueue;
@@ -331,7 +335,6 @@ void DX12Renderer::WaitForPreviousFrame() {
 }
 
 void DX12Renderer::UpdateConstantBuffer() {
-    perMeshCBData.model = DirectX::XMMatrixMultiply(DirectX::XMMatrixRotationY(DirectX::XM_PIDIV4), DirectX::XMMatrixTranslation(0, 1, -2));
     perFrameCBData.view = DirectX::XMMatrixLookAtLH(
         DirectX::XMVectorSet(0.0f, 2.0f, -5.0f, 1.0f), // Eye position
         DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),  // Focus point
@@ -344,7 +347,6 @@ void DX12Renderer::UpdateConstantBuffer() {
         100.0f              // Far clipping plane
     );
     memcpy(pPerFrameConstantBuffer, &perFrameCBData, sizeof(perFrameCBData));
-    memcpy(pPerMeshConstantBuffer, &perMeshCBData, sizeof(perMeshCBData));
 }
 
 void DX12Renderer::CreateConstantBuffer() {
@@ -380,27 +382,6 @@ void DX12Renderer::CreateConstantBuffer() {
     cbvDesc.BufferLocation = perFrameConstantBuffer->GetGPUVirtualAddress();
     cbvDesc.SizeInBytes = perFrameBufferSize; // CBV size is required to be 256-byte aligned.
     device->CreateConstantBufferView(&cbvDesc, perFrameCBVHeap->GetCPUDescriptorHandleForHeapStart());
-
-    UINT constantBufferSize = sizeof(PerMeshCB);
-
-    // Describe and create a constant buffer
-    heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize);
-
-    ThrowIfFailed(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &bufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&perMeshConstantBuffer)));
-
-    // Map the constant buffer and initialize it
-    //D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
-    ThrowIfFailed(perMeshConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pPerMeshConstantBuffer)));
-
-    // Initialize the constant buffer data
-    memcpy(pPerMeshConstantBuffer, &perMeshCBData, sizeof(perMeshCBData));
 
     // Create structured buffer for lights
     LightInfo light;
@@ -470,8 +451,6 @@ void DX12Renderer::Render() {
     // Bind the constant buffer to the root signature
     commandList->SetDescriptorHeaps(1, perFrameCBVHeap.GetAddressOf());
 
-    commandList->SetGraphicsRootConstantBufferView(1, perMeshConstantBuffer->GetGPUVirtualAddress());
-
     commandList->SetGraphicsRootDescriptorTable(0, perFrameCBVHeap->GetGPUDescriptorHandleForHeapStart()); // Bind descriptor table for PerFrame
 
     D3D12_GPU_DESCRIPTOR_HANDLE gpuSrvHandle = perFrameCBVHeap->GetGPUDescriptorHandleForHeapStart();
@@ -501,6 +480,8 @@ void DX12Renderer::Render() {
 
     for (auto& pair : currentScene.getRenderableObjectIDMap()) {
         auto& renderable = pair.second;
+        commandList->SetGraphicsRootConstantBufferView(1, renderable->getConstantBuffer()->GetGPUVirtualAddress());
+
         for (auto& mesh : renderable->getMeshes()) {
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
