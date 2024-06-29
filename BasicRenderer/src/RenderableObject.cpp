@@ -6,3 +6,7 @@ RenderableObject::RenderableObject(std::string name) : SceneNode(name) {
 RenderableObject::RenderableObject(std::string name, std::vector<Mesh> meshes) : SceneNode(name) {
 	this->meshes = meshes;
 }
+
+std::vector<Mesh>& RenderableObject::getMeshes() {
+	return meshes;
+}

@@ -6,6 +6,11 @@ UINT Scene::addObject(std::shared_ptr<RenderableObject> object) {
     objectsByName[object->name] = object;
     objectsByID[nextNodeID] = object;
     nextNodeID++;
+
+    if (object->parent == nullptr) {
+        sceneRoot.addChild(object);
+    }
+
     return object->localID;
 }
 
@@ -51,4 +56,18 @@ void Scene::removeObjectByID(UINT id) {
         std::shared_ptr<SceneNode> node = it->second;
         node->parent->removeChild(node->localID);
     }
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::getRenderableObjectIDMap() {
+    return objectsByID;
+}
+
+SceneNode& Scene::GetRoot() {
+    return sceneRoot;
+}
+
+void Scene::Update() {
+    auto currentTime = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
+    this->sceneRoot.update();
 }

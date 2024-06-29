@@ -14,14 +14,18 @@
 
 #include "Mesh.h"
 #include "Buffers.h"
+#include "Scene.h"
 
 using namespace Microsoft::WRL;
 
 class DX12Renderer {
 public:
     void Initialize(HWND hwnd);
+    void Update();
     void Render();
     void Cleanup();
+    ComPtr<ID3D12Device>& GetDevice();
+    Scene& GetCurrentScene();
 
 private:
     ComPtr<IDXGIFactory6> factory;
@@ -59,6 +63,8 @@ private:
     ComPtr<ID3D12Resource> perMeshConstantBuffer;
     UINT8* pPerMeshConstantBuffer;
     PerMeshCB perMeshCBData;
+
+    Scene currentScene;
 
     void LoadPipeline(HWND hwnd);
     void LoadAssets();

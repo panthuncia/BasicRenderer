@@ -454,6 +454,10 @@ void DX12Renderer::CreateConstantBuffer() {
     device->CreateShaderResourceView(lightBuffer.Get(), &srvDesc, srvHandle);
 }
 
+void DX12Renderer::Update() {
+    currentScene.Update();
+}
+
 void DX12Renderer::Render() {
     //Update buffers
     UpdateConstantBuffer();
@@ -494,15 +498,21 @@ void DX12Renderer::Render() {
     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    D3D12_VERTEX_BUFFER_VIEW vertexBufferView = cubeMesh->GetVertexBufferView();
-    D3D12_INDEX_BUFFER_VIEW indexBufferView = cubeMesh->GetIndexBufferView();
 
-    // Pass the addresses of the local variables
-    commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-    commandList->IASetIndexBuffer(&indexBufferView);
+    for (auto& pair : currentScene.getRenderableObjectIDMap()) {
+        auto& renderable = pair.second;
+        for (auto& mesh : renderable->getMeshes()) {
+            D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
+            D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 
-    // Draw the cube
-    commandList->DrawIndexedInstanced(cubeMesh->GetIndexCount(), 1, 0, 0, 0);
+            // Pass the addresses of the local variables
+            commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+            commandList->IASetIndexBuffer(&indexBufferView);
+
+            // Draw the cube
+            commandList->DrawIndexedInstanced(cubeMesh->GetIndexCount(), 1, 0, 0, 0);
+        }
+    }
 
     // Indicate that the back buffer will now be used to present
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -539,4 +549,12 @@ void DX12Renderer::CheckDebugMessages() {
         }
         infoQueue->ClearStoredMessages();
     }
+}
+
+ComPtr<ID3D12Device>& DX12Renderer::GetDevice() {
+    return device;
+}
+
+Scene& DX12Renderer::GetCurrentScene() {
+    return currentScene;
 }
