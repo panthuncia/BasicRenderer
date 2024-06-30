@@ -291,28 +291,6 @@ void DX12Renderer::LoadAssets() {
         CheckDebugMessages();
         ThrowIfFailed(hr);
     }
-
-    std::vector<Vertex> vertices = {
-        VertexColored{{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-        VertexColored{{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-        VertexColored{{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-        VertexColored{{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-        VertexColored{{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-        VertexColored{{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
-        VertexColored{{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
-        VertexColored{{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    };
-
-    std::vector<UINT16> indices = {
-        0, 1, 3, 3, 1, 2,
-        1, 5, 2, 2, 5, 6,
-        5, 4, 6, 6, 4, 7,
-        4, 0, 7, 7, 0, 3,
-        3, 2, 7, 7, 2, 6,
-        4, 5, 0, 0, 5, 1
-    };
-
-    cubeMesh = std::make_unique<Mesh>(device.Get(), vertices, indices);
 }
 
 
@@ -433,7 +411,7 @@ void DX12Renderer::CreateConstantBuffer() {
 }
 
 void DX12Renderer::Update() {
-    currentScene.Update();
+    currentScene->Update();
 }
 
 void DX12Renderer::Render() {
@@ -475,7 +453,7 @@ void DX12Renderer::Render() {
 
     commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    for (auto& pair : currentScene.GetRenderableObjectIDMap()) {
+    for (auto& pair : currentScene->GetRenderableObjectIDMap()) {
         auto& renderable = pair.second;
         commandList->SetGraphicsRootConstantBufferView(1, renderable->getConstantBuffer()->GetGPUVirtualAddress());
 
@@ -488,7 +466,7 @@ void DX12Renderer::Render() {
             commandList->IASetIndexBuffer(&indexBufferView);
 
             // Draw the cube
-            commandList->DrawIndexedInstanced(cubeMesh->GetIndexCount(), 1, 0, 0, 0);
+            commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
         }
     }
 
@@ -533,6 +511,10 @@ ComPtr<ID3D12Device>& DX12Renderer::GetDevice() {
     return device;
 }
 
-Scene& DX12Renderer::GetCurrentScene() {
+std::shared_ptr<Scene>& DX12Renderer::GetCurrentScene() {
     return currentScene;
+}
+
+void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
+    currentScene = newScene;
 }

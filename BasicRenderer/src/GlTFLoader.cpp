@@ -20,22 +20,162 @@ struct GLBChunk {
     std::vector<uint8_t> chunkData;
 };
 
-struct MeshData {
-    std::vector<GeometryData> geometries;
+size_t numComponentsForType(const std::string& type) {
+    if (type == "SCALAR") return 1;
+    if (type == "VEC2") return 2;
+    if (type == "VEC3") return 3;
+    if (type == "VEC4") return 4;
+    if (type == "MAT2") return 4;
+    if (type == "MAT3") return 9;
+    if (type == "MAT4") return 16;
+    throw std::invalid_argument("Invalid accessor type");
+}
+
+size_t bytesPerComponent(int componentType) {
+    switch (componentType) {
+    case 5120: // BYTE
+    case 5121: // UNSIGNED_BYTE
+        return 1;
+    case 5122: // SHORT
+    case 5123: // UNSIGNED_SHORT
+        return 2;
+    case 5125: // UNSIGNED_INT
+    case 5126: // FLOAT
+        return 4;
+    default:
+        throw std::invalid_argument("Invalid component type");
+    }
+}
+
+double readComponent(const std::vector<uint8_t>& binaryData, int componentType, size_t offset) {
+    switch (componentType) {
+    case 5120: // BYTE
+        return static_cast<double>(*(reinterpret_cast<const int8_t*>(binaryData.data() + offset)));
+    case 5121: // UNSIGNED_BYTE
+        return static_cast<double>(*(reinterpret_cast<const uint8_t*>(binaryData.data() + offset)));
+    case 5122: // SHORT
+        return static_cast<double>(*(reinterpret_cast<const int16_t*>(binaryData.data() + offset)));
+    case 5123: // UNSIGNED_SHORT
+        return static_cast<double>(*(reinterpret_cast<const uint16_t*>(binaryData.data() + offset)));
+    case 5125: // UNSIGNED_INT
+        return static_cast<double>(*(reinterpret_cast<const uint32_t*>(binaryData.data() + offset)));
+    case 5126: // FLOAT
+        return static_cast<double>(*(reinterpret_cast<const float*>(binaryData.data() + offset)));
+    default:
+        throw std::invalid_argument("Invalid component type");
+    }
+}
+
+void writeComponent(std::vector<uint8_t>& buffer, int componentType, size_t index, double value) {
+    switch (componentType) {
+    case 5120: { // BYTE
+        int8_t v = static_cast<int8_t>(value);
+        std::memcpy(buffer.data() + index * sizeof(int8_t), &v, sizeof(int8_t));
+        break;
+    }
+    case 5121: { // UNSIGNED_BYTE
+        uint8_t v = static_cast<uint8_t>(value);
+        std::memcpy(buffer.data() + index * sizeof(uint8_t), &v, sizeof(uint8_t));
+        break;
+    }
+    case 5122: { // SHORT
+        int16_t v = static_cast<int16_t>(value);
+        std::memcpy(buffer.data() + index * sizeof(int16_t), &v, sizeof(int16_t));
+        break;
+    }
+    case 5123: { // UNSIGNED_SHORT
+        uint16_t v = static_cast<uint16_t>(value);
+        std::memcpy(buffer.data() + index * sizeof(uint16_t), &v, sizeof(uint16_t));
+        break;
+    }
+    case 5125: { // UNSIGNED_INT
+        uint32_t v = static_cast<uint32_t>(value);
+        std::memcpy(buffer.data() + index * sizeof(uint32_t), &v, sizeof(uint32_t));
+        break;
+    }
+    case 5126: { // FLOAT
+        float v = static_cast<float>(value);
+        std::memcpy(buffer.data() + index * sizeof(float), &v, sizeof(float));
+        break;
+    }
+    default:
+        throw std::invalid_argument("Invalid component type");
+    }
+}
+
+struct Accessor {
+    std::string type;
+    int componentType;
+    size_t count;
+    size_t byteOffset;
+};
+
+struct BufferView {
+    size_t byteStride;
+    size_t byteOffset;
+};
+
+struct AccessorData {
+    Accessor accessor;
+    BufferView bufferView;
 };
 
 template <typename T>
-std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& buffer, size_t offset, size_t count) {
-    std::vector<T> data(count);
-    std::memcpy(data.data(), buffer.data() + offset, count * sizeof(T));
+std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
+    const Accessor& accessor = accessorData.accessor;
+    const BufferView& bufferView = accessorData.bufferView;
+    size_t numComponents = numComponentsForType(accessor.type);
+
+    // Calculate byte stride; use the provided byteStride from bufferView if present, otherwise calculate it
+    size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
+
+    size_t effectiveByteOffset = bufferView.byteOffset;
+    if (effectiveByteOffset == (std::numeric_limits<size_t>::max)()) {
+        effectiveByteOffset = 0;
+    }
+    if (accessor.byteOffset != (std::numeric_limits<size_t>::max)()) {
+        effectiveByteOffset += accessor.byteOffset;
+    }
+
+    std::vector<T> data(accessor.count * numComponents);
+
+    if (byteStride == numComponents * bytesPerComponent(accessor.componentType)) {
+        // Non-interleaved data, we can proceed as before
+        std::memcpy(data.data(), binaryData.data() + effectiveByteOffset, accessor.count * numComponents * sizeof(T));
+    }
+    else {
+        // Interleaved data, need to manually assemble the typed array
+        size_t elementSize = bytesPerComponent(accessor.componentType) * numComponents;
+        size_t dataOffset = 0;
+
+        for (size_t i = 0, byteOffset = accessor.byteOffset; i < accessor.count; i++, byteOffset += byteStride) {
+            for (size_t componentIndex = 0; componentIndex < numComponents; componentIndex++) {
+                size_t componentByteOffset = byteOffset + bytesPerComponent(accessor.componentType) * componentIndex;
+                double value = readComponent(binaryData, accessor.componentType, effectiveByteOffset + componentByteOffset);
+                data[dataOffset + componentIndex] = static_cast<T>(value);
+            }
+            dataOffset += numComponents;
+        }
+    }
     return data;
 }
 
-std::pair<size_t, size_t> getAccessorData(const json& gltfData, int accessorIndex) {
-    const auto& accessor = gltfData["accessors"][accessorIndex];
-    size_t byteOffset = accessor.value("byteOffset", 0);
-    size_t count = accessor["count"];
-    return { byteOffset, count };
+AccessorData getAccessorData(const json& gltfData, int accessorIndex) {
+    const json& accessorJson = gltfData["accessors"][accessorIndex];
+    Accessor accessor;
+    accessor.type = accessorJson["type"].get<std::string>();
+    accessor.componentType = accessorJson["componentType"].get<int>();
+    accessor.count = accessorJson["count"].get<size_t>();
+    accessor.byteOffset = accessorJson.value("byteOffset", 0);
+
+    int bufferViewIndex = accessorJson["bufferView"].get<int>();
+    const json& bufferViewJson = gltfData["bufferViews"][bufferViewIndex];
+    BufferView bufferView;
+    bufferView.byteStride = bufferViewJson.value("byteStride", 0);
+    bufferView.byteOffset = bufferViewJson.value("byteOffset", 0);
+
+    AccessorData accessorData = { accessor, bufferView };
+    return accessorData;
 }
 
 GLBHeader parseGLBHeader(const std::vector<uint8_t>& buffer) {
@@ -97,28 +237,28 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, s
         for (const auto& primitive : mesh["primitives"]) {
             GeometryData geometryData;
 
-            auto [positionOffset, positionCount] = getAccessorData(gltfData, primitive["attributes"]["POSITION"]);
-            geometryData.positions = extractDataFromBuffer<float>(binaryData, positionOffset, positionCount);
+            auto accessor = getAccessorData(gltfData, primitive["attributes"]["POSITION"]);
+            geometryData.positions = extractDataFromBuffer<float>(binaryData, accessor);
 
-            auto [normalOffset, normalCount] = getAccessorData(gltfData, primitive["attributes"]["NORMAL"]);
-            geometryData.normals = extractDataFromBuffer<float>(binaryData, normalOffset, normalCount);
+            accessor = getAccessorData(gltfData, primitive["attributes"]["NORMAL"]);
+            geometryData.normals = extractDataFromBuffer<float>(binaryData, accessor);
 
-            auto [indicesOffset, indicesCount] = getAccessorData(gltfData, primitive["indices"]);
-            geometryData.indices = extractDataFromBuffer<uint16_t>(binaryData, indicesOffset, indicesCount);
+            accessor = getAccessorData(gltfData, primitive["indices"]);
+            geometryData.indices = extractDataFromBuffer<uint16_t>(binaryData, accessor);
 
             geometryData.material = primitive["material"];
 
             if (primitive["attributes"].contains("TEXCOORD_0")) {
-                auto [texcoordOffset, texcoordCount] = getAccessorData(gltfData, primitive["attributes"]["TEXCOORD_0"]);
-                geometryData.texcoords = extractDataFromBuffer<float>(binaryData, texcoordOffset, texcoordCount);
+                accessor = getAccessorData(gltfData, primitive["attributes"]["TEXCOORD_0"]);
+                geometryData.texcoords = extractDataFromBuffer<float>(binaryData, accessor);
             }
 
             if (primitive["attributes"].contains("JOINTS_0")) {
-                auto [jointsOffset, jointsCount] = getAccessorData(gltfData, primitive["attributes"]["JOINTS_0"]);
-                geometryData.joints = extractDataFromBuffer<float>(binaryData, jointsOffset, jointsCount);
+                accessor = getAccessorData(gltfData, primitive["attributes"]["JOINTS_0"]);
+                geometryData.joints = extractDataFromBuffer<float>(binaryData, accessor);
 
-                auto [weightsOffset, weightsCount] = getAccessorData(gltfData, primitive["attributes"]["WEIGHTS_0"]);
-                geometryData.weights = extractDataFromBuffer<float>(binaryData, weightsOffset, weightsCount);
+                accessor = getAccessorData(gltfData, primitive["attributes"]["WEIGHTS_0"]);
+                geometryData.weights = extractDataFromBuffer<float>(binaryData, accessor);
             }
 
             meshData.geometries.push_back(geometryData);
@@ -127,8 +267,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, s
     }
 }
 
-void parseGLTFNodeHierarchy(Scene& scene, const json& gltfData, const std::vector<MeshData>& meshesAndMaterials, int maxBonesPerMesh, std::vector<std::shared_ptr<SceneNode>>* rootNodes) {
-    std::vector<std::shared_ptr<SceneNode>> nodes;
+void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData, const std::vector<MeshData>& meshesAndMaterials, std::vector<std::shared_ptr<SceneNode>>* nodes) {
 
     // Create SceneNode instances for each GLTF node
     for (const auto& gltfNode : gltfData["nodes"]) {
@@ -137,14 +276,14 @@ void parseGLTFNodeHierarchy(Scene& scene, const json& gltfData, const std::vecto
         if (gltfNode.contains("mesh")) {
             int meshIndex = gltfNode["mesh"];
             const MeshData& data = meshesAndMaterials[meshIndex];
-            node = std::make_shared<RenderableObject>("");//scene.CreateRenderableObject(data, gltfNode.value("name", ""), maxBonesPerMesh);
+            node = scene->CreateRenderableObject(data, gltfNode.value("name", ""));
             // Skinned mesh handling (commented out for now)
             // if (gltfNode.contains("skin")) {
             //     static_cast<RenderableObject*>(node)->skinInstance = gltfNode["skin"];
             // }
         }
         else {
-            node = scene.CreateNode(gltfNode.value("name", ""));
+            node = scene->CreateNode(gltfNode.value("name", ""));
         }
 
         if (gltfNode.contains("matrix")) {
@@ -179,25 +318,18 @@ void parseGLTFNodeHierarchy(Scene& scene, const json& gltfData, const std::vecto
             }
         }
 
-        nodes.push_back(node);
+        nodes->push_back(node);
     }
 
     // Establish parent-child relationships
     for (size_t index = 0; index < gltfData["nodes"].size(); ++index) {
         const auto& gltfNode = gltfData["nodes"][index];
-        std::shared_ptr<SceneNode> node = nodes[index];
+        std::shared_ptr<SceneNode> node = (*nodes)[index];
         if (gltfNode.contains("children")) {
             for (int childIndex : gltfNode["children"]) {
-                std::shared_ptr<SceneNode> childNode = nodes[childIndex];
+                std::shared_ptr<SceneNode> childNode = (*nodes)[childIndex];
                 node->addChild(childNode);
             }
-        }
-    }
-
-    // Find nodes with no parents
-    for (std::shared_ptr<SceneNode> node : nodes) {
-        if (node->parent == nullptr) {
-            rootNodes->push_back(node);
         }
     }
 }
@@ -244,11 +376,12 @@ std::shared_ptr<Scene> loadGLB(std::string fileName) {
         // Continue processing GLTF data and binary data...
         std::vector<MeshData> meshes;
         parseMeshes(gltfData, binaryData, &meshes);
-
+        std::vector<std::shared_ptr<SceneNode>> nodes;
+        parseGLTFNodeHierarchy(scene, gltfData, meshes, &nodes);
     }
     catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return nullptr;
     }
-    return nullptr;
+    return scene;
 }

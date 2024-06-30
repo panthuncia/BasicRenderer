@@ -5,7 +5,14 @@
 
 #include "Vertex.h"
 
-//void calculateTangentsBitangentsIndexed(
-//    std::vector<Vertex>& vertices,
-//    const std::vector<uint16_t>& indices
-//);
+struct TangentBitangent {
+    std::vector<XMFLOAT3> tangents;
+    std::vector<XMFLOAT3> bitangents;
+};
+
+TangentBitangent calculateTangentsBitangentsIndexed(
+    const std::vector<XMFLOAT3>& positions,
+    const std::vector<XMFLOAT3>& normals,
+    const std::vector<XMFLOAT2>& uvs,
+    const std::vector<uint16_t>& indices
+);

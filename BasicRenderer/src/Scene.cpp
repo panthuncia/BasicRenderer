@@ -1,5 +1,7 @@
 #include "Scene.h"
 
+#include "Utilities.h"
+
 UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     numObjects++;
     object->localID = nextNodeID;
@@ -34,6 +36,13 @@ std::shared_ptr<SceneNode> Scene::CreateNode(std::string name) {
     AddNode(node);
     return node;
 }
+
+std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(MeshData meshData, std::string name) {
+    std::shared_ptr<RenderableObject> object = RenderableFromData(meshData, name);
+    AddObject(object);
+    return object;
+}
+
 
 std::shared_ptr<RenderableObject> Scene::GetObjectByName(const std::string& name) {
     auto it = objectsByName.find(name);

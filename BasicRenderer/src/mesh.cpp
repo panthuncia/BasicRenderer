@@ -1,18 +1,21 @@
 #include "Mesh.h"
 #include "DirectX/d3dx12.h"
 #include "Utilities.h"
+#include "DeviceManager.h"
 
-Mesh::Mesh(ID3D12Device* device, const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
-    CreateBuffers(device, vertices, indices);
+Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
+    CreateBuffers(vertices, indices);
 }
 
 template <typename VertexType>
-void Mesh::CreateVertexBuffer(ID3D12Device* device, const std::vector<VertexType>& vertices, ComPtr<ID3D12Resource>& vertexBuffer) {
+void Mesh::CreateVertexBuffer(const std::vector<VertexType>& vertices, ComPtr<ID3D12Resource>& vertexBuffer) {
+    
     const UINT vertexBufferSize = static_cast<UINT>(vertices.size() * sizeof(VertexType));
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
     CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
+    auto device = DeviceManager::getInstance().getDevice();
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
@@ -32,7 +35,7 @@ void Mesh::CreateVertexBuffer(ID3D12Device* device, const std::vector<VertexType
     vertexBufferView.SizeInBytes = vertexBufferSize;
 }
 
-void Mesh::CreateBuffers(ID3D12Device* device, const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
+void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
 
     std::visit([&](auto&& vertex) {
         using T = std::decay_t<decltype(vertex)>;
@@ -41,7 +44,7 @@ void Mesh::CreateBuffers(ID3D12Device* device, const std::vector<Vertex>& vertic
         for (const auto& v : vertices) {
             specificVertices.push_back(std::get<T>(v));
         }
-        CreateVertexBuffer(device, specificVertices, vertexBuffer);
+        CreateVertexBuffer(specificVertices, vertexBuffer);
         }, vertices.front());
 
     const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT16));
@@ -51,6 +54,7 @@ void Mesh::CreateBuffers(ID3D12Device* device, const std::vector<Vertex>& vertic
     CD3DX12_RANGE readRange(0, 0);
     CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
 
+    auto device = DeviceManager::getInstance().getDevice();
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,

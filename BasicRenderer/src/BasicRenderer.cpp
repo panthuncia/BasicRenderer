@@ -86,12 +86,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         4, 5, 0, 0, 5, 1
     };
 
-    loadGLB("models/datsun.glb");
+    auto carScene = loadGLB("models/datsun.glb");
 
-    auto cubeMesh = Mesh(renderer.GetDevice().Get(), vertices, indices);
+    renderer.SetCurrentScene(carScene);
+
+    auto cubeMesh = Mesh(vertices, indices);
     std::vector<Mesh> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>("CubeObject", vec);
-    renderer.GetCurrentScene().AddObject(cubeObject);
+    renderer.GetCurrentScene()->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
     animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));

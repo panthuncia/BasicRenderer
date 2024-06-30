@@ -25,7 +25,8 @@ public:
     void Render();
     void Cleanup();
     ComPtr<ID3D12Device>& GetDevice();
-    Scene& GetCurrentScene();
+    std::shared_ptr<Scene>& GetCurrentScene();
+    void SetCurrentScene(std::shared_ptr<Scene> newScene);
 
 private:
     ComPtr<IDXGIFactory6> factory;
@@ -52,7 +53,6 @@ private:
     // Cube components
     ComPtr<ID3D12PipelineState> pipelineState;
     ComPtr<ID3D12RootSignature> rootSignature;
-    std::unique_ptr<Mesh> cubeMesh;
 
     // Add a constant buffer resource and view
     ComPtr<ID3D12Resource> perFrameConstantBuffer;
@@ -60,7 +60,7 @@ private:
     PerFrameCB perFrameCBData;
     ComPtr<ID3D12DescriptorHeap> perFrameCBVHeap;
 
-    Scene currentScene;
+    std::shared_ptr<Scene> currentScene = std::make_shared<Scene>();
 
     void LoadPipeline(HWND hwnd);
     void LoadAssets();

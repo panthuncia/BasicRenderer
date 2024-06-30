@@ -22,4 +22,4 @@ void print(Args... args) {
 Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const std::wstring& filename, const std::string& entryPoint, const std::string& target);
 #endif //UTILITIES_H
 
-std::shared_ptr<RenderableObject> createRenderableObject(GeometryData meshData, std::string name, UINT maxBonesPerMesh);
+std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::string name);

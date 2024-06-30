@@ -6,12 +6,14 @@
 #include "RenderableObject.h"
 #include <chrono>
 #include <ctime>  
+#include "Mesh.h"
 
 class Scene {
 public:
     UINT AddObject(std::shared_ptr<RenderableObject> object);
     UINT AddNode(std::shared_ptr<SceneNode> node);
     std::shared_ptr<SceneNode> CreateNode(std::string name = ""); // Like addNode, if node ids need to be pre-assigned
+    std::shared_ptr<RenderableObject> CreateRenderableObject(MeshData meshData, std::string name); // Like addObject, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> GetObjectByName(const std::string& name);
     std::shared_ptr<RenderableObject> GetObjectByID(UINT id);
     void RemoveObjectByName(const std::string& name);
