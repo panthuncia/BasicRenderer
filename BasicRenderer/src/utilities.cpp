@@ -28,3 +28,7 @@ Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const std::wstring& filename, con
 
     return shaderBlob;
 }
+
+std::shared_ptr<RenderableObject> createRenderableObject(GeometryData meshData, std::string name, UINT maxBonesPerMesh) {
+    return std::make_shared<RenderableObject>("");
+}

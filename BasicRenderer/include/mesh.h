@@ -5,13 +5,9 @@
 #include <directxmath.h>
 #include <vector>
 
-using namespace Microsoft::WRL;
+#include "Vertex.h"
 
-struct Vertex {
-    DirectX::XMFLOAT3 position;
-    DirectX::XMFLOAT3 normal;
-    DirectX::XMFLOAT4 color;
-};
+using namespace Microsoft::WRL;
 
 class Mesh {
 public:
@@ -21,6 +17,8 @@ public:
     UINT GetIndexCount() const;
 
 private:
+    template <typename VertexType>
+    void CreateVertexBuffer(ID3D12Device* device, const std::vector<VertexType>& vertices, ComPtr<ID3D12Resource>& vertexBuffer);
     void CreateBuffers(ID3D12Device* device, const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices);
 
     UINT indexCount = 0;

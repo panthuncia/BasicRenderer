@@ -1,6 +1,6 @@
 #include "Scene.h"
 
-UINT Scene::addObject(std::shared_ptr<RenderableObject> object) {
+UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     numObjects++;
     object->localID = nextNodeID;
     objectsByName[object->name] = object;
@@ -14,7 +14,28 @@ UINT Scene::addObject(std::shared_ptr<RenderableObject> object) {
     return object->localID;
 }
 
-std::shared_ptr<RenderableObject> Scene::getObjectByName(const std::string& name) {
+UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
+    node->localID = nextNodeID;
+
+    if (node->parent == nullptr) {
+        sceneRoot.addChild(node);
+    }
+
+    nodesByID[nextNodeID] = node;
+    nextNodeID++;
+    if (node->name != "") {
+        nodesByName[node->name] = node;
+    }
+    return node->localID;
+}
+
+std::shared_ptr<SceneNode> Scene::CreateNode(std::string name) {
+    std::shared_ptr<SceneNode> node = std::make_shared<SceneNode>(name);
+    AddNode(node);
+    return node;
+}
+
+std::shared_ptr<RenderableObject> Scene::GetObjectByName(const std::string& name) {
     auto it = objectsByName.find(name);
     if (it != objectsByName.end()) {
         return it->second;
@@ -22,7 +43,7 @@ std::shared_ptr<RenderableObject> Scene::getObjectByName(const std::string& name
     return nullptr;
 }
 
-std::shared_ptr<RenderableObject> Scene::getObjectByID(UINT id) {
+std::shared_ptr<RenderableObject> Scene::GetObjectByID(UINT id) {
     auto it = objectsByID.find(id);
     if (it != objectsByID.end()) {
         return it->second;
@@ -30,7 +51,7 @@ std::shared_ptr<RenderableObject> Scene::getObjectByID(UINT id) {
     return nullptr;
 }
 
-void Scene::removeObjectByName(const std::string& name) {
+void Scene::RemoveObjectByName(const std::string& name) {
     auto it = objectsByName.find(name);
     if (it != objectsByName.end()) {
         auto idIt = std::find_if(objectsByID.begin(), objectsByID.end(),
@@ -44,7 +65,7 @@ void Scene::removeObjectByName(const std::string& name) {
     }
 }
 
-void Scene::removeObjectByID(UINT id) {
+void Scene::RemoveObjectByID(UINT id) {
     auto it = objectsByID.find(id);
     if (it != objectsByID.end()) {
         auto nameIt = std::find_if(objectsByName.begin(), objectsByName.end(),
@@ -58,7 +79,7 @@ void Scene::removeObjectByID(UINT id) {
     }
 }
 
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::getRenderableObjectIDMap() {
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetRenderableObjectIDMap() {
     return objectsByID;
 }
 

@@ -6,6 +6,9 @@
 #include <wrl.h>
 #include <d3dcompiler.h>
 
+#include "RenderableObject.h"
+#include "GlTFLoader.h"
+
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
@@ -18,3 +21,5 @@ void print(Args... args) {
 
 Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const std::wstring& filename, const std::string& entryPoint, const std::string& target);
 #endif //UTILITIES_H
+
+std::shared_ptr<RenderableObject> createRenderableObject(GeometryData meshData, std::string name, UINT maxBonesPerMesh);

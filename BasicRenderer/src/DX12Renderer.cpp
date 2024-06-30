@@ -293,14 +293,14 @@ void DX12Renderer::LoadAssets() {
     }
 
     std::vector<Vertex> vertices = {
-        {{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-        {{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-        {{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-        {{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-        {{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-        {{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
-        {{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
-        {{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+        VertexColored{{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        VertexColored{{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+        VertexColored{{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+        VertexColored{{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
+        VertexColored{{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
+        VertexColored{{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
+        VertexColored{{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
+        VertexColored{{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
     };
 
     std::vector<UINT16> indices = {
@@ -318,17 +318,14 @@ void DX12Renderer::LoadAssets() {
 
 void DX12Renderer::WaitForPreviousFrame() {
     // Signal and increment the fence value
-    print("In wait for frame");
     const UINT64 fenceToWaitFor = fenceValue;
     ThrowIfFailed(commandQueue->Signal(fence.Get(), fenceToWaitFor));
-    print("Command queue signal");
     fenceValue++;
 
     // Wait until the previous frame is finished
     if (fence->GetCompletedValue() < fenceToWaitFor) {
         ThrowIfFailed(fence->SetEventOnCompletion(fenceToWaitFor, fenceEvent));
         WaitForSingleObject(fenceEvent, INFINITE);
-        print("Iwait for object");
     }
 
     frameIndex = swapChain->GetCurrentBackBufferIndex();
@@ -478,7 +475,7 @@ void DX12Renderer::Render() {
 
     commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    for (auto& pair : currentScene.getRenderableObjectIDMap()) {
+    for (auto& pair : currentScene.GetRenderableObjectIDMap()) {
         auto& renderable = pair.second;
         commandList->SetGraphicsRootConstantBufferView(1, renderable->getConstantBuffer()->GetGPUVirtualAddress());
 

@@ -6,10 +6,9 @@ Mesh::Mesh(ID3D12Device* device, const std::vector<Vertex>& vertices, const std:
     CreateBuffers(device, vertices, indices);
 }
 
-void Mesh::CreateBuffers(ID3D12Device* device, const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
-    const UINT vertexBufferSize = static_cast<UINT>(vertices.size() * sizeof(Vertex));
-    const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT16));
-    indexCount = indices.size();
+template <typename VertexType>
+void Mesh::CreateVertexBuffer(ID3D12Device* device, const std::vector<VertexType>& vertices, ComPtr<ID3D12Resource>& vertexBuffer) {
+    const UINT vertexBufferSize = static_cast<UINT>(vertices.size() * sizeof(VertexType));
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
     CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
@@ -29,10 +28,28 @@ void Mesh::CreateBuffers(ID3D12Device* device, const std::vector<Vertex>& vertic
     vertexBuffer->Unmap(0, nullptr);
 
     vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
-    vertexBufferView.StrideInBytes = sizeof(Vertex);
+    vertexBufferView.StrideInBytes = sizeof(VertexType);
     vertexBufferView.SizeInBytes = vertexBufferSize;
+}
 
-    bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
+void Mesh::CreateBuffers(ID3D12Device* device, const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
+
+    std::visit([&](auto&& vertex) {
+        using T = std::decay_t<decltype(vertex)>;
+        std::vector<T> specificVertices;
+        specificVertices.reserve(vertices.size());
+        for (const auto& v : vertices) {
+            specificVertices.push_back(std::get<T>(v));
+        }
+        CreateVertexBuffer(device, specificVertices, vertexBuffer);
+        }, vertices.front());
+
+    const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT16));
+    indexCount = indices.size();
+
+    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+    CD3DX12_RANGE readRange(0, 0);
+    CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
 
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,

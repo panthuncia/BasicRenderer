@@ -8,6 +8,7 @@
 #include "DX12Renderer.h"
 #include "Utilities.h"
 #include "RenderableObject.h"
+#include "GlTFLoader.h"
 
 
 // Window callback procedure
@@ -54,6 +55,11 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     HWND hwnd = InitWindow(hInstance, nShowCmd);
 
+    // Create separate console window because visual studio is stupid
+    AllocConsole();
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+
     DX12Renderer renderer;
 
     print("initializing renderer...");
@@ -61,14 +67,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     print("Renderer initialized.");
 
     std::vector<Vertex> vertices = {
-    {{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-    {{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-    {{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-    {{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-    {{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-    {{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
-    {{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
-    {{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    VertexColored{{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+    VertexColored{{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+    VertexColored{{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+    VertexColored{{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
+    VertexColored{{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
+    VertexColored{{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
+    VertexColored{{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
+    VertexColored{{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
     };
 
     std::vector<UINT16> indices = {
@@ -80,15 +86,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         4, 5, 0, 0, 5, 1
     };
 
+    loadGLB("models/datsun.glb");
+
     auto cubeMesh = Mesh(renderer.GetDevice().Get(), vertices, indices);
     std::vector<Mesh> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>("CubeObject", vec);
-    renderer.GetCurrentScene().addObject(cubeObject);
+    renderer.GetCurrentScene().AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
     animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
-    animation->addRotationKeyframe(1.5, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, DirectX::XM_PI));
-    animation->addRotationKeyframe(3, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, DirectX::XM_2PI));
+    animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
+    animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
+    animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     cubeObject->animationController->setAnimationClip(animation);
 
     MSG msg = {};
@@ -105,12 +114,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             lastUpdateTime = currentTime;
             cubeObject->animationController->update(elapsed_seconds.count());
 
-            print("Updating scene...");
+
             renderer.Update();
-            print("Scene updated.");
-            print("Rendering frame...");
             renderer.Render();
-            print("Frame complete.");
         }
     }
 
