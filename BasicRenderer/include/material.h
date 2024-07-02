@@ -3,31 +3,43 @@
 #include <d3d12.h>
 #include <wrl.h>
 #include <DirectXMath.h>
-#include <d3dcompiler.h>
 #include <string>
-#include "Buffers.h"
+#include "Texture.h"
 
 using Microsoft::WRL::ComPtr;
 
 class Material {
 public:
-    Material(ComPtr<ID3D12Device> device, const std::wstring& shaderFile);
-    void Bind(ComPtr<ID3D12GraphicsCommandList> commandList);
-    void UpdateConstantBuffer(const PerMaterialCB& cbData);
+    std::string name;
+    UINT psoFlags;
+    Texture* baseColorTexture;
+    Texture* normalTexture;
+    Texture* aoMap;
+    Texture* heightMap;
+    Texture* metallicRoughnessTexture;
+    Texture* emissiveTexture;
+    float metallicFactor;
+    float roughnessFactor;
+    DirectX::XMFLOAT4 baseColorFactor;
+    DirectX::XMFLOAT4 emissiveFactor;
+    int blendMode;
 
-private:
-    void LoadShaders(const std::wstring& shaderFile);
-    void CreatePipelineState();
-    void CreateRootSignature();
-    void CreateConstantBuffer();
+    Material(const std::string& name,
+        UINT psoFlags);
 
-    ComPtr<ID3D12Device> device;
-    ComPtr<ID3D12PipelineState> pipelineState;
-    ComPtr<ID3D12RootSignature> rootSignature;
-    ComPtr<ID3DBlob> vertexShader;
-    ComPtr<ID3DBlob> pixelShader;
-    ComPtr<ID3D12Resource> constantBuffer;
-    UINT8* pConstantBuffer;
+    Material(const std::string& name,
+        UINT psoFlags,
+        Texture* baseColorTexture,
+        Texture* normalTexture,
+        Texture* aoMap,
+        Texture* heightMap,
+        Texture* metallicRoughnessTexture,
+        float metallicFactor,
+        float roughnessFactor,
+        DirectX::XMFLOAT4 baseColorFactor,
+        DirectX::XMFLOAT4 emissiveFactor,
+        int blendMode);
 
-    D3D12_INPUT_ELEMENT_DESC inputElementDescs[2];
+    static Texture* createDefaultTexture();
+    // Other methods...
 };

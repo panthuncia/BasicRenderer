@@ -77,7 +77,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::str
             }
         }
 
-        Mesh mesh = Mesh(vertices, geom.indices);
+        Mesh mesh = Mesh(vertices, geom.indices, geom.material);
         meshes.push_back(std::move(mesh));
     }
 

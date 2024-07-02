@@ -2,9 +2,14 @@
 
 #include <iostream>
 #include <fstream>
+#include <streambuf>
 
 #include "nlohmann/json.h"
 #include "SceneNode.h"
+#include "stb/stb_image.h"
+#include "Texture.h"
+#include "Material.h"
+#include "PSOManager.h"
 
 using nlohmann::json;
 
@@ -231,7 +236,7 @@ std::vector<GLBChunk> parseGLBChunks(const std::vector<uint8_t>& buffer) {
     return chunks;
 }
 
-void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, std::vector<MeshData>* meshes) {
+void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, const std::vector<std::shared_ptr<Material>>& materials, std::vector<MeshData>* meshes) {
     for (const auto& mesh : gltfData["meshes"]) {
         MeshData meshData;
         for (const auto& primitive : mesh["primitives"]) {
@@ -246,7 +251,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, s
             accessor = getAccessorData(gltfData, primitive["indices"]);
             geometryData.indices = extractDataFromBuffer<uint16_t>(binaryData, accessor);
 
-            geometryData.material = primitive["material"];
+            geometryData.material = materials[primitive["material"]];
 
             if (primitive["attributes"].contains("TEXCOORD_0")) {
                 accessor = getAccessorData(gltfData, primitive["attributes"]["TEXCOORD_0"]);
@@ -267,7 +272,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, s
     }
 }
 
-void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData, const std::vector<MeshData>& meshesAndMaterials, std::vector<std::shared_ptr<SceneNode>>* nodes) {
+void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData, const std::vector<MeshData>& meshes, std::vector<std::shared_ptr<SceneNode>>* nodes) {
 
     // Create SceneNode instances for each GLTF node
     for (const auto& gltfNode : gltfData["nodes"]) {
@@ -275,7 +280,7 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
 
         if (gltfNode.contains("mesh")) {
             int meshIndex = gltfNode["mesh"];
-            const MeshData& data = meshesAndMaterials[meshIndex];
+            const MeshData& data = meshes[meshIndex];
             node = scene->CreateRenderableObject(data, gltfNode.value("name", ""));
             // Skinned mesh handling (commented out for now)
             // if (gltfNode.contains("skin")) {
@@ -334,6 +339,192 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
     }
 }
 
+
+// Function to decode base64 data URI (if needed)
+std::vector<uint8_t> decodeDataUri(const std::string& uri) {
+    const std::string base64Prefix = "data:image/";
+    if (uri.find(base64Prefix) != 0) {
+        throw std::runtime_error("Unsupported URI format");
+    }
+
+    std::string base64Data = uri.substr(uri.find(",") + 1);
+    std::vector<uint8_t> decodedData(base64Data.size() * 3 / 4);
+    // Decode base64 data (use a base64 decoding library or implement one)
+    // This part is omitted for brevity
+    return decodedData;
+}
+
+// Function to load images stored in binary format
+std::vector<std::vector<uint8_t>> getGLTFImagesFromBinary(const json& gltfData, const std::vector<uint8_t>& binaryData) {
+    std::vector<std::vector<uint8_t>> images;
+    if (!gltfData.contains("images")) {
+        return images;
+    }
+
+    for (const auto& gltfImage : gltfData["images"]) {
+        std::vector<uint8_t> imageBuffer;
+
+        if (gltfImage.contains("uri")) {
+            std::string uri = gltfImage["uri"];
+            if (uri.rfind("data:", 0) == 0) {
+                imageBuffer = decodeDataUri(uri);
+                images.push_back(imageBuffer);
+            }
+            else {
+                throw std::runtime_error("External URIs unsupported in glb files");
+            }
+        }
+        else if (gltfImage.contains("bufferView")) {
+            int bufferViewIndex = gltfImage["bufferView"];
+            const auto& bufferView = gltfData["bufferViews"][bufferViewIndex];
+            size_t byteOffset = bufferView["byteOffset"];
+            size_t byteLength = bufferView["byteLength"];
+            imageBuffer.assign(binaryData.begin() + byteOffset, binaryData.begin() + byteOffset + byteLength);
+            images.push_back(imageBuffer);
+        }
+    }
+
+    return images;
+}
+
+
+std::string loadFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file) {
+        throw std::runtime_error("Failed to open file: " + path);
+    }
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+std::vector<Texture> loadTexturesFromImages(const std::vector<std::vector<uint8_t>>& images, bool sRGB) {
+    std::vector<Texture> textures;
+
+    for (const auto& imageData : images) {
+        int width, height, channels;
+        stbi_uc* image = stbi_load_from_memory(imageData.data(), static_cast<int>(imageData.size()), &width, &height, &channels, 4);
+        if (!image) {
+            throw std::runtime_error("Failed to load texture image from binary data");
+        }
+
+        Texture texture(image, width, height, sRGB);
+        textures.push_back(std::move(texture));
+
+        stbi_image_free(image);
+    }
+
+    return textures;
+}
+
+std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, const std::string& dir, bool linearBaseColor = false, const std::vector<uint8_t>& binaryData = {}) {
+    std::unordered_map<int, Texture*> linearTextures;
+    std::unordered_map<int, Texture*> srgbTextures;
+    std::vector<std::shared_ptr<Material>> materials;
+
+    Texture* defaultTexture = Material::createDefaultTexture();
+
+    // Load images from binary data
+    auto imageBuffers = getGLTFImagesFromBinary(gltfData, binaryData);
+    auto textures = loadTexturesFromImages(imageBuffers, linearBaseColor);
+
+    // Map textures to indices
+    for (size_t i = 0; i < textures.size(); ++i) {
+        linearTextures[i] = &textures[i];
+        srgbTextures[i] = &textures[i];
+    }
+
+    // Create materials
+    for (const auto& gltfMaterial : gltfData["materials"]) {
+        UINT psoFlags = 0;
+        Texture* baseColorTexture = defaultTexture;
+        Texture* normalTexture = defaultTexture;
+        Texture* aoMap = defaultTexture;
+        Texture* metallicRoughnessTexture = defaultTexture;
+        Texture* emissiveTexture = defaultTexture;
+        float metallicFactor = 1.0f;
+        float roughnessFactor = 1.0f;
+        DirectX::XMFLOAT4 baseColorFactor(1.0f, 1.0f, 1.0f, 1.0f);
+        DirectX::XMFLOAT4 emissiveFactor(0.0f, 0.0f, 0.0f, 1.0f);
+        int blendMode = D3D12_BLEND_OP_ADD; // Opaque blend mode
+
+        if (gltfMaterial.contains("pbrMetallicRoughness")) {
+            psoFlags |= PSOFlags::PBR;
+            const auto& pbr = gltfMaterial["pbrMetallicRoughness"];
+            if (pbr.contains("baseColorTexture")) {
+                int textureIndex = pbr["baseColorTexture"]["index"];
+                if (linearBaseColor) {
+                    baseColorTexture = linearTextures[textureIndex];
+                    //srgbTextures[textureIndex]->textureResource.Reset();
+                }
+                else {
+                    baseColorTexture = srgbTextures[textureIndex];
+                    //linearTextures[textureIndex]->textureResource.Reset();
+                }
+            }
+            if (pbr.contains("metallicRoughnessTexture")) {
+                int textureIndex = pbr["metallicRoughnessTexture"]["index"];
+                metallicRoughnessTexture = linearTextures[textureIndex];
+                //srgbTextures[textureIndex]->textureResource.Reset();
+            }
+            if (pbr.contains("metallicFactor")) {
+                metallicFactor = pbr["metallicFactor"];
+            }
+            if (pbr.contains("roughnessFactor")) {
+                roughnessFactor = pbr["roughnessFactor"];
+            }
+            if (pbr.contains("baseColorFactor")) {
+                baseColorFactor = { pbr["baseColorFactor"][0], pbr["baseColorFactor"][1], pbr["baseColorFactor"][2], pbr["baseColorFactor"][3] };
+            }
+        }
+
+        if (gltfMaterial.contains("normalTexture")) {
+            psoFlags |= PSOFlags::NORMAL_MAP;
+            int textureIndex = gltfMaterial["normalTexture"]["index"];
+            normalTexture = linearTextures[textureIndex];
+            //srgbTextures[textureIndex]->textureResource.Reset();
+        }
+        if (gltfMaterial.contains("occlusionTexture")) {
+            psoFlags |= PSOFlags::AO_TEXTURE;
+            int textureIndex = gltfMaterial["occlusionTexture"]["index"];
+            aoMap = linearTextures[textureIndex];
+            //srgbTextures[textureIndex]->textureResource.Reset();
+        }
+        if (gltfMaterial.contains("emissiveTexture")) {
+            psoFlags |= PSOFlags::EMISSIVE_TEXTURE;
+            int textureIndex = gltfMaterial["emissiveTexture"]["index"];
+            emissiveTexture = srgbTextures[textureIndex];
+            //linearTextures[textureIndex]->textureResource.Reset();
+            emissiveFactor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        }
+        if (gltfMaterial.contains("emissiveFactor")) {
+            emissiveFactor = { gltfMaterial["emissiveFactor"][0], gltfMaterial["emissiveFactor"][1], gltfMaterial["emissiveFactor"][2], 1.0f };
+        }
+
+        if (gltfMaterial.contains("alphaMode")) {
+            std::string alphaMode = gltfMaterial["alphaMode"];
+            if (alphaMode == "MASK") {
+                blendMode = D3D12_BLEND_OP_MAX;
+            }
+            else if (alphaMode == "BLEND") {
+                blendMode = D3D12_BLEND_OP_ADD;
+            }
+        }
+        std::shared_ptr<Material> newMaterial = std::make_shared<Material>(gltfMaterial["name"], psoFlags,
+            baseColorTexture,
+            normalTexture,
+            aoMap,
+            nullptr,
+            metallicRoughnessTexture,
+            metallicFactor,
+            roughnessFactor,
+            baseColorFactor,
+            emissiveFactor,
+            blendMode);
+        materials.push_back(newMaterial);
+    }
+
+    return materials;
+}
+
 std::shared_ptr<Scene> loadGLB(std::string fileName) {
     auto scene = std::make_shared<Scene>();
     std::ifstream file(fileName, std::ios::binary);
@@ -374,8 +565,9 @@ std::shared_ptr<Scene> loadGLB(std::string fileName) {
         std::cout << gltfData.dump(2) << std::endl;
 
         // Continue processing GLTF data and binary data...
+        auto materials = parseGLTFMaterials(gltfData, "", false, binaryData);
         std::vector<MeshData> meshes;
-        parseMeshes(gltfData, binaryData, &meshes);
+        parseMeshes(gltfData, binaryData, materials, &meshes);
         std::vector<std::shared_ptr<SceneNode>> nodes;
         parseGLTFNodeHierarchy(scene, gltfData, meshes, &nodes);
     }

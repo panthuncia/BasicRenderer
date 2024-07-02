@@ -4,6 +4,7 @@
 struct PerFrameCB {
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX projection;
+    DirectX::XMVECTOR eyePosWorldSpace;
 };
 
 struct PerMeshCB {

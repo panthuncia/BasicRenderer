@@ -4,8 +4,10 @@
 #include <d3d12.h>
 #include <directxmath.h>
 #include <vector>
+#include <memory>
 
 #include "Vertex.h"
+#include "Material.h"
 
 using namespace Microsoft::WRL;
 
@@ -16,7 +18,7 @@ struct GeometryData {
     std::vector<float> texcoords;
     std::vector<float> joints;
     std::vector<float> weights;
-    int material;
+    std::shared_ptr<Material> material;
 };
 
 struct MeshData {
@@ -26,10 +28,12 @@ struct MeshData {
 
 class Mesh {
 public:
-    Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices);
+    Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices, const std::shared_ptr<Material>);
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
     UINT GetIndexCount() const;
+
+    std::shared_ptr<Material> material;
 
 private:
     template <typename VertexType>

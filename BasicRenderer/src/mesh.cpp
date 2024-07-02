@@ -3,8 +3,9 @@
 #include "Utilities.h"
 #include "DeviceManager.h"
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
+Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices, const std::shared_ptr<Material> material) {
     CreateBuffers(vertices, indices);
+    this->material = material;
 }
 
 template <typename VertexType>

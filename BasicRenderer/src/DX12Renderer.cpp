@@ -9,6 +9,7 @@
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
+#include "PSOManager.h"
 
 void DX12Renderer::Initialize(HWND hwnd) {
     LoadPipeline(hwnd);
@@ -35,6 +36,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd) {
 
     // Initialize device manager
     DeviceManager::getInstance().initialize(device);
+    PSOManager::getInstance().initialize();
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> infoQueue;
@@ -310,8 +312,9 @@ void DX12Renderer::WaitForPreviousFrame() {
 }
 
 void DX12Renderer::UpdateConstantBuffer() {
+    DirectX::XMFLOAT4 eyeWorld = { 0.0f, 2.0f, -5.0f, 1.0f };
     perFrameCBData.view = DirectX::XMMatrixLookAtLH(
-        DirectX::XMVectorSet(0.0f, 2.0f, -5.0f, 1.0f), // Eye position
+        DirectX::XMLoadFloat4(&eyeWorld), // Eye position
         DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),  // Focus point
         DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)   // Up direction
     );
@@ -321,6 +324,7 @@ void DX12Renderer::UpdateConstantBuffer() {
         0.1f,               // Near clipping plane
         100.0f              // Far clipping plane
     );
+    perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat4(&eyeWorld);
     memcpy(pPerFrameConstantBuffer, &perFrameCBData, sizeof(perFrameCBData));
 }
 
@@ -360,11 +364,11 @@ void DX12Renderer::CreateConstantBuffer() {
 
     // Create structured buffer for lights
     LightInfo light;
-    light.properties = DirectX::XMVectorSetInt(0, 0, 0, 0 );
-    light.posWorldSpace = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
-    light.dirWorldSpace = DirectX::XMVectorSet(0.0, 0.0, 0.0, 0.0);
+    light.properties = DirectX::XMVectorSetInt(2, 0, 0, 0 );
+    light.posWorldSpace = DirectX::XMVectorSet(3.0, 3.0, 3.0, 1.0);
+    light.dirWorldSpace = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
     light.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
-    light.color = DirectX::XMVectorSet(0.0, 1.0, 0.0, 1.0);
+    light.color = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
     lightsData.push_back(light);
 
     D3D12_RESOURCE_DESC structuredBufferDesc = {};
@@ -458,6 +462,8 @@ void DX12Renderer::Render() {
         commandList->SetGraphicsRootConstantBufferView(1, renderable->getConstantBuffer()->GetGPUVirtualAddress());
 
         for (auto& mesh : renderable->getMeshes()) {
+            auto pso = PSOManager::getInstance().GetPSO(mesh.material->psoFlags);
+            commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 

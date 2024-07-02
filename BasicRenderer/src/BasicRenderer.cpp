@@ -9,6 +9,7 @@
 #include "Utilities.h"
 #include "RenderableObject.h"
 #include "GlTFLoader.h"
+#include "PSOManager.h"
 
 
 // Window callback procedure
@@ -78,19 +79,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     };
 
     std::vector<UINT16> indices = {
-        0, 1, 3, 3, 1, 2,
-        1, 5, 2, 2, 5, 6,
-        5, 4, 6, 6, 4, 7,
-        4, 0, 7, 7, 0, 3,
-        3, 2, 7, 7, 2, 6,
-        4, 5, 0, 0, 5, 1
+        3, 1, 0, 2, 1, 3,
+        2, 5, 1, 6, 5, 2,
+        3, 4, 5, 7, 4, 6,
+        7, 0, 4, 3, 0, 7,
+        7, 2, 3, 6, 2, 7,
+        0, 5, 4, 1, 5, 0
     };
 
     auto carScene = loadGLB("models/datsun.glb");
 
     renderer.SetCurrentScene(carScene);
 
-    auto cubeMesh = Mesh(vertices, indices);
+    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::VERTEX_COLORS);
+    auto cubeMesh = Mesh(vertices, indices, cubeMaterial);
     std::vector<Mesh> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>("CubeObject", vec);
     renderer.GetCurrentScene()->AddObject(cubeObject);
