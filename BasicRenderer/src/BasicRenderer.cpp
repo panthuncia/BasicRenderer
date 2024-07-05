@@ -87,9 +87,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 5, 4, 1, 5, 0
     };
 
-    auto carScene = loadGLB("models/datsun.glb");
+    //auto carScene = loadGLB("models/datsun.glb");
 
-    renderer.SetCurrentScene(carScene);
+    //renderer.SetCurrentScene(carScene);
 
     auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::VERTEX_COLORS);
     auto cubeMesh = Mesh(vertices, indices, cubeMaterial);

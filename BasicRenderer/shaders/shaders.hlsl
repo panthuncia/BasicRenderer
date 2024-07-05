@@ -1,4 +1,4 @@
-cbuffer PerFrame : register(b0) {
+struct PerFrameBuffer {
     row_major matrix view;
     row_major matrix projection;
     float3 eyePosWorldSpace;
@@ -36,12 +36,15 @@ struct PSInput {
 };
 
 PSInput VSMain(VSInput input) {
+    
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    
     PSInput output;
     float4 worldPosition = mul(float4(input.position, 1.0f), model);
-    float4 viewPosition = mul(worldPosition, view);
+    float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
     output.normalWorldSpace = mul(float4(input.normal, 1.0f), model);
     output.positionWorldSpace = worldPosition;
-    output.position = mul(viewPosition, projection);
+    output.position = mul(viewPosition, perFrameBuffer.projection);
 #if defined(VERTEX_COLORS)
     output.color = input.color;
 #endif
@@ -107,7 +110,11 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
 }
 
 float4 PSMain(PSInput input) : SV_TARGET {
-    float3 viewDir = normalize(eyePosWorldSpace - input.positionWorldSpace.xyz);
+    
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[1];
+    
+    float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace - input.positionWorldSpace.xyz);
     uint numLights, lightsStride;
     lights.GetDimensions(numLights, lightsStride);
 

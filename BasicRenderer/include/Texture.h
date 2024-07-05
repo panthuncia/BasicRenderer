@@ -2,13 +2,16 @@
 #include "wrl.h"
 #include "stb/stb_image.h"
 #include "d3d12.h"
+#include "DirectX/d3dx12.h"
 using Microsoft::WRL::ComPtr;
 
 class Texture {
 public:
-    ComPtr<ID3D12Resource> textureResource;
-    // Other texture-related members...
-
     Texture(const stbi_uc* image, int width, int height, bool sRGB);
-    // Additional constructors or methods...
+private:
+    ComPtr<ID3D12Resource> textureResource;
+    ComPtr<ID3D12Resource> textureUploadHeap;
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle;
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle;
+    UINT descriptorIndex;
 };

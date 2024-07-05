@@ -1,4 +1,7 @@
 #include "PSOManager.h"
+
+#include <fstream>
+
 #include "DirectX/d3dx12.h"
 #include "Utilities.h"
 #include "DeviceManager.h"
@@ -115,6 +118,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
     arguments.push_back(DXC_ARG_WARNINGS_ARE_ERRORS); //-WX
     arguments.push_back(DXC_ARG_DEBUG); //-Zi
+    arguments.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE); //-Zss
 
     for (const auto& define : defines)
     {
@@ -135,6 +139,32 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
         arguments.size(),
         nullptr,
         IID_PPV_ARGS(result.GetAddressOf()));
+
+    //PDB data
+    ComPtr<IDxcBlob> pDebugData;
+    ComPtr<IDxcBlobUtf16> pDebugDataPath;
+    result->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(pDebugData.GetAddressOf()), pDebugDataPath.GetAddressOf());
+    // Get the debug data path
+    const wchar_t* debugDataPath = reinterpret_cast<const wchar_t*>(pDebugDataPath->GetStringPointer());
+    std::wcout << "Suggested pdb path:" << debugDataPath << std::endl;
+
+    // Get the debug data buffer
+    const void* debugDataBuffer = pDebugData->GetBufferPointer();
+    size_t debugDataSize = pDebugData->GetBufferSize();
+
+    // Open a file stream to write the debug data
+    std::ofstream file(debugDataPath, std::ios::binary);
+    if (!file.is_open()) {
+        // Handle error
+        return;
+    }
+
+    // Write the debug data to the file
+    file.write(reinterpret_cast<const char*>(debugDataBuffer), debugDataSize);
+
+    // Close the file
+    file.close();
+
 
     // Error Handling. Note that this will also include warnings unless disabled.
     ComPtr<IDxcBlobUtf8> pErrors;
@@ -190,7 +220,7 @@ void PSOManager::createRootSignature() {
     rootSignatureDesc.pParameters = parameters;
     rootSignatureDesc.NumStaticSamplers = 0;
     rootSignatureDesc.pStaticSamplers = nullptr;
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT| D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
 
     // Serialize and create the root signature
     ComPtr<ID3DBlob> signature;

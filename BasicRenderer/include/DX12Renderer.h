@@ -47,19 +47,6 @@ private:
     HANDLE fenceEvent;
     UINT64 fenceValue;
 
-    std::vector<LightInfo> lightsData;
-    ComPtr<ID3D12Resource> lightBuffer;
-
-    // Cube components
-    //ComPtr<ID3D12PipelineState> pipelineState;
-    //ComPtr<ID3D12RootSignature> rootSignature;
-
-    // Add a constant buffer resource and view
-    ComPtr<ID3D12Resource> perFrameConstantBuffer;
-    UINT8* pPerFrameConstantBuffer;
-    PerFrameCB perFrameCBData;
-    ComPtr<ID3D12DescriptorHeap> perFrameCBVHeap;
-
     std::shared_ptr<Scene> currentScene = std::make_shared<Scene>();
 
     void LoadPipeline(HWND hwnd);
