@@ -24,7 +24,8 @@ public:
 
     void initialize();
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> GetPSO(UINT psoFlags);
+    ComPtr<ID3D12PipelineState> GetPSO(UINT psoFlags);
+    ComPtr<ID3D12RootSignature> GetRootSignature();
 
 private:
     PSOManager() = default;
@@ -33,7 +34,7 @@ private:
     ComPtr<IDxcUtils> pUtils;
     ComPtr<IDxcCompiler3> pCompiler;
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> CreatePSO(UINT psoFlags);
+    ComPtr<ID3D12PipelineState> CreatePSO(UINT psoFlags);
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
     void CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
     void createRootSignature();

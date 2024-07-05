@@ -4,8 +4,6 @@
 
 #include "DX12Renderer.h"
 
-#include <d3dcompiler.h>
-
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
@@ -154,145 +152,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd) {
 }
 
 void DX12Renderer::LoadAssets() {
-    // Create root signature
-    // Descriptor range for PerFrame buffer using a descriptor table
-    D3D12_DESCRIPTOR_RANGE1 descRange = {};
-    descRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    descRange.NumDescriptors = 1;
-    descRange.BaseShaderRegister = 0; // b0 for PerFrame
-    descRange.RegisterSpace = 0;
-    descRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
-    D3D12_DESCRIPTOR_RANGE1 srvDescRange = {};
-    srvDescRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvDescRange.NumDescriptors = 1;
-    srvDescRange.BaseShaderRegister = 2; // b2 for lights
-    srvDescRange.RegisterSpace = 0;
-    srvDescRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
-    // Root parameter for descriptor table (PerFrame buffer)
-    D3D12_ROOT_PARAMETER1 parameters[3] = {};
-
-    // PerFrame buffer as a descriptor table
-    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[0].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[0].DescriptorTable.pDescriptorRanges = &descRange;
-    parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // PerMesh buffer as a direct root CBV
-    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameters[1].Descriptor.ShaderRegister = 1; // b1 for PerMesh
-    parameters[1].Descriptor.RegisterSpace = 0;
-    parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[2].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[2].DescriptorTable.pDescriptorRanges = &srvDescRange;
-    parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // Root Signature Description
-    D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = 3; // three parameters: two descriptor tables and one direct CBV
-    rootSignatureDesc.pParameters = parameters;
-    rootSignatureDesc.NumStaticSamplers = 0;
-    rootSignatureDesc.pStaticSamplers = nullptr;
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-
-    // Serialize and create the root signature
-    ComPtr<ID3DBlob> signature;
-    ComPtr<ID3DBlob> error;
-    D3D12_VERSIONED_ROOT_SIGNATURE_DESC versionedDesc;
-    versionedDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-    versionedDesc.Desc_1_1 = rootSignatureDesc;
-    ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &signature, &error));
-    ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
-
-    // Create the pipeline state, which includes compiling and loading shaders
-    ComPtr<ID3DBlob> vertexShader;
-    ComPtr<ID3DBlob> pixelShader;
-
-#if defined(_DEBUG)
-    UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#else
-    UINT compileFlags = 0;
-#endif
-
-    HRESULT hr = D3DCompileFromFile(L"shaders/shaders.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, &error);
-    if (FAILED(hr)) {
-        if (error) {
-            std::string errMsg(static_cast<char*>(error->GetBufferPointer()), error->GetBufferSize());
-            std::cerr << "Vertex shader compilation error: " << errMsg << std::endl;
-        }
-        ThrowIfFailed(hr);
-    }
-
-    hr = D3DCompileFromFile(L"shaders/shaders.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, &error);
-    if (FAILED(hr)) {
-        if (error) {
-            std::string errMsg(static_cast<char*>(error->GetBufferPointer()), error->GetBufferSize());
-            std::cerr << "Pixel shader compilation error: " << errMsg << std::endl;
-        }
-        ThrowIfFailed(hr);
-    }
-    if (vertexShader->GetBufferSize() == 0 || pixelShader->GetBufferSize() == 0) {
-        std::cerr << "Shader bytecode is empty" << std::endl;
-        throw std::runtime_error("Shader bytecode is empty");
-    }
-    // Define the vertex input layout
-    D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
-    };
-
-
-    D3D12_RASTERIZER_DESC rasterizerDesc = {};
-    rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-    rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK; // Enable back-face culling
-    rasterizerDesc.FrontCounterClockwise = TRUE; // Define the front face as counter-clockwise
-    rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-    rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-    rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-    rasterizerDesc.DepthClipEnable = TRUE;
-    rasterizerDesc.MultisampleEnable = FALSE;
-    rasterizerDesc.AntialiasedLineEnable = FALSE;
-    rasterizerDesc.ForcedSampleCount = 0;
-    rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
-    psoDesc.pRootSignature = rootSignature.Get();
-    psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    psoDesc.RasterizerState = rasterizerDesc;
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-    for (int i = 1; i < 8; ++i) {
-        psoDesc.RTVFormats[i] = DXGI_FORMAT_UNKNOWN;
-    }
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.SampleDesc.Quality = 0;
-    psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-
-    psoDesc.CachedPSO = { nullptr, 0 };
-    psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-
-    // Optional shaders (if not used, set to {nullptr, 0})
-    psoDesc.DS = { nullptr, 0 };
-    psoDesc.HS = { nullptr, 0 };
-    psoDesc.GS = { nullptr, 0 };
-    psoDesc.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
-    psoDesc.NodeMask = 0;
-
-    HRESULT hr1 = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineState));
-    if (FAILED(hr)) {
-        CheckDebugMessages();
-        ThrowIfFailed(hr);
-    }
+    
 }
 
 
@@ -423,10 +283,11 @@ void DX12Renderer::Render() {
     UpdateConstantBuffer();
     // Record all the commands we need to render the scene into the command list
     ThrowIfFailed(commandAllocator->Reset());
-    ThrowIfFailed(commandList->Reset(commandAllocator.Get(), pipelineState.Get()));
+    ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 
     // Set necessary state
-    commandList->SetGraphicsRootSignature(rootSignature.Get());
+    auto& psoManager = PSOManager::getInstance();
+    commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
     // Bind the constant buffer to the root signature
     commandList->SetDescriptorHeaps(1, perFrameCBVHeap.GetAddressOf());
 
@@ -462,7 +323,7 @@ void DX12Renderer::Render() {
         commandList->SetGraphicsRootConstantBufferView(1, renderable->getConstantBuffer()->GetGPUVirtualAddress());
 
         for (auto& mesh : renderable->getMeshes()) {
-            auto pso = PSOManager::getInstance().GetPSO(mesh.material->psoFlags);
+            auto pso = psoManager.GetPSO(mesh.material->psoFlags);
             commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();

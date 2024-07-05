@@ -51,8 +51,8 @@ private:
     ComPtr<ID3D12Resource> lightBuffer;
 
     // Cube components
-    ComPtr<ID3D12PipelineState> pipelineState;
-    ComPtr<ID3D12RootSignature> rootSignature;
+    //ComPtr<ID3D12PipelineState> pipelineState;
+    //ComPtr<ID3D12RootSignature> rootSignature;
 
     // Add a constant buffer resource and view
     ComPtr<ID3D12Resource> perFrameConstantBuffer;

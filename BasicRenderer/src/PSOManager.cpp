@@ -202,3 +202,7 @@ void PSOManager::createRootSignature() {
     auto device = DeviceManager::getInstance().getDevice();
     ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
 }
+
+ComPtr<ID3D12RootSignature> PSOManager::GetRootSignature() {
+    return rootSignature;
+}
