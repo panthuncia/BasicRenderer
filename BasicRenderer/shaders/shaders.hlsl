@@ -28,8 +28,8 @@ struct VSInput {
 
 struct PSInput {
     float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD0;
-    float4 normalWorldSpace : TEXCOORD1;
+    float4 positionWorldSpace : TEXCOORD1;
+    float4 normalWorldSpace : TEXCOORD2;
 #if defined(VERTEX_COLORS)
     float4 color : COLOR;
 #endif
@@ -64,7 +64,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     uint lightType = light.properties.x;
     float3 lightPos = light.posWorldSpace.xyz;
     float3 lightColor = light.color.xyz;
-    float dir = light.dirWorldSpace.xyz;
+    float3 dir = light.dirWorldSpace.xyz;
     float constantAttenuation = light.attenuation.x;
     float linearAttenuation = light.attenuation.y;
     float quadraticAttenuation = light.attenuation.z;

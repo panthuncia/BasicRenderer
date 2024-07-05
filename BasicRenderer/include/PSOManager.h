@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <string>
 
+#include "DirectX/dxcapi.h"
+
 using Microsoft::WRL::ComPtr;
 
 enum PSOFlags {
@@ -28,18 +30,16 @@ private:
     PSOManager() = default;
     ComPtr<ID3D12RootSignature> rootSignature;
     std::unordered_map<UINT, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_psoCache;
+    ComPtr<IDxcUtils> pUtils;
+    ComPtr<IDxcCompiler3> pCompiler;
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> CreatePSO(UINT psoFlags);
-    std::vector<D3D_SHADER_MACRO> GetShaderDefines(UINT psoFlags);
-    void CompileShader(const std::wstring& filename, const std::string& entryPoint, const std::string& target, const D3D_SHADER_MACRO* defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
+    std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
+    void CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
     void createRootSignature();
 };
 
 inline PSOManager& PSOManager::getInstance() {
     static PSOManager instance;
     return instance;
-}
-
-inline void PSOManager::initialize() {
-    createRootSignature();
 }

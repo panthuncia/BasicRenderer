@@ -19,6 +19,11 @@ set(SHADERS_DEST_DIR "${CMAKE_BINARY_DIR}/BasicRenderer/")
 
 file(COPY ${SHADERS_SOURCE_DIR} DESTINATION ${SHADERS_DEST_DIR})
 
+set(COMPILER_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxcompiler.dll")
+set(SIGNING_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxil.dll")
+set(COMPILER_DEST_DIR "${CMAKE_BINARY_DIR}/BasicRenderer/")
+file(COPY ${SIGNING_BINARY_DIR} DESTINATION ${COMPILER_DEST_DIR})
+
 # Include directories
 include_directories(include/)
 

@@ -3,6 +3,30 @@
 #include "Utilities.h"
 #include "DeviceManager.h"
 
+#pragma comment(lib, "dxcompiler.lib")
+//#pragma comment(lib, "dxil.lib")
+
+void PSOManager::initialize() {
+    createRootSignature();
+
+    HMODULE dxcompiler = LoadLibrary(L"dxcompiler.dll");
+    if (!dxcompiler)
+    {
+        throw std::runtime_error("Failed to load dxcompiler.dll");
+    }
+
+    // Get DxcCreateInstance function
+    auto DxcCreateInstance = reinterpret_cast<DxcCreateInstanceProc>(
+        GetProcAddress(dxcompiler, "DxcCreateInstance"));
+    if (!DxcCreateInstance)
+    {
+        throw std::runtime_error("Failed to get DxcCreateInstance function");
+    }
+    // Create compiler and library instances
+    DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(pUtils.GetAddressOf()));
+    DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(pCompiler.GetAddressOf()));
+}
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags) {
     if (m_psoCache.find(psoFlags) == m_psoCache.end()) {
         m_psoCache[psoFlags] = CreatePSO(psoFlags);
@@ -19,8 +43,8 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags)
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    CompileShader(L"shaders/shaders.hlsl", "VSMain", "vs_5_0", defines.data(), vertexShader);
-    CompileShader(L"shaders/shaders.hlsl", "PSMain", "ps_5_0", defines.data(), pixelShader);
+    CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
+    CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
 
     // Define the vertex input layout
     std::vector<D3D12_INPUT_ELEMENT_DESC> inputElementDescs = {
@@ -55,33 +79,72 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags)
     return pso;
 }
 
-std::vector<D3D_SHADER_MACRO> PSOManager::GetShaderDefines(UINT psoFlags) {
-    std::vector<D3D_SHADER_MACRO> defines = {
-    { NULL, NULL }
-    };
+std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
+    std::vector<DxcDefine> defines = {};
     if (psoFlags & PSOFlags::VERTEX_COLORS) {
-        D3D_SHADER_MACRO macro;
-        macro.Definition = "1";
-        macro.Name = "VERTEX_COLORS";
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"VERTEX_COLORS";
         defines.insert(defines.begin(), macro);
     }
     return defines;
 }
 
-void PSOManager::CompileShader(const std::wstring& filename, const std::string& entryPoint, const std::string& target, const D3D_SHADER_MACRO* defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob) {
-    Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-    UINT compileFlags = 0;
-#if defined(_DEBUG)
-    compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-    HRESULT hr = D3DCompileFromFile(filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE, entryPoint.c_str(), target.c_str(), compileFlags, 0, &shaderBlob, &errorBlob);
-    if (FAILED(hr)) {
-        if (errorBlob) {
-            std::string errorMsg(static_cast<char*>(errorBlob->GetBufferPointer()), errorBlob->GetBufferSize());
-            throw std::runtime_error("Shader compilation error: " + errorMsg);
-        }
-        ThrowIfFailed(hr);
+void PSOManager::CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob) {
+    ComPtr<IDxcBlobEncoding> sourceBlob;
+    ComPtr<IDxcResult> result;
+    ComPtr<IDxcIncludeHandler> includeHandler;
+
+    UINT32 codePage = CP_UTF8;
+    pUtils->LoadFile(filename.c_str(), &codePage, &sourceBlob);
+    //library->CreateIncludeHandler(&includeHandler);
+
+    DxcBuffer sourceBuffer;
+    sourceBuffer.Ptr = sourceBlob->GetBufferPointer();
+    sourceBuffer.Size = sourceBlob->GetBufferSize();
+    sourceBuffer.Encoding = 0;
+
+    std::vector<LPCWSTR> arguments;
+    // -E for the entry point (eg. 'main')
+    arguments.push_back(L"-E");
+    arguments.push_back(entryPoint.c_str());
+
+    // -T for the target profile (eg. 'ps_6_6')
+    arguments.push_back(L"-T");
+    arguments.push_back(target.c_str());
+
+    arguments.push_back(DXC_ARG_WARNINGS_ARE_ERRORS); //-WX
+    arguments.push_back(DXC_ARG_DEBUG); //-Zi
+
+    for (const auto& define : defines)
+    {
+        arguments.push_back(L"-D");
+        arguments.push_back(define.Name);
     }
+
+    print("Compiling with arguments: ");
+    for (auto& arg : arguments) {
+        std::wcout << arg << " ";
+    }
+    std::wcout << std::endl;
+
+    // Compile the shader
+    HRESULT hr = pCompiler->Compile(
+        &sourceBuffer,
+        arguments.data(),
+        arguments.size(),
+        nullptr,
+        IID_PPV_ARGS(result.GetAddressOf()));
+
+    // Error Handling. Note that this will also include warnings unless disabled.
+    ComPtr<IDxcBlobUtf8> pErrors;
+    result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
+    if (pErrors && pErrors->GetStringLength() > 0)
+    {
+        print((char*)pErrors->GetBufferPointer());
+    }
+    // Get the compiled shader
+    result->GetResult(reinterpret_cast<IDxcBlob**>(shaderBlob.GetAddressOf()));
 }
 
 void PSOManager::createRootSignature() {
