@@ -16,7 +16,21 @@ struct LightInfo {
     float4 color;
 };
 
-StructuredBuffer<LightInfo> lights : register(t2);
+struct MaterialInfo {
+    uint psoFlags;
+    uint baseColorTextureIndex;
+    uint normalTextureIndex;
+    uint metallicRoughnessTextureIndex;
+    uint emissiveTextureIndex;
+    uint aoMapIndex;
+    uint heightMapIndex;
+    float metallicFactor;
+    float roughnessFactor;
+    float4 baseColorFactor;
+    float4 emissiveFactor;
+};
+
+
 
 struct VSInput {
     float3 position : POSITION;

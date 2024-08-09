@@ -4,6 +4,11 @@
 #include "DeviceManager.h"
 
 void ResourceManager::initialize() {
+    for (int i = 0; i < 3; i++) {
+        frameResourceCopies[i] = std::make_unique<FrameResource>();
+        frameResourceCopies[i]->Initialize();
+    }
+
     auto device = DeviceManager::getInstance().getDevice();
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
     heapDesc.NumDescriptors = D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1;// numDescriptors;
@@ -27,10 +32,8 @@ void ResourceManager::initialize() {
 
     // Map the constant buffer and initialize it
 
-    D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
-    ThrowIfFailed(perFrameConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pPerFrameConstantBuffer)));
-
-    memcpy(pPerFrameConstantBuffer, &perFrameCBData, sizeof(perFrameCBData));
+    InitializeUploadHeap();
+    InitializeCopyCommandQueue();
 
     // Create CBV
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
@@ -71,7 +74,7 @@ void ResourceManager::initialize() {
 
     // Upload light data to the buffer
     void* mappedData;
-    //CD3DX12_RANGE readRange(0, 0);
+    CD3DX12_RANGE readRange(0, 0);
     ThrowIfFailed(lightBuffer->Map(0, &readRange, &mappedData));
     memcpy(mappedData, lightsData.data(), sizeof(LightInfo) * lightsData.size());
     lightBuffer->Unmap(0, nullptr);
@@ -120,5 +123,68 @@ void ResourceManager::UpdateConstantBuffers() {
         100.0f              // Far clipping plane
     );
     perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat4(&eyeWorld);
-    memcpy(pPerFrameConstantBuffer, &perFrameCBData, sizeof(perFrameCBData));
+    
+    // Map the upload heap and copy new data to it
+    void* pUploadData;
+    D3D12_RANGE readRange(0, 0);
+    ThrowIfFailed(uploadHeap->Map(0, &readRange, &pUploadData));
+    memcpy(pUploadData, &perFrameCBData, sizeof(perFrameCBData));
+    uploadHeap->Unmap(0, nullptr);
+
+    // Reset and record the copy command list
+    ThrowIfFailed(copyCommandAllocator->Reset());
+    ThrowIfFailed(copyCommandList->Reset(copyCommandAllocator.Get(), nullptr));
+    copyCommandList->CopyBufferRegion(perFrameConstantBuffer.Get(), 0, uploadHeap.Get(), 0, sizeof(perFrameCBData));
+    ThrowIfFailed(copyCommandList->Close());
+
+    // Execute the copy command list
+    ID3D12CommandList* ppCommandLists[] = { copyCommandList.Get() };
+    copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+    // Wait for the copy queue to finish
+    WaitForCopyQueue();
+}
+
+void ResourceManager::InitializeUploadHeap() {
+    auto device = DeviceManager::getInstance().getDevice();
+    D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer((sizeof(PerFrameCB) + 255) & ~255);
+    ThrowIfFailed(device->CreateCommittedResource(
+        &uploadHeapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &uploadBufferDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&uploadHeap)));
+}
+
+void ResourceManager::WaitForCopyQueue() {
+    ThrowIfFailed(copyCommandQueue->Signal(copyFence.Get(), ++copyFenceValue));
+    if (copyFence->GetCompletedValue() < copyFenceValue) {
+        ThrowIfFailed(copyFence->SetEventOnCompletion(copyFenceValue, copyFenceEvent));
+        WaitForSingleObject(copyFenceEvent, INFINITE);
+    }
+}
+
+void ResourceManager::InitializeCopyCommandQueue() {
+    auto device = DeviceManager::getInstance().getDevice();
+
+    D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+    queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&copyCommandQueue)));
+
+    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&copyCommandAllocator)));
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COPY, copyCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&copyCommandList)));
+    copyCommandList->Close();
+
+    ThrowIfFailed(device->CreateFence(copyFenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copyFence)));
+    copyFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (copyFenceEvent == nullptr) {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+    }
+}
+
+std::unique_ptr<FrameResource>& ResourceManager::GetFrameResource(UINT frameNum) {
+    return frameResourceCopies[frameNum % 3];
 }

@@ -189,7 +189,7 @@ void DX12Renderer::Update() {
 
 void DX12Renderer::Render() {
     //Update buffers
-    //UpdateConstantBuffer();
+    UpdateConstantBuffer();
     // Record all the commands we need to render the scene into the command list
     ThrowIfFailed(commandAllocator->Reset());
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
