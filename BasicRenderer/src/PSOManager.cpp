@@ -15,6 +15,7 @@ void PSOManager::initialize() {
     HMODULE dxcompiler = LoadLibrary(L"dxcompiler.dll");
     if (!dxcompiler)
     {
+
         throw std::runtime_error("Failed to load dxcompiler.dll");
     }
 

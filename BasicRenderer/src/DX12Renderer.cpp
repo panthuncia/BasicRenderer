@@ -4,6 +4,9 @@
 
 #include "DX12Renderer.h"
 
+#define _USE_MATH_DEFINES
+#include <math.h>
+
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
@@ -185,7 +188,14 @@ void DX12Renderer::CreateConstantBuffer() {
 }
 
 void DX12Renderer::Update(double elapsedSeconds) {
+
     currentScene->GetCamera()->transform.applyMovement(movementState, elapsedSeconds);
+    currentScene->GetCamera()->transform.rotatePitchYaw(verticalAngle, horizontalAngle);
+    //spdlog::info("horizontal angle: {}", horizontalAngle);
+    //spdlog::info("vertical angle: {}", verticalAngle);
+    verticalAngle = 0;
+    horizontalAngle = 0;
+
     currentScene->Update();
     UpdateConstantBuffer();
 }
@@ -350,6 +360,12 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
         });
 
     context.SetActionHandler(InputAction::RotateCamera, [this](float magnitude, const InputData& inputData) {
+        spdlog::info("X: {}, Y: {}", inputData.mouseX, inputData.mouseY);
+        horizontalAngle -= inputData.mouseDeltaX * 0.005;
+        verticalAngle -= inputData.mouseDeltaY * 0.005;
+        const float upperBound = M_PI / 2 - 0.01; // Slightly less than 90 degrees
+        const float lowerBound = -M_PI / 2 + 0.01; // Slightly more than -90 degrees
+        verticalAngle = max(lowerBound, min(upperBound, verticalAngle));
         // TODO
         });
 

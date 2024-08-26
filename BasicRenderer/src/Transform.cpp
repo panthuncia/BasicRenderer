@@ -42,11 +42,12 @@ void Transform::rotateEuler(const XMFLOAT3& rotEuler) {
     rot = XMQuaternionMultiply(rot, newQuat);
 }
 
+// Intended for cameras
 void Transform::rotatePitchYaw(float pitch, float yaw) {
     XMVECTOR yawQuat = XMQuaternionRotationAxis(XMVectorSet(0, 1, 0, 0), yaw);
     XMVECTOR pitchQuat = XMQuaternionRotationAxis(XMVectorSet(1, 0, 0, 0), pitch);
-    rot = XMQuaternionMultiply(yawQuat, rot);
-    rot = XMQuaternionMultiply(rot, pitchQuat);
+    rot = XMQuaternionMultiply(rot, yawQuat); // Multiplication order is important. If this is reversed, you get a solidworks-style camera
+    rot = XMQuaternionMultiply(pitchQuat, rot);
     isDirty = true;
 }
 

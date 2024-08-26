@@ -18,7 +18,7 @@ class InputManager; // Forward declaration
 
 class InputContext {
 public:
-    virtual void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam, const InputData& inputData) = 0;
+    virtual void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam) = 0;
 
     void SetActionHandler(InputAction action, std::function<void(float magnitude, const InputData&)> handler) {
         actionHandlers[action] = handler;
@@ -38,8 +38,11 @@ private:
 
 class WASDContext : public InputContext {
 public:
-    void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam, const InputData& inputData) override {
+    void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam) override {
         float magnitude = (message == WM_KEYDOWN) ? 1.0f : 0.0f;
+        InputData inputData = {};
+        inputData.mouseX = GET_X_LPARAM(lParam);
+        inputData.mouseY = GET_Y_LPARAM(lParam);
         switch (message) {
         case WM_KEYDOWN: {
             WPARAM key = toupper(wParam);
@@ -60,16 +63,43 @@ public:
             else if (key == ' ') TriggerAction(InputAction::MoveUp, 0.0f, inputData);
             break;
         }
+        case WM_LBUTTONDOWN:
+            mousedown = true;
+            lastMouseX = inputData.mouseX;
+            lastMouseY = inputData.mouseY;
+            break;
+        case WM_LBUTTONUP:
+            mousedown = false;
+            break;
+        case WM_MOUSEMOVE:
+            if (mousedown) {
+
+                inputData.mouseDeltaX = inputData.mouseX - lastMouseX;
+                inputData.mouseDeltaY = inputData.mouseY - lastMouseY;
+                spdlog::info("X: {}, Y: {}, LastX {}, LastY {}", inputData.mouseX, inputData.mouseY, lastMouseX, lastMouseY);
+
+                lastMouseX = inputData.mouseX;
+                lastMouseY = inputData.mouseY;
+
+                inputData.scrollDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+                TriggerAction(InputAction::RotateCamera, 1.0, inputData);
+            }
+            break;
             // Ignore mouse scroll in this context
         default:
             break;
         }
     }
+private:
+    int lastMouseX;
+    int lastMouseY;
+    bool mousedown = false;
 };
 
 class OrbitalCameraContext : public InputContext {
 public:
-    void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam, const InputData& inputData) override {
+    void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam) override {
+        InputData inputData = {};
         switch (message) {
         case WM_MOUSEMOVE:
             TriggerAction(InputAction::RotateCamera, 1.0, inputData);
@@ -87,4 +117,7 @@ public:
             break;
         }
     }
+private:
+    int lastMouseX;
+    int lastMouseY;
 };

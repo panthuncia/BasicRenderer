@@ -52,6 +52,8 @@ private:
 
     InputManager inputManager;
     MovementState movementState;
+    float verticalAngle = 0;
+    float horizontalAngle = 0;
 
     std::shared_ptr<Scene> currentScene = std::make_shared<Scene>();
 

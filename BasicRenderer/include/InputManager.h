@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Windowsx.h"
+#include <Windowsx.h>
 #include "InputContext.h"
+#include <spdlog/spdlog.h>
 
 class InputManager {
 public:
@@ -9,15 +10,9 @@ public:
         currentContext = context;
     }
 
-    void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam) {
-        std::cout << "In process input" << std::endl;
-        InputData inputData = {};
-        inputData.mouseX = GET_X_LPARAM(lParam);
-        inputData.mouseY = GET_Y_LPARAM(lParam);
-        inputData.scrollDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+    void ProcessInput(UINT message, WPARAM wParam, LPARAM lParam) {        
         if (currentContext) {
-            std::cout << "Has current context" << std::endl;
-            currentContext->ProcessInput(message, wParam, lParam, inputData);
+            currentContext->ProcessInput(message, wParam, lParam);
         }
     }
 

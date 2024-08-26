@@ -15,5 +15,7 @@ enum class InputAction {
 struct InputData {
     int mouseX;
     int mouseY;
+    int mouseDeltaX;
+    int mouseDeltaY;
     int scrollDelta;
 };
