@@ -1,9 +1,12 @@
 ﻿#include <iostream>
 #include <Windows.h>
+#include <windowsx.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <iostream>
 #include <memory>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include "Mesh.h"
 #include "DX12Renderer.h"
 #include "Utilities.h"
@@ -11,31 +14,94 @@
 #include "GlTFLoader.h"
 #include "PSOManager.h"
 
+DX12Renderer renderer;
+
+void ProcessRawInput(LPARAM lParam) {
+    UINT dwSize = 0;
+
+    // Get the size of the raw input data
+    GetRawInputData((HRAWINPUT)lParam, RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER));
+
+    // Allocate memory for the raw input data
+    LPBYTE lpb = new BYTE[dwSize];
+    if (lpb == nullptr) {
+        return;
+    }
+
+    // Get the raw input data
+    if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, lpb, &dwSize, sizeof(RAWINPUTHEADER)) != dwSize) {
+        std::cerr << "GetRawInputData does not return correct size!" << std::endl;
+    }
+
+    RAWINPUT* raw = (RAWINPUT*)lpb;
+
+    if (raw->header.dwType == RIM_TYPEKEYBOARD) {
+        // Process keyboard input
+        RAWKEYBOARD& rawKB = raw->data.keyboard;
+        std::cout << "Virtual key: " << rawKB.VKey << ", Scan code: " << rawKB.MakeCode << std::endl;
+
+        // Check if the escape key is pressed
+        if (rawKB.VKey == VK_ESCAPE) {
+            PostQuitMessage(0); // Exit the application
+        }
+
+    }
+    else if (raw->header.dwType == RIM_TYPEMOUSE) {
+        // Process mouse input
+        RAWMOUSE& rawMouse = raw->data.mouse;
+        std::cout << "Mouse move: (" << rawMouse.lLastX << ", " << rawMouse.lLastY << ")" << std::endl;
+
+        if (rawMouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) {
+            std::cout << "Left mouse button down" << std::endl;
+        }
+    }
+
+    delete[] lpb;
+}
 
 // Window callback procedure
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
-    if (message == WM_DESTROY) {
-        PostQuitMessage(0);
-        return 0;
+void RegisterRawInputDevices(HWND hwnd) {
+    RAWINPUTDEVICE rid[2];
+
+    // Register keyboard
+    rid[0].usUsagePage = 0x01;
+    rid[0].usUsage = 0x06;
+    rid[0].dwFlags = RIDEV_INPUTSINK; // Receive input even when not in focus
+    rid[0].hwndTarget = hwnd;
+
+    // Register mouse
+    rid[1].usUsagePage = 0x01;
+    rid[1].usUsage = 0x02;
+    rid[1].dwFlags = RIDEV_INPUTSINK; // Receive input even when not in focus
+    rid[1].hwndTarget = hwnd;
+
+    if (!RegisterRawInputDevices(rid, 2, sizeof(rid[0]))) {
+        MessageBox(nullptr, L"Failed to register raw input devices", L"Error", MB_OK);
+        throw std::runtime_error("Failed to register raw input devices.");
     }
-    return DefWindowProc(hWnd, message, wParam, lParam);
 }
+
 
 HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
     const wchar_t CLASS_NAME[] = L"DX12WindowClass";
 
-    WNDCLASSW wc = {}; // Use WNDCLASSW for Unicode
-    wc.lpfnWndProc = WindowProc;
+    WNDCLASS wc = { };
+
+    wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = CLASS_NAME;
 
-    RegisterClassW(&wc); // Use RegisterClassW for Unicode
+    if (!RegisterClass(&wc)) {
+        MessageBox(nullptr, L"Failed to register window class", L"Error", MB_OK);
+        throw std::runtime_error("Failed to register window class.");
+    }
 
-    HWND hwnd = CreateWindowExW(
+    HWND hwnd = CreateWindowEx(
         0,
         CLASS_NAME,
-        L"DirectX 12 Basic Renderer", // Use wide string for window title
+        L"DirectX 12 Basic Renderer",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
         nullptr,
@@ -45,10 +111,13 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
     );
 
     if (hwnd == nullptr) {
+        MessageBox(nullptr, L"Failed to create window", L"Error", MB_OK);
         throw std::runtime_error("Failed to create window.");
     }
 
     ShowWindow(hwnd, nCmdShow);
+
+    RegisterRawInputDevices(hwnd);
 
     return hwnd;
 }
@@ -56,16 +125,13 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     HWND hwnd = InitWindow(hInstance, nShowCmd);
 
-    // Create separate console window because visual studio is stupid
-    AllocConsole();
-    freopen("CONOUT$", "w", stdout);
-    freopen("CONOUT$", "w", stderr);
+    auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
+    spdlog::set_default_logger(file_logger);
 
-    DX12Renderer renderer;
-
-    print("initializing renderer...");
+    spdlog::info("initializing renderer...");
     renderer.Initialize(hwnd);
-    print("Renderer initialized.");
+    spdlog::info("Renderer initialized.");
+    renderer.SetInputMode(InputMode::wasd);
 
     std::vector<Vertex> vertices = {
     VertexColored{{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
@@ -87,9 +153,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 5, 4, 1, 5, 0
     };
 
-    //auto carScene = loadGLB("models/datsun.glb");
+    auto carScene = loadGLB("models/datsun.glb");
 
-    //renderer.SetCurrentScene(carScene);
+    renderer.SetCurrentScene(carScene);
 
     auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::VERTEX_COLORS);
     auto cubeMesh = Mesh(vertices, indices, cubeMaterial);
@@ -126,5 +192,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.Cleanup();
 
+    return 0;
+}
+
+// Window callback procedure
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    renderer.GetInputManager().ProcessInput(message, wParam, lParam);
+
+    switch (message)
+    {
+    case WM_INPUT:
+        ProcessRawInput(lParam);
+        break;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
     return 0;
 }

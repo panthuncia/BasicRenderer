@@ -5,6 +5,7 @@
 # Add source to this project's executable.
 add_definitions(-D_UNICODE -DUNICODE)
 
+find_package(spdlog CONFIG REQUIRED)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (BasicRenderer WIN32  ${SOURCES})
@@ -23,9 +24,10 @@ set(COMPILER_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxcompiler.dll")
 set(SIGNING_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxil.dll")
 set(COMPILER_DEST_DIR "${CMAKE_BINARY_DIR}/BasicRenderer/")
 file(COPY ${SIGNING_BINARY_DIR} DESTINATION ${COMPILER_DEST_DIR})
+file(COPY ${COMPILER_BINARY_DIR} DESTINATION ${COMPILER_DEST_DIR})
 
 # Include directories
 include_directories(include/)
 
 # Find and link DirectX 12
-target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib)
+target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib spdlog::spdlog)

@@ -237,7 +237,6 @@ void DX12Renderer::Render() {
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 
-            // Pass the addresses of the local variables
             commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
             commandList->IASetIndexBuffer(&indexBufferView);
 
@@ -293,4 +292,45 @@ std::shared_ptr<Scene>& DX12Renderer::GetCurrentScene() {
 
 void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
     currentScene = newScene;
+}
+
+InputManager& DX12Renderer::GetInputManager() {
+    return inputManager;
+}
+
+void DX12Renderer::SetInputMode(InputMode mode) {
+    static WASDContext wasdContext;
+    static OrbitalCameraContext orbitalContext;
+    switch (mode) {
+    case InputMode::wasd:
+        inputManager.SetInputContext(&wasdContext);
+        break;
+    case InputMode::orbital:
+        inputManager.SetInputContext(&orbitalContext);
+        break;
+    }
+    SetupInputHandlers(inputManager, *inputManager.GetCurrentContext());
+}
+
+void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& context) {
+    context.SetActionHandler(InputAction::MoveForward, []() {
+        spdlog::info("Moving forward!");
+        // TODO
+        });
+
+    context.SetActionHandler(InputAction::MoveBackward, []() {
+        // TODO
+        });
+
+    context.SetActionHandler(InputAction::RotateCamera, []() {
+        // TODO
+        });
+
+    context.SetActionHandler(InputAction::ZoomIn, []() {
+        // TODO
+        });
+
+    context.SetActionHandler(InputAction::ZoomOut, []() {
+        // TODO
+        });
 }

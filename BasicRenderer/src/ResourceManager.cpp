@@ -4,10 +4,10 @@
 #include "DeviceManager.h"
 
 void ResourceManager::initialize() {
-    for (int i = 0; i < 3; i++) {
-        frameResourceCopies[i] = std::make_unique<FrameResource>();
-        frameResourceCopies[i]->Initialize();
-    }
+    //for (int i = 0; i < 3; i++) {
+    //    frameResourceCopies[i] = std::make_unique<FrameResource>();
+    //    frameResourceCopies[i]->Initialize();
+    //}
 
     auto device = DeviceManager::getInstance().getDevice();
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
@@ -91,6 +91,7 @@ void ResourceManager::initialize() {
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = descriptorHeap->GetCPUDescriptorHandleForHeapStart();
     srvHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); // Move to the next slot
     device->CreateShaderResourceView(lightBuffer.Get(), &srvDesc, srvHandle);
+    numAllocatedDescriptors++;
 }
 
 CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::getCPUHandle() {
@@ -106,7 +107,8 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::getDescriptorHeap() {
 }
 
 UINT ResourceManager::allocateDescriptor() {
-    return numAllocatedDescriptors++;
+    numAllocatedDescriptors++;
+    return numAllocatedDescriptors;
 }
 
 void ResourceManager::UpdateConstantBuffers() {

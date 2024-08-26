@@ -15,6 +15,7 @@
 #include "Mesh.h"
 #include "Buffers.h"
 #include "Scene.h"
+#include "InputManager.h"
 
 using namespace Microsoft::WRL;
 
@@ -27,6 +28,8 @@ public:
     ComPtr<ID3D12Device>& GetDevice();
     std::shared_ptr<Scene>& GetCurrentScene();
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
+    InputManager& GetInputManager();
+    void SetInputMode(InputMode mode);
 
 private:
     ComPtr<IDXGIFactory6> factory;
@@ -47,12 +50,15 @@ private:
     HANDLE fenceEvent;
     UINT64 fenceValue;
 
+    InputManager inputManager;
+
     std::shared_ptr<Scene> currentScene = std::make_shared<Scene>();
 
     void LoadPipeline(HWND hwnd);
     void LoadAssets();
     void CreateConstantBuffer();
     void UpdateConstantBuffer();
+    void SetupInputHandlers(InputManager& inputManager, InputContext& context);
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateRootSignatureFromShaders(const std::vector<Microsoft::WRL::ComPtr<ID3DBlob>>& shaderBlobs);
 
