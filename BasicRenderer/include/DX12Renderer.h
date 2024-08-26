@@ -19,6 +19,15 @@
 
 using namespace Microsoft::WRL;
 
+struct MovementState {
+    float forwardMagnitude = 0.0;
+    float backwardMagnitude = 0.0;
+    float rightMagnitude = 0.0;
+    float leftMagnitude = 0.0;
+    float upMagnitude = 0.0;
+    float downMagnitude = 0.0;
+};
+
 class DX12Renderer {
 public:
     void Initialize(HWND hwnd);
@@ -51,6 +60,7 @@ private:
     UINT64 fenceValue;
 
     InputManager inputManager;
+    MovementState movementState;
 
     std::shared_ptr<Scene> currentScene = std::make_shared<Scene>();
 
@@ -58,6 +68,7 @@ private:
     void LoadAssets();
     void CreateConstantBuffer();
     void UpdateConstantBuffer();
+    void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateRootSignatureFromShaders(const std::vector<Microsoft::WRL::ComPtr<ID3DBlob>>& shaderBlobs);

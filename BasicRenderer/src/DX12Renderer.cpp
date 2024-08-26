@@ -312,25 +312,50 @@ void DX12Renderer::SetInputMode(InputMode mode) {
     SetupInputHandlers(inputManager, *inputManager.GetCurrentContext());
 }
 
+void DX12Renderer::MoveForward() {
+    spdlog::info("Moving forward!");
+}
+
 void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& context) {
-    context.SetActionHandler(InputAction::MoveForward, []() {
-        spdlog::info("Moving forward!");
+    context.SetActionHandler(InputAction::MoveForward, [this](float magnitude, const InputData& inputData) {
+        //spdlog::info("Moving forward!");
+        movementState.forwardMagnitude = magnitude;
+        });
+
+    context.SetActionHandler(InputAction::MoveBackward, [this](float magnitude, const InputData& inputData) {
+        //spdlog::info("Moving forward!");
+        movementState.backwardMagnitude = magnitude;
+        });
+
+    context.SetActionHandler(InputAction::MoveRight, [this](float magnitude, const InputData& inputData) {
+        //spdlog::info("Moving right!");
+        movementState.rightMagnitude = magnitude;
+        });
+
+    context.SetActionHandler(InputAction::MoveLeft, [this](float magnitude, const InputData& inputData) {
+        //spdlog::info("Moving right!");
+        movementState.leftMagnitude = magnitude;
+        });
+
+    context.SetActionHandler(InputAction::MoveUp, [this](float magnitude, const InputData& inputData) {
+        //spdlog::info("Moving up!");
+        movementState.upMagnitude = magnitude;
+        });
+
+    context.SetActionHandler(InputAction::MoveDown, [this](float magnitude, const InputData& inputData) {
+        //spdlog::info("Moving up!");
+        movementState.downMagnitude = magnitude;
+        });
+
+    context.SetActionHandler(InputAction::RotateCamera, [this](float magnitude, const InputData& inputData) {
         // TODO
         });
 
-    context.SetActionHandler(InputAction::MoveBackward, []() {
+    context.SetActionHandler(InputAction::ZoomIn, [this](float magnitude, const InputData& inputData) {
         // TODO
         });
 
-    context.SetActionHandler(InputAction::RotateCamera, []() {
-        // TODO
-        });
-
-    context.SetActionHandler(InputAction::ZoomIn, []() {
-        // TODO
-        });
-
-    context.SetActionHandler(InputAction::ZoomOut, []() {
+    context.SetActionHandler(InputAction::ZoomOut, [this](float magnitude, const InputData& inputData) {
         // TODO
         });
 }

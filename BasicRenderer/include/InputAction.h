@@ -3,9 +3,17 @@
 enum class InputAction {
     MoveForward,
     MoveBackward,
-    MoveLeft,
     MoveRight,
+    MoveLeft,
+    MoveUp,
+    MoveDown,
     RotateCamera,
     ZoomIn,
     ZoomOut,
+};
+
+struct InputData {
+    int mouseX;
+    int mouseY;
+    int scrollDelta;
 };
