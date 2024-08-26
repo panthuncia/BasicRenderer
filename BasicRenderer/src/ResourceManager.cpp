@@ -111,20 +111,22 @@ UINT ResourceManager::allocateDescriptor() {
     return numAllocatedDescriptors;
 }
 
-void ResourceManager::UpdateConstantBuffers() {
-    DirectX::XMFLOAT4 eyeWorld = { 0.0f, 2.0f, -5.0f, 1.0f };
-    perFrameCBData.view = DirectX::XMMatrixLookAtLH(
-        DirectX::XMLoadFloat4(&eyeWorld), // Eye position
-        DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),  // Focus point
-        DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)   // Up direction
-    );
-    perFrameCBData.projection = DirectX::XMMatrixPerspectiveFovLH(
-        DirectX::XM_PIDIV2, // Field of View
-        800.0f / 600.0f,    // Aspect ratio
-        0.1f,               // Near clipping plane
-        100.0f              // Far clipping plane
-    );
-    perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat4(&eyeWorld);
+void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix) {
+    //DirectX::XMFLOAT4 eyeWorld = { 0.0f, 2.0f, -5.0f, 1.0f };
+    //perFrameCBData.view = DirectX::XMMatrixLookAtLH(
+    //    DirectX::XMLoadFloat4(&eyeWorld), // Eye position
+    //    DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),  // Focus point
+    //    DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)   // Up direction
+    //);
+    perFrameCBData.view = viewMatrix;
+    //perFrameCBData.projection = DirectX::XMMatrixPerspectiveFovLH(
+    //    DirectX::XM_PIDIV2, // Field of View
+    //    800.0f / 600.0f,    // Aspect ratio
+    //    0.1f,               // Near clipping plane
+    //    100.0f              // Far clipping plane
+    //);
+    perFrameCBData.projection = projectionMatrix;
+    perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat3(&eyeWorld);
     
     // Map the upload heap and copy new data to it
     void* pUploadData;

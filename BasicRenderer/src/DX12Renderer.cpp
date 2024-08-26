@@ -175,7 +175,8 @@ void DX12Renderer::WaitForPreviousFrame() {
 
 void DX12Renderer::UpdateConstantBuffer() {
     // moved
-    ResourceManager::getInstance().UpdateConstantBuffers();
+    auto camera = currentScene->GetCamera();
+    ResourceManager::getInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix());
 }
 
 void DX12Renderer::CreateConstantBuffer() {
@@ -183,13 +184,14 @@ void DX12Renderer::CreateConstantBuffer() {
     // moved
 }
 
-void DX12Renderer::Update(std::chrono::duration<double> elapsedSeconds) {
+void DX12Renderer::Update(double elapsedSeconds) {
+    currentScene->GetCamera()->transform.applyMovement(movementState, elapsedSeconds);
     currentScene->Update();
+    UpdateConstantBuffer();
 }
 
 void DX12Renderer::Render() {
     //Update buffers
-    UpdateConstantBuffer();
     // Record all the commands we need to render the scene into the command list
     ThrowIfFailed(commandAllocator->Reset());
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));

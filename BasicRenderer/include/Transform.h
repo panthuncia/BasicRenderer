@@ -3,6 +3,15 @@
 
 using namespace DirectX;
 
+struct MovementState {
+    float forwardMagnitude = 0.0;
+    float backwardMagnitude = 0.0;
+    float rightMagnitude = 0.0;
+    float leftMagnitude = 0.0;
+    float upMagnitude = 0.0;
+    float downMagnitude = 0.0;
+};
+
 class Transform {
 public:
     XMFLOAT3 pos;
@@ -25,6 +34,7 @@ public:
     void setLocalRotationFromQuaternion(const XMVECTOR& quaternion);
     void setDirection(const XMFLOAT3& dir);
     void setLocalScale(const XMFLOAT3& newScale);
+    void applyMovement(const MovementState& movement, float deltaTime);
 
     XMFLOAT3 getGlobalPosition() const;
 };

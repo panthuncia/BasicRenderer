@@ -102,3 +102,12 @@ void Scene::Update() {
     lastUpdateTime = currentTime;
     this->sceneRoot.update();
 }
+
+void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
+    pCamera = std::make_shared<Camera>("MainCamera", lookAt, up, fov, aspect, zNear, zFar);
+    AddNode(pCamera);
+}
+
+std::shared_ptr<Camera> Scene::GetCamera() {
+    return pCamera;
+}

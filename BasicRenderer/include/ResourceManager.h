@@ -22,7 +22,7 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE getGPUHandle();
     ComPtr<ID3D12DescriptorHeap> getDescriptorHeap();
     UINT allocateDescriptor();
-    void UpdateConstantBuffers();
+    void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix);
     std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
 
     std::unique_ptr<FrameResource> currentFrameResource;

@@ -14,6 +14,7 @@ Camera::Camera(std::string name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float 
 }
 
 void Camera::onUpdate() {
-    viewMatrix = XMMatrixInverse(nullptr, this->transform.modelMatrix);
+    viewMatrixInverse = transform.modelMatrix;
+    viewMatrix = XMMatrixInverse(nullptr, transform.modelMatrix);
     UpdateViewProjectionMatrix();
 }

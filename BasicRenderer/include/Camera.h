@@ -23,6 +23,13 @@ public:
         viewProjectionMatrixInverse = XMMatrixInverse(nullptr, viewProjectionMatrix);
     }
 
+    DirectX::XMMATRIX GetViewMatrix() {
+        return viewMatrix;
+    }
+    DirectX::XMMATRIX GetProjectionMatrix() {
+        return projectionMatrix;
+    }
+
 private:
 protected:
     XMFLOAT3 lookAt;

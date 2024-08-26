@@ -89,3 +89,22 @@ XMFLOAT3 Transform::getGlobalPosition() const {
     XMStoreFloat4x4(&modelFloats, modelMatrix);
     return XMFLOAT3(modelFloats._41, modelFloats._42, modelFloats._43);
 }
+
+void Transform::applyMovement(const MovementState& movement, float deltaTime) {
+    // Compute direction vectors based on current rotation
+    XMVECTOR forwardDir = XMVector3Rotate(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rot);
+    XMVECTOR rightDir = XMVector3Rotate(XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), rot);
+    XMVECTOR upDir = XMVector3Rotate(XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), rot);
+
+    // Update position based on movement state and delta time
+    XMVECTOR displacement = XMVectorZero();
+    displacement += forwardDir * (movement.forwardMagnitude - movement.backwardMagnitude) * deltaTime;
+    displacement += rightDir * (movement.rightMagnitude - movement.leftMagnitude) * deltaTime;
+    displacement += upDir * (movement.upMagnitude - movement.downMagnitude) * deltaTime;
+
+    // Update position
+    XMVECTOR posVec = XMLoadFloat3(&pos);
+    posVec += displacement;
+    XMStoreFloat3(&pos, posVec);
+    isDirty = true;
+}

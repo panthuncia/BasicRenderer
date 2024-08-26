@@ -7,6 +7,7 @@
 #include <chrono>
 #include <ctime>  
 #include "Mesh.h"
+#include "Camera.h"
 
 class Scene {
 public:
@@ -21,8 +22,12 @@ public:
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetRenderableObjectIDMap();
     SceneNode& GetRoot();
     void Update();
+    void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
+    std::shared_ptr<Camera> GetCamera();
 
 private:
+    std::shared_ptr<Camera> pCamera;
+
     std::unordered_map<std::string, std::shared_ptr<RenderableObject>> objectsByName;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> objectsByID;
     std::unordered_map<UINT, std::shared_ptr<SceneNode>> nodesByID;
