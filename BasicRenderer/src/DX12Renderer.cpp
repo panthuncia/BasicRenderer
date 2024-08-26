@@ -183,7 +183,7 @@ void DX12Renderer::CreateConstantBuffer() {
     // moved
 }
 
-void DX12Renderer::Update() {
+void DX12Renderer::Update(std::chrono::duration<double> elapsedSeconds) {
     currentScene->Update();
 }
 

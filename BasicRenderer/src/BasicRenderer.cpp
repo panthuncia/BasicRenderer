@@ -181,12 +181,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         else {
 
             auto currentTime = std::chrono::system_clock::now();
-            std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
+            std::chrono::duration<double> elapsedSeconds = currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
-            cubeObject->animationController->update(elapsed_seconds.count());
+            cubeObject->animationController->update(elapsedSeconds.count());
 
 
-            renderer.Update();
+            renderer.Update(elapsedSeconds.count());
             renderer.Render();
         }
     }

@@ -31,7 +31,7 @@ struct MovementState {
 class DX12Renderer {
 public:
     void Initialize(HWND hwnd);
-    void Update();
+    void Update(double elapsedSeconds);
     void Render();
     void Cleanup();
     ComPtr<ID3D12Device>& GetDevice();
