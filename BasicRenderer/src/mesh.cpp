@@ -8,8 +8,7 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indic
     this->material = material;
     auto& resourceManager = ResourceManager::GetInstance();
     perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
-    perMeshBufferHandle = resourceManager.CreateIndexedConstantBuffer<PerMeshCB>();
-    resourceManager.UpdateIndexedConstantBuffer(perMeshBufferHandle, perMeshBufferData);
+    pPerMeshBuffer = CreateConstantBuffer<PerMeshCB>(&perMeshBufferData);
 }
 
 template <typename VertexType>

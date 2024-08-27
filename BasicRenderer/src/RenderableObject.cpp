@@ -41,6 +41,7 @@ void RenderableObject::CreateBuffers() {
 
     // Initialize the constant buffer data
     memcpy(pPerMeshConstantBuffer, &perMeshCBData, sizeof(perMeshCBData));
+    perMeshConstantBuffer->Unmap(0, nullptr);
 }
 
 void RenderableObject::UpdateBuffers() {

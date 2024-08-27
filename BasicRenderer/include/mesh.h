@@ -45,6 +45,6 @@ private:
     ComPtr<ID3D12Resource> indexBuffer;
     D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
     D3D12_INDEX_BUFFER_VIEW indexBufferView;
-    BufferHandle<PerMeshCB> perMeshBufferHandle;
+    ComPtr<ID3D12Resource> pPerMeshBuffer;
     PerMeshCB perMeshBufferData = { 0 };
 };
