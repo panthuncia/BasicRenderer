@@ -8,6 +8,7 @@ using Microsoft::WRL::ComPtr;
 class Texture {
 public:
     Texture(const stbi_uc* image, int width, int height, bool sRGB);
+    UINT GetDescriptorIndex();
 private:
     ComPtr<ID3D12Resource> textureResource;
     ComPtr<ID3D12Resource> textureUploadHeap;

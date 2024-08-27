@@ -51,7 +51,7 @@ public:
         );
 
         if (FAILED(hr)) {
-            // Handle error (e.g., throw an exception or return a failure code)
+            // Handle error
             return;
         }
 

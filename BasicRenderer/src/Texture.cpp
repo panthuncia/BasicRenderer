@@ -97,3 +97,7 @@ Texture::Texture(const stbi_uc* image, int width, int height, bool sRGB) {
 
     device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
 }
+
+UINT Texture::GetDescriptorIndex() {
+    return descriptorIndex;
+}

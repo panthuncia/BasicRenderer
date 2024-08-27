@@ -26,6 +26,10 @@ struct MaterialInfo {
     uint heightMapIndex;
     float metallicFactor;
     float roughnessFactor;
+    float ambientStrength;
+    float specularStrength;
+    float textureScale;
+    float heightMapScale;
     float4 baseColorFactor;
     float4 emissiveFactor;
 };

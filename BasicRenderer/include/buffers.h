@@ -12,7 +12,21 @@ struct PerMeshCB {
 };
 
 struct PerMaterialCB {
-    DirectX::XMFLOAT4 color;
+    UINT psoFlags;
+    UINT baseColorTextureIndex;
+    UINT normalTextureIndex;
+    UINT metallicRoughnessTextureIndex;
+    UINT emissiveTextureIndex;
+    UINT aoMapIndex;
+    UINT heightMapIndex;
+    float metallicFactor;
+    float roughnessFactor;
+    float ambientStrength;
+    float specularStrength;
+    float textureScale;
+    float heightMapScale;
+    DirectX::XMFLOAT4 baseColorFactor;
+    DirectX::XMFLOAT4 emissiveFactor;
 };
 
 struct LightInfo {

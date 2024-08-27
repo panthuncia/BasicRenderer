@@ -5,6 +5,7 @@
 #include <DirectXMath.h>
 #include <string>
 #include "Texture.h"
+#include "ResourceManager.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -23,6 +24,8 @@ public:
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
     int blendMode;
+    PerMaterialCB materialData;
+    BufferHandle<PerMaterialCB> perMaterialHandle;
 
     Material(const std::string& name,
         UINT psoFlags);
