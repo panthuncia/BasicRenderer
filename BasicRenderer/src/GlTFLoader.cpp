@@ -236,6 +236,29 @@ std::vector<GLBChunk> parseGLBChunks(const std::vector<uint8_t>& buffer) {
     return chunks;
 }
 
+
+template<typename T>
+std::vector<uint32_t> convertToUint32(const std::vector<T>& input) {
+    std::vector<uint32_t> output(input.size());
+    std::transform(input.begin(), input.end(), output.begin(),
+        [](T val) { return static_cast<uint32_t>(val); });
+    return output;
+}
+
+std::vector<uint32_t> extractIndexDataAsUint32(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
+    // Determine the type and perform the necessary conversion
+    switch (accessorData.accessor.componentType) {
+    case 5121:  // UNSIGNED_BYTE
+        return convertToUint32(extractDataFromBuffer<uint8_t>(binaryData, accessorData));
+    case 5123:  // UNSIGNED_SHORT
+        return convertToUint32(extractDataFromBuffer<uint16_t>(binaryData, accessorData));
+    case 5125:  // UNSIGNED_INT
+        return extractDataFromBuffer<uint32_t>(binaryData, accessorData);
+    default:
+        throw std::invalid_argument("Unsupported index component type");
+    }
+}
+
 void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, const std::vector<std::shared_ptr<Material>>& materials, std::vector<MeshData>* meshes) {
     for (const auto& mesh : gltfData["meshes"]) {
         MeshData meshData;
@@ -249,7 +272,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, c
             geometryData.normals = extractDataFromBuffer<float>(binaryData, accessor);
 
             accessor = getAccessorData(gltfData, primitive["indices"]);
-            geometryData.indices = extractDataFromBuffer<uint16_t>(binaryData, accessor);
+            geometryData.indices = extractIndexDataAsUint32(binaryData, accessor);
 
             geometryData.material = materials[primitive["material"]];
 

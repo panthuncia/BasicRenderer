@@ -3,7 +3,7 @@
 #include "Utilities.h"
 #include "DeviceManager.h"
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices, const std::shared_ptr<Material> material) {
+Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material) {
     CreateBuffers(vertices, indices);
     this->material = material;
 }
@@ -36,7 +36,7 @@ void Mesh::CreateVertexBuffer(const std::vector<VertexType>& vertices, ComPtr<ID
     vertexBufferView.SizeInBytes = vertexBufferSize;
 }
 
-void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices) {
+void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices) {
 
     std::visit([&](auto&& vertex) {
         using T = std::decay_t<decltype(vertex)>;
@@ -48,7 +48,7 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
         CreateVertexBuffer(specificVertices, vertexBuffer);
         }, vertices.front());
 
-    const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT16));
+    const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT32));
     indexCount = indices.size();
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
@@ -70,7 +70,7 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
     indexBuffer->Unmap(0, nullptr);
 
     indexBufferView.BufferLocation = indexBuffer->GetGPUVirtualAddress();
-    indexBufferView.Format = DXGI_FORMAT_R16_UINT;
+    indexBufferView.Format = DXGI_FORMAT_R32_UINT;
     indexBufferView.SizeInBytes = indexBufferSize;
 }
 

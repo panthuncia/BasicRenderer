@@ -76,8 +76,6 @@ public:
 
                 inputData.mouseDeltaX = inputData.mouseX - lastMouseX;
                 inputData.mouseDeltaY = inputData.mouseY - lastMouseY;
-                spdlog::info("X: {}, Y: {}, LastX {}, LastY {}", inputData.mouseX, inputData.mouseY, lastMouseX, lastMouseY);
-
                 lastMouseX = inputData.mouseX;
                 lastMouseY = inputData.mouseY;
 

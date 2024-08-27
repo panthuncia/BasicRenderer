@@ -9,7 +9,7 @@ TangentBitangent calculateTangentsBitangentsIndexed(
     const std::vector<XMFLOAT3>& positions,
     const std::vector<XMFLOAT3>& normals,
     const std::vector<XMFLOAT2>& uvs,
-    const std::vector<uint16_t>& indices
+    const std::vector<uint32_t>& indices
 ) {
     TangentBitangent result;
     result.tangents.resize(positions.size(), XMFLOAT3(0.0f, 0.0f, 0.0f));
@@ -17,9 +17,9 @@ TangentBitangent calculateTangentsBitangentsIndexed(
 
     for (size_t i = 0; i < indices.size(); i += 3) {
         // Indices
-        uint16_t i0 = indices[i];
-        uint16_t i1 = indices[i + 1];
-        uint16_t i2 = indices[i + 2];
+        uint32_t i0 = indices[i];
+        uint32_t i1 = indices[i + 1];
+        uint32_t i2 = indices[i + 2];
 
         // vertices
         XMFLOAT3 v0 = positions[i0];

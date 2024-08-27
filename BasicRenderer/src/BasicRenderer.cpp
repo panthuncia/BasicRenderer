@@ -145,7 +145,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     VertexColored{{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
     };
 
-    std::vector<UINT16> indices = {
+    std::vector<UINT32> indices = {
         3, 1, 0, 2, 1, 3,
         2, 5, 1, 6, 5, 2,
         6, 4, 5, 7, 4, 6,

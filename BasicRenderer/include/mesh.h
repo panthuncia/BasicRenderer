@@ -14,7 +14,7 @@ using namespace Microsoft::WRL;
 struct GeometryData {
     std::vector<float> positions;
     std::vector<float> normals;
-    std::vector<uint16_t> indices;
+    std::vector<uint32_t> indices;
     std::vector<float> texcoords;
     std::vector<float> joints;
     std::vector<float> weights;
@@ -28,7 +28,7 @@ struct MeshData {
 
 class Mesh {
 public:
-    Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices, const std::shared_ptr<Material>);
+    Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>);
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
     UINT GetIndexCount() const;
@@ -38,7 +38,7 @@ public:
 private:
     template <typename VertexType>
     void CreateVertexBuffer(const std::vector<VertexType>& vertices, ComPtr<ID3D12Resource>& vertexBuffer);
-    void CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT16>& indices);
+    void CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices);
 
     UINT indexCount = 0;
     ComPtr<ID3D12Resource> vertexBuffer;
