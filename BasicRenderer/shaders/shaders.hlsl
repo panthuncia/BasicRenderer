@@ -4,8 +4,12 @@ struct PerFrameBuffer {
     float3 eyePosWorldSpace;
 };
 
-cbuffer PerMesh : register(b1) {
+cbuffer PerObject : register(b1) {
     row_major matrix model;
+};
+
+cbuffer PerMesh : register(b2) {
+    uint materialDataIndex;
 };
 
 struct LightInfo {

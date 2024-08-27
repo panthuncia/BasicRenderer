@@ -18,7 +18,7 @@ public:
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> CmdListAlloc;
 	// We cannot update a cbuffer until the GPU is done processing the
 	// commands that reference it. So each frame needs their own cbuffers.
-	std::vector<CBuffer<PerMeshCB>> objectConstantBuffers;
+	std::vector<CBuffer<PerObjectCB>> objectConstantBuffers;
 	std::vector<CBuffer<PerMaterialCB>> materialConstantBuffers;
 	CBuffer<PerFrameCB> frameConstantBuffer;
 	std::vector<LightInfo> lightsData;

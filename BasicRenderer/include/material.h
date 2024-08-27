@@ -24,7 +24,7 @@ public:
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
     int blendMode;
-    PerMaterialCB materialData;
+    PerMaterialCB materialData = {0};
     BufferHandle<PerMaterialCB> perMaterialHandle;
 
     Material(const std::string& name,

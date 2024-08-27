@@ -19,7 +19,7 @@ std::vector<Mesh>& RenderableObject::getMeshes() {
 
 void RenderableObject::CreateBuffers() {
     // Create PerMesh buffer
-    UINT constantBufferSize = sizeof(PerMeshCB);
+    UINT constantBufferSize = sizeof(PerObjectCB);
 
     // Describe and create a constant buffer
     CD3DX12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);

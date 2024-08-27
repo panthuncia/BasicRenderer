@@ -11,11 +11,12 @@ using Microsoft::WRL::ComPtr;
 
 enum PSOFlags {
     VERTEX_COLORS = 1 << 0,
-    NORMAL_MAP = 1 << 1,
-    AO_TEXTURE = 1<<2,
-    EMISSIVE_TEXTURE = 1<<3,
-    PBR = 1 << 4,
-    SKINNED = 1 << 5,
+    BASE_COLOR_TEXTURE = 1 << 1,
+    NORMAL_MAP = 1 << 2,
+    AO_TEXTURE = 1<<3,
+    EMISSIVE_TEXTURE = 1<<4,
+    PBR = 1 << 5,
+    SKINNED = 1 << 6,
 };
 
 class PSOManager {

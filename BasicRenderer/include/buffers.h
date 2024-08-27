@@ -7,8 +7,12 @@ struct PerFrameCB {
     DirectX::XMVECTOR eyePosWorldSpace;
 };
 
-struct PerMeshCB {
+struct PerObjectCB {
     DirectX::XMMATRIX model;
+};
+
+struct PerMeshCB {
+    UINT materialDataIndex;
 };
 
 struct PerMaterialCB {

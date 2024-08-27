@@ -91,6 +91,42 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         macro.Name = L"VERTEX_COLORS";
         defines.insert(defines.begin(), macro);
     }
+    if (psoFlags & PSOFlags::BASE_COLOR_TEXTURE) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"BASE_COLOR_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (psoFlags & PSOFlags::NORMAL_MAP) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"NORMAL_MAP";
+        defines.insert(defines.begin(), macro);
+    }
+    if (psoFlags & PSOFlags::AO_TEXTURE) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"AO_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (psoFlags & PSOFlags::EMISSIVE_TEXTURE) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"EMISSIVE_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (psoFlags & PSOFlags::PBR) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PBR";
+        defines.insert(defines.begin(), macro);
+    }
+    if (psoFlags & PSOFlags::SKINNED) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"SKINNED";
+        defines.insert(defines.begin(), macro);
+    }
     return defines;
 }
 

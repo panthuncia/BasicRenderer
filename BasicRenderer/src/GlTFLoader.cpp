@@ -458,11 +458,11 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
     // Create materials
     for (const auto& gltfMaterial : gltfData["materials"]) {
         UINT psoFlags = 0;
-        Texture* baseColorTexture = defaultTexture;
-        Texture* normalTexture = defaultTexture;
-        Texture* aoMap = defaultTexture;
-        Texture* metallicRoughnessTexture = defaultTexture;
-        Texture* emissiveTexture = defaultTexture;
+        Texture* baseColorTexture = nullptr;
+        Texture* normalTexture = nullptr;
+        Texture* aoMap = nullptr;
+        Texture* metallicRoughnessTexture = nullptr;
+        Texture* emissiveTexture = nullptr;
         float metallicFactor = 1.0f;
         float roughnessFactor = 1.0f;
         DirectX::XMFLOAT4 baseColorFactor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -473,6 +473,7 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
             psoFlags |= PSOFlags::PBR;
             const auto& pbr = gltfMaterial["pbrMetallicRoughness"];
             if (pbr.contains("baseColorTexture")) {
+                psoFlags |= PSOFlags::BASE_COLOR_TEXTURE;
                 int textureIndex = pbr["baseColorTexture"]["index"];
                 if (linearBaseColor) {
                     baseColorTexture = linearTextures[textureIndex];
