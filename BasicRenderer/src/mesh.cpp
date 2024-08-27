@@ -6,6 +6,10 @@
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material) {
     CreateBuffers(vertices, indices);
     this->material = material;
+    auto& resourceManager = ResourceManager::GetInstance();
+    perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
+    perMeshBufferHandle = resourceManager.CreateIndexedConstantBuffer<PerMeshCB>();
+    resourceManager.UpdateIndexedConstantBuffer(perMeshBufferHandle, perMeshBufferData);
 }
 
 template <typename VertexType>

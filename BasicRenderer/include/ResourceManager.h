@@ -19,21 +19,21 @@ struct BufferHandle {
 
 class ResourceManager {
 public:
-    static ResourceManager& getInstance() {
+    static ResourceManager& GetInstance() {
         static ResourceManager instance;
         return instance;
     }
 
-    void initialize();
+    void Initialize();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE getCPUHandle();
-    CD3DX12_GPU_DESCRIPTOR_HANDLE getGPUHandle();
-    ComPtr<ID3D12DescriptorHeap> getDescriptorHeap();
-    UINT allocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE GetCPUHandle();
+    CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle();
+    ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap();
+    UINT AllocateDescriptor();
     void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix);
 
     template<typename T>
-    BufferHandle<T> createConstantBuffer() {
+    BufferHandle<T> CreateIndexedConstantBuffer() {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
         auto device = DeviceManager::getInstance().getDevice();
@@ -63,8 +63,8 @@ public:
         cbvDesc.BufferLocation = buffer->GetGPUVirtualAddress();
         cbvDesc.SizeInBytes = bufferSize;
 
-        UINT index = allocateDescriptor();
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = getCPUHandle().Offset(index, descriptorSize);
+        UINT index = AllocateDescriptor();
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = GetCPUHandle().Offset(index, descriptorSize);
 
         device->CreateConstantBufferView(&cbvDesc, handle);
 
@@ -72,7 +72,7 @@ public:
     }
 
     template<typename T>
-    void updateConstantBuffer(BufferHandle<T>& handle, const T& data) {
+    void UpdateIndexedConstantBuffer(BufferHandle<T>& handle, const T& data) {
         void* mappedData;
         D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
         handle.buffer->Map(0, &readRange, &mappedData);

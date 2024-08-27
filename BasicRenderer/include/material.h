@@ -25,7 +25,6 @@ public:
     DirectX::XMFLOAT4 emissiveFactor;
     int blendMode;
     PerMaterialCB materialData = {0};
-    BufferHandle<PerMaterialCB> perMaterialHandle;
 
     Material(const std::string& name,
         UINT psoFlags);
@@ -44,5 +43,8 @@ public:
         int blendMode);
 
     static Texture* createDefaultTexture();
-    // Other methods...
+    UINT GetMaterialBufferIndex();
+
+private:
+    BufferHandle<PerMaterialCB> perMaterialHandle;
 };

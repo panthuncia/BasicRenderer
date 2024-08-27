@@ -57,9 +57,9 @@ Material::Material(const std::string& name,
         materialData.metallicRoughnessTextureIndex = metallicRoughnessTexture->GetDescriptorIndex();
     }
 
-    auto& resourceManager = ResourceManager::getInstance();
-    perMaterialHandle = resourceManager.createConstantBuffer<PerMaterialCB>();
-    resourceManager.updateConstantBuffer(perMaterialHandle, materialData);
+    auto& resourceManager = ResourceManager::GetInstance();
+    perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
+    resourceManager.UpdateIndexedConstantBuffer(perMaterialHandle, materialData);
 }
 
 Texture* Material::createDefaultTexture() {
@@ -67,4 +67,8 @@ Texture* Material::createDefaultTexture() {
     static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
     Texture* defaultTexture = new Texture(whitePixel, 1, 1, false);
     return defaultTexture;
+}
+
+UINT Material::GetMaterialBufferIndex() {
+    return perMaterialHandle.index;
 }

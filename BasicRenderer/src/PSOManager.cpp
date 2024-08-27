@@ -224,12 +224,12 @@ void PSOManager::createRootSignature() {
     descRange.RegisterSpace = 0;
     descRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    D3D12_DESCRIPTOR_RANGE1 srvDescRange = {};
-    srvDescRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvDescRange.NumDescriptors = 1;
-    srvDescRange.BaseShaderRegister = 2; // b2 for lights
-    srvDescRange.RegisterSpace = 0;
-    srvDescRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    //D3D12_DESCRIPTOR_RANGE1 srvDescRange = {};
+    //srvDescRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    //srvDescRange.NumDescriptors = 1;
+    //srvDescRange.BaseShaderRegister = 2; // b2 for lights
+    //srvDescRange.RegisterSpace = 0;
+    //srvDescRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
     // Root parameter for descriptor table (PerFrame buffer)
     D3D12_ROOT_PARAMETER1 parameters[3] = {};
@@ -242,18 +242,19 @@ void PSOManager::createRootSignature() {
 
     // PerMesh buffer as a direct root CBV
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameters[1].Descriptor.ShaderRegister = 1; // b1 for PerMesh
+    parameters[1].Descriptor.ShaderRegister = 1; // b1 for PerObject
     parameters[1].Descriptor.RegisterSpace = 0;
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[2].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[2].DescriptorTable.pDescriptorRanges = &srvDescRange;
+    // PerMesh buffer as a direct root CBV
+    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    parameters[2].Descriptor.ShaderRegister = 2; // b2 for PerMesh
+    parameters[2].Descriptor.RegisterSpace = 0;
     parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = 3; // three parameters: two descriptor tables and one direct CBV
+    rootSignatureDesc.NumParameters = 3; // three parameters: one descriptor table and two direct CBVs
     rootSignatureDesc.pParameters = parameters;
     rootSignatureDesc.NumStaticSamplers = 0;
     rootSignatureDesc.pStaticSamplers = nullptr;

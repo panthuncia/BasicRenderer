@@ -82,10 +82,10 @@ Texture::Texture(const stbi_uc* image, int width, int height, bool sRGB) {
     CloseHandle(fenceEvent);
 
     // Allocate descriptor and create shader resource view
-    ResourceManager& resourceManager = ResourceManager::getInstance();
-    descriptorIndex = resourceManager.allocateDescriptor();
-    cpuHandle = resourceManager.getCPUHandle();
-    gpuHandle = resourceManager.getGPUHandle();
+    ResourceManager& resourceManager = ResourceManager::GetInstance();
+    descriptorIndex = resourceManager.AllocateDescriptor();
+    cpuHandle = resourceManager.GetCPUHandle();
+    gpuHandle = resourceManager.GetGPUHandle();
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;

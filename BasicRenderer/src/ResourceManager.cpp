@@ -3,7 +3,7 @@
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
 
-void ResourceManager::initialize() {
+void ResourceManager::Initialize() {
     //for (int i = 0; i < 3; i++) {
     //    frameResourceCopies[i] = std::make_unique<FrameResource>();
     //    frameResourceCopies[i]->Initialize();
@@ -94,19 +94,19 @@ void ResourceManager::initialize() {
     numAllocatedDescriptors++;
 }
 
-CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::getCPUHandle() {
+CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetCPUHandle() {
     return CD3DX12_CPU_DESCRIPTOR_HANDLE(descriptorHeap->GetCPUDescriptorHandleForHeapStart(), numAllocatedDescriptors, descriptorSize);
 }
 
-CD3DX12_GPU_DESCRIPTOR_HANDLE ResourceManager::getGPUHandle() {
+CD3DX12_GPU_DESCRIPTOR_HANDLE ResourceManager::GetGPUHandle() {
     return CD3DX12_GPU_DESCRIPTOR_HANDLE(descriptorHeap->GetGPUDescriptorHandleForHeapStart(), numAllocatedDescriptors, descriptorSize);
 }
 
-ComPtr<ID3D12DescriptorHeap> ResourceManager::getDescriptorHeap() {
+ComPtr<ID3D12DescriptorHeap> ResourceManager::GetDescriptorHeap() {
     return descriptorHeap;
 }
 
-UINT ResourceManager::allocateDescriptor() {
+UINT ResourceManager::AllocateDescriptor() {
     numAllocatedDescriptors++;
     return numAllocatedDescriptors;
 }

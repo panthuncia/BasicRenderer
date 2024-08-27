@@ -39,7 +39,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd) {
     // Initialize device manager
     DeviceManager::getInstance().initialize(device);
     PSOManager::getInstance().initialize();
-    ResourceManager::getInstance().initialize();
+    ResourceManager::GetInstance().Initialize();
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> infoQueue;
@@ -179,7 +179,7 @@ void DX12Renderer::WaitForPreviousFrame() {
 void DX12Renderer::UpdateConstantBuffer() {
     // moved
     auto camera = currentScene->GetCamera();
-    ResourceManager::getInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix());
+    ResourceManager::GetInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix());
 }
 
 void DX12Renderer::CreateConstantBuffer() {
@@ -211,7 +211,7 @@ void DX12Renderer::Render() {
     commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
     // Bind the constant buffer to the root signature
     ID3D12DescriptorHeap* descriptorHeaps[] = {
-        ResourceManager::getInstance().getDescriptorHeap().Get() // The texture descriptor heap
+        ResourceManager::GetInstance().GetDescriptorHeap().Get() // The texture descriptor heap
     };
 
     commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
