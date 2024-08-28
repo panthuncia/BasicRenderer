@@ -13,12 +13,12 @@ class Material {
 public:
     std::string name;
     UINT psoFlags;
-    Texture* baseColorTexture;
-    Texture* normalTexture;
-    Texture* aoMap;
-    Texture* heightMap;
-    Texture* metallicRoughnessTexture;
-    Texture* emissiveTexture;
+    std::shared_ptr<Texture> baseColorTexture;
+    std::shared_ptr<Texture> normalTexture;
+    std::shared_ptr<Texture> aoMap;
+    std::shared_ptr<Texture> heightMap;
+    std::shared_ptr<Texture> metallicRoughnessTexture;
+    std::shared_ptr<Texture> emissiveTexture;
     float metallicFactor;
     float roughnessFactor;
     DirectX::XMFLOAT4 baseColorFactor;
@@ -31,18 +31,18 @@ public:
 
     Material(const std::string& name,
         UINT psoFlags,
-        Texture* baseColorTexture,
-        Texture* normalTexture,
-        Texture* aoMap,
-        Texture* heightMap,
-        Texture* metallicRoughnessTexture,
+        std::shared_ptr<Texture> baseColorTexture,
+        std::shared_ptr<Texture> normalTexture,
+        std::shared_ptr<Texture> aoMap,
+        std::shared_ptr<Texture> heightMap,
+        std::shared_ptr<Texture> metallicRoughnessTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
         DirectX::XMFLOAT4 emissiveFactor,
         int blendMode);
 
-    static Texture* createDefaultTexture();
+    static std::shared_ptr<Texture> createDefaultTexture();
     UINT GetMaterialBufferIndex();
 
 private:

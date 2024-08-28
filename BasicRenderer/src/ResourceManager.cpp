@@ -92,6 +92,17 @@ void ResourceManager::Initialize() {
     srvHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); // Move to the next slot
     device->CreateShaderResourceView(lightBuffer.Get(), &srvDesc, srvHandle);
     numAllocatedDescriptors++;
+
+    // Initialize Sampler Descriptor Heap
+    D3D12_DESCRIPTOR_HEAP_DESC samplerHeapDesc = {};
+    samplerHeapDesc.NumDescriptors = 2048;
+    samplerHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+    samplerHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE; // Must be visible to shaders
+    ThrowIfFailed(device->CreateDescriptorHeap(&samplerHeapDesc, IID_PPV_ARGS(&samplerHeap)));
+
+    samplerDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+    numAllocatedSamplerDescriptors = 0;
+
 }
 
 CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetCPUHandle() {
@@ -191,4 +202,26 @@ void ResourceManager::InitializeCopyCommandQueue() {
 
 std::unique_ptr<FrameResource>& ResourceManager::GetFrameResource(UINT frameNum) {
     return frameResourceCopies[frameNum % 3];
+}
+
+UINT ResourceManager::CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc) {
+    auto device = DeviceManager::getInstance().getDevice();
+
+    if (numAllocatedSamplerDescriptors >= samplerHeap->GetDesc().NumDescriptors) {
+        throw std::runtime_error("Exceeded the maximum number of samplers that can be allocated in the sampler heap.");
+    }
+
+    UINT index = numAllocatedSamplerDescriptors++;
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = samplerHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += index * samplerDescriptorSize;
+
+    device->CreateSampler(&samplerDesc, handle);
+
+    return index;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getCPUHandleForSampler(UINT index) const {
+    auto handle = samplerHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += index * samplerDescriptorSize;
+    return handle;
 }

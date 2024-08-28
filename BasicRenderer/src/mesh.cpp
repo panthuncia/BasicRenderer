@@ -85,6 +85,10 @@ D3D12_INDEX_BUFFER_VIEW Mesh::GetIndexBufferView() const {
     return indexBufferView;
 }
 
+ComPtr<ID3D12Resource> Mesh::GetPerMeshBuffer() const {
+    return pPerMeshBuffer;
+}
+
 UINT Mesh::GetIndexCount() const {
     return indexCount;
 }

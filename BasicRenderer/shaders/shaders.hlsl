@@ -40,13 +40,21 @@ struct MaterialInfo {
 
 
 
+#if defined(VERTEX_COLORS)
 struct VSInput {
     float3 position : POSITION;
     float3 normal : NORMAL;
-#if defined(VERTEX_COLORS)
     float4 color : COLOR;
+};
+#else
+struct VSInput {
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+#if defined(TEXTURED)
+    float2 texcoord : TEXCOORD0;
 #endif
 };
+#endif
 
 struct PSInput {
     float4 position : SV_POSITION;
@@ -141,6 +149,11 @@ float4 PSMain(PSInput input) : SV_TARGET {
     lights.GetDimensions(numLights, lightsStride);
 
     float3 baseColor = float3(1.0, 1.0, 1.0);
+#if defined(BASE_COLOR_TEXTURE)
+//    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex]
+//    Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[MaterialInfo.baseColorTextureIndex]
+//    baseColor = <sample texture>
+#endif
 #if defined(VERTEX_COLORS)
     baseColor *= input.color.xyz;
 #endif

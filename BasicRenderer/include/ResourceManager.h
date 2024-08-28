@@ -82,6 +82,9 @@ public:
 
     std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
 
+    UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
+    D3D12_CPU_DESCRIPTOR_HANDLE getCPUHandleForSampler(UINT index) const;
+
     std::unique_ptr<FrameResource> currentFrameResource;
 
 private:
@@ -95,6 +98,10 @@ private:
     ComPtr<ID3D12DescriptorHeap> descriptorHeap;
     UINT descriptorSize;
     UINT numAllocatedDescriptors;
+
+    ComPtr<ID3D12DescriptorHeap> samplerHeap;
+    UINT samplerDescriptorSize;
+    UINT numAllocatedSamplerDescriptors;
 
     std::vector<LightInfo> lightsData;
     ComPtr<ID3D12Resource> lightBuffer;

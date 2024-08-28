@@ -31,6 +31,7 @@ public:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>);
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
+    ComPtr<ID3D12Resource> GetPerMeshBuffer() const;
     UINT GetIndexCount() const;
 
     std::shared_ptr<Material> material;

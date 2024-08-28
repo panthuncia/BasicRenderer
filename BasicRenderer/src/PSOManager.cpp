@@ -58,6 +58,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags)
 
     if (psoFlags & PSOFlags::VERTEX_COLORS) {
         inputElementDescs.push_back({ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+    } // TODO: Vertex colors are not yet supported with more complex vertex types
+    else {
+        if (psoFlags & PSOFlags::BASE_COLOR_TEXTURE || psoFlags & PSOFlags::NORMAL_MAP || psoFlags & PSOFlags::AO_TEXTURE || psoFlags & PSOFlags::EMISSIVE_TEXTURE) {
+            inputElementDescs.push_back({ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        }
     }
 
     // Create the pipeline state object
@@ -89,6 +94,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         DxcDefine macro;
         macro.Value = L"1";
         macro.Name = L"VERTEX_COLORS";
+        defines.insert(defines.begin(), macro);
+    }
+    if (psoFlags & PSOFlags::BASE_COLOR_TEXTURE || psoFlags & PSOFlags::NORMAL_MAP || psoFlags & PSOFlags::AO_TEXTURE || psoFlags & PSOFlags::EMISSIVE_TEXTURE) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"TEXTURED";
         defines.insert(defines.begin(), macro);
     }
     if (psoFlags & PSOFlags::BASE_COLOR_TEXTURE) {
@@ -258,7 +269,7 @@ void PSOManager::createRootSignature() {
     rootSignatureDesc.pParameters = parameters;
     rootSignatureDesc.NumStaticSamplers = 0;
     rootSignatureDesc.pStaticSamplers = nullptr;
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT| D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
+    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT| D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
 
     // Serialize and create the root signature
     ComPtr<ID3DBlob> signature;

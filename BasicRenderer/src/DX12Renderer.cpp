@@ -244,6 +244,7 @@ void DX12Renderer::Render() {
         commandList->SetGraphicsRootConstantBufferView(1, renderable->getConstantBuffer()->GetGPUVirtualAddress());
 
         for (auto& mesh : renderable->getMeshes()) {
+            commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
             auto pso = psoManager.GetPSO(mesh.material->psoFlags);
             commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
@@ -252,7 +253,6 @@ void DX12Renderer::Render() {
             commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
             commandList->IASetIndexBuffer(&indexBufferView);
 
-            // Draw the cube
             commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
         }
     }

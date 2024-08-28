@@ -169,7 +169,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int clientHeight = 600; // TODO
 
     aspectRatio = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
-    renderer.GetCurrentScene()->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
+    auto& scene = renderer.GetCurrentScene();
+    scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
 
     auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::VERTEX_COLORS);
     auto cubeMesh = Mesh(vertices, indices, cubeMaterial);

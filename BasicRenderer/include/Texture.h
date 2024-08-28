@@ -1,18 +1,14 @@
 #pragma once
-#include "wrl.h"
-#include "stb/stb_image.h"
-#include "d3d12.h"
-#include "DirectX/d3dx12.h"
-using Microsoft::WRL::ComPtr;
+#include <memory>
 
+#include "PixelBuffer.h"
+#include "Sampler.h"
 class Texture {
 public:
-    Texture(const stbi_uc* image, int width, int height, bool sRGB);
-    UINT GetDescriptorIndex();
+	Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler);
+	UINT GetBufferDescriptorIndex();
+	UINT GetSamplerDescriptorIndex();
 private:
-    ComPtr<ID3D12Resource> textureResource;
-    ComPtr<ID3D12Resource> textureUploadHeap;
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle;
-    UINT descriptorIndex;
+	std::shared_ptr<PixelBuffer> m_image;
+	std::shared_ptr<Sampler> m_sampler;
 };

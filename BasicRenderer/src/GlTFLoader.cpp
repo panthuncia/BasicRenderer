@@ -10,6 +10,8 @@
 #include "Texture.h"
 #include "Material.h"
 #include "PSOManager.h"
+#include "Sampler.h"
+#include "PixelBuffer.h"
 
 using nlohmann::json;
 
@@ -419,9 +421,9 @@ std::string loadFile(const std::string& path) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-std::vector<Texture> loadTexturesFromImages(const std::vector<std::vector<uint8_t>>& images, bool sRGB) {
-    std::vector<Texture> textures;
-
+std::vector<std::shared_ptr<Texture>> loadTexturesFromImages(const json& gltfData, const std::vector<std::vector<uint8_t>>& images, std::vector<std::shared_ptr<Sampler>>& samplers, bool sRGB) {
+    // Create buffers from images
+    std::vector<std::shared_ptr<PixelBuffer>> pixelBuffers;
     for (const auto& imageData : images) {
         int width, height, channels;
         stbi_uc* image = stbi_load_from_memory(imageData.data(), static_cast<int>(imageData.size()), &width, &height, &channels, 4);
@@ -429,40 +431,108 @@ std::vector<Texture> loadTexturesFromImages(const std::vector<std::vector<uint8_
             throw std::runtime_error("Failed to load texture image from binary data");
         }
 
-        Texture texture(image, width, height, sRGB);
-        textures.push_back(std::move(texture));
+        auto pBuffer = std::make_shared<PixelBuffer>(image, width, height, sRGB);
+        pixelBuffers.push_back(std::move(pBuffer));
 
         stbi_image_free(image);
+    }
+
+    // Associate buffers and samplers into textures
+    std::vector<std::shared_ptr<Texture>> textures;
+    for (const auto& gltfTexture : gltfData["textures"]) {
+        const uint32_t imageIndex = gltfTexture["source"].get<uint32_t>();
+        const uint32_t samplerIndex = gltfTexture["sampler"].get<uint32_t>();
+        auto pTexture = std::make_shared<Texture>(pixelBuffers[imageIndex], samplers[samplerIndex]);
+        textures.push_back(std::move(pTexture));
     }
 
     return textures;
 }
 
+// Helper functions to translate glTF sampler parameters to D3D12 equivalents
+D3D12_TEXTURE_ADDRESS_MODE translateWrapMode(int wrapMode) {
+    switch (wrapMode) {
+    case 33071: return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    case 33648: return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+    case 10497: return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    default:    return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    }
+}
+
+D3D12_FILTER translateFilterMode(int magFilter, int minFilter) {
+    if (magFilter == 9729 && minFilter == 9729) {
+        return D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    }
+    else if (magFilter == 9728 && minFilter == 9728) {
+        return D3D12_FILTER_MIN_MAG_MIP_POINT;
+    }
+    else if (magFilter == 9729 && minFilter == 9728) {
+        return D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
+    }
+    else if (magFilter == 9728 && minFilter == 9729) {
+        return D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT;
+    }
+    else {
+        // May need to add more cases for extensions
+        return D3D12_FILTER_MIN_MAG_MIP_LINEAR; // Default fallback
+    }
+}
+
+std::vector<std::shared_ptr<Sampler>> parseGLTFSamplers(const json& gltfData) {
+    std::vector<std::shared_ptr<Sampler>> samplers;
+    if (gltfData.contains("samplers")) {
+        for (const auto& gltfSampler : gltfData["samplers"]) {
+            D3D12_SAMPLER_DESC samplerDesc = {};
+
+            // Set filtering modes based on the glTF sampler definitions
+            samplerDesc.Filter = translateFilterMode(gltfSampler.value("magFilter", 9729),
+                gltfSampler.value("minFilter", 9729));
+            samplerDesc.AddressU = translateWrapMode(gltfSampler.value("wrapS", 10497));
+            samplerDesc.AddressV = translateWrapMode(gltfSampler.value("wrapT", 10497));
+            samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+            samplerDesc.MipLODBias = 0.0f;
+            samplerDesc.MaxAnisotropy = 1;
+            samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+            samplerDesc.BorderColor[0] = 1.0f;
+            samplerDesc.BorderColor[1] = 1.0f;
+            samplerDesc.BorderColor[2] = 1.0f;
+            samplerDesc.BorderColor[3] = 1.0f;
+            samplerDesc.MinLOD = 0.f;
+            samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+
+            auto pSampler = std::make_shared<Sampler>(samplerDesc);
+            samplers.push_back(std::move(pSampler));
+        }
+    }
+    return samplers;
+}
+
 std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, const std::string& dir, bool linearBaseColor = false, const std::vector<uint8_t>& binaryData = {}) {
-    std::unordered_map<int, Texture*> linearTextures;
-    std::unordered_map<int, Texture*> srgbTextures;
+    std::unordered_map<int, std::shared_ptr<Texture>> linearTextures;
+    std::unordered_map<int, std::shared_ptr<Texture>> srgbTextures;
     std::vector<std::shared_ptr<Material>> materials;
 
-    Texture* defaultTexture = Material::createDefaultTexture();
+    std::shared_ptr<Texture> defaultTexture = Material::createDefaultTexture();
 
     // Load images from binary data
     auto imageBuffers = getGLTFImagesFromBinary(gltfData, binaryData);
-    auto textures = loadTexturesFromImages(imageBuffers, linearBaseColor);
+    auto samplers = parseGLTFSamplers(gltfData);
+    auto textures = loadTexturesFromImages(gltfData, imageBuffers, samplers, linearBaseColor);
 
     // Map textures to indices
     for (size_t i = 0; i < textures.size(); ++i) {
-        linearTextures[i] = &textures[i];
-        srgbTextures[i] = &textures[i];
+        linearTextures[i] = textures[i];
+        srgbTextures[i] = textures[i];
     }
 
     // Create materials
     for (const auto& gltfMaterial : gltfData["materials"]) {
         UINT psoFlags = 0;
-        Texture* baseColorTexture = nullptr;
-        Texture* normalTexture = nullptr;
-        Texture* aoMap = nullptr;
-        Texture* metallicRoughnessTexture = nullptr;
-        Texture* emissiveTexture = nullptr;
+        std::shared_ptr<Texture> baseColorTexture = nullptr;
+        std::shared_ptr<Texture> normalTexture = nullptr;
+        std::shared_ptr<Texture> aoMap = nullptr;
+        std::shared_ptr<Texture> metallicRoughnessTexture = nullptr;
+        std::shared_ptr<Texture> emissiveTexture = nullptr;
         float metallicFactor = 1.0f;
         float roughnessFactor = 1.0f;
         DirectX::XMFLOAT4 baseColorFactor(1.0f, 1.0f, 1.0f, 1.0f);
