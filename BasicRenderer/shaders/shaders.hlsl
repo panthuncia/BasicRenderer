@@ -23,11 +23,17 @@ struct LightInfo {
 struct MaterialInfo {
     uint psoFlags;
     uint baseColorTextureIndex;
+    uint baseColorSamplerIndex;
     uint normalTextureIndex;
+    uint normalSamplerIndex;
     uint metallicRoughnessTextureIndex;
+    uint metallicRoughnessSamplerIndex;
     uint emissiveTextureIndex;
+    uint emissiveSamplerIndex;
     uint aoMapIndex;
+    uint aoSamplerIndex;
     uint heightMapIndex;
+    uint heightSamplerIndex;
     float metallicFactor;
     float roughnessFactor;
     float ambientStrength;
@@ -56,14 +62,23 @@ struct VSInput {
 };
 #endif
 
+#if defined(VERTEX_COLORS)
 struct PSInput {
     float4 position : SV_POSITION;
     float4 positionWorldSpace : TEXCOORD1;
     float4 normalWorldSpace : TEXCOORD2;
-#if defined(VERTEX_COLORS)
     float4 color : COLOR;
+};
+#else
+struct PSInput {
+    float4 position : SV_POSITION;
+    float4 positionWorldSpace : TEXCOORD1;
+    float4 normalWorldSpace : TEXCOORD2;
+#if defined(TEXTURED)
+    float2 texcoord : TEXCOORD0;
 #endif
 };
+#endif
 
 PSInput VSMain(VSInput input) {
     
@@ -77,6 +92,9 @@ PSInput VSMain(VSInput input) {
     output.position = mul(viewPosition, perFrameBuffer.projection);
 #if defined(VERTEX_COLORS)
     output.color = input.color;
+#endif
+#if defined(TEXTURED)
+    output.texcoord = input.texcoord;
 #endif
     return output;
 }
@@ -136,7 +154,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
         float spot = spotAttenuation(lightDir, dir, outerConeCos, innerConeCos);
         lighting *= spot;
     }
-    return lighting;
+    return lighting * albedo;
 }
 
 float4 PSMain(PSInput input) : SV_TARGET {
@@ -150,9 +168,11 @@ float4 PSMain(PSInput input) : SV_TARGET {
 
     float3 baseColor = float3(1.0, 1.0, 1.0);
 #if defined(BASE_COLOR_TEXTURE)
-//    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex]
-//    Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[MaterialInfo.baseColorTextureIndex]
-//    baseColor = <sample texture>
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
+    Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
+    SamplerState samplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
+    //baseColor*=materialDataIndex;
+    baseColor = baseColorTexture.Sample(samplerState, input.texcoord).rgb;
 #endif
 #if defined(VERTEX_COLORS)
     baseColor *= input.color.xyz;

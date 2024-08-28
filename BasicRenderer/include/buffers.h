@@ -18,11 +18,17 @@ struct PerMeshCB {
 struct PerMaterialCB {
     UINT psoFlags;
     UINT baseColorTextureIndex;
+    UINT baseColorSamplerIndex;
     UINT normalTextureIndex;
+    UINT normalSamplerIndex;
     UINT metallicRoughnessTextureIndex;
+    UINT metallicRoughnessSamplerIndex;
     UINT emissiveTextureIndex;
+    UINT emissiveSamplerIndex;
     UINT aoMapIndex;
+    UINT aoSamplerIndex;
     UINT heightMapIndex;
+    UINT heightSamplerIndex;
     float metallicFactor;
     float roughnessFactor;
     float ambientStrength;

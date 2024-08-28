@@ -211,7 +211,8 @@ void DX12Renderer::Render() {
     commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
     // Bind the constant buffer to the root signature
     ID3D12DescriptorHeap* descriptorHeaps[] = {
-        ResourceManager::GetInstance().GetDescriptorHeap().Get() // The texture descriptor heap
+        ResourceManager::GetInstance().GetDescriptorHeap().Get(), // The texture descriptor heap
+        ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
     };
 
     commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);

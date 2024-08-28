@@ -17,9 +17,9 @@ private:
 	void CreateBuffers();
 	void UpdateBuffers();
 	std::vector<Mesh> meshes;
-	ComPtr<ID3D12Resource> perMeshConstantBuffer;
-	UINT8* pPerMeshConstantBuffer;
-	PerObjectCB perMeshCBData;
+	ComPtr<ID3D12Resource> perObjectConstantBuffer;
+	UINT8* pPerObjectConstantBuffer;
+	PerObjectCB perObjectCBData;
 protected:
 	void onUpdate() override;
 };

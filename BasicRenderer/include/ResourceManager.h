@@ -29,6 +29,7 @@ public:
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetCPUHandle();
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle();
     ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap();
+    ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
     UINT AllocateDescriptor();
     void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix);
 

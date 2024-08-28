@@ -49,7 +49,7 @@ ComPtr<ID3D12Resource> CreateConstantBuffer(T* pInitialData) {
         void* mappedData;
         D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
         buffer->Map(0, &readRange, &mappedData);
-        memcpy(mappedData, &pInitialData, sizeof(T));
+        memcpy(mappedData, pInitialData, sizeof(T));
         buffer->Unmap(0, nullptr);
     }
 

@@ -117,6 +117,10 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetDescriptorHeap() {
     return descriptorHeap;
 }
 
+ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
+    return samplerHeap;
+}
+
 UINT ResourceManager::AllocateDescriptor() {
     numAllocatedDescriptors++;
     return numAllocatedDescriptors;

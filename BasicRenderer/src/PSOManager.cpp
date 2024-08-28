@@ -167,6 +167,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     arguments.push_back(DXC_ARG_WARNINGS_ARE_ERRORS); //-WX
     arguments.push_back(DXC_ARG_DEBUG); //-Zi
     arguments.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE); //-Zss
+    arguments.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
 
     for (const auto& define : defines)
     {
