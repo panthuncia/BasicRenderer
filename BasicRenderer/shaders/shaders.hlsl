@@ -94,7 +94,7 @@ PSInput VSMain(VSInput input) {
     PSInput output;
     float4 worldPosition = mul(float4(input.position, 1.0f), model);
     float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
-    output.normalWorldSpace = mul(input.normal, normalMatrix);
+    output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
     output.positionWorldSpace = worldPosition;
     output.position = mul(viewPosition, perFrameBuffer.projection);
 #if defined(VERTEX_COLORS)
