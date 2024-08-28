@@ -555,6 +555,7 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
                 }
             }
             if (pbr.contains("metallicRoughnessTexture")) {
+                psoFlags |= PSOFlags::PBR_MAPS;
                 int textureIndex = pbr["metallicRoughnessTexture"]["index"];
                 metallicRoughnessTexture = linearTextures[textureIndex];
                 //srgbTextures[textureIndex]->textureResource.Reset();

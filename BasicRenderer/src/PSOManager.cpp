@@ -132,6 +132,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         macro.Name = L"PBR";
         defines.insert(defines.begin(), macro);
     }
+    if (psoFlags & PSOFlags::PBR_MAPS) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PBR_MAPS";
+        defines.insert(defines.begin(), macro);
+    }
     if (psoFlags & PSOFlags::SKINNED) {
         DxcDefine macro;
         macro.Value = L"1";
@@ -189,6 +195,39 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
         nullptr,
         IID_PPV_ARGS(result.GetAddressOf()));
 
+    // Error Handling. Note that this will also include warnings unless disabled.
+    //ComPtr<IDxcBlobUtf8> pErrors;
+    //result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
+    //if (pErrors && pErrors->GetStringLength() > 0)
+    //{
+    //    spdlog::error(pErrors->GetBufferPointer());
+    //}
+
+    //Error handling: Check HRESULT first
+    if (FAILED(hr)) {
+        ComPtr<IDxcBlobUtf8> pErrors;
+        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
+        if (pErrors && pErrors->GetStringLength() > 0) {
+            spdlog::error("Shader compilation failed: {}", pErrors->GetStringPointer());
+        }
+        ThrowIfFailed(hr); // Re-throw if you want to handle it higher up
+        return;
+    }
+
+    // Check for errors in the result
+    ComPtr<IDxcBlobUtf8> pErrors;
+    result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
+    if (pErrors && pErrors->GetStringLength() > 0) {
+        // Log the errors or warnings using spdlog
+        spdlog::warn("Shader compilation warnings/errors: {}", pErrors->GetStringPointer());
+
+        // Optionally handle warnings as errors if you have set DXC_ARG_WARNINGS_ARE_ERRORS
+        if (strstr(pErrors->GetStringPointer(), "error") != nullptr) {
+            // If errors exist, treat this as a failure
+            return;
+        }
+    }
+
     //PDB data
     ComPtr<IDxcBlob> pDebugData;
     ComPtr<IDxcBlobUtf16> pDebugDataPath;
@@ -215,13 +254,6 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     file.close();
 
 
-    // Error Handling. Note that this will also include warnings unless disabled.
-    ComPtr<IDxcBlobUtf8> pErrors;
-    result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
-    if (pErrors && pErrors->GetStringLength() > 0)
-    {
-        print((char*)pErrors->GetBufferPointer());
-    }
     // Get the compiled shader
     result->GetResult(reinterpret_cast<IDxcBlob**>(shaderBlob.GetAddressOf()));
 }

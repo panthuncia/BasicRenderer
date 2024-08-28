@@ -16,7 +16,8 @@ enum PSOFlags {
     AO_TEXTURE = 1<<3,
     EMISSIVE_TEXTURE = 1<<4,
     PBR = 1 << 5,
-    SKINNED = 1 << 6,
+    PBR_MAPS = 1 << 6,
+    SKINNED = 1 << 7,
 };
 
 class PSOManager {

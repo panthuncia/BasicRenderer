@@ -1,3 +1,5 @@
+#define PI 3.1415926538
+
 struct PerFrameBuffer {
     row_major matrix view;
     row_major matrix projection;
@@ -111,7 +113,45 @@ float spotAttenuation(float3 pointToLight, float3 lightDirection, float outerCon
     return 0.0;
 }
 
-float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float3 albedo) {
+// http://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
+// http://ix.cs.uoregon.edu/~hank/441/lectures/pbr_slides.pdf
+// https://learnopengl.com/PBR/Theory
+// Most of this is "plug-and-chug", because I'm not deriving my own BRDF or Fresnel equations
+
+// Approximates the percent of microfacets in a surface aligned with the halfway vector
+float TrowbridgeReitzGGX(float3 normalDir, float3 halfwayDir, float roughness) {
+        // UE4 uses alpha = roughness^2, so I will too.
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+        
+    float normDotHalf = max(dot(normalDir, halfwayDir), 0.0);
+    float normDotHalf2 = normDotHalf * normDotHalf;
+
+    float denom1 = (normDotHalf2 * (alpha2 - 1.0) + 1.0);
+    float denom2 = denom1 * denom1;
+
+    return alpha2 / (PI * denom2);
+}
+// Approximates self-shadowing of microfacets on a surface
+float geometrySchlickGGX(float normDotView, float roughness) {
+    float r = (roughness + 1.0);
+    float k = (r * r) / 8.0;
+
+    float denominator = normDotView * (1.0 - k) + k;
+    return normDotView / denominator;
+}
+float geometrySmith(float3 normalDir, float3 viewDir, float roughness, float normDotLight) {
+    float normDotView = max(dot(normalDir, viewDir), 0.0);
+
+    // combination of shadowing from microfacets obstructing view vector, and microfacets obstructing light vector
+    return geometrySchlickGGX(normDotView, roughness) * geometrySchlickGGX(normDotLight, roughness);
+}
+// models increased reflectivity as view angle approaches 90 degrees
+float3 fresnelSchlick(float cosTheta, float3 F0) {
+    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0) {
     uint lightType = light.properties.x;
     float3 lightPos = light.posWorldSpace.xyz;
     float3 lightColor = light.color.xyz;
@@ -140,16 +180,42 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     
     // Unit vector halfway between view dir and light dir. Makes more accurate specular highlights.
     float3 halfwayDir = normalize(lightDir + viewDir);
+
+#if defined(PBR)
+    float3 radiance = lightColor * attenuation;
+    float normDotLight = max(dot(normal, lightDir), 0.0);
+
+    // Cook-Torrence specular BRDF: fCookTorrance=DFG/(4(wo dot n)(wi dot n))
+    // Approximate microfacet alignment
+    float normalDistributionFunction = TrowbridgeReitzGGX(normal, halfwayDir, roughness);
+    // Approximate microfacet shadowing
+    float G = geometrySmith(normal, viewDir, roughness, normDotLight);
+    // Approximate specular intensity based on view angle
+    float3 kSpecular = fresnelSchlick(max(dot(halfwayDir, viewDir), 0.0), F0); // F
+
+    // Preserve energy, diffuse+specular must be at most 1.0
+    float3 kDiffuse = float3(1.0, 1.0, 1.0) - kSpecular;
+    // Metallic surfaces have no diffuse color
+    // model as diffuse color decreases as metallic fudge-factor increases 
+    kDiffuse *= 1.0 - metallic;
+
+    float3 numerator = normalDistributionFunction * G * kSpecular;
+    float denominator = 4.0 * max(dot(normal, viewDir), 0.0) * max(dot(normal, lightDir), 0.0) + 0.0001; //+0.0001 fudge-factor to prevent division by 0
+    float3 specular = numerator / denominator;
+
+    float3 lighting = (kDiffuse * albedo / PI + specular) * radiance * normDotLight;
+#else
     
     float diff = max(dot(normal, lightDir), 0.0);
     float3 diffuse = diff * lightColor;
 
-        // Calculate specular light, Blinn-Phong
+    // Calculate specular light, Blinn-Phong
     float spec = pow(max(dot(normal, halfwayDir), 0.0), 32.0);
     float3 specular = /*u_specularStrength * */ spec * lightColor;
     
     float3 lighting = (diffuse + specular) * attenuation;
-
+#endif
+    
     if (lightType == 1) {
         float spot = spotAttenuation(lightDir, dir, outerConeCos, innerConeCos);
         lighting *= spot;
@@ -167,21 +233,45 @@ float4 PSMain(PSInput input) : SV_TARGET {
     lights.GetDimensions(numLights, lightsStride);
 
     float3 baseColor = float3(1.0, 1.0, 1.0);
-#if defined(BASE_COLOR_TEXTURE)
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
+    
+#if defined(TEXTURED)
+    float2 uv = input.texcoord;
+#endif // TEXTURED
+#if defined(BASE_COLOR_TEXTURE)
     Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
-    SamplerState samplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
-    //baseColor*=materialDataIndex;
-    baseColor = baseColorTexture.Sample(samplerState, input.texcoord).rgb;
-#endif
+    SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
+    baseColor = baseColorTexture.Sample(baseColorSamplerState, uv).rgb;
+    #if defined(PBR)
+        baseColor *= materialInfo.baseColorFactor.xyz;
+    #endif // PBR
+#endif //BASE_COLOR_TEXTURE
+    float metallic = 0.0;
+    float roughness = 0.0;
+    float3 F0 = float3(0.04, 0.04, 0.04); // TODO: this should be specified per-material
+    
+#if defined(PBR)
+    #if defined (PBR_MAPS)
+        Texture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[materialInfo.metallicRoughnessTextureIndex];
+        SamplerState metallicRoughnessSamplerState = SamplerDescriptorHeap[materialInfo.metallicRoughnessSamplerIndex];
+        float2 metallicRoughness = metallicRoughnessTexture.Sample(metallicRoughnessSamplerState, uv).gb;
+        metallic = metallicRoughness.y * materialInfo.metallicFactor;
+        roughness = metallicRoughness.x * materialInfo.roughnessFactor;
+    #else
+        metallic = materialInfo.metallicFactor;
+        roughness = materialInfo.roughnessFactor;
+    #endif // PBR_MAPS
+#endif // PBR
+    F0 = lerp(F0, baseColor.xyz, metallic);
+    
 #if defined(VERTEX_COLORS)
     baseColor *= input.color.xyz;
-#endif
+#endif // VERTEX_COLORS
     
     float3 lighting = float3(0.0, 0.0, 0.0);
     for (uint i = 0; i < numLights; i++) {
         LightInfo light = lights[i];
-        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, input.normalWorldSpace.xyz, baseColor);
+        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, input.normalWorldSpace.xyz, uv, baseColor, metallic, roughness, F0);
     }
     
 #if defined(VERTEX_COLORS)
