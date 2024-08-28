@@ -8,6 +8,7 @@ struct PerFrameBuffer {
 
 cbuffer PerObject : register(b1) {
     row_major matrix model;
+    row_major float3x3 normalMatrix;
 };
 
 cbuffer PerMesh : register(b2) {
@@ -15,11 +16,15 @@ cbuffer PerMesh : register(b2) {
 };
 
 struct LightInfo {
+    // Light attributes: x=type (0=point, 1=spot, 2=directional)
+    // x=point -> w = shadow caster
+    // x=spot -> y= inner cone angle, z= outer cone angle, w= shadow caster
+    // x=directional => w= shadow caster
     int4 properties;
-    float4 posWorldSpace;
-    float4 dirWorldSpace;
-    float4 attenuation;
-    float4 color;
+    float4 posWorldSpace; // Position of the lights
+    float4 dirWorldSpace; // Direction of the lights
+    float4 attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
+    float4 color; // Color of the lights
 };
 
 struct MaterialInfo {
@@ -75,7 +80,7 @@ struct PSInput {
 struct PSInput {
     float4 position : SV_POSITION;
     float4 positionWorldSpace : TEXCOORD1;
-    float4 normalWorldSpace : TEXCOORD2;
+    float3 normalWorldSpace : TEXCOORD2;
 #if defined(TEXTURED)
     float2 texcoord : TEXCOORD0;
 #endif
@@ -89,7 +94,7 @@ PSInput VSMain(VSInput input) {
     PSInput output;
     float4 worldPosition = mul(float4(input.position, 1.0f), model);
     float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
-    output.normalWorldSpace = mul(float4(input.normal, 1.0f), model);
+    output.normalWorldSpace = mul(input.normal, normalMatrix);
     output.positionWorldSpace = worldPosition;
     output.position = mul(viewPosition, perFrameBuffer.projection);
 #if defined(VERTEX_COLORS)
@@ -235,8 +240,9 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float3 baseColor = float3(1.0, 1.0, 1.0);
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
     
+    float2 uv = float2(0.0, 0.0);
 #if defined(TEXTURED)
-    float2 uv = input.texcoord;
+    uv = input.texcoord;
 #endif // TEXTURED
 #if defined(BASE_COLOR_TEXTURE)
     Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
@@ -271,7 +277,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float3 lighting = float3(0.0, 0.0, 0.0);
     for (uint i = 0; i < numLights; i++) {
         LightInfo light = lights[i];
-        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, input.normalWorldSpace.xyz, uv, baseColor, metallic, roughness, F0);
+        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, input.normalWorldSpace, uv, baseColor, metallic, roughness, F0);
     }
     
 #if defined(VERTEX_COLORS)

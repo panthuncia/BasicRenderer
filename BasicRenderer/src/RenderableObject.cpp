@@ -23,9 +23,19 @@ void RenderableObject::CreateBuffers() {
 }
 
 void RenderableObject::UpdateBuffers() {
+    perObjectCBData.modelMatrix = transform.modelMatrix;
+
+    XMMATRIX upperLeft3x3 = XMMatrixSet(
+        XMVectorGetX(perObjectCBData.modelMatrix.r[0]), XMVectorGetY(perObjectCBData.modelMatrix.r[0]), XMVectorGetZ(perObjectCBData.modelMatrix.r[0]), 0.0f,
+        XMVectorGetX(perObjectCBData.modelMatrix.r[1]), XMVectorGetY(perObjectCBData.modelMatrix.r[1]), XMVectorGetZ(perObjectCBData.modelMatrix.r[1]), 0.0f,
+        XMVectorGetX(perObjectCBData.modelMatrix.r[2]), XMVectorGetY(perObjectCBData.modelMatrix.r[2]), XMVectorGetZ(perObjectCBData.modelMatrix.r[2]), 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    );
+
+    perObjectCBData.normalMatrix = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
+
     D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
     ThrowIfFailed(perObjectConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pPerObjectConstantBuffer)));
-    perObjectCBData.model = transform.modelMatrix;
     memcpy(pPerObjectConstantBuffer, &perObjectCBData, sizeof(perObjectCBData));
     perObjectConstantBuffer->Unmap(0, nullptr);
 }

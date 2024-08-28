@@ -2,13 +2,14 @@
 #include <DirectXMath.h>
 
 struct PerFrameCB {
-    DirectX::XMMATRIX view;
-    DirectX::XMMATRIX projection;
+    DirectX::XMMATRIX viewMatrix;
+    DirectX::XMMATRIX projectionMatrix;
     DirectX::XMVECTOR eyePosWorldSpace;
 };
 
 struct PerObjectCB {
-    DirectX::XMMATRIX model;
+    DirectX::XMMATRIX modelMatrix;
+    DirectX::XMMATRIX normalMatrix;
 };
 
 struct PerMeshCB {
@@ -40,9 +41,13 @@ struct PerMaterialCB {
 };
 
 struct LightInfo {
+    // Light attributes: x=type (0=point, 1=spot, 2=directional)
+    // x=point -> w = shadow caster
+    // x=spot -> y= inner cone angle, z= outer cone angle, w= shadow caster
+    // x=directional => w= shadow caster
     DirectX::XMVECTOR properties;
-    DirectX::XMVECTOR posWorldSpace;
-    DirectX::XMVECTOR dirWorldSpace;
-    DirectX::XMVECTOR attenuation;
-    DirectX::XMVECTOR color;
+    DirectX::XMVECTOR posWorldSpace; // Position of the lights
+    DirectX::XMVECTOR dirWorldSpace; // Direction of the lights
+    DirectX::XMVECTOR attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
+    DirectX::XMVECTOR color; // Color of the lights
 };

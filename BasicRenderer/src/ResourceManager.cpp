@@ -48,7 +48,7 @@ void ResourceManager::Initialize() {
     light.posWorldSpace = DirectX::XMVectorSet(3.0, 3.0, 3.0, 1.0);
     light.dirWorldSpace = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
     light.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
-    light.color = DirectX::XMVectorSet(10.0, 10.0, 10.0, 1.0);
+    light.color = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
     lightsData.push_back(light);
 
     D3D12_RESOURCE_DESC structuredBufferDesc = {};
@@ -133,14 +133,14 @@ void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX:
     //    DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),  // Focus point
     //    DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)   // Up direction
     //);
-    perFrameCBData.view = viewMatrix;
+    perFrameCBData.viewMatrix = viewMatrix;
     //perFrameCBData.projection = DirectX::XMMatrixPerspectiveFovLH(
     //    DirectX::XM_PIDIV2, // Field of View
     //    800.0f / 600.0f,    // Aspect ratio
     //    0.1f,               // Near clipping plane
     //    100.0f              // Far clipping plane
     //);
-    perFrameCBData.projection = projectionMatrix;
+    perFrameCBData.projectionMatrix = projectionMatrix;
     perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat3(&eyeWorld);
     
     // Map the upload heap and copy new data to it
