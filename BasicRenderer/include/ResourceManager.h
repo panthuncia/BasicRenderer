@@ -65,7 +65,7 @@ public:
         cbvDesc.SizeInBytes = bufferSize;
 
         UINT index = AllocateDescriptor();
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = GetCPUHandle().Offset(index, descriptorSize);
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = GetCPUHandle();
 
         device->CreateConstantBufferView(&cbvDesc, handle);
 
