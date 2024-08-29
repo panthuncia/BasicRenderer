@@ -30,6 +30,8 @@ void ResourceManager::Initialize() {
         nullptr,
         IID_PPV_ARGS(&perFrameConstantBuffer)));
 
+    perFrameCBData.ambientLighting = XMVectorSet(0.2, 0.2, 0.2, 1.0);
+
     // Map the constant buffer and initialize it
 
     InitializeUploadHeap();

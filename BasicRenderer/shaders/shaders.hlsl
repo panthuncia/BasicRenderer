@@ -3,7 +3,8 @@
 struct PerFrameBuffer {
     row_major matrix view;
     row_major matrix projection;
-    float3 eyePosWorldSpace;
+    float4 eyePosWorldSpace;
+    float4 ambientLighting;
 };
 
 cbuffer PerObject : register(b1) {
@@ -246,12 +247,26 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     return lighting * albedo;
 }
 
+float luminanceFromColor(float3 color) {
+        //standard luminance coefficients
+    return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+//https://64.github.io/tonemapping/
+//Interpolates between per-channel reinhard and luninance-based reinhard
+float3 reinhardJodie(float3 color) {
+    float luminance = luminanceFromColor(color);
+    float3 reinhardPerChannel = color / (1.0f + color);
+    float3 reinhardLuminance = color / (1.0f + luminance);
+    return lerp(reinhardLuminance, reinhardPerChannel, reinhardPerChannel);
+}
+
 float4 PSMain(PSInput input) : SV_TARGET {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[1];
     
-    float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace - input.positionWorldSpace.xyz);
+    float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
     uint numLights, lightsStride;
     lights.GetDimensions(numLights, lightsStride);
 
@@ -309,10 +324,26 @@ float4 PSMain(PSInput input) : SV_TARGET {
         LightInfo light = lights[i];
         lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
     }
-    
+#if defined(AO_TEXTURE)
+    Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
+    SamplerState aoSamplerState = SamplerDescriptorHeap[materialInfo.aoSamplerIndex];
+    float ao = aoTexture.Sample(aoSamplerState, uv).r;
+    float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz * ao;
+#else
+    float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz;
+#endif // AO_TEXTURE
+    lighting += ambient;
 #if defined(VERTEX_COLORS)
     lighting = lighting * input.color.xyz;
 #endif
+    
+    // Reinhard tonemapping
+    lighting = reinhardJodie(lighting);
+#if defined(PBR)
+    // Gamma correction
+    lighting = pow(lighting, float3(0.45454545454, 0.45454545454, 0.45454545454));
+#endif
+    
     float opacity = baseColor.a;
     return float4(lighting, opacity);
 }

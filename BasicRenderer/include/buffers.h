@@ -5,6 +5,7 @@ struct PerFrameCB {
     DirectX::XMMATRIX viewMatrix;
     DirectX::XMMATRIX projectionMatrix;
     DirectX::XMVECTOR eyePosWorldSpace;
+    DirectX::XMVECTOR ambientLighting;
 };
 
 struct PerObjectCB {
