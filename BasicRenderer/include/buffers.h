@@ -36,6 +36,7 @@ struct PerMaterialCB {
     float specularStrength;
     float textureScale;
     float heightMapScale;
+    float pad0;
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
 };

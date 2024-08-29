@@ -20,6 +20,8 @@ public:
     void RemoveObjectByName(const std::string& name);
     void RemoveObjectByID(UINT id);
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetRenderableObjectIDMap();
+    std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetOpaqueRenderableObjectIDMap();
+    std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetTransparentRenderableObjectIDMap();
     SceneNode& GetRoot();
     void Update();
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
@@ -32,6 +34,8 @@ private:
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> objectsByID;
     std::unordered_map<UINT, std::shared_ptr<SceneNode>> nodesByID;
     std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodesByName;
+    std::unordered_map<UINT, std::shared_ptr<RenderableObject>> opaqueObjectsByID;
+    std::unordered_map<UINT, std::shared_ptr<RenderableObject>> transparentObjectsByID;
 	UINT numObjects = 0;
 	UINT nextNodeID = 0;
     SceneNode sceneRoot;

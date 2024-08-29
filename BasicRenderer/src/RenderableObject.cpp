@@ -9,12 +9,33 @@ RenderableObject::RenderableObject(std::string name) : SceneNode(name) {
 }
 
 RenderableObject::RenderableObject(std::string name, std::vector<Mesh> meshes) : SceneNode(name) {
-	this->meshes = meshes;
+    for (auto& mesh : meshes) {
+        if (mesh.material->blendState != BlendState::BLEND_STATE_OPAQUE) {
+            transparentMeshes.push_back(mesh);
+            m_hasTransparent = true;
+        }
+        else {
+            this->opaqueMeshes.push_back(mesh);
+            m_hasOpaque = true;
+        }
+    }
     CreateBuffers();
 }
 
-std::vector<Mesh>& RenderableObject::getMeshes() {
-	return meshes;
+std::vector<Mesh>& RenderableObject::GetOpaqueMeshes() {
+	return opaqueMeshes;
+}
+
+std::vector<Mesh>& RenderableObject::GetTransparentMeshes() {
+    return transparentMeshes;
+}
+
+bool RenderableObject::HasOpaque() const {
+    return m_hasOpaque;
+}
+
+bool RenderableObject::HasTransparent() const {
+    return m_hasTransparent;
 }
 
 void RenderableObject::CreateBuffers() {
@@ -40,7 +61,7 @@ void RenderableObject::UpdateBuffers() {
     perObjectConstantBuffer->Unmap(0, nullptr);
 }
 
-ComPtr<ID3D12Resource>& RenderableObject::getConstantBuffer() {
+ComPtr<ID3D12Resource>& RenderableObject::GetConstantBuffer() {
     return perObjectConstantBuffer;
 }
 

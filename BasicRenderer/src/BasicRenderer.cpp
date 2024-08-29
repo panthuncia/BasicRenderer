@@ -154,7 +154,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 5, 4, 1, 5, 0
     };
 
-    auto carScene = loadGLB("models/wooden_table.glb");
+    auto carScene = loadGLB("models/datsun.glb");
 
     renderer.SetCurrentScene(carScene);
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);

@@ -47,6 +47,7 @@ struct MaterialInfo {
     float specularStrength;
     float textureScale;
     float heightMapScale;
+    float pad0;
     float4 baseColorFactor;
     float4 emissiveFactor;
 };
@@ -66,6 +67,10 @@ struct VSInput {
 #if defined(TEXTURED)
     float2 texcoord : TEXCOORD0;
 #endif
+#if defined(NORMAL_MAP) || defined(PARALLAX)
+    float3 tangent : TANGENT0;
+    float3 bitangent : BINORMAL0;
+#endif // NORMAL_MAP
 };
 #endif
 
@@ -83,7 +88,12 @@ struct PSInput {
     float3 normalWorldSpace : TEXCOORD2;
 #if defined(TEXTURED)
     float2 texcoord : TEXCOORD0;
-#endif
+#endif // TEXTURED
+#if defined(NORMAL_MAP) || defined(PARALLAX)
+    float3 TBN_T : TEXCOORD3;      // First row of TBN
+    float3 TBN_B : TEXCOORD4;      // Second row of TBN
+    float3 TBN_N : TEXCOORD5;      // Third row of TBN
+#endif // NORMAL_MAP
 };
 #endif
 
@@ -94,9 +104,17 @@ PSInput VSMain(VSInput input) {
     PSInput output;
     float4 worldPosition = mul(float4(input.position, 1.0f), model);
     float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
-    output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
     output.positionWorldSpace = worldPosition;
     output.position = mul(viewPosition, perFrameBuffer.projection);
+    
+    output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
+    
+#if defined(NORMAL_MAP) || defined(PARALLAX)
+    output.TBN_T = normalize(mul(input.tangent, normalMatrix));
+    output.TBN_B = normalize(mul(input.bitangent, normalMatrix));
+    output.TBN_N = normalize(mul(input.normal, normalMatrix));
+#endif // NORMAL_MAP
+    
 #if defined(VERTEX_COLORS)
     output.color = input.color;
 #endif
@@ -237,7 +255,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
     uint numLights, lightsStride;
     lights.GetDimensions(numLights, lightsStride);
 
-    float3 baseColor = float3(1.0, 1.0, 1.0);
+    float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
     
     float2 uv = float2(0.0, 0.0);
@@ -247,11 +265,23 @@ float4 PSMain(PSInput input) : SV_TARGET {
 #if defined(BASE_COLOR_TEXTURE)
     Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
     SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
-    baseColor = baseColorTexture.Sample(baseColorSamplerState, uv).rgb;
-    #if defined(PBR)
-        baseColor *= materialInfo.baseColorFactor.xyz;
-    #endif // PBR
+    baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
 #endif //BASE_COLOR_TEXTURE
+#if defined(PBR)
+        baseColor = materialInfo.baseColorFactor * baseColor;
+#endif // PBR
+    float3 normalWS = input.normalWorldSpace;
+#if defined(NORMAL_MAP) || defined(PARALLAX)
+    float3x3 TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
+#endif // NORMAL_MAP || PARALLAX
+    
+#if defined (NORMAL_MAP)
+    Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
+    SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
+    float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
+    float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
+    normalWS = normalize(mul(tangentSpaceNormal, TBN));
+#endif // NORMAL_MAP
     float metallic = 0.0;
     float roughness = 0.0;
     float3 F0 = float3(0.04, 0.04, 0.04); // TODO: this should be specified per-material
@@ -271,18 +301,18 @@ float4 PSMain(PSInput input) : SV_TARGET {
     F0 = lerp(F0, baseColor.xyz, metallic);
     
 #if defined(VERTEX_COLORS)
-    baseColor *= input.color.xyz;
+    baseColor *= input.color;
 #endif // VERTEX_COLORS
     
     float3 lighting = float3(0.0, 0.0, 0.0);
     for (uint i = 0; i < numLights; i++) {
         LightInfo light = lights[i];
-        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, input.normalWorldSpace, uv, baseColor, metallic, roughness, F0);
+        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
     }
     
 #if defined(VERTEX_COLORS)
     lighting = lighting * input.color.xyz;
 #endif
-    
-    return float4(lighting, 1.0);
+    float opacity = baseColor.a;
+    return float4(lighting, opacity);
 }

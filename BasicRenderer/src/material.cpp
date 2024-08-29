@@ -18,7 +18,7 @@ Material::Material(const std::string& name,
     float roughnessFactor,
     DirectX::XMFLOAT4 baseColorFactor,
     DirectX::XMFLOAT4 emissiveFactor,
-    int blendMode)
+    BlendState blendState)
     : name(name),
     psoFlags(psoFlags),
     baseColorTexture(baseColorTexture),
@@ -30,7 +30,7 @@ Material::Material(const std::string& name,
     roughnessFactor(roughnessFactor),
     baseColorFactor(baseColorFactor),
     emissiveFactor(emissiveFactor),
-    blendMode(blendMode) {
+    blendState(blendState) {
 
     materialData.psoFlags = psoFlags;
     materialData.ambientStrength = 0.5;

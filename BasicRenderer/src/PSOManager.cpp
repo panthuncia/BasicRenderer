@@ -31,16 +31,17 @@ void PSOManager::initialize() {
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(pCompiler.GetAddressOf()));
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags) {
-    if (m_psoCache.find(psoFlags) == m_psoCache.end()) {
-        m_psoCache[psoFlags] = CreatePSO(psoFlags);
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, BlendState blendState) {
+    PSOKey key(psoFlags, blendState);
+    if (m_psoCache.find(key) == m_psoCache.end()) {
+        m_psoCache[key] = CreatePSO(psoFlags, blendState);
     }
-    return m_psoCache[psoFlags];
+    return m_psoCache[key];
 }
 
 
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags, BlendState blendState) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
 
@@ -64,7 +65,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags)
             inputElementDescs.push_back({ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
         }
     }
-
+    if (psoFlags & PSOFlags::NORMAL_MAP) {
+        inputElementDescs.push_back({ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        inputElementDescs.push_back({ "BINORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 48, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+    }
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = { inputElementDescs.data(), static_cast<unsigned int>(inputElementDescs.size())};
@@ -72,7 +76,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags)
     psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
     psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = GetBlendDesc(blendState);
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -301,4 +305,48 @@ void PSOManager::createRootSignature() {
 
 ComPtr<ID3D12RootSignature> PSOManager::GetRootSignature() {
     return rootSignature;
+}
+
+D3D12_BLEND_DESC PSOManager::GetBlendDesc(BlendState blendState) {
+    switch (blendState) {
+    case BlendState::BLEND_STATE_OPAQUE:{
+        D3D12_BLEND_DESC opaqueBlendDesc = {};
+        opaqueBlendDesc.AlphaToCoverageEnable = FALSE;
+        opaqueBlendDesc.IndependentBlendEnable = FALSE;
+
+        for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+            opaqueBlendDesc.RenderTarget[i].BlendEnable = FALSE;
+            opaqueBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        }
+        return opaqueBlendDesc;
+    }
+    case BlendState::BLEND_STATE_MASK: {
+        D3D12_BLEND_DESC maskBlendDesc = {};
+        maskBlendDesc.AlphaToCoverageEnable = TRUE; // Enable Alpha-to-Coverage for multi-sampling anti-aliasing.
+        maskBlendDesc.IndependentBlendEnable = FALSE;
+
+        for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+            maskBlendDesc.RenderTarget[i].BlendEnable = FALSE; // No standard blending needed.
+            maskBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        }
+        return maskBlendDesc;
+    }
+    case BlendState::BLEND_STATE_BLEND: {
+        D3D12_BLEND_DESC blendBlendDesc = {};
+        blendBlendDesc.AlphaToCoverageEnable = FALSE;
+        blendBlendDesc.IndependentBlendEnable = FALSE;
+
+        for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+            blendBlendDesc.RenderTarget[i].BlendEnable = TRUE;
+            blendBlendDesc.RenderTarget[i].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+            blendBlendDesc.RenderTarget[i].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+            blendBlendDesc.RenderTarget[i].BlendOp = D3D12_BLEND_OP_ADD;
+            blendBlendDesc.RenderTarget[i].SrcBlendAlpha = D3D12_BLEND_ONE;
+            blendBlendDesc.RenderTarget[i].DestBlendAlpha = D3D12_BLEND_ZERO;
+            blendBlendDesc.RenderTarget[i].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+            blendBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        }
+        return blendBlendDesc;
+    }
+    }
 }

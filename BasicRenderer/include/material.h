@@ -6,6 +6,7 @@
 #include <string>
 #include "Texture.h"
 #include "ResourceManager.h"
+#include "BlendState.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -23,7 +24,7 @@ public:
     float roughnessFactor;
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
-    int blendMode;
+    BlendState blendState;
     PerMaterialCB materialData = {0};
 
     Material(const std::string& name,
@@ -40,7 +41,7 @@ public:
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
         DirectX::XMFLOAT4 emissiveFactor,
-        int blendMode);
+        BlendState blendState);
 
     static std::shared_ptr<Texture> createDefaultTexture();
     UINT GetMaterialBufferIndex();

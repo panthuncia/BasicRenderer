@@ -240,13 +240,31 @@ void DX12Renderer::Render() {
 
     commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    for (auto& pair : currentScene->GetRenderableObjectIDMap()) {
+    for (auto& pair : currentScene->GetOpaqueRenderableObjectIDMap()) {
         auto& renderable = pair.second;
-        commandList->SetGraphicsRootConstantBufferView(1, renderable->getConstantBuffer()->GetGPUVirtualAddress());
+        commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer()->GetGPUVirtualAddress());
 
-        for (auto& mesh : renderable->getMeshes()) {
+        for (auto& mesh : renderable->GetOpaqueMeshes()) {
             commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
-            auto pso = psoManager.GetPSO(mesh.material->psoFlags);
+            auto pso = psoManager.GetPSO(mesh.material->psoFlags, mesh.material->blendState);
+            commandList->SetPipelineState(pso.Get());
+            D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
+            D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
+
+            commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+            commandList->IASetIndexBuffer(&indexBufferView);
+
+            commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+        }
+    }
+
+    for (auto& pair : currentScene->GetTransparentRenderableObjectIDMap()) {
+        auto& renderable = pair.second;
+        commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer()->GetGPUVirtualAddress());
+
+        for (auto& mesh : renderable->GetTransparentMeshes()) {
+            commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
+            auto pso = psoManager.GetPSO(mesh.material->psoFlags, mesh.material->blendState);
             commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();

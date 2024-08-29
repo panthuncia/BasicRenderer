@@ -9,6 +9,14 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     objectsByID[nextNodeID] = object;
     nextNodeID++;
 
+    if (object->HasOpaque()) {
+        opaqueObjectsByID[object->localID] = object;
+    }
+
+    if (object->HasTransparent()) {
+        transparentObjectsByID[object->localID] = object;
+    }
+
     if (object->parent == nullptr) {
         sceneRoot.addChild(object);
     }
@@ -69,6 +77,8 @@ void Scene::RemoveObjectByName(const std::string& name) {
             objectsByID.erase(idIt);
         }
         objectsByName.erase(it);
+        opaqueObjectsByID.erase(it->second->localID);
+        transparentObjectsByID.erase(it->second->localID);
         std::shared_ptr<SceneNode> node = it->second;
         node->parent->removeChild(node->localID);
     }
@@ -83,6 +93,9 @@ void Scene::RemoveObjectByID(UINT id) {
             objectsByName.erase(nameIt);
         }
         objectsByID.erase(it);
+        opaqueObjectsByID.erase(it->second->localID);
+        transparentObjectsByID.erase(it->second->localID);
+
         std::shared_ptr<SceneNode> node = it->second;
         node->parent->removeChild(node->localID);
     }
@@ -90,6 +103,14 @@ void Scene::RemoveObjectByID(UINT id) {
 
 std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetRenderableObjectIDMap() {
     return objectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetOpaqueRenderableObjectIDMap() {
+    return opaqueObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetTransparentRenderableObjectIDMap() {
+    return transparentObjectsByID;
 }
 
 SceneNode& Scene::GetRoot() {

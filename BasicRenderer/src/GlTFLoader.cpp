@@ -537,7 +537,7 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
         float roughnessFactor = 1.0f;
         DirectX::XMFLOAT4 baseColorFactor(1.0f, 1.0f, 1.0f, 1.0f);
         DirectX::XMFLOAT4 emissiveFactor(0.0f, 0.0f, 0.0f, 1.0f);
-        int blendMode = D3D12_BLEND_OP_ADD; // Opaque blend mode
+        BlendState blendMode = BlendState::BLEND_STATE_OPAQUE; // Opaque blend mode
 
         if (gltfMaterial.contains("pbrMetallicRoughness")) {
             psoFlags |= PSOFlags::PBR;
@@ -597,10 +597,10 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
         if (gltfMaterial.contains("alphaMode")) {
             std::string alphaMode = gltfMaterial["alphaMode"];
             if (alphaMode == "MASK") {
-                blendMode = D3D12_BLEND_OP_MAX;
+                blendMode = BlendState::BLEND_STATE_MASK;
             }
             else if (alphaMode == "BLEND") {
-                blendMode = D3D12_BLEND_OP_ADD;
+                blendMode = BlendState::BLEND_STATE_BLEND;
             }
         }
         std::shared_ptr<Material> newMaterial = std::make_shared<Material>(gltfMaterial["name"], psoFlags,

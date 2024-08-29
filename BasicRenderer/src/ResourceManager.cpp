@@ -48,7 +48,7 @@ void ResourceManager::Initialize() {
     light.posWorldSpace = DirectX::XMVectorSet(3.0, 3.0, 3.0, 1.0);
     light.dirWorldSpace = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
     light.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
-    light.color = DirectX::XMVectorSet(10.0, 10.0, 10.0, 10.0);
+    light.color = DirectX::XMVectorSet(10.0, 10.0, 10.0, 1.0);
     lightsData.push_back(light);
 
     D3D12_RESOURCE_DESC structuredBufferDesc = {};
