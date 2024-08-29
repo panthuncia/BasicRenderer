@@ -268,13 +268,25 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, c
             GeometryData geometryData;
 
             auto accessor = getAccessorData(gltfData, primitive["attributes"]["POSITION"]);
-            geometryData.positions = extractDataFromBuffer<float>(binaryData, accessor);
+            auto positions = extractDataFromBuffer<float>(binaryData, accessor);
+            for (size_t i = 0; i < positions.size(); i += 3) {
+                positions[i + 2] = -positions[i + 2]; // Flip Z-coordinate
+            }
+            geometryData.positions = positions;
 
             accessor = getAccessorData(gltfData, primitive["attributes"]["NORMAL"]);
-            geometryData.normals = extractDataFromBuffer<float>(binaryData, accessor);
+            auto normals = extractDataFromBuffer<float>(binaryData, accessor);
+            for (size_t i = 0; i < normals.size(); i += 3) {
+                normals[i + 2] = -normals[i + 2]; // Flip Z-component of normals
+            }
+            geometryData.normals = normals;
 
             accessor = getAccessorData(gltfData, primitive["indices"]);
-            geometryData.indices = extractIndexDataAsUint32(binaryData, accessor);
+            auto indices = extractIndexDataAsUint32(binaryData, accessor);
+            for (size_t i = 0; i < indices.size(); i += 3) {
+                std::swap(indices[i + 1], indices[i + 2]); // Reverse winding order
+            }
+            geometryData.indices = indices;
 
             geometryData.material = materials[primitive["material"]];
 
@@ -318,6 +330,12 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
 
         if (gltfNode.contains("matrix")) {
             auto matrixValues = gltfNode["matrix"].get<std::vector<float>>();
+            // Manually flip the Z-axis translation components in the transformation matrix
+            matrixValues[8] = -matrixValues[8];
+            matrixValues[9] = -matrixValues[9];
+            matrixValues[10] = -matrixValues[10];
+            matrixValues[11] = -matrixValues[11];
+
             XMMATRIX matrix = XMMatrixSet(
                 matrixValues[0], matrixValues[1], matrixValues[2], matrixValues[3],
                 matrixValues[4], matrixValues[5], matrixValues[6], matrixValues[7],
@@ -325,17 +343,18 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
                 matrixValues[12], matrixValues[13], matrixValues[14], matrixValues[15]
             );
 
+
             XMVECTOR position, rotation, scale;
             XMMatrixDecompose(&scale, &rotation, &position, matrix);
 
-            node->transform.setLocalPosition(XMFLOAT3(XMVectorGetX(position), XMVectorGetY(position), XMVectorGetZ(position)));
+            node->transform.setLocalPosition(XMFLOAT3(XMVectorGetX(position), XMVectorGetY(position), -XMVectorGetZ(position)));
             node->transform.setLocalScale(XMFLOAT3(XMVectorGetX(scale), XMVectorGetY(scale), XMVectorGetZ(scale)));
             node->transform.setLocalRotationFromQuaternion(rotation);
         }
         else {
             if (gltfNode.contains("translation")) {
                 auto translationValues = gltfNode["translation"].get<std::vector<float>>();
-                node->transform.setLocalPosition(XMFLOAT3(translationValues[0], translationValues[1], translationValues[2]));
+                node->transform.setLocalPosition(XMFLOAT3(translationValues[0], translationValues[1], -translationValues[2]));
             }
             if (gltfNode.contains("scale")) {
                 auto scaleValues = gltfNode["scale"].get<std::vector<float>>();
@@ -343,7 +362,7 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
             }
             if (gltfNode.contains("rotation")) {
                 auto rotationValues = gltfNode["rotation"].get<std::vector<float>>();
-                XMVECTOR quaternion = XMVectorSet(rotationValues[0], rotationValues[1], rotationValues[2], rotationValues[3]);
+                XMVECTOR quaternion = XMVectorSet(rotationValues[0], rotationValues[1], -rotationValues[2], -rotationValues[3]);
                 node->transform.setLocalRotationFromQuaternion(quaternion);
             }
         }
