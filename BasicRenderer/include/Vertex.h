@@ -32,7 +32,7 @@ struct VertexSkinned {
     XMFLOAT3 position;
     XMFLOAT3 normal;
     XMFLOAT2 texcoord;
-    XMFLOAT4 joints;
+    XMUINT4 joints;
     XMFLOAT4 weights;
 };
 
@@ -50,7 +50,7 @@ struct VertexNormalMappedSkinned {
     XMFLOAT2 texcoord;
     XMFLOAT3 tangent;
     XMFLOAT3 bitangent;
-    XMFLOAT4 joints;
+    XMUINT4 joints;
     XMFLOAT4 weights;
 };
 

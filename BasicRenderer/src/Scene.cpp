@@ -122,6 +122,9 @@ void Scene::Update() {
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
     this->sceneRoot.update();
+    for (auto& skeleton : animatedSkeletons) {
+        skeleton->UpdateTransforms();
+    }
 }
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {

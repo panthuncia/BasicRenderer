@@ -154,8 +154,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 5, 4, 1, 5, 0
     };
 
-    auto carScene = loadGLB("models/dragon.glb");
-    carScene->GetRoot().transform.setLocalScale({10, 10, 10});
+    auto carScene = loadGLB("models/wooden_table.glb");
+    carScene->GetRoot().transform.setLocalScale({1, 1, 1});
 
     renderer.SetCurrentScene(carScene);
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);

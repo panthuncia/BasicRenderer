@@ -299,7 +299,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, c
 
             if (primitive["attributes"].contains("JOINTS_0")) {
                 accessor = getAccessorData(gltfData, primitive["attributes"]["JOINTS_0"]);
-                geometryData.joints = extractDataFromBuffer<float>(binaryData, accessor);
+                geometryData.joints = extractIndexDataAsUint32(binaryData, accessor);
 
                 accessor = getAccessorData(gltfData, primitive["attributes"]["WEIGHTS_0"]);
                 geometryData.weights = extractDataFromBuffer<float>(binaryData, accessor);
@@ -799,6 +799,7 @@ std::shared_ptr<Scene> loadGLB(std::string fileName) {
         for (std::shared_ptr<Skeleton> skin : skins) {
             scene->AddSkeleton(skin);
         }
+        SetSkins(nodes, skins);
     }
     catch (const std::exception& e) {
         spdlog::error("Error: {}", e.what());

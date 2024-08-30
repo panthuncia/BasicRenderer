@@ -9,7 +9,7 @@ struct PerFrameBuffer {
 
 cbuffer PerObject : register(b1) {
     row_major matrix model;
-    row_major float3x3 normalMatrix;
+    row_major float4x4 normalMatrix;
     uint boneTransformBufferIndex;
     uint inverseBindMatricesBufferIndex;
 };
@@ -75,7 +75,7 @@ struct VSInput {
     float3 bitangent : BINORMAL0;
 #endif // NORMAL_MAP
 #if defined(SKINNED)
-    float4 joints : TEXCOORD1;
+    uint4 joints : TEXCOORD1;
     float4 weights : TEXCOORD2;
 #endif // SKINNED
 };
@@ -109,19 +109,19 @@ PSInput VSMain(VSInput input) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(input.position, 1.0f);
     
-    float3x3 normalMatrixSkinnedIfNecessary = normalMatrix;
+    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;
     
 #if defined(SKINNED)
-    StructuredBuffer<matrix> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
-    StructuredBuffer<matrix> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
+    StructuredBuffer<row_major matrix> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
+    StructuredBuffer<row_major matrix> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
-    matrix skinMatrix = input.weights.x * (boneTransformsBuffer[input.joints.x] * inverseBindMatricesBuffer[input.joints.x]) +
-            input.weights.y * (boneTransformsBuffer[input.joints.y] * inverseBindMatricesBuffer[input.joints.y]) +
-            input.weights.z * (boneTransformsBuffer[input.joints.z] * inverseBindMatricesBuffer[input.joints.z]) +
-            input.weights.w * (boneTransformsBuffer[input.joints.w] * inverseBindMatricesBuffer[input.joints.w]);
+    matrix skinMatrix = input.weights.x * mul(inverseBindMatricesBuffer[input.joints.x], boneTransformsBuffer[input.joints.x]) +
+                        input.weights.y * mul(inverseBindMatricesBuffer[input.joints.y], boneTransformsBuffer[input.joints.y]) +
+                        input.weights.z * mul(inverseBindMatricesBuffer[input.joints.z], boneTransformsBuffer[input.joints.z]) +
+                        input.weights.w * mul(inverseBindMatricesBuffer[input.joints.w], boneTransformsBuffer[input.joints.w]);
     
     pos = mul(pos, skinMatrix);
-    normalMatrixSkinnedIfNecessary = mul((float3x3)skinMatrix, normalMatrixSkinnedIfNecessary);
+    normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3)skinMatrix);
 #endif // SKINNED
     
     PSInput output;

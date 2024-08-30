@@ -43,6 +43,8 @@ void Skeleton::UpdateTransforms() {
         // Copy the matrix directly using memcpy
         memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
     }
+    auto& resourceManager = ResourceManager::GetInstance();
+    resourceManager.UpdateStructuredBuffer<DirectX::XMMATRIX>(m_transformsHandle, reinterpret_cast<XMMATRIX*>(m_boneTransforms.data()), 0, m_nodes.size());
 }
 
 UINT Skeleton::GetTransformsBufferIndex() {

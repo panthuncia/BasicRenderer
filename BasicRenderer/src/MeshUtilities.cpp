@@ -11,72 +11,96 @@ TangentBitangent calculateTangentsBitangentsIndexed(
     const std::vector<XMFLOAT2>& uvs,
     const std::vector<uint32_t>& indices
 ) {
-    TangentBitangent result;
-    result.tangents.resize(positions.size(), XMFLOAT3(0.0f, 0.0f, 0.0f));
-    result.bitangents.resize(positions.size(), XMFLOAT3(0.0f, 0.0f, 0.0f));
+    size_t vertexCount = positions.size();
+    size_t triangleCount = indices.size() / 3;
 
-    for (size_t i = 0; i < indices.size(); i += 3) {
-        // Indices
-        uint32_t i0 = indices[i];
-        uint32_t i1 = indices[i + 1];
-        uint32_t i2 = indices[i + 2];
+    // Initialize tangents and bitangents
+    std::vector<XMFLOAT3> tangents(vertexCount, XMFLOAT3(0.0f, 0.0f, 0.0f));
+    std::vector<XMFLOAT3> bitangents(vertexCount, XMFLOAT3(0.0f, 0.0f, 0.0f));
 
-        // vertices
-        XMFLOAT3 v0 = positions[i0];
-        XMFLOAT3 v1 = positions[i1];
-        XMFLOAT3 v2 = positions[i2];
+    for (size_t i = 0; i < triangleCount; ++i) {
+        // Get the indices of the triangle vertices
+        uint32_t index0 = indices[i * 3];
+        uint32_t index1 = indices[i * 3 + 1];
+        uint32_t index2 = indices[i * 3 + 2];
 
-        // uvs
-        XMFLOAT2 uv0 = uvs[i0];
-        XMFLOAT2 uv1 = uvs[i1];
-        XMFLOAT2 uv2 = uvs[i2];
+        // Get the vertex positions
+        XMFLOAT3 pos0 = positions[index0];
+        XMFLOAT3 pos1 = positions[index1];
+        XMFLOAT3 pos2 = positions[index2];
 
-        // deltas
-        XMFLOAT3 deltaPos1(
-            v1.x - v0.x,
-            v1.y - v0.y,
-            v1.z - v0.z
-        );
-        XMFLOAT3 deltaPos2(
-            v2.x - v0.x,
-            v2.y - v0.y,
-            v2.z - v0.z
-        );
-        XMFLOAT2 deltaUV1(
-            uv1.x - uv0.x,
-            uv1.y - uv0.y
-        );
-        XMFLOAT2 deltaUV2(
-            uv2.x - uv0.x,
-            uv2.y - uv0.y
-        );
+        // Get the UV coordinates
+        XMFLOAT2 uv0 = uvs[index0];
+        XMFLOAT2 uv1 = uvs[index1];
+        XMFLOAT2 uv2 = uvs[index2];
 
-        // tangent and bitangent
-        float r = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+        // Calculate the edges of the triangle
+        XMFLOAT3 edge1 = XMFLOAT3(pos1.x - pos0.x, pos1.y - pos0.y, pos1.z - pos0.z);
+        XMFLOAT3 edge2 = XMFLOAT3(pos2.x - pos0.x, pos2.y - pos0.y, pos2.z - pos0.z);
 
-        XMFLOAT3 tangent(
-            (deltaPos1.x * deltaUV2.y - deltaPos2.x * deltaUV1.y) * r,
-            (deltaPos1.y * deltaUV2.y - deltaPos2.y * deltaUV1.y) * r,
-            (deltaPos1.z * deltaUV2.y - deltaPos2.z * deltaUV1.y) * r
-        );
+        // Calculate the differences in UV coordinates
+        XMFLOAT2 deltaUV1 = XMFLOAT2(uv1.x - uv0.x, uv1.y - uv0.y);
+        XMFLOAT2 deltaUV2 = XMFLOAT2(uv2.x - uv0.x, uv2.y - uv0.y);
 
-        XMFLOAT3 bitangent(
-            (deltaPos2.x * deltaUV1.x - deltaPos1.x * deltaUV2.x) * r,
-            (deltaPos2.y * deltaUV1.x - deltaPos1.y * deltaUV2.x) * r,
-            (deltaPos2.z * deltaUV1.x - deltaPos1.z * deltaUV2.x) * r
-        );
+        // Calculate the denominator of the tangent/bitangent matrix
+        float f = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
 
-        // A vertex can belong to multiple triangles
-        for (uint16_t idx : {i0, i1, i2}) {
-            result.tangents[idx].x += tangent.x;
-            result.tangents[idx].y += tangent.y;
-            result.tangents[idx].z += tangent.z;
+        // Calculate tangent
+        XMFLOAT3 tangent;
+        tangent.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
+        tangent.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
+        tangent.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
 
-            result.bitangents[idx].x += bitangent.x;
-            result.bitangents[idx].y += bitangent.y;
-            result.bitangents[idx].z += bitangent.z;
-        }
+        // Calculate bitangent
+        XMFLOAT3 bitangent;
+        bitangent.x = f * (-deltaUV2.x * edge1.x + deltaUV1.x * edge2.x);
+        bitangent.y = f * (-deltaUV2.x * edge1.y + deltaUV1.x * edge2.y);
+        bitangent.z = f * (-deltaUV2.x * edge1.z + deltaUV1.x * edge2.z);
+
+        // Accumulate tangents and bitangents for each vertex of the triangle
+        tangents[index0].x += tangent.x;
+        tangents[index0].y += tangent.y;
+        tangents[index0].z += tangent.z;
+
+        tangents[index1].x += tangent.x;
+        tangents[index1].y += tangent.y;
+        tangents[index1].z += tangent.z;
+
+        tangents[index2].x += tangent.x;
+        tangents[index2].y += tangent.y;
+        tangents[index2].z += tangent.z;
+
+        bitangents[index0].x += bitangent.x;
+        bitangents[index0].y += bitangent.y;
+        bitangents[index0].z += bitangent.z;
+
+        bitangents[index1].x += bitangent.x;
+        bitangents[index1].y += bitangent.y;
+        bitangents[index1].z += bitangent.z;
+
+        bitangents[index2].x += bitangent.x;
+        bitangents[index2].y += bitangent.y;
+        bitangents[index2].z += bitangent.z;
     }
 
-    return result;
+    // Normalize tangents and bitangents
+    for (size_t i = 0; i < vertexCount; ++i) {
+        XMVECTOR t = XMLoadFloat3(&tangents[i]);
+        XMVECTOR b = XMLoadFloat3(&bitangents[i]);
+        XMVECTOR n = XMLoadFloat3(&normals[i]);
+
+        // Orthogonalize and normalize the tangent
+        t = XMVector3Normalize(t - n * XMVector3Dot(n, t));
+        XMStoreFloat3(&tangents[i], t);
+
+        // Compute the handedness (bitangent should be perpendicular to both normal and tangent)
+        XMVECTOR crossTB = XMVector3Cross(t, n);
+        float handedness = (XMVector3Dot(crossTB, b).m128_f32[0] < 0.0f) ? -1.0f : 1.0f;
+
+        // Recompute bitangent
+        b = XMVector3Cross(n, t) * handedness;
+        XMStoreFloat3(&bitangents[i], b);
+    }
+
+    return { tangents, bitangents };
 }
