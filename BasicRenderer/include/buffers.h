@@ -11,6 +11,8 @@ struct PerFrameCB {
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
     DirectX::XMMATRIX normalMatrix;
+    UINT boneTransformBufferIndex;
+    UINT inverseBindMatricesBufferIndex;
 };
 
 struct PerMeshCB {

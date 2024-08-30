@@ -52,22 +52,33 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
 
     // Define the vertex input layout
+    UINT byte = 0;
     std::vector<D3D12_INPUT_ELEMENT_DESC> inputElementDescs = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
     };
-
+    byte += 24;
     if (psoFlags & PSOFlags::VERTEX_COLORS) {
-        inputElementDescs.push_back({ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        inputElementDescs.push_back({ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        byte += 16;
     } // TODO: Vertex colors are not yet supported with more complex vertex types
     else {
         if (psoFlags & PSOFlags::BASE_COLOR_TEXTURE || psoFlags & PSOFlags::NORMAL_MAP || psoFlags & PSOFlags::AO_TEXTURE || psoFlags & PSOFlags::EMISSIVE_TEXTURE) {
-            inputElementDescs.push_back({ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+            inputElementDescs.push_back({ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+            byte += 8;
         }
     }
     if (psoFlags & PSOFlags::NORMAL_MAP) {
-        inputElementDescs.push_back({ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-        inputElementDescs.push_back({ "BINORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 48, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        inputElementDescs.push_back({ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        byte += 12;
+        inputElementDescs.push_back({ "BINORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        byte += 12;
+    }
+    if (psoFlags & PSOFlags::SKINNED) {
+        inputElementDescs.push_back({ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        byte += 16;
+        inputElementDescs.push_back({ "TEXCOORD", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+        byte += 16;
     }
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};

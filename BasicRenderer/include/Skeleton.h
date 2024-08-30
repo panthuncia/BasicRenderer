@@ -21,6 +21,8 @@ public:
     void AddAnimation(const std::shared_ptr<Animation>& animation);
     void SetAnimation(size_t index);
     void UpdateTransforms();
+    UINT GetTransformsBufferIndex();
+    UINT GetInverseBindMatricesBufferIndex();
 
 private:
     BufferHandle<XMMATRIX> m_transformsHandle;

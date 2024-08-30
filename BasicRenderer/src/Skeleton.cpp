@@ -44,3 +44,11 @@ void Skeleton::UpdateTransforms() {
         memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
     }
 }
+
+UINT Skeleton::GetTransformsBufferIndex() {
+    return m_transformsHandle.index;
+}
+
+UINT Skeleton::GetInverseBindMatricesBufferIndex() {
+    return m_inverseBindMatricesHandle.index;
+}

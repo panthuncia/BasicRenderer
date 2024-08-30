@@ -2,13 +2,18 @@
 #include "DirectX/d3dx12.h"
 #include "Utilities.h"
 #include "DeviceManager.h"
+#include "PSOFlags.h"
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material) {
+Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, bool skinned) {
     CreateBuffers(vertices, indices);
     this->material = material;
+    m_psoFlags = material->psoFlags;
+    if (skinned) {
+        m_psoFlags |= PSOFlags::SKINNED;
+    }
     auto& resourceManager = ResourceManager::GetInstance();
-    perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
-    pPerMeshBuffer = CreateConstantBuffer<PerMeshCB>(&perMeshBufferData);
+    m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
+    m_pPerMeshBuffer = CreateConstantBuffer<PerMeshCB>(&m_perMeshBufferData);
 }
 
 template <typename VertexType>
@@ -34,9 +39,9 @@ void Mesh::CreateVertexBuffer(const std::vector<VertexType>& vertices, ComPtr<ID
     memcpy(pVertexDataBegin, vertices.data(), vertexBufferSize);
     vertexBuffer->Unmap(0, nullptr);
 
-    vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
-    vertexBufferView.StrideInBytes = sizeof(VertexType);
-    vertexBufferView.SizeInBytes = vertexBufferSize;
+    m_vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
+    m_vertexBufferView.StrideInBytes = sizeof(VertexType);
+    m_vertexBufferView.SizeInBytes = vertexBufferSize;
 }
 
 void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices) {
@@ -48,11 +53,11 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
         for (const auto& v : vertices) {
             specificVertices.push_back(std::get<T>(v));
         }
-        CreateVertexBuffer(specificVertices, vertexBuffer);
+        CreateVertexBuffer(specificVertices, m_vertexBuffer);
         }, vertices.front());
 
     const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT32));
-    indexCount = indices.size();
+    m_indexCount = indices.size();
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
     CD3DX12_RANGE readRange(0, 0);
@@ -65,30 +70,34 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
         &bufferDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr,
-        IID_PPV_ARGS(&indexBuffer)));
+        IID_PPV_ARGS(&m_indexBuffer)));
 
     UINT8* pIndexDataBegin;
-    ThrowIfFailed(indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)));
+    ThrowIfFailed(m_indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)));
     memcpy(pIndexDataBegin, indices.data(), indexBufferSize);
-    indexBuffer->Unmap(0, nullptr);
+    m_indexBuffer->Unmap(0, nullptr);
 
-    indexBufferView.BufferLocation = indexBuffer->GetGPUVirtualAddress();
-    indexBufferView.Format = DXGI_FORMAT_R32_UINT;
-    indexBufferView.SizeInBytes = indexBufferSize;
+    m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
+    m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+    m_indexBufferView.SizeInBytes = indexBufferSize;
 }
 
 D3D12_VERTEX_BUFFER_VIEW Mesh::GetVertexBufferView() const {
-    return vertexBufferView;
+    return m_vertexBufferView;
 }
 
 D3D12_INDEX_BUFFER_VIEW Mesh::GetIndexBufferView() const {
-    return indexBufferView;
+    return m_indexBufferView;
 }
 
 ComPtr<ID3D12Resource> Mesh::GetPerMeshBuffer() const {
-    return pPerMeshBuffer;
+    return m_pPerMeshBuffer;
 }
 
 UINT Mesh::GetIndexCount() const {
-    return indexCount;
+    return m_indexCount;
+}
+
+UINT Mesh::GetPSOFlags() const {
+    return m_psoFlags;
 }

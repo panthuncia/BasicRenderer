@@ -61,9 +61,27 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::str
             }
         }
 
-        Mesh mesh = Mesh(vertices, geom.indices, geom.material);
+        Mesh mesh = Mesh(vertices, geom.indices, geom.material, hasJoints);
         meshes.push_back(std::move(mesh));
     }
 
     return std::make_shared<RenderableObject>(name, meshes);
+}
+
+XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix) {
+    XMVECTOR translation = initialMatrix.r[3];
+    XMVECTOR right = initialMatrix.r[0];
+    XMVECTOR up = initialMatrix.r[1];
+    XMVECTOR forward = initialMatrix.r[2];
+    right = XMVector3Normalize(right);
+    up = XMVector3NormalizeEst(up);
+    forward = XMVector3Normalize(forward);
+
+    XMMATRIX result = XMMatrixIdentity();
+    result.r[0] = right;
+    result.r[1] = up;
+    result.r[2] = forward;
+    result.r[3] = translation;
+
+    return result;
 }

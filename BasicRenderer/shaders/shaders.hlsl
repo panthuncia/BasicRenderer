@@ -10,6 +10,8 @@ struct PerFrameBuffer {
 cbuffer PerObject : register(b1) {
     row_major matrix model;
     row_major float3x3 normalMatrix;
+    uint boneTransformBufferIndex;
+    uint inverseBindMatricesBufferIndex;
 };
 
 cbuffer PerMesh : register(b2) {
@@ -72,28 +74,32 @@ struct VSInput {
     float3 tangent : TANGENT0;
     float3 bitangent : BINORMAL0;
 #endif // NORMAL_MAP
+#if defined(SKINNED)
+    float4 joints : TEXCOORD1;
+    float4 weights : TEXCOORD2;
+#endif // SKINNED
 };
 #endif
 
 #if defined(VERTEX_COLORS)
 struct PSInput {
     float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD1;
-    float4 normalWorldSpace : TEXCOORD2;
+    float4 positionWorldSpace : TEXCOORD3;
+    float4 normalWorldSpace : TEXCOORD4;
     float4 color : COLOR;
 };
 #else
 struct PSInput {
     float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD1;
-    float3 normalWorldSpace : TEXCOORD2;
+    float4 positionWorldSpace : TEXCOORD3;
+    float3 normalWorldSpace : TEXCOORD4;
 #if defined(TEXTURED)
     float2 texcoord : TEXCOORD0;
 #endif // TEXTURED
 #if defined(NORMAL_MAP) || defined(PARALLAX)
-    float3 TBN_T : TEXCOORD3;      // First row of TBN
-    float3 TBN_B : TEXCOORD4;      // Second row of TBN
-    float3 TBN_N : TEXCOORD5;      // Third row of TBN
+    float3 TBN_T : TEXCOORD5;      // First row of TBN
+    float3 TBN_B : TEXCOORD6;      // Second row of TBN
+    float3 TBN_N : TEXCOORD7;      // Third row of TBN
 #endif // NORMAL_MAP
 };
 #endif
@@ -101,19 +107,35 @@ struct PSInput {
 PSInput VSMain(VSInput input) {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    float4 pos = float4(input.position, 1.0f);
+    
+    float3x3 normalMatrixSkinnedIfNecessary = normalMatrix;
+    
+#if defined(SKINNED)
+    StructuredBuffer<matrix> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
+    StructuredBuffer<matrix> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
+    
+    matrix skinMatrix = input.weights.x * (boneTransformsBuffer[input.joints.x] * inverseBindMatricesBuffer[input.joints.x]) +
+            input.weights.y * (boneTransformsBuffer[input.joints.y] * inverseBindMatricesBuffer[input.joints.y]) +
+            input.weights.z * (boneTransformsBuffer[input.joints.z] * inverseBindMatricesBuffer[input.joints.z]) +
+            input.weights.w * (boneTransformsBuffer[input.joints.w] * inverseBindMatricesBuffer[input.joints.w]);
+    
+    pos = mul(pos, skinMatrix);
+    normalMatrixSkinnedIfNecessary = mul((float3x3)skinMatrix, normalMatrixSkinnedIfNecessary);
+#endif // SKINNED
     
     PSInput output;
-    float4 worldPosition = mul(float4(input.position, 1.0f), model);
+    float4 worldPosition = mul(pos, model);
     float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
     output.positionWorldSpace = worldPosition;
     output.position = mul(viewPosition, perFrameBuffer.projection);
     
-    output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
+    output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
     
 #if defined(NORMAL_MAP) || defined(PARALLAX)
-    output.TBN_T = normalize(mul(input.tangent, normalMatrix));
-    output.TBN_B = normalize(mul(input.bitangent, normalMatrix));
-    output.TBN_N = normalize(mul(input.normal, normalMatrix));
+    output.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));
+    output.TBN_B = normalize(mul(input.bitangent, normalMatrixSkinnedIfNecessary));
+    output.TBN_N = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
 #endif // NORMAL_MAP
     
 #if defined(VERTEX_COLORS)

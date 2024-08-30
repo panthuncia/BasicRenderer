@@ -154,8 +154,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 5, 4, 1, 5, 0
     };
 
-    auto carScene = loadGLB("models/datsun.glb");
-    carScene->GetRoot().transform.setLocalScale({0.2, 0.2, 0.2});
+    auto carScene = loadGLB("models/dragon.glb");
+    carScene->GetRoot().transform.setLocalScale({10, 10, 10});
 
     renderer.SetCurrentScene(carScene);
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
@@ -174,7 +174,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
 
     auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::VERTEX_COLORS);
-    auto cubeMesh = Mesh(vertices, indices, cubeMaterial);
+    auto cubeMesh = Mesh(vertices, indices, cubeMaterial, false);
     std::vector<Mesh> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>("CubeObject", vec);
     //renderer.GetCurrentScene()->AddObject(cubeObject);

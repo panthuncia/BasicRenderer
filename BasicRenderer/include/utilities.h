@@ -55,3 +55,5 @@ ComPtr<ID3D12Resource> CreateConstantBuffer(T* pInitialData) {
 
     return buffer;
 }
+
+XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);

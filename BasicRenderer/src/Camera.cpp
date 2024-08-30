@@ -1,5 +1,5 @@
 #include "camera.h"
-
+#include "utilities.h"
 using namespace DirectX;
 Camera::Camera(std::string name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) : lookAt(lookAt), up(up), fieldOfView(fov), aspectRatio(aspect), zNear(zNear), zFar(zFar), SceneNode(name) {
     // Initialize matrices
@@ -15,6 +15,7 @@ Camera::Camera(std::string name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float 
 
 void Camera::onUpdate() {
     viewMatrixInverse = transform.modelMatrix;
-    viewMatrix = XMMatrixInverse(nullptr, transform.modelMatrix);
+    auto inverseMatrix = XMMatrixInverse(nullptr, transform.modelMatrix);
+    viewMatrix = RemoveScalingFromMatrix(inverseMatrix);
     UpdateViewProjectionMatrix();
 }

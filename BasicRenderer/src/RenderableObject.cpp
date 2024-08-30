@@ -71,5 +71,8 @@ void RenderableObject::onUpdate() {
 
 void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
     m_skeleton = skeleton;
+    perObjectCBData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
+    perObjectCBData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
+    UpdateBuffers();
     skeleton->userIDs.push_back(localID);
 }
