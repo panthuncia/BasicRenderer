@@ -81,6 +81,75 @@ public:
         handle.buffer->Unmap(0, nullptr);
     }
 
+    template<typename T>
+    BufferHandle<T> CreateIndexedStructuredBuffer(UINT numElements) {
+        auto device = DeviceManager::getInstance().getDevice();
+        UINT elementSize = sizeof(T);
+        UINT bufferSize = numElements * elementSize;
+
+        D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+        D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+        ComPtr<ID3D12Resource> buffer;
+        auto hr = device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &bufferDesc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&buffer));
+
+        if (FAILED(hr)) {
+            spdlog::error("HRESULT failed with error code: {}", hr);
+            throw std::runtime_error("HRESULT failed");
+        }
+
+        UINT index = AllocateDescriptor();
+        BufferHandle<DirectX::XMMATRIX> handle = { index, buffer };
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.NumElements = numElements;
+        srvDesc.Buffer.StructureByteStride = sizeof(T);
+        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle();
+        device->CreateShaderResourceView(handle.buffer.Get(), &srvDesc, srvHandle);
+
+        return handle;
+    }
+
+    template<typename T>
+    void UpdateStructuredBuffer(BufferHandle<T>& handle, T* data, UINT startIndex, UINT numElements) {
+        if (handle.buffer == nullptr) {
+            spdlog::error("Buffer not initialized.");
+            throw std::runtime_error("Buffer not initialized.");
+        }
+
+        // Calculate the size of the data to update
+        UINT elementSize = sizeof(T);
+        UINT updateSize = numElements * elementSize;
+        UINT offset = startIndex * elementSize;
+
+        // Map the buffer
+        void* mappedData = nullptr;
+        D3D12_RANGE readRange = { offset, offset + updateSize }; // We specify the range we might read, which is none in this case
+        HRESULT hr = handle.buffer->Map(0, &readRange, &mappedData);
+        if (FAILED(hr)) {
+            spdlog::error("Failed to map buffer with HRESULT: {}", hr);
+            throw std::runtime_error("Failed to map buffer.");
+        }
+
+        // Copy new data to the buffer
+        memcpy(static_cast<char*>(mappedData) + offset, data, updateSize);
+
+        // Unmap the buffer
+        D3D12_RANGE writtenRange = { offset, offset + updateSize };
+        handle.buffer->Unmap(0, &writtenRange);
+    }
+
     std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);

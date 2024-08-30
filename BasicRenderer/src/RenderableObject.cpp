@@ -68,3 +68,8 @@ ComPtr<ID3D12Resource>& RenderableObject::GetConstantBuffer() {
 void RenderableObject::onUpdate() {
     UpdateBuffers();
 }
+
+void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
+    m_skeleton = skeleton;
+    skeleton->userIDs.push_back(localID);
+}

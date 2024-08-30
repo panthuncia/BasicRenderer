@@ -132,3 +132,11 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 std::shared_ptr<Camera> Scene::GetCamera() {
     return pCamera;
 }
+
+void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
+    skeletons.push_back(skeleton);
+    if (skeleton->animations.size() > 0) {
+        skeleton->SetAnimation(0);
+        animatedSkeletons.push_back(skeleton);
+    }
+}

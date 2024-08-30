@@ -12,6 +12,8 @@
 #include "PSOManager.h"
 #include "Sampler.h"
 #include "PixelBuffer.h"
+#include "Animation.h"
+#include "Skeleton.h"
 
 using nlohmann::json;
 
@@ -319,10 +321,14 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
             int meshIndex = gltfNode["mesh"];
             const MeshData& data = meshes[meshIndex];
             node = scene->CreateRenderableObject(data, gltfNode.value("name", ""));
-            // Skinned mesh handling (commented out for now)
-            // if (gltfNode.contains("skin")) {
-            //     static_cast<RenderableObject*>(node)->skinInstance = gltfNode["skin"];
-            // }
+            
+            // Skinned mesh handling. Identify them now, bind to skins later
+            if (gltfNode.contains("skin")) {
+                auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
+                if (renderableNode) {
+                    renderableNode->m_fileLocalSkinIndex = gltfNode["skin"]; //hack for setting skins later
+                }
+            }
         }
         else {
             node = scene->CreateNode(gltfNode.value("name", ""));
@@ -639,6 +645,108 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
     return materials;
 }
 
+UINT numComponentsForPath(std::string path) {
+    if (path == "translation" || path == "scale") {
+        return 3;
+    }
+    else if (path == "rotation") {
+        return 4;
+    }
+    else {
+        spdlog::error("Unsupported path in glTF animation");
+        return 0;
+    }
+}
+
+std::shared_ptr<Animation> parseGLTFAnimationToClips(const json& gltfAnimation, const json& gltfData, const std::vector<uint8_t>& binaryData, const std::vector<std::shared_ptr<SceneNode>>& nodes) {
+    auto animation = std::make_shared<Animation>(gltfAnimation.value("name", ""));
+
+    for (const auto& channel : gltfAnimation["channels"]) {
+        const auto& sampler = gltfAnimation["samplers"][channel["sampler"]];
+        AccessorData inputAccessor = getAccessorData(gltfData, sampler["input"]);
+        AccessorData outputAccessor = getAccessorData(gltfData, sampler["output"]);
+
+        std::vector<float> inputs = extractDataFromBuffer<float>(binaryData, inputAccessor); // Time keyframes
+        std::vector<float> outputs = extractDataFromBuffer<float>(binaryData, outputAccessor); // Value keyframes
+
+        std::string path = channel["target"]["path"];
+        int node = nodes[channel["target"]["node"]]->localID;
+
+        if (animation->nodesMap.find(node) == animation->nodesMap.end()) {
+            animation->nodesMap[node] = std::make_shared<AnimationClip>();
+        }
+
+        for (size_t i = 0; i < inputs.size(); ++i) {
+            float time = inputs[i];
+            size_t numComponents = numComponentsForPath(path);
+            std::vector<float> value(outputs.begin() + i * numComponents, outputs.begin() + (i + 1) * numComponents);
+
+            if (path == "translation") {
+                animation->nodesMap[node]->addPositionKeyframe(time, XMFLOAT3(value[0], value[1], value[2]));
+            }
+            else if (path == "rotation") {
+                animation->nodesMap[node]->addRotationKeyframe(time, XMVectorSet(value[0], value[1], value[2], value[3]));
+            }
+            else if (path == "scale") {
+                animation->nodesMap[node]->addScaleKeyframe(time, XMFLOAT3(value[0], value[1], value[2]));
+            }
+        }
+    }
+
+    return animation;
+}
+
+std::vector<std::shared_ptr<Animation>> parseGLTFAnimations(const json& gltfData, std::vector<uint8_t>& binaryData, std::vector<std::shared_ptr<SceneNode>>& nodes) {
+    std::vector<std::shared_ptr<Animation>> animations;
+
+    if (!gltfData.contains("animations")) {
+        return animations;
+    }
+
+    for (const auto& animation : gltfData["animations"]) {
+        std::shared_ptr<Animation> parsedAnimation = parseGLTFAnimationToClips(animation, gltfData, binaryData, nodes);
+        animations.push_back(parsedAnimation);
+    }
+
+    return animations;
+}
+
+std::vector<std::shared_ptr<Skeleton>> parseGLTFSkins(const json& gltfData, std::vector<uint8_t>& binaryData, std::vector<std::shared_ptr<SceneNode>>& nodes, std::vector<std::shared_ptr<Animation>>& animations) {
+    std::vector<std::shared_ptr<Skeleton>> skins;
+    if (!gltfData.contains("skins")) {
+        return skins;
+    }
+    for (const auto& skin : gltfData["skins"]) {
+        std::vector<float> inverseBindMatrices = extractDataFromBuffer<float>(binaryData, getAccessorData(gltfData, skin["inverseBindMatrices"]));
+        std::vector<std::shared_ptr<SceneNode>> joints;
+        for (const auto& joint : skin["joints"]) {
+            joints.push_back(nodes[joint.get<uint32_t>()]);
+        }
+        auto skeleton = std::make_shared<Skeleton>(joints, inverseBindMatrices);
+
+        // Register animations that reference joints in this skeleton
+        for (const auto& joint : skin["joints"]) {
+            int jointIndex = joint.get<int>();
+            for (const auto& animation : animations) {
+                if (animation->nodesMap.find(nodes[jointIndex]->localID) != animation->nodesMap.end() && skeleton->animationsByName.find(animation->name) == skeleton->animationsByName.end()) {
+                    skeleton->AddAnimation(animation);
+                }
+            }
+        }
+
+        skins.push_back(skeleton);
+    }
+}
+
+void SetSkins(std::vector<std::shared_ptr<SceneNode>>& nodes, std::vector<std::shared_ptr<Skeleton>> skins) {
+    for (auto& node : nodes) {
+        auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
+        if (renderableNode && renderableNode->m_fileLocalSkinIndex != -1) {
+            renderableNode->SetSkin(skins[renderableNode->m_fileLocalSkinIndex]);
+        }
+    }
+}
+
 std::shared_ptr<Scene> loadGLB(std::string fileName) {
     auto scene = std::make_shared<Scene>();
     std::ifstream file(fileName, std::ios::binary);
@@ -684,6 +792,12 @@ std::shared_ptr<Scene> loadGLB(std::string fileName) {
         parseMeshes(gltfData, binaryData, materials, &meshes);
         std::vector<std::shared_ptr<SceneNode>> nodes;
         parseGLTFNodeHierarchy(scene, gltfData, meshes, &nodes);
+        std::vector<std::shared_ptr<Animation>> animations = parseGLTFAnimations(gltfData, binaryData, nodes);
+        std::vector<std::shared_ptr<Skeleton>> skins = parseGLTFSkins(gltfData, binaryData, nodes, animations);
+
+        for (std::shared_ptr<Skeleton> skin : skins) {
+            scene->AddSkeleton(skin);
+        }
     }
     catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;

@@ -8,6 +8,7 @@
 #include <ctime>  
 #include "Mesh.h"
 #include "Camera.h"
+#include "Skeleton.h"
 
 class Scene {
 public:
@@ -26,6 +27,7 @@ public:
     void Update();
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
     std::shared_ptr<Camera> GetCamera();
+    void AddSkeleton(std::shared_ptr<Skeleton>);
 
 private:
     std::shared_ptr<Camera> pCamera;
@@ -39,5 +41,7 @@ private:
 	UINT numObjects = 0;
 	UINT nextNodeID = 0;
     SceneNode sceneRoot;
+    std::vector<std::shared_ptr<Skeleton>> skeletons;
+    std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
 };
