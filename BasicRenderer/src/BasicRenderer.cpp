@@ -155,6 +155,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     };
 
     auto carScene = loadGLB("models/datsun.glb");
+    carScene->GetRoot().transform.setLocalScale({0.2, 0.2, 0.2});
 
     renderer.SetCurrentScene(carScene);
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);

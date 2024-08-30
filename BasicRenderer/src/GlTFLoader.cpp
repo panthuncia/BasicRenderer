@@ -662,7 +662,8 @@ std::shared_ptr<Animation> parseGLTFAnimationToClips(const json& gltfAnimation, 
     auto animation = std::make_shared<Animation>(gltfAnimation.value("name", ""));
 
     for (const auto& channel : gltfAnimation["channels"]) {
-        const auto& sampler = gltfAnimation["samplers"][channel["sampler"]];
+        int samplerIndex = channel["sampler"].get<int>();
+        const auto& sampler = gltfAnimation["samplers"][samplerIndex];
         AccessorData inputAccessor = getAccessorData(gltfData, sampler["input"]);
         AccessorData outputAccessor = getAccessorData(gltfData, sampler["output"]);
 
@@ -800,7 +801,7 @@ std::shared_ptr<Scene> loadGLB(std::string fileName) {
         }
     }
     catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        spdlog::error("Error: {}", e.what());
         return nullptr;
     }
     return scene;

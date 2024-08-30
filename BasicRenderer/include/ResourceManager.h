@@ -88,7 +88,7 @@ public:
         UINT bufferSize = numElements * elementSize;
 
         D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-        D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD); // TODO: Make a real upload system
 
         ComPtr<ID3D12Resource> buffer;
         auto hr = device->CreateCommittedResource(
