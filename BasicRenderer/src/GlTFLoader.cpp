@@ -130,12 +130,55 @@ struct AccessorData {
 };
 
 template <typename T>
+std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData);
+
+template <>
+std::vector<XMMATRIX> extractDataFromBuffer<XMMATRIX>(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
+    const Accessor& accessor = accessorData.accessor;
+    const BufferView& bufferView = accessorData.bufferView;
+
+    size_t numComponents = numComponentsForType(accessor.type); // This should return 16 for a matrix
+    size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
+
+    size_t effectiveByteOffset = bufferView.byteOffset;
+    if (effectiveByteOffset == (std::numeric_limits<size_t>::max)()) {
+        effectiveByteOffset = 0;
+    }
+    if (accessor.byteOffset != (std::numeric_limits<size_t>::max)()) {
+        effectiveByteOffset += accessor.byteOffset;
+    }
+
+    std::vector<XMMATRIX> data(accessor.count);
+
+    if (byteStride == numComponents * bytesPerComponent(accessor.componentType)) {
+        // Direct memory copy for non-interleaved data
+        std::memcpy(data.data(), binaryData.data() + effectiveByteOffset, accessor.count * sizeof(XMMATRIX));
+    }
+    else {
+        // Interleaved data, need to manually assemble the XMMATRIX array
+        size_t elementSize = bytesPerComponent(accessor.componentType) * numComponents;
+        for (size_t i = 0; i < accessor.count; ++i) {
+            float matrixData[16];
+            for (size_t j = 0; j < 16; ++j) {
+                size_t componentByteOffset = effectiveByteOffset + i * byteStride + j * bytesPerComponent(accessor.componentType);
+                matrixData[j] = static_cast<float>(readComponent(binaryData, accessor.componentType, componentByteOffset));
+            }
+            data[i] = XMMATRIX(matrixData[0], matrixData[1], matrixData[2], matrixData[3],
+                matrixData[4], matrixData[5], matrixData[6], matrixData[7],
+                matrixData[8], matrixData[9], matrixData[10], matrixData[11],
+                matrixData[12], matrixData[13], matrixData[14], matrixData[15]);
+        }
+    }
+    return data;
+}
+
+// Template function for types other than XMMATRIX
+template <typename T>
 std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
     const Accessor& accessor = accessorData.accessor;
     const BufferView& bufferView = accessorData.bufferView;
     size_t numComponents = numComponentsForType(accessor.type);
 
-    // Calculate byte stride; use the provided byteStride from bufferView if present, otherwise calculate it
     size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
 
     size_t effectiveByteOffset = bufferView.byteOffset;
@@ -149,11 +192,9 @@ std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, con
     std::vector<T> data(accessor.count * numComponents);
 
     if (byteStride == numComponents * bytesPerComponent(accessor.componentType)) {
-        // Non-interleaved data, we can proceed as before
         std::memcpy(data.data(), binaryData.data() + effectiveByteOffset, accessor.count * numComponents * sizeof(T));
     }
     else {
-        // Interleaved data, need to manually assemble the typed array
         size_t elementSize = bytesPerComponent(accessor.componentType) * numComponents;
         size_t dataOffset = 0;
 
@@ -271,23 +312,23 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, c
 
             auto accessor = getAccessorData(gltfData, primitive["attributes"]["POSITION"]);
             auto positions = extractDataFromBuffer<float>(binaryData, accessor);
-            for (size_t i = 0; i < positions.size(); i += 3) {
-                positions[i + 2] = -positions[i + 2]; // Flip Z-coordinate
-            }
+            //for (size_t i = 0; i < positions.size(); i += 3) {
+            //    positions[i + 2] = -positions[i + 2]; // Flip Z-coordinate
+            //}
             geometryData.positions = positions;
 
             accessor = getAccessorData(gltfData, primitive["attributes"]["NORMAL"]);
             auto normals = extractDataFromBuffer<float>(binaryData, accessor);
-            for (size_t i = 0; i < normals.size(); i += 3) {
-                normals[i + 2] = -normals[i + 2]; // Flip Z-component of normals
-            }
+            //for (size_t i = 0; i < normals.size(); i += 3) {
+            //    normals[i + 2] = -normals[i + 2]; // Flip Z-component of normals
+            //}
             geometryData.normals = normals;
 
             accessor = getAccessorData(gltfData, primitive["indices"]);
             auto indices = extractIndexDataAsUint32(binaryData, accessor);
-            for (size_t i = 0; i < indices.size(); i += 3) {
-                std::swap(indices[i + 1], indices[i + 2]); // Reverse winding order
-            }
+            //for (size_t i = 0; i < indices.size(); i += 3) {
+            //    std::swap(indices[i + 1], indices[i + 2]); // Reverse winding order
+            //}
             geometryData.indices = indices;
 
             geometryData.material = materials[primitive["material"]];
@@ -337,10 +378,10 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
         if (gltfNode.contains("matrix")) {
             auto matrixValues = gltfNode["matrix"].get<std::vector<float>>();
             // Manually flip the Z-axis translation components in the transformation matrix
-            matrixValues[8] = -matrixValues[8];
-            matrixValues[9] = -matrixValues[9];
-            matrixValues[10] = -matrixValues[10];
-            matrixValues[11] = -matrixValues[11];
+            //matrixValues[8] = -matrixValues[8];
+            //matrixValues[9] = -matrixValues[9];
+            //matrixValues[10] = -matrixValues[10];
+            //matrixValues[11] = -matrixValues[11];
 
             XMMATRIX matrix = XMMatrixSet(
                 matrixValues[0], matrixValues[1], matrixValues[2], matrixValues[3],
@@ -360,7 +401,7 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
         else {
             if (gltfNode.contains("translation")) {
                 auto translationValues = gltfNode["translation"].get<std::vector<float>>();
-                node->transform.setLocalPosition(XMFLOAT3(translationValues[0], translationValues[1], -translationValues[2]));
+                node->transform.setLocalPosition(XMFLOAT3(translationValues[0], translationValues[1], translationValues[2]));
             }
             if (gltfNode.contains("scale")) {
                 auto scaleValues = gltfNode["scale"].get<std::vector<float>>();
@@ -368,7 +409,7 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
             }
             if (gltfNode.contains("rotation")) {
                 auto rotationValues = gltfNode["rotation"].get<std::vector<float>>();
-                XMVECTOR quaternion = XMVectorSet(rotationValues[0], rotationValues[1], -rotationValues[2], -rotationValues[3]);
+                XMVECTOR quaternion = XMVectorSet(rotationValues[0], rotationValues[1], rotationValues[2], rotationValues[3]);
                 node->transform.setLocalRotationFromQuaternion(quaternion);
             }
         }
@@ -718,7 +759,15 @@ std::vector<std::shared_ptr<Skeleton>> parseGLTFSkins(const json& gltfData, std:
         return skins;
     }
     for (const auto& skin : gltfData["skins"]) {
-        std::vector<float> inverseBindMatrices = extractDataFromBuffer<float>(binaryData, getAccessorData(gltfData, skin["inverseBindMatrices"]));
+        std::vector<XMMATRIX> inverseBindMatrices = extractDataFromBuffer<XMMATRIX>(binaryData, getAccessorData(gltfData, skin["inverseBindMatrices"]));
+        
+        // Convert to left-handed
+        //DirectX::XMMATRIX handednessConversionMatrix = DirectX::XMMatrixIdentity();
+        //handednessConversionMatrix.r[2] = DirectX::XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f); // Set the third row to flip the z-axis
+        //for (auto& matrix : inverseBindMatrices) {
+        //    matrix = DirectX::XMMatrixMultiply(handednessConversionMatrix, matrix);
+        //}
+
         std::vector<std::shared_ptr<SceneNode>> joints;
         for (const auto& joint : skin["joints"]) {
             joints.push_back(nodes[joint.get<uint32_t>()]);

@@ -15,6 +15,8 @@
 #include "PSOManager.h"
 
 DX12Renderer renderer;
+UINT x_res = 1920;
+UINT y_res = 1080;
 
 void ProcessRawInput(LPARAM lParam) {
     UINT dwSize = 0;
@@ -103,7 +105,7 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
         CLASS_NAME,
         L"DirectX 12 Basic Renderer",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
+        CW_USEDEFAULT, CW_USEDEFAULT, x_res, y_res,
         nullptr,
         nullptr,
         hInstance,
@@ -130,7 +132,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     file_logger->flush_on(spdlog::level::info);
 
     spdlog::info("initializing renderer...");
-    renderer.Initialize(hwnd);
+    renderer.Initialize(hwnd, x_res, y_res);
     spdlog::info("Renderer initialized.");
     renderer.SetInputMode(InputMode::wasd);
 
@@ -154,8 +156,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 5, 4, 1, 5, 0
     };
 
-    auto carScene = loadGLB("models/wooden_table.glb");
-    carScene->GetRoot().transform.setLocalScale({1, 1, 1});
+    auto carScene = loadGLB("models/dragon.glb");
+    carScene->GetRoot().transform.setLocalPosition({ 0, 1, 0 });
+    carScene->GetRoot().transform.setLocalScale({10, 10, 10});
 
     renderer.SetCurrentScene(carScene);
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
@@ -166,8 +169,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     float zFar = 1000.0f;
 
 
-    int clientWidth = 800; // TODO
-    int clientHeight = 600; // TODO
+    int clientWidth = x_res; // TODO
+    int clientHeight = y_res; // TODO
 
     aspectRatio = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
     auto& scene = renderer.GetCurrentScene();

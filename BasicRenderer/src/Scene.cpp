@@ -121,6 +121,11 @@ void Scene::Update() {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
+    for (auto& skeleton : animatedSkeletons) {
+        for (auto& node : skeleton->m_nodes) {
+            node->animationController->update(elapsed_seconds.count());
+        }
+    }
     this->sceneRoot.update();
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();

@@ -10,7 +10,7 @@ Camera::Camera(std::string name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float 
     viewProjectionMatrixInverse = XMMatrixIdentity();
 
     // Setup perspective projection matrix
-    projectionMatrix = XMMatrixPerspectiveFovLH(fieldOfView, aspectRatio, zNear, zFar);
+    projectionMatrix = XMMatrixPerspectiveFovRH(fieldOfView, aspectRatio, zNear, zFar);
 }
 
 void Camera::onUpdate() {

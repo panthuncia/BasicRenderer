@@ -21,7 +21,7 @@ using namespace Microsoft::WRL;
 
 class DX12Renderer {
 public:
-    void Initialize(HWND hwnd);
+    void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void Update(double elapsedSeconds);
     void Render();
     void Cleanup();
@@ -57,7 +57,10 @@ private:
 
     std::shared_ptr<Scene> currentScene = std::make_shared<Scene>();
 
-    void LoadPipeline(HWND hwnd);
+    UINT m_xRes;
+    UINT m_yRes;
+
+    void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void LoadAssets();
     void CreateConstantBuffer();
     void UpdateConstantBuffer();

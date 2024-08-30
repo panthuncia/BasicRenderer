@@ -5,6 +5,7 @@
 #include <d3dcompiler.h>
 #include <stdexcept>
 #include "MeshUtilities.h"
+#include "PSOFlags.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -23,7 +24,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::str
         bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
         bool hasTangents = false;
 
-        if (hasTexcoords) {
+        if (geom.material->psoFlags & PSOFlags::NORMAL_MAP) {
             if (!geom.indices.empty()) {
                 std::vector<XMFLOAT3>& xmfloat3Positions = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.positions);
                 std::vector<XMFLOAT3>& xmfloat3Normals = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.normals);

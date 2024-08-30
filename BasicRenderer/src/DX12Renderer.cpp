@@ -13,13 +13,15 @@
 #include "PSOManager.h"
 #include "ResourceManager.h"
 
-void DX12Renderer::Initialize(HWND hwnd) {
-    LoadPipeline(hwnd);
+void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
+    m_xRes = x_res;
+    m_yRes = y_res;
+    LoadPipeline(hwnd, x_res, y_res);
     LoadAssets();
     CreateConstantBuffer();
 }
 
-void DX12Renderer::LoadPipeline(HWND hwnd) {
+void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
      UINT dxgiFactoryFlags = 0;
 
 #if defined(_DEBUG)
@@ -60,8 +62,8 @@ void DX12Renderer::LoadPipeline(HWND hwnd) {
     // Describe and create the swap chain
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.BufferCount = 2;
-    swapChainDesc.Width = 800;
-    swapChainDesc.Height = 600;
+    swapChainDesc.Width = x_res;
+    swapChainDesc.Height = y_res;
     swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
@@ -129,7 +131,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd) {
 
     // Create the depth stencil buffer
     D3D12_RESOURCE_DESC depthStencilDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_D24_UNORM_S8_UINT, 800, 600,
+        DXGI_FORMAT_D24_UNORM_S8_UINT, x_res, y_res,
         1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
     );
 
@@ -220,9 +222,9 @@ void DX12Renderer::Render() {
     //commandList->SetGraphicsRootDescriptorTable(0, ResourceManager::getInstance().getGPUHandle()); // Bind descriptor table
 
     // Set viewports and scissor rect
-    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, 800.0f, 600.0f);
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, m_xRes, m_yRes);
     commandList->RSSetViewports(1, &viewport);
-    CD3DX12_RECT rect = CD3DX12_RECT(0, 0, 800, 600);
+    CD3DX12_RECT rect = CD3DX12_RECT(0, 0, m_xRes, m_yRes);
     commandList->RSSetScissorRects(1, &rect);
 
     // Indicate that the back buffer will be used as a render target
@@ -379,8 +381,8 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
         });
 
     context.SetActionHandler(InputAction::RotateCamera, [this](float magnitude, const InputData& inputData) {
-        horizontalAngle += inputData.mouseDeltaX * 0.005;
-        verticalAngle += inputData.mouseDeltaY * 0.005;
+        horizontalAngle -= inputData.mouseDeltaX * 0.005;
+        verticalAngle -= inputData.mouseDeltaY * 0.005;
         const float upperBound = M_PI / 2 - 0.01; // Slightly less than 90 degrees
         const float lowerBound = -M_PI / 2 + 0.01; // Slightly more than -90 degrees
         verticalAngle = max(lowerBound, min(upperBound, verticalAngle));

@@ -1,13 +1,13 @@
 #include "Skeleton.h"
 #include <spdlog/spdlog.h>
 
-Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<float>& inverseBindMatrices)
+Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
     : m_nodes(nodes), m_inverseBindMatrices(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
     m_inverseBindMatricesHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
-    resourceManager.UpdateStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, reinterpret_cast<XMMATRIX*>(m_inverseBindMatrices.data()), 0, nodes.size());
+    resourceManager.UpdateStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
 }
 
 void Skeleton::AddAnimation(const std::shared_ptr<Animation>& animation) {

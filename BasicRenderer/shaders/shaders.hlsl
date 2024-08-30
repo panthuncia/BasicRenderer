@@ -55,6 +55,9 @@ struct MaterialInfo {
     float4 emissiveFactor;
 };
 
+struct SingleMatrix {
+    row_major matrix value;
+};
 
 
 #if defined(VERTEX_COLORS)
@@ -104,6 +107,14 @@ struct PSInput {
 };
 #endif
 
+matrix loadMatrixFromBuffer(StructuredBuffer<float4> matrixBuffer, uint matrixIndex) {
+    float4 bone1Row1 = matrixBuffer[matrixIndex * 4];
+    float4 bone1Row2 = matrixBuffer[matrixIndex * 4 + 1];
+    float4 bone1Row3 = matrixBuffer[matrixIndex * 4 + 2];
+    float4 bone1Row4 = matrixBuffer[matrixIndex * 4 + 3];
+    return float4x4(bone1Row1, bone1Row2, bone1Row3, bone1Row4);
+}
+
 PSInput VSMain(VSInput input) {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
@@ -112,13 +123,23 @@ PSInput VSMain(VSInput input) {
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;
     
 #if defined(SKINNED)
-    StructuredBuffer<row_major matrix> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
-    StructuredBuffer<row_major matrix> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
+    StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
+    StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
-    matrix skinMatrix = input.weights.x * mul(inverseBindMatricesBuffer[input.joints.x], boneTransformsBuffer[input.joints.x]) +
-                        input.weights.y * mul(inverseBindMatricesBuffer[input.joints.y], boneTransformsBuffer[input.joints.y]) +
-                        input.weights.z * mul(inverseBindMatricesBuffer[input.joints.z], boneTransformsBuffer[input.joints.z]) +
-                        input.weights.w * mul(inverseBindMatricesBuffer[input.joints.w], boneTransformsBuffer[input.joints.w]);
+    matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.x);
+    matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.y);
+    matrix bone3 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.z);
+    matrix bone4 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.w);
+    
+    matrix bindMatrix1 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.x);
+    matrix bindMatrix2 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.y);
+    matrix bindMatrix3 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.z);
+    matrix bindMatrix4 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.w);
+
+    matrix skinMatrix = input.weights.x * mul(bindMatrix1, bone1) +
+                        input.weights.y * mul(bindMatrix2, bone2) +
+                        input.weights.z * mul(bindMatrix3, bone3) +
+                        input.weights.w * mul(bindMatrix4, bone4);
     
     pos = mul(pos, skinMatrix);
     normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3)skinMatrix);

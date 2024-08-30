@@ -93,7 +93,7 @@ XMFLOAT3 Transform::getGlobalPosition() const {
 
 void Transform::applyMovement(const MovementState& movement, float deltaTime) {
     // Compute direction vectors based on current rotation
-    XMVECTOR forwardDir = XMVector3Rotate(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rot);
+    XMVECTOR forwardDir = XMVector3Rotate(XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), rot);
     XMVECTOR rightDir = XMVector3Rotate(XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), rot);
     XMVECTOR upDir = XMVector3Rotate(XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), rot);
 

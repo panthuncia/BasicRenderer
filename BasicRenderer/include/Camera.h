@@ -12,7 +12,7 @@ public:
 
     // Function to update view matrix
     void UpdateViewMatrix(XMFLOAT3 eye, XMFLOAT3 target, XMFLOAT3 upVec) {
-        viewMatrix = XMMatrixLookAtLH(XMLoadFloat3(&eye), XMLoadFloat3(&target), XMLoadFloat3(&upVec));
+        viewMatrix = XMMatrixLookAtRH(XMLoadFloat3(&eye), XMLoadFloat3(&target), XMLoadFloat3(&upVec));
         viewMatrixInverse = XMMatrixInverse(nullptr, viewMatrix);
         UpdateViewProjectionMatrix();
     }
