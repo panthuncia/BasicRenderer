@@ -89,7 +89,7 @@ struct VSInput {
 struct PSInput {
     float4 position : SV_POSITION;
     float4 positionWorldSpace : TEXCOORD3;
-    float4 normalWorldSpace : TEXCOORD4;
+    float3 normalWorldSpace : TEXCOORD4;
     float4 color : COLOR;
 };
 #else
@@ -119,7 +119,7 @@ matrix loadMatrixFromBuffer(StructuredBuffer<float4> matrixBuffer, uint matrixIn
 PSInput VSMain(VSInput input) {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    float4 pos = float4(input.position, 1.0f);
+    float4 pos = float4(input.position.xyz, 1.0f);
     
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;
     
@@ -327,7 +327,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
 #if defined(PBR)
         baseColor = materialInfo.baseColorFactor * baseColor;
 #endif // PBR
-    float3 normalWS = input.normalWorldSpace;
+    float3 normalWS = input.normalWorldSpace.xyz;
 #if defined(NORMAL_MAP) || defined(PARALLAX)
     float3x3 TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
 #endif // NORMAL_MAP || PARALLAX

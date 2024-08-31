@@ -362,4 +362,14 @@ D3D12_BLEND_DESC PSOManager::GetBlendDesc(BlendState blendState) {
         return blendBlendDesc;
     }
     }
+    spdlog::warn("Blend state not set, defaulting to opaque");
+    D3D12_BLEND_DESC opaqueBlendDesc = {};
+    opaqueBlendDesc.AlphaToCoverageEnable = FALSE;
+    opaqueBlendDesc.IndependentBlendEnable = FALSE;
+
+    for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+        opaqueBlendDesc.RenderTarget[i].BlendEnable = FALSE;
+        opaqueBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    }
+    return opaqueBlendDesc;
 }

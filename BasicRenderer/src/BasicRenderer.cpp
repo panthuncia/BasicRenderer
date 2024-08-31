@@ -179,7 +179,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto cubeMesh = Mesh(vertices, indices, cubeMaterial, false);
     std::vector<Mesh> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>("CubeObject", vec);
-    //renderer.GetCurrentScene()->AddObject(cubeObject);
+    renderer.GetCurrentScene()->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
     animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
