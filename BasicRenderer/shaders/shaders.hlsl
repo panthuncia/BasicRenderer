@@ -5,6 +5,7 @@ struct PerFrameBuffer {
     row_major matrix projection;
     float4 eyePosWorldSpace;
     float4 ambientLighting;
+    uint numLights;
 };
 
 cbuffer PerObject : register(b1) {
@@ -310,8 +311,6 @@ float4 PSMain(PSInput input) : SV_TARGET {
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[1];
     
     float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
-    uint numLights, lightsStride;
-    lights.GetDimensions(numLights, lightsStride);
 
     float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
@@ -363,7 +362,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
 #endif // VERTEX_COLORS
     
     float3 lighting = float3(0.0, 0.0, 0.0);
-    for (uint i = 0; i < numLights; i++) {
+    for (uint i = 0; i < perFrameBuffer.numLights; i++) {
         LightInfo light = lights[i];
         lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
     }

@@ -6,7 +6,7 @@
 FrameResource::~FrameResource() {}
 
 void FrameResource::Initialize() {
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateCommandAllocator(
         D3D12_COMMAND_LIST_TYPE_DIRECT,
         IID_PPV_ARGS(CmdListAlloc.GetAddressOf())));

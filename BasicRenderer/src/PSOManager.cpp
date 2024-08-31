@@ -99,7 +99,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
     return pso;
@@ -312,7 +312,7 @@ void PSOManager::createRootSignature() {
     versionedDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
     versionedDesc.Desc_1_1 = rootSignatureDesc;
     ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &signature, &error));
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
 }
 

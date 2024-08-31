@@ -4,18 +4,16 @@
 #include <wrl.h>
 #include <vector>
 #include <stdexcept>
+#include <queue>
 #include "DirectX/d3dx12.h"
 #include "Buffers.h"
 #include "FrameResource.h"
 #include "spdlog/spdlog.h"
+#include "DynamicStructuredBuffer.h"
+#include "ResourceHandles.h"
+#include "PixelBuffer.h"
+
 using namespace Microsoft::WRL;
-
-template<typename T>
-struct BufferHandle {
-    UINT index; // Index in the descriptor heap
-    ComPtr<ID3D12Resource> buffer; // The actual resource buffer
-};
-
 
 class ResourceManager {
 public:
@@ -26,18 +24,17 @@ public:
 
     void Initialize();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE GetCPUHandle();
-    CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index);
     ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
-    UINT AllocateDescriptor();
     void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix);
 
     template<typename T>
     BufferHandle<T> CreateIndexedConstantBuffer() {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
-        auto device = DeviceManager::getInstance().getDevice();
+        auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Calculate the size of the buffer to be 256-byte aligned
         UINT bufferSize = (sizeof(T) + 255) & ~255;
@@ -65,7 +62,7 @@ public:
         cbvDesc.SizeInBytes = bufferSize;
 
         UINT index = AllocateDescriptor();
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = GetCPUHandle();
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = GetCPUHandle(index);
 
         device->CreateConstantBufferView(&cbvDesc, handle);
 
@@ -83,7 +80,7 @@ public:
 
     template<typename T>
     BufferHandle<T> CreateIndexedStructuredBuffer(UINT numElements) {
-        auto device = DeviceManager::getInstance().getDevice();
+        auto& device = DeviceManager::GetInstance().GetDevice();
         UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
 
@@ -115,7 +112,7 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle();
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle(index);
         device->CreateShaderResourceView(handle.buffer.Get(), &srvDesc, srvHandle);
 
         return handle;
@@ -150,6 +147,61 @@ public:
         handle.buffer->Unmap(0, &writtenRange);
     }
 
+    template<typename T>
+    DynamicBufferHandle<T> CreateDynamicStructuredBuffer(UINT capacity = 64) {
+        static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
+
+        auto device = DeviceManager::GetInstance().GetDevice();
+
+        // Create the dynamic structured buffer instance
+        UINT bufferID = GetNextResizableBufferID();
+        DynamicStructuredBuffer<T> dynamicBuffer(bufferID, capacity);
+        dynamicBuffer.SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, ComPtr<ID3D12Resource>& buffer) {
+            this->onBufferResized(bufferID, typeSize, capacity, buffer);
+            });
+
+        // Create a Shader Resource View (SRV) for the buffer
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.NumElements = capacity;
+        srvDesc.Buffer.StructureByteStride = sizeof(T);
+        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+        UINT index = AllocateDescriptor();
+        bufferIDDescriptorIndexMap[bufferID] = index;
+        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(index);
+        device->CreateShaderResourceView(dynamicBuffer.GetBuffer().Get(), &srvDesc, cpuHandle);
+
+        return { index, dynamicBuffer };
+    }
+
+    UINT GetNextResizableBufferID() {
+        UINT val = numResizableBuffers;
+        numResizableBuffers++;
+        return val;
+    }
+
+    void onBufferResized(UINT bufferID, UINT typeSize, UINT capacity, ComPtr<ID3D12Resource>& buffer) {
+        UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle(descriptorIndex);
+        auto& device = DeviceManager::GetInstance().GetDevice();
+
+        // Create a Shader Resource View (SRV) for the buffer
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.NumElements = capacity;
+        srvDesc.Buffer.StructureByteStride = typeSize;
+        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+        device->CreateShaderResourceView(buffer.Get(), &srvDesc, srvHandle);
+    }
+
+    TextureHandle<PixelBuffer> CreateTexture(const stbi_uc* image, int width, int height, bool sRGB);
+
     std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
@@ -162,19 +214,26 @@ private:
     void InitializeUploadHeap();
     void WaitForCopyQueue();
     void InitializeCopyCommandQueue();
+    UINT AllocateDescriptor();
+    void ReleaseDescriptor(UINT index);
+    void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
+    void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
+    void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     
     std::unique_ptr<FrameResource> frameResourceCopies[3];
 
     ComPtr<ID3D12DescriptorHeap> descriptorHeap;
     UINT descriptorSize;
     UINT numAllocatedDescriptors;
+    std::queue<UINT> freeDescriptors;
 
     ComPtr<ID3D12DescriptorHeap> samplerHeap;
     UINT samplerDescriptorSize;
     UINT numAllocatedSamplerDescriptors;
+    std::queue<UINT> freeSamplerDescriptors;
 
-    std::vector<LightInfo> lightsData;
-    ComPtr<ID3D12Resource> lightBuffer;
+    UINT numResizableBuffers;
+    std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> uploadHeap;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> copyCommandQueue;
@@ -188,4 +247,6 @@ private:
     UINT8* pPerFrameConstantBuffer;
     PerFrameCB perFrameCBData;
     UINT currentFrameIndex;
+
+    DynamicBufferHandle<LightInfo> lightBufferHandle;
 };

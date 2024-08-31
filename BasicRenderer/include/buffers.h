@@ -6,6 +6,7 @@ struct PerFrameCB {
     DirectX::XMMATRIX projectionMatrix;
     DirectX::XMVECTOR eyePosWorldSpace;
     DirectX::XMVECTOR ambientLighting;
+    UINT numLights;
 };
 
 struct PerObjectCB {

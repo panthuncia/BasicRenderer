@@ -23,7 +23,7 @@ template<typename T>
 ComPtr<ID3D12Resource> CreateConstantBuffer(T* pInitialData) {
     static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
 
     // Calculate the size of the buffer to be 256-byte aligned
     UINT bufferSize = (sizeof(T) + 255) & ~255;

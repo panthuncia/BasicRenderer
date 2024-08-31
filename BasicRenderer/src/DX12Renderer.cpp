@@ -39,7 +39,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)));
 
     // Initialize device manager
-    DeviceManager::getInstance().initialize(device);
+    DeviceManager::GetInstance().Initialize(device);
     PSOManager::getInstance().initialize();
     ResourceManager::GetInstance().Initialize();
 

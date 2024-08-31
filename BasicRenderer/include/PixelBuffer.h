@@ -3,6 +3,8 @@
 #include "stb/stb_image.h"
 #include "d3d12.h"
 #include "DirectX/d3dx12.h"
+
+#include "ResourceHandles.h"
 using Microsoft::WRL::ComPtr;
 
 class PixelBuffer {
@@ -10,9 +12,5 @@ public:
     PixelBuffer(const stbi_uc* image, int width, int height, bool sRGB);
     UINT GetDescriptorIndex() const;
 private:
-    ComPtr<ID3D12Resource> textureResource;
-    ComPtr<ID3D12Resource> textureUploadHeap;
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle;
-    UINT descriptorIndex;
+    TextureHandle<PixelBuffer> handle;
 };

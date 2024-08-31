@@ -573,7 +573,7 @@ std::vector<std::shared_ptr<Sampler>> parseGLTFSamplers(const json& gltfData) {
     return samplers;
 }
 
-std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, const std::string& dir, bool linearBaseColor = false, const std::vector<uint8_t>& binaryData = {}) {
+std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, const std::string& dir, const std::vector<uint8_t>& binaryData = {}) {
     std::unordered_map<int, std::shared_ptr<Texture>> linearTextures;
     std::unordered_map<int, std::shared_ptr<Texture>> srgbTextures;
     std::vector<std::shared_ptr<Material>> materials;
@@ -583,7 +583,7 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
     // Load images from binary data
     auto imageBuffers = getGLTFImagesFromBinary(gltfData, binaryData);
     auto samplers = parseGLTFSamplers(gltfData);
-    auto textures = loadTexturesFromImages(gltfData, imageBuffers, samplers, linearBaseColor);
+    auto textures = loadTexturesFromImages(gltfData, imageBuffers, samplers, false);
 
     // Map textures to indices
     for (size_t i = 0; i < textures.size(); ++i) {
@@ -611,14 +611,8 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
             if (pbr.contains("baseColorTexture")) {
                 psoFlags |= PSOFlags::BASE_COLOR_TEXTURE;
                 int textureIndex = pbr["baseColorTexture"]["index"];
-                if (linearBaseColor) {
-                    baseColorTexture = linearTextures[textureIndex];
-                    //srgbTextures[textureIndex]->textureResource.Reset();
-                }
-                else {
-                    baseColorTexture = srgbTextures[textureIndex];
-                    //linearTextures[textureIndex]->textureResource.Reset();
-                }
+                baseColorTexture = srgbTextures[textureIndex];
+                //linearTextures[textureIndex]->textureResource.Reset();
             }
             if (pbr.contains("metallicRoughnessTexture")) {
                 psoFlags |= PSOFlags::PBR_MAPS;
@@ -837,7 +831,7 @@ std::shared_ptr<Scene> loadGLB(std::string fileName) {
         std::cout << gltfData.dump(2) << std::endl;
 
         // Continue processing GLTF data and binary data...
-        auto materials = parseGLTFMaterials(gltfData, "", false, binaryData);
+        auto materials = parseGLTFMaterials(gltfData, "", binaryData);
         std::vector<MeshData> meshes;
         parseMeshes(gltfData, binaryData, materials, &meshes);
         std::vector<std::shared_ptr<SceneNode>> nodes;

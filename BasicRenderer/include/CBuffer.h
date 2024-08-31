@@ -17,7 +17,7 @@ public:
     CBuffer() : pConstantBuffer(nullptr) {}
 
     void Initialize() {
-        auto device = DeviceManager::getInstance().getDevice();
+        auto& device = DeviceManager::GetInstance().GetDevice();
         // Create the constant buffer resource
         D3D12_HEAP_PROPERTIES heapProperties = {};
         heapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;

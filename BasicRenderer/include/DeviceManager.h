@@ -6,26 +6,24 @@
 
 class DeviceManager {
 public:
-    static DeviceManager& getInstance();
+    static DeviceManager& GetInstance();
 
-    void initialize(Microsoft::WRL::ComPtr<ID3D12Device> device);
+    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device);
 
-    Microsoft::WRL::ComPtr<ID3D12Device> getDevice() const;
+    Microsoft::WRL::ComPtr<ID3D12Device>& GetDevice() {
+        return device;
+    }
 
 private:
     DeviceManager() = default;
     Microsoft::WRL::ComPtr<ID3D12Device> device;
 };
 
-inline DeviceManager& DeviceManager::getInstance() {
+inline DeviceManager& DeviceManager::GetInstance() {
     static DeviceManager instance;
     return instance;
 }
 
-inline void DeviceManager::initialize(Microsoft::WRL::ComPtr<ID3D12Device> device) {
+inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device) {
     this->device = device;
-}
-
-inline Microsoft::WRL::ComPtr<ID3D12Device> DeviceManager::getDevice() const {
-    return device;
 }

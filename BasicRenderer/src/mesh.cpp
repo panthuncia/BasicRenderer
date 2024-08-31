@@ -24,7 +24,7 @@ void Mesh::CreateVertexBuffer(const std::vector<VertexType>& vertices, ComPtr<ID
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
     CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
@@ -63,7 +63,7 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
     CD3DX12_RANGE readRange(0, 0);
     CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
 
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,

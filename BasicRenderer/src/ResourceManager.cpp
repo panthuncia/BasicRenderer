@@ -2,6 +2,7 @@
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
+#include "DynamicStructuredBuffer.h"
 
 void ResourceManager::Initialize() {
     //for (int i = 0; i < 3; i++) {
@@ -9,7 +10,7 @@ void ResourceManager::Initialize() {
     //    frameResourceCopies[i]->Initialize();
     //}
 
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
     heapDesc.NumDescriptors = D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1;// numDescriptors;
     heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -43,57 +44,30 @@ void ResourceManager::Initialize() {
     cbvDesc.SizeInBytes = perFrameBufferSize; // CBV size is required to be 256-byte aligned.
     device->CreateConstantBufferView(&cbvDesc, descriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
+    numAllocatedDescriptors++;
 
     // Create structured buffer for lights
+    lightBufferHandle = CreateDynamicStructuredBuffer<LightInfo>(1);//DynamicStructuredBuffer<LightInfo>();
+
     LightInfo light;
     light.properties = DirectX::XMVectorSetInt(2, 0, 0, 0);
     light.posWorldSpace = DirectX::XMVectorSet(3.0, 3.0, 3.0, 1.0);
-    light.dirWorldSpace = DirectX::XMVectorSet(1.0, 1.0, 1.0, 1.0);
+    light.dirWorldSpace = DirectX::XMVectorSet(-1.0, 0.0, 0.0, 1.0);
     light.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
     light.color = DirectX::XMVectorSet(10.0, 10.0, 10.0, 1.0);
-    lightsData.push_back(light);
 
-    D3D12_RESOURCE_DESC structuredBufferDesc = {};
-    structuredBufferDesc.Alignment = 0;
-    structuredBufferDesc.DepthOrArraySize = 1;
-    structuredBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    structuredBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    structuredBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
-    structuredBufferDesc.Height = 1;
-    structuredBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    structuredBufferDesc.MipLevels = 1;
-    structuredBufferDesc.SampleDesc.Count = 1;
-    structuredBufferDesc.SampleDesc.Quality = 0;
-    structuredBufferDesc.Width = sizeof(LightInfo) * lightsData.size(); // Size of all lights
+    lightBufferHandle.buffer.Add(light);
+    lightBufferHandle.buffer.UpdateBuffer();
 
-    ThrowIfFailed(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &structuredBufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&lightBuffer)));
+    LightInfo light1;
+    light1.properties = DirectX::XMVectorSetInt(2, 0, 0, 0);
+    light1.posWorldSpace = DirectX::XMVectorSet(3.0, 3.0, 3.0, 1.0);
+    light1.dirWorldSpace = DirectX::XMVectorSet(1.0, 0.0, 0.0, 1.0);
+    light1.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
+    light1.color = DirectX::XMVectorSet(10.0, 10.0, 10.0, 1.0);
 
-    // Upload light data to the buffer
-    void* mappedData;
-    CD3DX12_RANGE readRange(0, 0);
-    ThrowIfFailed(lightBuffer->Map(0, &readRange, &mappedData));
-    memcpy(mappedData, lightsData.data(), sizeof(LightInfo) * lightsData.size());
-    lightBuffer->Unmap(0, nullptr);
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Buffer.FirstElement = 0;
-    srvDesc.Buffer.NumElements = static_cast<UINT>(lightsData.size());
-    srvDesc.Buffer.StructureByteStride = sizeof(LightInfo);
-    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-
-    D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = descriptorHeap->GetCPUDescriptorHandleForHeapStart();
-    srvHandle.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); // Move to the next slot
-    device->CreateShaderResourceView(lightBuffer.Get(), &srvDesc, srvHandle);
-    numAllocatedDescriptors++;
+    lightBufferHandle.buffer.Add(light1);
+    lightBufferHandle.buffer.UpdateBuffer();
 
     // Initialize Sampler Descriptor Heap
     D3D12_DESCRIPTOR_HEAP_DESC samplerHeapDesc = {};
@@ -107,12 +81,12 @@ void ResourceManager::Initialize() {
 
 }
 
-CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetCPUHandle() {
-    return CD3DX12_CPU_DESCRIPTOR_HANDLE(descriptorHeap->GetCPUDescriptorHandleForHeapStart(), numAllocatedDescriptors, descriptorSize);
+CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetCPUHandle(UINT index) {
+    return CD3DX12_CPU_DESCRIPTOR_HANDLE(descriptorHeap->GetCPUDescriptorHandleForHeapStart(), index, descriptorSize);
 }
 
-CD3DX12_GPU_DESCRIPTOR_HANDLE ResourceManager::GetGPUHandle() {
-    return CD3DX12_GPU_DESCRIPTOR_HANDLE(descriptorHeap->GetGPUDescriptorHandleForHeapStart(), numAllocatedDescriptors, descriptorSize);
+CD3DX12_GPU_DESCRIPTOR_HANDLE ResourceManager::GetGPUHandle(UINT index) {
+    return CD3DX12_GPU_DESCRIPTOR_HANDLE(descriptorHeap->GetGPUDescriptorHandleForHeapStart(), index, descriptorSize);
 }
 
 ComPtr<ID3D12DescriptorHeap> ResourceManager::GetDescriptorHeap() {
@@ -124,9 +98,23 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
 }
 
 UINT ResourceManager::AllocateDescriptor() {
-    numAllocatedDescriptors++;
-    return numAllocatedDescriptors;
+    if (!freeDescriptors.empty()) {
+        UINT freeIndex = freeDescriptors.front();
+        freeDescriptors.pop();
+        return freeIndex;
+    }
+    else {
+        if (numAllocatedDescriptors >= descriptorHeap->GetDesc().NumDescriptors) {
+            throw std::runtime_error("Out of descriptor heap space!");
+        }
+        return numAllocatedDescriptors++;
+    }
 }
+
+void ResourceManager::ReleaseDescriptor(UINT index) {
+    freeDescriptors.push(index);
+}
+
 
 void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix) {
     //DirectX::XMFLOAT4 eyeWorld = { 0.0f, 2.0f, -5.0f, 1.0f };
@@ -144,7 +132,7 @@ void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX:
     //);
     perFrameCBData.projectionMatrix = projectionMatrix;
     perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat3(&eyeWorld);
-    
+    perFrameCBData.numLights = lightBufferHandle.buffer.Size();
     // Map the upload heap and copy new data to it
     void* pUploadData;
     D3D12_RANGE readRange(0, 0);
@@ -167,7 +155,7 @@ void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX:
 }
 
 void ResourceManager::InitializeUploadHeap() {
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
     D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer((sizeof(PerFrameCB) + 255) & ~255);
     ThrowIfFailed(device->CreateCommittedResource(
@@ -188,15 +176,15 @@ void ResourceManager::WaitForCopyQueue() {
 }
 
 void ResourceManager::InitializeCopyCommandQueue() {
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
 
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&copyCommandQueue)));
 
-    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&copyCommandAllocator)));
-    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COPY, copyCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&copyCommandList)));
+    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&copyCommandAllocator)));
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, copyCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&copyCommandList)));
     copyCommandList->Close();
 
     ThrowIfFailed(device->CreateFence(copyFenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copyFence)));
@@ -211,7 +199,7 @@ std::unique_ptr<FrameResource>& ResourceManager::GetFrameResource(UINT frameNum)
 }
 
 UINT ResourceManager::CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc) {
-    auto device = DeviceManager::getInstance().getDevice();
+    auto& device = DeviceManager::GetInstance().GetDevice();
 
     if (numAllocatedSamplerDescriptors >= samplerHeap->GetDesc().NumDescriptors) {
         throw std::runtime_error("Exceeded the maximum number of samplers that can be allocated in the sampler heap.");
@@ -230,4 +218,129 @@ D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getCPUHandleForSampler(UINT index) 
     auto handle = samplerHeap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += index * samplerDescriptorSize;
     return handle;
+}
+
+TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, int width, int height, bool sRGB) {
+    auto& device = DeviceManager::GetInstance().GetDevice();
+
+    // Describe and create the texture resource
+    CD3DX12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, width, height);
+    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    ComPtr<ID3D12Resource> textureResource;
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &textureDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&textureResource)));
+
+    // Create an upload heap
+    const UINT64 uploadBufferSize = GetRequiredIntermediateSize(textureResource.Get(), 0, 1);
+    CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+    D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    ComPtr<ID3D12Resource> textureUploadHeap;
+    ThrowIfFailed(device->CreateCommittedResource(
+        &uploadHeapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &uploadBufferDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&textureUploadHeap)));
+
+    // Upload the texture data to the GPU
+    D3D12_SUBRESOURCE_DATA textureData = {};
+    textureData.pData = image;
+    textureData.RowPitch = width * 4;
+    textureData.SlicePitch = textureData.RowPitch * height;
+
+    // TODO: Make a real upload system
+    ComPtr<ID3D12GraphicsCommandList> commandList;
+    ComPtr<ID3D12CommandAllocator> commandAllocator;
+    GetCopyCommandList(commandList, commandAllocator);
+
+    UpdateSubresources(commandList.Get(), textureResource.Get(), textureUploadHeap.Get(), 0, 0, 1, &textureData);
+
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(textureResource.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    commandList->ResourceBarrier(1, &barrier);
+
+    ExecuteAndWaitForCommandList(commandList, commandAllocator);
+
+    // Allocate descriptor and create shader resource view
+    UINT descriptorIndex = AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = GetGPUHandle(descriptorIndex);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+    srvDesc.Texture2D.MipLevels = 1;
+    srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+
+    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
+
+    return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
+}
+
+void ResourceManager::GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator) {
+    auto& device = DeviceManager::GetInstance().GetDevice();
+
+    // Create a new command allocator if none is available or reuse an existing one
+    if (!commandAllocator || FAILED(commandAllocator->Reset())) {
+        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+    }
+
+    if (!commandList || FAILED(commandList->Reset(commandAllocator.Get(), nullptr))) {
+        ThrowIfFailed(device->CreateCommandList(
+            0,
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            commandAllocator.Get(),
+            nullptr,
+            IID_PPV_ARGS(&commandList)
+        ));
+    }
+}
+
+void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator) {
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    static ComPtr<ID3D12CommandQueue> copyCommandQueue;
+    static ComPtr<ID3D12Fence> copyFence;
+    static HANDLE copyFenceEvent = nullptr;
+    static UINT64 copyFenceValue = 0;
+
+    // Create the command queue if it hasn't been created yet
+    if (!copyCommandQueue) {
+        D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+        queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&copyCommandQueue)));
+    }
+
+    // Create a fence for synchronization if it hasn't been created yet
+    if (!copyFence) {
+        ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copyFence)));
+        copyFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+        if (!copyFenceEvent) {
+            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+        }
+    }
+
+    // Close the command list and execute it
+    ThrowIfFailed(commandList->Close());
+    ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
+    copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+    // Increment the fence value and signal the fence
+    ++copyFenceValue;
+    ThrowIfFailed(copyCommandQueue->Signal(copyFence.Get(), copyFenceValue));
+
+    // Wait until the fence is completed
+    if (copyFence->GetCompletedValue() < copyFenceValue) {
+        ThrowIfFailed(copyFence->SetEventOnCompletion(copyFenceValue, copyFenceEvent));
+        WaitForSingleObject(copyFenceEvent, INFINITE);
+    }
+
+    ThrowIfFailed(commandAllocator->Reset());
 }
