@@ -148,3 +148,7 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         animatedSkeletons.push_back(skeleton);
     }
 }
+
+LightManager& Scene::GetLightManager() {
+    return lightManager;
+}

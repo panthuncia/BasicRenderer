@@ -55,7 +55,7 @@ private:
     float verticalAngle = 0;
     float horizontalAngle = 0;
 
-    std::shared_ptr<Scene> currentScene = std::make_shared<Scene>();
+    std::shared_ptr<Scene> currentScene;// = std::make_shared<Scene>();
 
     UINT m_xRes;
     UINT m_yRes;

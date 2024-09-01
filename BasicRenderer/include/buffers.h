@@ -6,34 +6,35 @@ struct PerFrameCB {
     DirectX::XMMATRIX projectionMatrix;
     DirectX::XMVECTOR eyePosWorldSpace;
     DirectX::XMVECTOR ambientLighting;
-    UINT numLights;
+    unsigned int lightBufferIndex;
+    unsigned int numLights;
 };
 
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
     DirectX::XMMATRIX normalMatrix;
-    UINT boneTransformBufferIndex;
-    UINT inverseBindMatricesBufferIndex;
+    unsigned int boneTransformBufferIndex;
+    unsigned int inverseBindMatricesBufferIndex;
 };
 
 struct PerMeshCB {
-    UINT materialDataIndex;
+    unsigned int materialDataIndex;
 };
 
 struct PerMaterialCB {
-    UINT psoFlags;
-    UINT baseColorTextureIndex;
-    UINT baseColorSamplerIndex;
-    UINT normalTextureIndex;
-    UINT normalSamplerIndex;
-    UINT metallicRoughnessTextureIndex;
-    UINT metallicRoughnessSamplerIndex;
-    UINT emissiveTextureIndex;
-    UINT emissiveSamplerIndex;
-    UINT aoMapIndex;
-    UINT aoSamplerIndex;
-    UINT heightMapIndex;
-    UINT heightSamplerIndex;
+    unsigned int psoFlags;
+    unsigned int baseColorTextureIndex;
+    unsigned int baseColorSamplerIndex;
+    unsigned int normalTextureIndex;
+    unsigned int normalSamplerIndex;
+    unsigned int metallicRoughnessTextureIndex;
+    unsigned int metallicRoughnessSamplerIndex;
+    unsigned int emissiveTextureIndex;
+    unsigned int emissiveSamplerIndex;
+    unsigned int aoMapIndex;
+    unsigned int aoSamplerIndex;
+    unsigned int heightMapIndex;
+    unsigned int heightSamplerIndex;
     float metallicFactor;
     float roughnessFactor;
     float ambientStrength;
@@ -50,7 +51,10 @@ struct LightInfo {
     // x=point -> w = shadow caster
     // x=spot -> y= inner cone angle, z= outer cone angle, w= shadow caster
     // x=directional => w= shadow caster
-    DirectX::XMVECTOR properties;
+    unsigned int type;
+    float innerConeAngle;
+    float outerConeAngle;
+    unsigned int shadowCaster;
     DirectX::XMVECTOR posWorldSpace; // Position of the lights
     DirectX::XMVECTOR dirWorldSpace; // Direction of the lights
     DirectX::XMVECTOR attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range

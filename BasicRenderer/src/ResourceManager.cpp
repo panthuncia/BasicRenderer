@@ -46,29 +46,6 @@ void ResourceManager::Initialize() {
 
     numAllocatedDescriptors++;
 
-    // Create structured buffer for lights
-    lightBufferHandle = CreateDynamicStructuredBuffer<LightInfo>(1);//DynamicStructuredBuffer<LightInfo>();
-
-    LightInfo light;
-    light.properties = DirectX::XMVectorSetInt(2, 0, 0, 0);
-    light.posWorldSpace = DirectX::XMVectorSet(3.0, 3.0, 3.0, 1.0);
-    light.dirWorldSpace = DirectX::XMVectorSet(-1.0, 0.0, 0.0, 1.0);
-    light.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
-    light.color = DirectX::XMVectorSet(10.0, 10.0, 10.0, 1.0);
-
-    lightBufferHandle.buffer.Add(light);
-    lightBufferHandle.buffer.UpdateBuffer();
-
-    LightInfo light1;
-    light1.properties = DirectX::XMVectorSetInt(2, 0, 0, 0);
-    light1.posWorldSpace = DirectX::XMVectorSet(3.0, 3.0, 3.0, 1.0);
-    light1.dirWorldSpace = DirectX::XMVectorSet(1.0, 0.0, 0.0, 1.0);
-    light1.attenuation = DirectX::XMVectorSet(1.0, 0.01, 0.0032, 10.0);
-    light1.color = DirectX::XMVectorSet(10.0, 10.0, 10.0, 1.0);
-
-    lightBufferHandle.buffer.Add(light1);
-    lightBufferHandle.buffer.UpdateBuffer();
-
     // Initialize Sampler Descriptor Heap
     D3D12_DESCRIPTOR_HEAP_DESC samplerHeapDesc = {};
     samplerHeapDesc.NumDescriptors = 2048;
@@ -116,7 +93,7 @@ void ResourceManager::ReleaseDescriptor(UINT index) {
 }
 
 
-void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix) {
+void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex) {
     //DirectX::XMFLOAT4 eyeWorld = { 0.0f, 2.0f, -5.0f, 1.0f };
     //perFrameCBData.view = DirectX::XMMatrixLookAtLH(
     //    DirectX::XMLoadFloat4(&eyeWorld), // Eye position
@@ -132,7 +109,8 @@ void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX:
     //);
     perFrameCBData.projectionMatrix = projectionMatrix;
     perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat3(&eyeWorld);
-    perFrameCBData.numLights = lightBufferHandle.buffer.Size();
+    perFrameCBData.numLights = numLights;
+    perFrameCBData.lightBufferIndex = lightBufferIndex;
     // Map the upload heap and copy new data to it
     void* pUploadData;
     D3D12_RANGE readRange(0, 0);

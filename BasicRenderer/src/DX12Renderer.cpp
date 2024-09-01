@@ -181,7 +181,8 @@ void DX12Renderer::WaitForPreviousFrame() {
 void DX12Renderer::UpdateConstantBuffer() {
     // moved
     auto camera = currentScene->GetCamera();
-    ResourceManager::GetInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix());
+    auto lightManager = currentScene->GetLightManager();
+    ResourceManager::GetInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), lightManager.GetNumLights(), lightManager.GetLightBufferDescriptorIndex());
 }
 
 void DX12Renderer::CreateConstantBuffer() {

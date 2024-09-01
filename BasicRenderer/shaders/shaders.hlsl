@@ -5,6 +5,7 @@ struct PerFrameBuffer {
     row_major matrix projection;
     float4 eyePosWorldSpace;
     float4 ambientLighting;
+    uint lightBufferIndex;
     uint numLights;
 };
 
@@ -20,15 +21,14 @@ cbuffer PerMesh : register(b2) {
 };
 
 struct LightInfo {
-    // Light attributes: x=type (0=point, 1=spot, 2=directional)
-    // x=point -> w = shadow caster
-    // x=spot -> y= inner cone angle, z= outer cone angle, w= shadow caster
-    // x=directional => w= shadow caster
-    int4 properties;
-    float4 posWorldSpace; // Position of the lights
-    float4 dirWorldSpace; // Direction of the lights
+    uint type;
+    float innerConeAngle;
+    float outerConeAngle;
+    uint shadowCaster;
+    float4 posWorldSpace; // Position of the light
+    float4 dirWorldSpace; // Direction of the light
     float4 attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
-    float4 color; // Color of the lights
+    float4 color; // Color of the light
 };
 
 struct MaterialInfo {
@@ -220,7 +220,7 @@ float3 fresnelSchlick(float cosTheta, float3 F0) {
 }
 
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0) {
-    uint lightType = light.properties.x;
+    uint lightType = light.type;
     float3 lightPos = light.posWorldSpace.xyz;
     float3 lightColor = light.color.xyz;
     float3 dir = light.dirWorldSpace.xyz;
@@ -228,8 +228,8 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     float linearAttenuation = light.attenuation.y;
     float quadraticAttenuation = light.attenuation.z;
     
-    float outerConeCos = light.properties.z;
-    float innerConeCos = light.properties.y;
+    float outerConeCos = light.outerConeAngle;
+    float innerConeCos = light.innerConeAngle;
     
     float3 lightDir;
     float distance;
@@ -308,7 +308,7 @@ float3 reinhardJodie(float3 color) {
 float4 PSMain(PSInput input) : SV_TARGET {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[1];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     
     float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
 

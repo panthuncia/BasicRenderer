@@ -9,6 +9,7 @@
 #include "Mesh.h"
 #include "Camera.h"
 #include "Skeleton.h"
+#include "LightManager.h"
 
 class Scene {
 public:
@@ -28,6 +29,7 @@ public:
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
     std::shared_ptr<Camera> GetCamera();
     void AddSkeleton(std::shared_ptr<Skeleton>);
+    LightManager& GetLightManager();
 
 private:
     std::shared_ptr<Camera> pCamera;
@@ -44,4 +46,5 @@ private:
     std::vector<std::shared_ptr<Skeleton>> skeletons;
     std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
+    LightManager lightManager;
 };
