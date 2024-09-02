@@ -12,20 +12,20 @@ using Microsoft::WRL::ComPtr;
 
 class Material {
 public:
-    std::string name;
-    UINT psoFlags;
-    std::shared_ptr<Texture> baseColorTexture;
-    std::shared_ptr<Texture> normalTexture;
-    std::shared_ptr<Texture> aoMap;
-    std::shared_ptr<Texture> heightMap;
-    std::shared_ptr<Texture> metallicRoughnessTexture;
-    std::shared_ptr<Texture> emissiveTexture;
-    float metallicFactor;
-    float roughnessFactor;
-    DirectX::XMFLOAT4 baseColorFactor;
-    DirectX::XMFLOAT4 emissiveFactor;
-    BlendState blendState;
-    PerMaterialCB materialData = {0};
+    std::string m_name;
+    UINT m_psoFlags;
+    std::shared_ptr<Texture> m_baseColorTexture;
+    std::shared_ptr<Texture> m_normalTexture;
+    std::shared_ptr<Texture> m_aoMap;
+    std::shared_ptr<Texture> m_heightMap;
+    std::shared_ptr<Texture> m_metallicRoughnessTexture;
+    std::shared_ptr<Texture> m_emissiveTexture;
+    float m_metallicFactor;
+    float m_roughnessFactor;
+    DirectX::XMFLOAT4 m_baseColorFactor;
+    DirectX::XMFLOAT4 m_emissiveFactor;
+    BlendState m_blendState;
+    PerMaterialCB m_materialData = {0};
 
     Material(const std::string& name,
         UINT psoFlags);
@@ -37,6 +37,7 @@ public:
         std::shared_ptr<Texture> aoMap,
         std::shared_ptr<Texture> heightMap,
         std::shared_ptr<Texture> metallicRoughnessTexture,
+        std::shared_ptr<Texture> emissiveTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
@@ -47,5 +48,5 @@ public:
     UINT GetMaterialBufferIndex();
 
 private:
-    BufferHandle<PerMaterialCB> perMaterialHandle;
+    BufferHandle<PerMaterialCB> m_perMaterialHandle;
 };

@@ -10,7 +10,7 @@ RenderableObject::RenderableObject(std::string name) : SceneNode(name) {
 
 RenderableObject::RenderableObject(std::string name, std::vector<Mesh> meshes) : SceneNode(name) {
     for (auto& mesh : meshes) {
-        if (mesh.material->blendState != BlendState::BLEND_STATE_OPAQUE) {
+        if (mesh.material->m_blendState != BlendState::BLEND_STATE_OPAQUE) {
             transparentMeshes.push_back(mesh);
             m_hasTransparent = true;
         }

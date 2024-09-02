@@ -248,7 +248,7 @@ void DX12Renderer::Render() {
 
         for (auto& mesh : renderable->GetOpaqueMeshes()) {
             commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
-            auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->blendState);
+            auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
             commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
@@ -266,7 +266,7 @@ void DX12Renderer::Render() {
 
         for (auto& mesh : renderable->GetTransparentMeshes()) {
             commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
-            auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->blendState);
+            auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
             commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();

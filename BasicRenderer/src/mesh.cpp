@@ -7,7 +7,7 @@
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, bool skinned) {
     CreateBuffers(vertices, indices);
     this->material = material;
-    m_psoFlags = material->psoFlags;
+    m_psoFlags = material->m_psoFlags;
     if (skinned) {
         m_psoFlags |= PSOFlags::SKINNED;
     }

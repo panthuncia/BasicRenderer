@@ -421,6 +421,14 @@ float4 PSMain(PSInput input) : SV_TARGET {
     lighting = lighting * input.color.xyz;
 #endif
     
+#if defined(EMISSIVE_TEXTURE)
+    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];
+    SamplerState emissiveSamplerState = SamplerDescriptorHeap[materialInfo.emissiveSamplerIndex];
+    lighting += SRGBToLinear(emissiveTexture.Sample(emissiveSamplerState, uv).rgb)*materialInfo.emissiveFactor.rgb;
+#else
+    lighting += materialInfo.emissiveFactor.rgb;
+#endif
+    
     // Reinhard tonemapping
     lighting = reinhardJodie(lighting);
 #if defined(PBR)

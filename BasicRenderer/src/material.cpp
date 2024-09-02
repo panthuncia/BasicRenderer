@@ -3,8 +3,11 @@
 
 Material::Material(const std::string& name,
     UINT psoFlags)
-    : name(name),
-    psoFlags(psoFlags) {
+    : m_name(name),
+    m_psoFlags(psoFlags) {
+    auto& resourceManager = ResourceManager::GetInstance();
+    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
+    resourceManager.UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 
 Material::Material(const std::string& name,
@@ -14,52 +17,63 @@ Material::Material(const std::string& name,
     std::shared_ptr<Texture> aoMap,
     std::shared_ptr<Texture> heightMap,
     std::shared_ptr<Texture> metallicRoughnessTexture,
+    std::shared_ptr<Texture> emissiveTexture,
     float metallicFactor,
     float roughnessFactor,
     DirectX::XMFLOAT4 baseColorFactor,
     DirectX::XMFLOAT4 emissiveFactor,
     BlendState blendState)
-    : name(name),
-    psoFlags(psoFlags),
-    baseColorTexture(baseColorTexture),
-    normalTexture(normalTexture),
-    aoMap(aoMap),
-    heightMap(heightMap),
-    metallicRoughnessTexture(metallicRoughnessTexture),
-    metallicFactor(metallicFactor),
-    roughnessFactor(roughnessFactor),
-    baseColorFactor(baseColorFactor),
-    emissiveFactor(emissiveFactor),
-    blendState(blendState) {
+    : m_name(name),
+    m_psoFlags(psoFlags),
+    m_baseColorTexture(baseColorTexture),
+    m_normalTexture(normalTexture),
+    m_aoMap(aoMap),
+    m_heightMap(heightMap),
+    m_metallicRoughnessTexture(metallicRoughnessTexture),
+    m_emissiveTexture(emissiveTexture),
+    m_metallicFactor(metallicFactor),
+    m_roughnessFactor(roughnessFactor),
+    m_baseColorFactor(baseColorFactor),
+    m_emissiveFactor(emissiveFactor),
+    m_blendState(blendState) {
 
-    materialData.psoFlags = psoFlags;
-    materialData.ambientStrength = 0.5;
-    materialData.specularStrength = 2.0;
-    materialData.heightMapScale = 0.05;
-    materialData.textureScale = 1.0;
-    materialData.baseColorFactor = baseColorFactor;
-    materialData.emissiveFactor = emissiveFactor;
-    materialData.metallicFactor = metallicFactor;
-    materialData.roughnessFactor = roughnessFactor;
+    m_materialData.psoFlags = psoFlags;
+    m_materialData.ambientStrength = 0.5;
+    m_materialData.specularStrength = 2.0;
+    m_materialData.heightMapScale = 0.05;
+    m_materialData.textureScale = 1.0;
+    m_materialData.baseColorFactor = baseColorFactor;
+    m_materialData.emissiveFactor = emissiveFactor;
+    m_materialData.metallicFactor = metallicFactor;
+    m_materialData.roughnessFactor = roughnessFactor;
     if (baseColorTexture != nullptr) {
-        materialData.baseColorTextureIndex = baseColorTexture->GetBufferDescriptorIndex();
+        m_materialData.baseColorTextureIndex = baseColorTexture->GetBufferDescriptorIndex();
+        m_materialData.baseColorSamplerIndex = baseColorTexture->GetSamplerDescriptorIndex();
     }
     if (normalTexture != nullptr) {
-        materialData.normalTextureIndex = normalTexture->GetBufferDescriptorIndex();
+        m_materialData.normalTextureIndex = normalTexture->GetBufferDescriptorIndex();
+        m_materialData.normalTextureIndex = normalTexture->GetSamplerDescriptorIndex();
     }
     if (aoMap != nullptr) {
-        materialData.aoMapIndex = aoMap->GetBufferDescriptorIndex();
+        m_materialData.aoMapIndex = aoMap->GetBufferDescriptorIndex();
+        m_materialData.aoSamplerIndex = aoMap->GetSamplerDescriptorIndex();
     }
     if (heightMap != nullptr) {
-        materialData.heightMapIndex = heightMap->GetBufferDescriptorIndex();
+        m_materialData.heightMapIndex = heightMap->GetBufferDescriptorIndex();
+        m_materialData.heightMapIndex = heightMap->GetSamplerDescriptorIndex();
     }
     if (metallicRoughnessTexture != nullptr) {
-        materialData.metallicRoughnessTextureIndex = metallicRoughnessTexture->GetBufferDescriptorIndex();
+        m_materialData.metallicRoughnessTextureIndex = metallicRoughnessTexture->GetBufferDescriptorIndex();
+        m_materialData.metallicRoughnessSamplerIndex = metallicRoughnessTexture->GetSamplerDescriptorIndex();
+    }
+    if (emissiveTexture != nullptr) {
+        m_materialData.emissiveTextureIndex = emissiveTexture->GetBufferDescriptorIndex();
+        m_materialData.emissiveSamplerIndex = emissiveTexture->GetSamplerDescriptorIndex();
     }
 
     auto& resourceManager = ResourceManager::GetInstance();
-    perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
-    resourceManager.UpdateIndexedConstantBuffer(perMaterialHandle, materialData);
+    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
+    resourceManager.UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 
 std::shared_ptr<Texture> Material::createDefaultTexture() {
@@ -90,5 +104,5 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
 }
 
 UINT Material::GetMaterialBufferIndex() {
-    return perMaterialHandle.index;
+    return m_perMaterialHandle.index;
 }
