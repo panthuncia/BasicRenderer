@@ -10,6 +10,14 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const s
     resourceManager.UpdateStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
 }
 
+Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle<XMMATRIX> inverseBindMatricesHandle)
+    : m_nodes(nodes), m_inverseBindMatricesHandle(inverseBindMatricesHandle) {
+    m_boneTransforms.resize(nodes.size() * 16);
+    auto& resourceManager = ResourceManager::GetInstance();
+    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
+}
+
+
 void Skeleton::AddAnimation(const std::shared_ptr<Animation>& animation) {
     if (animationsByName.find(animation->name) != animationsByName.end()) {
         spdlog::error("Duplicate animation names are not allowed in a single skeleton");
@@ -53,4 +61,8 @@ UINT Skeleton::GetTransformsBufferIndex() {
 
 UINT Skeleton::GetInverseBindMatricesBufferIndex() {
     return m_inverseBindMatricesHandle.index;
+}
+
+BufferHandle<XMMATRIX> Skeleton::GetInverseBindMatricesHandle() {
+    return m_inverseBindMatricesHandle;
 }

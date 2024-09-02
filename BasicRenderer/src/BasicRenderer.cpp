@@ -171,9 +171,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
     renderer.SetCurrentScene(baseScene);
-    renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
     renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    phoenixScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    phoenixScene->GetRoot().transform.setLocalPosition({ -2.0, 0.0, 0.0 });
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    phoenixScene->GetRoot().transform.setLocalPosition({ -3.0, 0.0, 0.0 });
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    phoenixScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    phoenixScene->GetRoot().transform.setLocalPosition({ 2.0, 0.0, 0.0 });
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    phoenixScene->GetRoot().transform.setLocalPosition({ 3.0, 0.0, 0.0 });
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+
+
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
     XMFLOAT3 up = XMFLOAT3(0.0f, 1.0f, 0.0f);
