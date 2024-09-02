@@ -243,7 +243,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     } else {
         lightDir = normalize(lightPos - fragPos);
         distance = length(lightPos - fragPos);
-        attenuation = 1.0 / (constantAttenuation + linearAttenuation * distance + quadraticAttenuation * distance * distance);
+        attenuation = 1.0 / ((constantAttenuation + linearAttenuation * distance + quadraticAttenuation * distance * distance) + 0.0001); //+0.0001 fudge-factor to prevent division by 0;
     }
     
     // Unit vector halfway between view dir and light dir. Makes more accurate specular highlights.

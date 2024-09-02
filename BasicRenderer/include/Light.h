@@ -25,6 +25,7 @@ public:
 	void RemoveLightObserver(ISceneNodeObserver<Light>* observer);
 
 	void OnUpdate() override {
+		UpdateLightInfo();
 		// Notify Light-specific observers
 		NotifyLightObservers();
 	}
@@ -34,4 +35,5 @@ private:
 	int m_currentLightBufferIndex = -1;
 	std::vector<ISceneNodeObserver<Light>*> lightObservers;
 	void NotifyLightObservers();
+	void UpdateLightInfo();
 };

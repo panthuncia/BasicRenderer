@@ -114,6 +114,16 @@ void Scene::RemoveObjectByID(UINT id) {
     }
 }
 
+void Scene::RemoveLightByID(UINT id) {
+    auto it = lightsByID.find(id);
+    if (it != lightsByID.end()) {
+        auto& light = it->second;
+        light->parent->RemoveChild(id);
+        lightsByID.erase(it);
+        lightManager.RemoveLight(light.get());
+    }
+}
+
 std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetRenderableObjectIDMap() {
     return objectsByID;
 }
@@ -143,6 +153,7 @@ void Scene::Update() {
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }
+    lightManager.UpdateGPU();
 }
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
@@ -162,6 +173,14 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
     }
 }
 
-LightManager& Scene::GetLightManager() {
-    return lightManager;
+void Scene::PostUpdate() {
+    lightManager.UpdateGPU();
+}
+
+UINT Scene::GetNumLights() {
+    return lightsByID.size();
+}
+
+UINT Scene::GetLightBufferDescriptorIndex() {
+    return lightManager.GetLightBufferDescriptorIndex();
 }

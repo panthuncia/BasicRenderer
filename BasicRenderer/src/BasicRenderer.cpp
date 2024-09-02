@@ -183,13 +183,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
+    animation->addPositionKeyframe(0, { -10, 0, 0 });
+    animation->addPositionKeyframe(1, { 10, 0, 0 });
+    animation->addPositionKeyframe(2, { 10, 15, 0 });
+    animation->addPositionKeyframe(3, { -10, 15, 0 });
+    animation->addPositionKeyframe(4, { -10, 0, 0 });
     animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
     animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
     animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     cubeObject->animationController->setAnimationClip(animation);
 
-    std::shared_ptr<Light> light1 = std::make_shared<Light>("sun", 2, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 10, XMFLOAT3(-1, 0, 0));
+    std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", 0, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 1, XMFLOAT3(-1, 0, 0));
+    cubeObject->AddChild(light1);
     renderer.GetCurrentScene()->AddLight(light1);
 
     MSG msg = {};

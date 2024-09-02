@@ -52,6 +52,7 @@ public:
 
     void UpdateAt(UINT index, const T& element) {
         m_data[index] = element;
+        m_needsUpdate = true;
     }
 
     void UpdateBuffer() {

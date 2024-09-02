@@ -20,6 +20,10 @@ public:
         lightBufferHandle.buffer.UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
     }
 
+    void UpdateGPU() {
+        lightBufferHandle.buffer.UpdateBuffer();
+    }
+
 private:
     DynamicBufferHandle<LightInfo> lightBufferHandle;
     //std::unordered_map<int, unsigned int> lightIndexMap; // Maps localID to buffer index

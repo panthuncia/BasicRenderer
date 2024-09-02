@@ -22,6 +22,7 @@ public:
     std::shared_ptr<RenderableObject> GetObjectByID(UINT id);
     void RemoveObjectByName(const std::string& name);
     void RemoveObjectByID(UINT id);
+    void RemoveLightByID(UINT Id);
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetOpaqueRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetTransparentRenderableObjectIDMap();
@@ -30,7 +31,10 @@ public:
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
     std::shared_ptr<Camera> GetCamera();
     void AddSkeleton(std::shared_ptr<Skeleton>);
-    LightManager& GetLightManager();
+    UINT GetNumLights();
+    UINT GetLightBufferDescriptorIndex();
+    void PostUpdate();
+    //LightManager& GetLightManager();
 
 private:
     std::shared_ptr<Camera> pCamera;
