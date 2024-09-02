@@ -346,7 +346,7 @@ float3 reinhardJodie(float3 color) {
     return lerp(reinhardLuminance, reinhardPerChannel, reinhardPerChannel);
 }
 
-float4 PSMain(PSInput input) : SV_TARGET {
+float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
@@ -381,6 +381,13 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
     normalWS = normalize(mul(tangentSpaceNormal, TBN));
 #endif // NORMAL_MAP
+    
+#if defined(DOUBLE_SIDED)
+    if(!isFrontFace) {
+        normalWS = -normalWS;
+    }
+#endif // DOUBLE_SIDED
+    
     float metallic = 0.0;
     float roughness = 0.0;
     float3 F0 = float3(0.04, 0.04, 0.04); // TODO: this should be specified per-material

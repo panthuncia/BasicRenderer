@@ -605,6 +605,12 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
         DirectX::XMFLOAT4 emissiveFactor(0.0f, 0.0f, 0.0f, 1.0f);
         BlendState blendMode = BlendState::BLEND_STATE_OPAQUE; // Opaque blend mode
 
+        if (gltfMaterial.contains("doubleSided")) {
+            if (gltfMaterial["doubleSided"].get<bool>()) {
+                psoFlags |= PSOFlags::DOUBLE_SIDED;
+            }
+        }
+
         if (gltfMaterial.contains("pbrMetallicRoughness")) {
             psoFlags |= PSOFlags::PBR;
             const auto& pbr = gltfMaterial["pbrMetallicRoughness"];

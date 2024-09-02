@@ -52,7 +52,7 @@ Material::Material(const std::string& name,
     }
     if (normalTexture != nullptr) {
         m_materialData.normalTextureIndex = normalTexture->GetBufferDescriptorIndex();
-        m_materialData.normalTextureIndex = normalTexture->GetSamplerDescriptorIndex();
+        m_materialData.normalSamplerIndex = normalTexture->GetSamplerDescriptorIndex();
     }
     if (aoMap != nullptr) {
         m_materialData.aoMapIndex = aoMap->GetBufferDescriptorIndex();

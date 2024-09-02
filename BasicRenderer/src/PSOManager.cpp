@@ -88,7 +88,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     psoDesc.RasterizerState.FrontCounterClockwise = true;
-    //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    if (psoFlags & PSOFlags::DOUBLE_SIDED) {
+        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    }
     psoDesc.BlendState = GetBlendDesc(blendState);
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
@@ -159,6 +161,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         DxcDefine macro;
         macro.Value = L"1";
         macro.Name = L"SKINNED";
+        defines.insert(defines.begin(), macro);
+    }
+    if (psoFlags & PSOFlags::DOUBLE_SIDED) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"DOUBLE_SIDED";
         defines.insert(defines.begin(), macro);
     }
     return defines;

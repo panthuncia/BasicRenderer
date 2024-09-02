@@ -9,4 +9,5 @@ enum PSOFlags {
     PBR = 1 << 5,
     PBR_MAPS = 1 << 6,
     SKINNED = 1 << 7,
+    DOUBLE_SIDED = 1 << 8,
 };
