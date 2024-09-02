@@ -25,6 +25,10 @@ Light::Light(std::string name, unsigned int type, XMFLOAT3 position, XMFLOAT3 co
 	m_lightInfo.attenuation = XMVectorSet(0, 0, 0, 0);
 }
 
+Light::Light(LightInfo& lightInfo) : SceneNode(name) {
+	m_lightInfo = lightInfo;
+}
+
 LightInfo& Light::GetLightInfo() {
 	return m_lightInfo;
 }

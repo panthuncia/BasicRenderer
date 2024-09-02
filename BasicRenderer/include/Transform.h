@@ -37,4 +37,6 @@ public:
     void applyMovement(const MovementState& movement, float deltaTime);
 
     XMFLOAT3 getGlobalPosition() const;
+
+    Transform copy() const;
 };

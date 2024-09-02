@@ -20,6 +20,7 @@ public:
     std::shared_ptr<RenderableObject> CreateRenderableObject(MeshData meshData, std::string name); // Like addObject, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> GetObjectByName(const std::string& name);
     std::shared_ptr<RenderableObject> GetObjectByID(UINT id);
+    std::shared_ptr<SceneNode> GetEntityByID(UINT id);
     void RemoveObjectByName(const std::string& name);
     void RemoveObjectByID(UINT id);
     void RemoveLightByID(UINT Id);
@@ -34,6 +35,7 @@ public:
     UINT GetNumLights();
     UINT GetLightBufferDescriptorIndex();
     void PostUpdate();
+    std::shared_ptr<SceneNode> AppendScene(Scene& scene);
     //LightManager& GetLightManager();
 
 private:

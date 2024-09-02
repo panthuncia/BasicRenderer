@@ -169,6 +169,47 @@ PSInput VSMain(VSInput input) {
     return output;
 }
 
+float3 LinearToSRGB(float3 color) {
+    // Clamp color to the [0, 1] range
+    float3 result = saturate(color);
+
+    // Apply the sRGB gamma curve using select for component-wise operation
+    float3 linearThreshold = float3(0.0031308, 0.0031308, 0.0031308);
+    float3 sRGBMultiplier = float3(12.92, 12.92, 12.92);
+    float3 sRGBOffset = float3(0.055, 0.055, 0.055);
+    float3 sRGBScale = float3(1.055, 1.055, 1.055);
+
+    // Calculate using select() for component-wise conditional evaluation
+    result = select(
+        sRGBScale * pow(result, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - sRGBOffset,
+        sRGBMultiplier * result,
+        result <= linearThreshold
+    );
+
+    return result;
+}
+
+float3 SRGBToLinear(float3 color) {
+    // Clamp color to the [0, 1] range
+    float3 result = saturate(color);
+
+    // Apply the inverse sRGB gamma curve using select for component-wise operation
+    float3 sRGBThreshold = float3(0.04045, 0.04045, 0.04045);
+    float3 linearMultiplier = float3(12.92, 12.92, 12.92);
+    float3 linearOffset = float3(0.055, 0.055, 0.055);
+    float3 linearScale = float3(1.055, 1.055, 1.055);
+    float3 gamma = float3(2.4, 2.4, 2.4);
+
+    // Calculate using select() for component-wise conditional evaluation
+    result = select(
+        pow((result + linearOffset) / linearScale, gamma),
+        result / linearMultiplier,
+        result <= sRGBThreshold
+    );
+
+    return result;
+}
+
 // Models spotlight falloff with linear interpolation between inner and outer cone angles
 float spotAttenuation(float3 pointToLight, float3 lightDirection, float outerConeCos, float innerConeCos) {
     float cos = dot(normalize(lightDirection), normalize(-pointToLight));
@@ -323,6 +364,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
     Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
     SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
     baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
+    baseColor.rgb = SRGBToLinear(baseColor.rgb);
 #endif //BASE_COLOR_TEXTURE
 #if defined(PBR)
         baseColor = materialInfo.baseColorFactor * baseColor;
@@ -383,7 +425,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
     lighting = reinhardJodie(lighting);
 #if defined(PBR)
     // Gamma correction
-    lighting = pow(lighting, float3(0.45454545454, 0.45454545454, 0.45454545454));
+    lighting = LinearToSRGB(lighting);
 #endif
     
     float opacity = baseColor.a;

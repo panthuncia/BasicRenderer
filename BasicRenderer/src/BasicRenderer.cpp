@@ -157,10 +157,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 5, 4, 1, 5, 0
     };
 
-    auto carScene = loadGLB("models/tiger.glb");
-    carScene->GetRoot().transform.setLocalScale({0.1, 0.1, 0.1});
+    auto baseScene = std::make_shared<Scene>();
 
-    renderer.SetCurrentScene(carScene);
+    auto dragonScene = loadGLB("models/dragon.glb");
+    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+
+    auto tigerScene = loadGLB("models/tiger.glb");
+    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
+
+    auto phoenixScene = loadGLB("models/phoenix.glb");
+    phoenixScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
+    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+
+    renderer.SetCurrentScene(baseScene);
+    renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
     XMFLOAT3 up = XMFLOAT3(0.0f, 1.0f, 0.0f);
     float fov = 80.0f * (XM_PI / 180.0f); // Converting degrees to radians
@@ -180,7 +194,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto cubeMesh = Mesh(vertices, indices, cubeMaterial, false);
     std::vector<Mesh> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>("CubeObject", vec);
-    renderer.GetCurrentScene()->AddObject(cubeObject);
+    auto cubeScaleNode = std::make_shared<SceneNode>();
+    cubeScaleNode->transform.setLocalScale({ 0.1, 0.1, 0.1 });
+    cubeScaleNode->AddChild(cubeObject);
+    scene->AddNode(cubeScaleNode);
+    scene->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
     animation->addPositionKeyframe(0, { -10, 0, 0 });
@@ -194,9 +212,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     cubeObject->animationController->setAnimationClip(animation);
 
-    std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", 0, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 1, XMFLOAT3(-1, 0, 0));
+    std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", 0, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 0.01, XMFLOAT3(-1, 0, 0));
     cubeObject->AddChild(light1);
-    renderer.GetCurrentScene()->AddLight(light1);
+    scene->AddLight(light1);
 
     MSG msg = {};
     auto lastUpdateTime = std::chrono::system_clock::now();

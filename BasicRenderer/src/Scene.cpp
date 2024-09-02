@@ -81,6 +81,23 @@ std::shared_ptr<RenderableObject> Scene::GetObjectByID(UINT id) {
     return nullptr;
 }
 
+std::shared_ptr<SceneNode> Scene::GetEntityByID(UINT id) {
+    auto it = objectsByID.find(id);
+    if (it != objectsByID.end()) {
+        return it->second;
+    }
+    auto it1 = lightsByID.find(id);
+    if (it1 != lightsByID.end()) {
+        return it1->second;
+    }
+    auto it2 = nodesByID.find(id);
+    if (it2 != nodesByID.end()) {
+        return it2->second;
+    }
+    return nullptr;
+}
+
+
 void Scene::RemoveObjectByName(const std::string& name) {
     auto it = objectsByName.find(name);
     if (it != objectsByName.end()) {
@@ -113,6 +130,8 @@ void Scene::RemoveObjectByID(UINT id) {
         node->parent->RemoveChild(node->localID);
     }
 }
+
+
 
 void Scene::RemoveLightByID(UINT id) {
     auto it = lightsByID.find(id);
@@ -183,4 +202,138 @@ UINT Scene::GetNumLights() {
 
 UINT Scene::GetLightBufferDescriptorIndex() {
     return lightManager.GetLightBufferDescriptorIndex();
+}
+
+std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
+    std::unordered_map<UINT, UINT> idMap;
+    auto& oldRootID = scene.sceneRoot.localID;
+    auto newRootNode = std::make_shared<SceneNode>();
+    for (auto& childPair : scene.sceneRoot.children) {
+        auto& child = childPair.second;
+        auto dummyNode = std::make_shared<SceneNode>();
+        dummyNode->localID = child->localID;
+        newRootNode->AddChild(dummyNode);
+    }
+    newRootNode->transform = scene.sceneRoot.transform.copy();
+    UINT newRootID = AddNode(newRootNode);
+    idMap[oldRootID] = newRootID;
+
+    std::vector<std::shared_ptr<SceneNode>> newEntities;
+
+    // Parse lights
+    for (auto& lightPair : scene.lightsByID) {
+        auto& light = lightPair.second;
+        UINT oldID = light->localID;
+        auto newLight = std::make_shared<Light>(light->GetLightInfo());
+        for (auto& childPair : light->children) {
+            auto& child = childPair.second;
+            auto dummyNode = std::make_shared<SceneNode>();
+            dummyNode->localID = child->localID;
+            newLight->AddChild(dummyNode);
+        }
+        newLight->transform = light->transform.copy();
+        UINT newID = AddLight(newLight);
+        idMap[oldID] = newLight->localID;
+        newEntities.push_back(newLight);
+    }
+
+    // Parse objects
+    for (auto& objectPair : scene.objectsByID) {
+        auto& object = objectPair.second;
+        UINT oldID = object->localID;
+        auto newObject = std::make_shared<RenderableObject>(object->name, object->GetOpaqueMeshes(), object->GetTransparentMeshes());
+        for (auto& childPair : object->children) {
+            auto& child = childPair.second;
+            auto dummyNode = std::make_shared<SceneNode>();
+            dummyNode->localID = child->localID;
+            newObject->AddChild(dummyNode);
+        }
+        newObject->transform = object->transform.copy();
+        UINT newID = AddObject(newObject);
+        idMap[oldID] = newID;
+        newEntities.push_back(newObject);
+    }
+
+    // Parse nodes
+    for (auto& nodePair : scene.nodesByID) {
+        auto& node = nodePair.second;
+        UINT oldID = node->localID;
+        auto newNode = std::make_shared<SceneNode>();
+        for (auto& childPair : node->children) {
+            auto& child = childPair.second;
+            auto dummyNode = std::make_shared<SceneNode>();
+            dummyNode->localID = child->localID;
+            newNode->AddChild(dummyNode);
+        }
+        newNode->transform = node->transform.copy();
+        UINT newID = AddNode(newNode);
+        idMap[oldID] = newID;
+        newEntities.push_back(newNode);
+    }
+
+    for (auto& skeleton : scene.skeletons) {
+        std::vector<std::shared_ptr<SceneNode>> newJoints;
+        for (auto& joint : skeleton->m_nodes) {
+            auto newJoint = GetEntityByID(idMap[joint->localID]);
+            if (newJoint) {
+                newJoints.push_back(newJoint);
+            }
+            else {
+                spdlog::error("Joint mapping broke during scene cloning!");
+            }
+        }
+        auto newSkeleton = std::make_shared<Skeleton>(newJoints, skeleton->m_inverseBindMatrices);
+
+        // Remap node ids in animations
+        for (auto& animation : skeleton->animations) {
+            auto newAnimation = std::make_shared<Animation>(animation->name);
+            for (auto& nodePair : animation->nodesMap) {
+                UINT key = nodePair.first;
+                newAnimation->nodesMap[idMap[key]] = nodePair.second;
+            }
+            newSkeleton->AddAnimation(newAnimation);
+        }
+
+        // Remap skeleton & users to their correct IDs
+        for (auto& oldID : skeleton->userIDs) {
+            GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
+        }
+        AddSkeleton(newSkeleton);
+    }
+
+    // Rebuild parent-child mapping
+    auto oldRootChildren = newRootNode->children; // Copy existing children
+    newRootNode->children.clear(); // Clear children
+
+    for (auto& childPair : oldRootChildren) {
+        auto& child = childPair.second;
+        if (idMap.find(child->localID) != idMap.end()) {
+            auto mappedChild = GetEntityByID(idMap[child->localID]);
+            if (mappedChild) {
+                newRootNode->AddChild(mappedChild);
+            }
+        }
+    }
+
+    for (auto& entity : newEntities) {
+        auto oldChildren = entity->children; // Copy existing children
+        entity->children.clear(); // Clear children
+
+        for (auto& childPair : oldChildren) {
+            auto& child = childPair.second;
+            if (idMap.find(child->localID) != idMap.end()) {
+                auto mappedChild = GetEntityByID(idMap[child->localID]);
+                if (mappedChild) {
+                    entity->AddChild(mappedChild);
+                }
+                else {
+                    spdlog::error("Node missing from id map: ID {}", child->localID);
+                }
+            }
+            else {
+                spdlog::error("Node missing from id map: ID {}", child->localID);
+            }
+        }
+    }
+    return newRootNode;
 }

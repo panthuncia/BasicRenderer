@@ -109,3 +109,12 @@ void Transform::applyMovement(const MovementState& movement, float deltaTime) {
     XMStoreFloat3(&pos, posVec);
     isDirty = true;
 }
+
+Transform Transform::copy() const {
+    Transform transform;
+    transform.setLocalPosition(pos);
+    transform.setLocalRotationFromQuaternion(rot);
+    transform.setLocalScale(scale);
+    transform.isDirty = true;
+    return transform;
+}

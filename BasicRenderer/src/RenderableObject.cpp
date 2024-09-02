@@ -22,6 +22,22 @@ RenderableObject::RenderableObject(std::string name, std::vector<Mesh> meshes) :
     CreateBuffers();
 }
 
+RenderableObject::RenderableObject(std::string name, std::vector<Mesh>& newOpaqueMeshes, std::vector<Mesh>& newTransparentMeshes) : SceneNode(name) {
+    if (newOpaqueMeshes.size() > 0) {
+        m_hasOpaque = true;
+        for (auto& mesh : newOpaqueMeshes) {
+            opaqueMeshes.push_back(mesh);
+        }
+    }
+    if (newTransparentMeshes.size() > 0) {
+        m_hasTransparent = true;
+        for (auto& mesh : newTransparentMeshes) {
+            transparentMeshes.push_back(mesh);
+        }
+    }
+    CreateBuffers();
+}
+
 std::vector<Mesh>& RenderableObject::GetOpaqueMeshes() {
 	return opaqueMeshes;
 }

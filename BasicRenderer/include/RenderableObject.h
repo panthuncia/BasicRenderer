@@ -12,6 +12,7 @@ class RenderableObject : public SceneNode {
 public:
 	RenderableObject(std::string name);
 	RenderableObject(std::string name, std::vector<Mesh> meshes);
+	RenderableObject(std::string name, std::vector<Mesh>& newOpaqueMeshes, std::vector<Mesh>& newTransparentMeshes);
 	std::vector<Mesh>& GetOpaqueMeshes();
 	std::vector<Mesh>& GetTransparentMeshes();
 	bool HasTransparent() const;
