@@ -15,6 +15,7 @@ class Scene {
 public:
     UINT AddObject(std::shared_ptr<RenderableObject> object);
     UINT AddNode(std::shared_ptr<SceneNode> node);
+    UINT AddLight(std::shared_ptr<Light> light);
     std::shared_ptr<SceneNode> CreateNode(std::string name = ""); // Like addNode, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> CreateRenderableObject(MeshData meshData, std::string name); // Like addObject, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> GetObjectByName(const std::string& name);
@@ -40,6 +41,7 @@ private:
     std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodesByName;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> opaqueObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> transparentObjectsByID;
+    std::unordered_map<UINT, std::shared_ptr<Light>> lightsByID;
 	UINT numObjects = 0;
 	UINT nextNodeID = 0;
     SceneNode sceneRoot;

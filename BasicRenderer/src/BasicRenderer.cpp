@@ -190,7 +190,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     cubeObject->animationController->setAnimationClip(animation);
 
     std::shared_ptr<Light> light1 = std::make_shared<Light>("sun", 2, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 10, XMFLOAT3(-1, 0, 0));
-    renderer.GetCurrentScene()->GetLightManager().AddLight(*light1);
+    renderer.GetCurrentScene()->AddLight(light1);
 
     MSG msg = {};
     auto lastUpdateTime = std::chrono::system_clock::now();

@@ -8,7 +8,7 @@ AnimationController::AnimationController(SceneNode* node)
 
 void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> animationClip) {
     this->animationClip = animationClip;
-    node->forceUpdate();
+    node->ForceUpdate();
     updateTransform();
 }
 

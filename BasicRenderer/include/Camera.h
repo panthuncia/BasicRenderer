@@ -44,5 +44,5 @@ protected:
     float zNear;
     float zFar;
 
-	void onUpdate() override;
+	void OnUpdate() override;
 };

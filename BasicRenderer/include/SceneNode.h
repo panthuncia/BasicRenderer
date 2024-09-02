@@ -5,6 +5,7 @@
 #include <memory>
 #include "Transform.h"
 #include "AnimationController.h"
+#include "Interfaces/ISceneNodeObserver.h"
 
 class AnimationController;
 
@@ -19,11 +20,17 @@ public:
 
     SceneNode(const std::string& name = "");
 
-    void addChild(std::shared_ptr<SceneNode> node);
-    void removeChild(unsigned int childId);
-    void update();
-    void forceUpdate();
+    void AddChild(std::shared_ptr<SceneNode> node);
+    void RemoveChild(unsigned int childId);
+    void Update();
+    void ForceUpdate();
 
+    void AddObserver(ISceneNodeObserver<SceneNode>* observer);
+    void RemoveObserver(ISceneNodeObserver<SceneNode>* observer);
+
+private:
+    std::vector<ISceneNodeObserver<SceneNode>*> observers; // Base class observer
 protected:
-    virtual void onUpdate() {} // Hook method for derived classes to extend update behavior
+    virtual void OnUpdate() {} // Hook method for derived classes to extend update behavior
+    void NotifyObservers();
 };

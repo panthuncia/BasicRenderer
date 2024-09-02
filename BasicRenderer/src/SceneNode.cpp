@@ -5,37 +5,56 @@ SceneNode::SceneNode(const std::string& name)
     : parent(nullptr), transform(), animationController(std::make_unique<AnimationController>(this)), localID(-1), name(name) {
 }
 
-void SceneNode::addChild(std::shared_ptr<SceneNode> node) {
+void SceneNode::AddChild(std::shared_ptr<SceneNode> node) {
     children[node->localID] = node;
     if (node->parent != nullptr) {
-        node->parent->removeChild(node->localID);
+        node->parent->RemoveChild(node->localID);
     }
     node->parent = this;
 }
 
-void SceneNode::removeChild(unsigned int childId) {
+void SceneNode::RemoveChild(unsigned int childId) {
     children.erase(childId);
 }
 
-void SceneNode::update() {
+void SceneNode::Update() {
     if (transform.isDirty) {
-        forceUpdate();
+        ForceUpdate();
     }
-    onUpdate();
+    OnUpdate();
     for (auto& childPair : children) {
-        childPair.second->update();
+        childPair.second->Update();
     }
 }
 
-void SceneNode::forceUpdate() {
+void SceneNode::ForceUpdate() {
     if (parent) {
         transform.computeModelMatrixFromParent(parent->transform.modelMatrix);
     }
     else {
         transform.computeLocalModelMatrix();
     }
-    onUpdate();
+    OnUpdate();
     for (auto& childPair : children) {
-        childPair.second->forceUpdate();
+        childPair.second->ForceUpdate();
+    }
+}
+
+void SceneNode::AddObserver(ISceneNodeObserver<SceneNode>* observer) {
+    if (observer && std::find(observers.begin(), observers.end(), observer) == observers.end()) {
+        observers.push_back(observer);
+    }
+}
+
+void SceneNode::RemoveObserver(ISceneNodeObserver<SceneNode>* observer) {
+    auto it = std::remove(observers.begin(), observers.end(), observer);
+    if (it != observers.end()) {
+        observers.erase(it);
+    }
+}
+
+void SceneNode::NotifyObservers() {
+    for (auto observer : observers) {
+        observer->OnNodeUpdated(this);
     }
 }

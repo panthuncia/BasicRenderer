@@ -65,7 +65,7 @@ ComPtr<ID3D12Resource>& RenderableObject::GetConstantBuffer() {
     return perObjectConstantBuffer;
 }
 
-void RenderableObject::onUpdate() {
+void RenderableObject::OnUpdate() {
     UpdateBuffers();
 }
 

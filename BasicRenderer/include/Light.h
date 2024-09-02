@@ -8,6 +8,30 @@ public:
 	Light(std::string name, unsigned int type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction);
 
 	LightInfo& GetLightInfo();
+
+	int GetCurrentLightBufferIndex() {
+		return m_currentLightBufferIndex;
+	}
+
+	void DecrementLightBufferIndex() {
+		m_currentLightBufferIndex--;
+	}
+
+	void SetLightBufferIndex(int index) {
+		m_currentLightBufferIndex = index;
+	}
+
+	void AddLightObserver(ISceneNodeObserver<Light>* observer);
+	void RemoveLightObserver(ISceneNodeObserver<Light>* observer);
+
+	void OnUpdate() override {
+		// Notify Light-specific observers
+		NotifyLightObservers();
+	}
+
 private:
 	LightInfo m_lightInfo;
+	int m_currentLightBufferIndex = -1;
+	std::vector<ISceneNodeObserver<Light>*> lightObservers;
+	void NotifyLightObservers();
 };

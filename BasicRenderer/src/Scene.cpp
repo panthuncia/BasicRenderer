@@ -18,7 +18,7 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     }
 
     if (object->parent == nullptr) {
-        sceneRoot.addChild(object);
+        sceneRoot.AddChild(object);
     }
 
     return object->localID;
@@ -28,7 +28,7 @@ UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
     node->localID = nextNodeID;
 
     if (node->parent == nullptr) {
-        sceneRoot.addChild(node);
+        sceneRoot.AddChild(node);
     }
 
     nodesByID[nextNodeID] = node;
@@ -37,6 +37,19 @@ UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
         nodesByName[node->name] = node;
     }
     return node->localID;
+}
+
+UINT Scene::AddLight(std::shared_ptr<Light> light) {
+    light->localID = nextNodeID;
+    if (light->parent == nullptr) {
+        sceneRoot.AddChild(light);
+    }
+
+    lightsByID[nextNodeID] = light;
+    nextNodeID++;
+
+    lightManager.AddLight(light.get());
+    return light->localID;
 }
 
 std::shared_ptr<SceneNode> Scene::CreateNode(std::string name) {
@@ -80,7 +93,7 @@ void Scene::RemoveObjectByName(const std::string& name) {
         opaqueObjectsByID.erase(it->second->localID);
         transparentObjectsByID.erase(it->second->localID);
         std::shared_ptr<SceneNode> node = it->second;
-        node->parent->removeChild(node->localID);
+        node->parent->RemoveChild(node->localID);
     }
 }
 
@@ -97,7 +110,7 @@ void Scene::RemoveObjectByID(UINT id) {
         transparentObjectsByID.erase(it->second->localID);
 
         std::shared_ptr<SceneNode> node = it->second;
-        node->parent->removeChild(node->localID);
+        node->parent->RemoveChild(node->localID);
     }
 }
 
@@ -126,7 +139,7 @@ void Scene::Update() {
             node->animationController->update(elapsed_seconds.count());
         }
     }
-    this->sceneRoot.update();
+    this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }

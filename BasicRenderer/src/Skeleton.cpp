@@ -37,7 +37,7 @@ void Skeleton::UpdateTransforms() {
     for (size_t i = 0; i < m_nodes.size(); ++i) {
         if (m_nodes[i]->transform.isDirty) {
             spdlog::warn("Skeleton node wasn't updated!");
-            m_nodes[i]->update();
+            m_nodes[i]->Update();
         }
 
         // Copy the matrix directly using memcpy

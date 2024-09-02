@@ -13,7 +13,7 @@ Camera::Camera(std::string name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float 
     projectionMatrix = XMMatrixPerspectiveFovRH(fieldOfView, aspectRatio, zNear, zFar);
 }
 
-void Camera::onUpdate() {
+void Camera::OnUpdate() {
     viewMatrixInverse = transform.modelMatrix;
     auto inverseMatrix = XMMatrixInverse(nullptr, transform.modelMatrix);
     viewMatrix = RemoveScalingFromMatrix(inverseMatrix);

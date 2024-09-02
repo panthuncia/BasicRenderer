@@ -31,5 +31,5 @@ private:
 	bool m_hasOpaque = false;
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
 protected:
-	void onUpdate() override;
+	void OnUpdate() override;
 };

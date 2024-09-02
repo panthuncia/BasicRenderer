@@ -24,3 +24,22 @@ Light::Light(std::string name, unsigned int type, XMFLOAT3 position, XMFLOAT3 co
 LightInfo& Light::GetLightInfo() {
 	return m_lightInfo;
 }
+
+void Light::AddLightObserver(ISceneNodeObserver<Light>* observer) {
+	if (observer && std::find(lightObservers.begin(), lightObservers.end(), observer) == lightObservers.end()) {
+		lightObservers.push_back(observer);
+	}
+}
+
+void Light::RemoveLightObserver(ISceneNodeObserver<Light>* observer) {
+	auto it = std::remove(lightObservers.begin(), lightObservers.end(), observer);
+	if (it != lightObservers.end()) {
+		lightObservers.erase(it);
+	}
+}
+
+void Light::NotifyLightObservers() {
+	for (auto observer : lightObservers) {
+		observer->OnNodeUpdated(this);
+	}
+}

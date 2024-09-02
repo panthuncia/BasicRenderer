@@ -50,6 +50,10 @@ public:
         
     }
 
+    void UpdateAt(UINT index, const T& element) {
+        m_data[index] = element;
+    }
+
     void UpdateBuffer() {
         if (m_needsUpdate) {
             // Map buffer and copy data

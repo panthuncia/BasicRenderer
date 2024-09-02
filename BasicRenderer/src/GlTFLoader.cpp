@@ -424,7 +424,7 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
         if (gltfNode.contains("children")) {
             for (int childIndex : gltfNode["children"]) {
                 std::shared_ptr<SceneNode> childNode = (*nodes)[childIndex];
-                node->addChild(childNode);
+                node->AddChild(childNode);
             }
         }
     }
