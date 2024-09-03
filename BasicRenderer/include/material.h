@@ -46,6 +46,7 @@ public:
 
     static std::shared_ptr<Texture> createDefaultTexture();
     UINT GetMaterialBufferIndex();
+    void SetHeightmap(std::shared_ptr<Texture> heightmap);
 
 private:
     BufferHandle<PerMaterialCB> m_perMaterialHandle;

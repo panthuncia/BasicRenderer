@@ -57,3 +57,4 @@ ComPtr<ID3D12Resource> CreateConstantBuffer(T* pInitialData) {
 }
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
+std::shared_ptr<Texture> loadTextureFromFile(const char* filename);

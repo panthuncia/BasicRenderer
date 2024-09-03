@@ -21,7 +21,6 @@ void SceneNode::Update() {
     if (transform.isDirty) {
         ForceUpdate();
     }
-    OnUpdate();
     for (auto& childPair : children) {
         childPair.second->Update();
     }

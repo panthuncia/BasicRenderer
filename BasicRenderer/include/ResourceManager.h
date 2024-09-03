@@ -200,7 +200,7 @@ public:
         device->CreateShaderResourceView(buffer.Get(), &srvDesc, srvHandle);
     }
 
-    TextureHandle<PixelBuffer> CreateTexture(const stbi_uc* image, int width, int height, bool sRGB);
+    TextureHandle<PixelBuffer> CreateTexture(const stbi_uc* image, int width, int height, int channels, bool sRGB);
 
     std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
 

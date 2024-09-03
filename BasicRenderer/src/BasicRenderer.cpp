@@ -159,34 +159,50 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    auto dragonScene = loadGLB("models/dragon.glb");
-    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
-    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+    //auto dragonScene = loadGLB("models/dragon.glb");
+    //dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+    //dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
 
-    auto tigerScene = loadGLB("models/tiger.glb");
-    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
+    //auto tigerScene = loadGLB("models/tiger.glb");
+    //tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
 
-    auto phoenixScene = loadGLB("models/phoenix.glb");
-    phoenixScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
-    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+    //auto phoenixScene = loadGLB("models/phoenix.glb");
+    //phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+    //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+
+    //auto carScene = loadGLB("models/datsun.glb");
+    //carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+    //carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+
+    auto cubeScene = loadGLB("models/cube.glb");
+    auto heightMap = loadTextureFromFile("textures/height.png");
+    for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
+        auto& renderable = pair.second;
+        for (auto& mesh : renderable->GetOpaqueMeshes()) {
+            mesh.material->SetHeightmap(heightMap);
+        }
+    }
+    for (auto& pair : cubeScene->GetTransparentRenderableObjectIDMap()) {
+        auto& renderable = pair.second;
+        for (auto& mesh : renderable->GetTransparentMeshes()) {
+            mesh.material->SetHeightmap(heightMap);
+        }
+    }
+
 
     renderer.SetCurrentScene(baseScene);
     //renderer.GetCurrentScene()->AppendScene(*dragonScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    phoenixScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    phoenixScene->GetRoot().transform.setLocalPosition({ -2.0, 0.0, 0.0 });
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    phoenixScene->GetRoot().transform.setLocalPosition({ -3.0, 0.0, 0.0 });
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    phoenixScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    phoenixScene->GetRoot().transform.setLocalPosition({ 2.0, 0.0, 0.0 });
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    phoenixScene->GetRoot().transform.setLocalPosition({ 3.0, 0.0, 0.0 });
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    //renderer.GetCurrentScene()->AppendScene(*carScene);
+    renderer.GetCurrentScene()->AppendScene(*cubeScene);
+    renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
+    renderer.GetCurrentScene()->AppendScene(*cubeScene);
+
+    renderer.GetCurrentScene()->AppendScene(*cubeScene);
+
+    renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
@@ -225,10 +241,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     cubeObject->animationController->setAnimationClip(animation);
-
-    std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", 0, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 0.01, XMFLOAT3(-1, 0, 0));
+    std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", 0, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, XMFLOAT3(0, 1, 0), 0.0, 0.0);
     cubeObject->AddChild(light1);
     scene->AddLight(light1);
+    std::shared_ptr<Light> light2 = std::make_shared<Light>("light2", 2, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, 1, 0));
+    scene->AddLight(light2);
 
     MSG msg = {};
     auto lastUpdateTime = std::chrono::system_clock::now();

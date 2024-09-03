@@ -26,6 +26,8 @@ public:
         return ResourceManager::GetInstance().getCPUHandleForSampler(m_index);
     }
 
+    static std::shared_ptr<Sampler> GetDefaultSampler();
+
 private:
     UINT m_index; // Index of the sampler in the descriptor heap
     D3D12_SAMPLER_DESC m_samplerDesc; // Descriptor of the sampler
@@ -33,4 +35,6 @@ private:
     void createSampler() {
         m_index = ResourceManager::GetInstance().CreateIndexedSampler(m_samplerDesc);
     }
+
+    static std::shared_ptr<Sampler> m_defaultSampler;
 };

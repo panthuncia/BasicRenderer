@@ -31,7 +31,7 @@ void ResourceManager::Initialize() {
         nullptr,
         IID_PPV_ARGS(&perFrameConstantBuffer)));
 
-    perFrameCBData.ambientLighting = XMVectorSet(0.2, 0.2, 0.2, 1.0);
+    perFrameCBData.ambientLighting = XMVectorSet(0.1, 0.1, 0.1, 1.0);
 
     // Map the constant buffer and initialize it
 
@@ -198,11 +198,20 @@ D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getCPUHandleForSampler(UINT index) 
     return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, int width, int height, bool sRGB) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
     // Describe and create the texture resource
-    CD3DX12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, width, height);
+
+    DXGI_FORMAT textureFormat;
+    switch (channels) {
+        case 1: textureFormat = DXGI_FORMAT_R8_UNORM; break;
+        case 3: textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM; break; // Note: DXGI does not have a R8G8B8 format
+        case 4: textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM; break;
+    default: throw std::invalid_argument("Unsupported channel count");
+    }
+
+    CD3DX12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(textureFormat, width, height);
     D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     ComPtr<ID3D12Resource> textureResource;
     ThrowIfFailed(device->CreateCommittedResource(
@@ -229,7 +238,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, 
     // Upload the texture data to the GPU
     D3D12_SUBRESOURCE_DATA textureData = {};
     textureData.pData = image;
-    textureData.RowPitch = width * 4;
+    textureData.RowPitch = width * channels; // Calculate based on the number of channels
     textureData.SlicePitch = textureData.RowPitch * height;
 
     // TODO: Make a real upload system
@@ -251,7 +260,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, 
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvDesc.Format = textureFormat;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Texture2D.MostDetailedMip = 0;
     srvDesc.Texture2D.MipLevels = 1;

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include "MeshUtilities.h"
 #include "PSOFlags.h"
+#include "DirectX/d3dx12.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -85,4 +86,34 @@ XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix) {
     result.r[3] = translation;
 
     return result;
+}
+
+struct ImageData {
+    stbi_uc* data;
+    int width;
+    int height;
+    int channels;
+
+    ~ImageData() {
+        if (data) {
+            stbi_image_free(data);
+        }
+    }
+};
+
+ImageData loadImage(const char* filename) {
+    ImageData img;
+    img.data = stbi_load(filename, &img.width, &img.height, &img.channels, 0);
+    if (!img.data) {
+        throw std::runtime_error("Failed to load image: " + std::string(filename));
+    }
+    return img;
+}
+
+std::shared_ptr<Texture> loadTextureFromFile(const char* filename) {
+	ImageData img = loadImage(filename);
+    PixelBuffer bufferTest(img.data, img.width, img.height, img.channels, false);
+	auto buffer = std::make_shared<PixelBuffer>(img.data, img.width, img.height, img.channels, false);
+    auto sampler = Sampler::GetDefaultSampler();
+    return std::make_shared<Texture>(buffer, sampler);
 }

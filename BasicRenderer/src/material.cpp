@@ -1,5 +1,6 @@
 #include "Material.h"
 #include <string>
+#include "PSOFlags.h"
 
 Material::Material(const std::string& name,
     UINT psoFlags)
@@ -79,7 +80,7 @@ Material::Material(const std::string& name,
 std::shared_ptr<Texture> Material::createDefaultTexture() {
     // Create a 1x1 white texture
     static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
-    std::shared_ptr<PixelBuffer>defaultImage = std::make_shared<PixelBuffer>(whitePixel, 1, 1, false);
+    std::shared_ptr<PixelBuffer>defaultImage = std::make_shared<PixelBuffer>(whitePixel, 1, 1, 4, false);
 
     D3D12_SAMPLER_DESC defaultSamplerDesc = {};
     defaultSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -105,4 +106,12 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
 
 UINT Material::GetMaterialBufferIndex() {
     return m_perMaterialHandle.index;
+}
+
+void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
+    m_psoFlags |= PSOFlags::PARALLAX;
+	m_heightMap = heightmap;
+	m_materialData.heightMapIndex = heightmap->GetBufferDescriptorIndex();
+	m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
+	ResourceManager::GetInstance().UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
 }

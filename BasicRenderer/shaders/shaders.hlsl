@@ -210,6 +210,107 @@ float3 SRGBToLinear(float3 color) {
     return result;
 }
 
+// Parallax shadowing, very expensive method (per-fragment*per-light tangent-space raycast)
+float getParallaxShadow(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 lightDir, float3 viewDir, float sampleHeight) {
+    lightDir = normalize(mul(TBN, lightDir));
+    int steps = 64;
+    float heightmapScale = 0.05;
+    float maxDistance = heightmapScale * 0.2; //0.1;
+    float currentHeight = parallaxTexture.Sample(parallaxSampler, uv); //texture(u_heightMap, uv).r;
+    float2 lightDirUV = normalize(lightDir.xy);
+    float heightStep = lightDir.z / float(steps);
+    float stepSizeUV = maxDistance / float(steps);
+
+    for (int i = 0; i < steps; ++i) {
+        uv += lightDirUV * stepSizeUV; // Step across
+        currentHeight += heightStep; // Step up
+            
+        float heightAtSample = parallaxTexture.Sample(parallaxSampler, uv); //texture(u_heightMap, uv).r;
+    
+        if (heightAtSample > currentHeight) {
+            return 0.1;
+        }
+    }
+    
+    return 1.0;
+}
+
+float2 WrapFloat2(float2 input) {
+    // Apply modulo 1.0 and handle negative values by adding 1.0 and taking modulo again
+    return frac(input + 1.0);
+}
+
+    // Contact-refinement parallax 
+    // https://www.artstation.com/blogs/andreariccardi/3VPo/a-new-approach-for-parallax-mapping-presenting-the-contact-refinement-parallax-mapping-technique
+float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 viewDir) {
+    // Get view direction in tangent space
+    uv.y = 1.0- uv.y;
+    viewDir = normalize(mul(TBN, viewDir));
+
+    float heightmapScale = 0.01;
+    float maxHeight = heightmapScale; //0.05;
+    float minHeight = maxHeight * 0.5;
+
+    int numSteps = 10;
+        // Corrects for Z view angle
+    float viewCorrection = (-viewDir.z) + 2.0;
+    float stepSize = 1.0 / (float(numSteps) + 1.0);
+    float2 stepOffset = viewDir.xy * float2(maxHeight, maxHeight) * stepSize;
+
+    float2 lastOffset = WrapFloat2(viewDir.xy * float2(minHeight, minHeight) + uv);
+    float lastRayDepth = 1.0;
+    float lastHeight = 1.0;
+
+    float2 p1;
+    float2 p2;
+    bool refine = false;
+
+    while (numSteps > 0) {
+        // Advance ray in direction of TS view direction
+        float2 candidateOffset = WrapFloat2(lastOffset - stepOffset);
+
+        float currentRayDepth = lastRayDepth - stepSize;
+
+        // Sample height map at this offset
+        float currentHeight = parallaxTexture.Sample(parallaxSampler, candidateOffset); //texture(u_heightMap, candidateOffset).r;
+        currentHeight = viewCorrection * currentHeight;
+        // Test our candidate depth
+        if (currentHeight > currentRayDepth) {
+            p1 = float2(currentRayDepth, currentHeight);
+            p2 = float2(lastRayDepth, lastHeight);
+                // Break if this is the contact refinement pass
+            if (refine) {
+                lastHeight = currentHeight;
+                break;
+            // Else, continue raycasting with squared precision
+            }
+            else {
+                refine = true;
+                lastRayDepth = p2.x;
+                stepSize /= float(numSteps);
+                stepOffset /= float(numSteps);
+                continue;
+            }
+        }
+        lastOffset = candidateOffset;
+        lastRayDepth = currentRayDepth;
+        lastHeight = currentHeight;
+        numSteps -= 1;
+    }
+    // Interpolate between final two points
+    float diff1 = p1.x - p1.y;
+    float diff2 = p2.x - p2.y;
+    float denominator = diff2 - diff1;
+
+    float parallaxAmount;
+    if (denominator != 0.0) {
+        parallaxAmount = (p1.x * diff2 - p2.x * diff1) / denominator;
+    }
+
+    float offset = ((1.0 - parallaxAmount) * -maxHeight) + minHeight;
+    return float3(viewDir.xy * offset + uv, lastHeight);
+}
+
 // Models spotlight falloff with linear interpolation between inner and outer cone angles
 float spotAttenuation(float3 pointToLight, float3 lightDirection, float outerConeCos, float innerConeCos) {
     float cos = dot(normalize(lightDirection), normalize(-pointToLight));
@@ -259,8 +360,11 @@ float geometrySmith(float3 normalDir, float3 viewDir, float roughness, float nor
 float3 fresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
-
+#if defined(PARALLAX)
+float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0, float height, Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN) {
+#else
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0) {
+#endif
     uint lightType = light.type;
     float3 lightPos = light.posWorldSpace.xyz;
     float3 lightColor = light.color.xyz;
@@ -329,6 +433,12 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
         float spot = spotAttenuation(lightDir, dir, outerConeCos, innerConeCos);
         lighting *= spot;
     }
+    
+#if defined(PARALLAX)
+    //float parallaxShadow = getParallaxShadow(parallaxTexture, parallaxSampler, TBN, uv, lightDir, viewDir, height);
+    //lighting *= parallaxShadow;
+#endif
+    
     return lighting * albedo;
 }
 
@@ -350,16 +460,31 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
     
     float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
 
-    float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
-    
     float2 uv = float2(0.0, 0.0);
 #if defined(TEXTURED)
     uv = input.texcoord;
+    uv*=8.0;
 #endif // TEXTURED
+    
+#if defined(NORMAL_MAP) || defined(PARALLAX)
+    float3x3 TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
+#endif // NORMAL_MAP || PARALLAX
+    float height = 0.0;
+    
+#if defined(PARALLAX)
+    Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
+    SamplerState parallaxSamplerState = SamplerDescriptorHeap[materialInfo.heightSamplerIndex];
+    float3 uvh = getContactRefinementParallaxCoordsAndHeight(parallaxTexture, parallaxSamplerState, TBN, uv, viewDir);
+    uv = uvh.xy;
+    //height = uvh.z;
+#endif // PARALLAX
+    
+    float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
+    
 #if defined(BASE_COLOR_TEXTURE)
     Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
     SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
@@ -370,9 +495,6 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         baseColor = materialInfo.baseColorFactor * baseColor;
 #endif // PBR
     float3 normalWS = input.normalWorldSpace.xyz;
-#if defined(NORMAL_MAP) || defined(PARALLAX)
-    float3x3 TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
-#endif // NORMAL_MAP || PARALLAX
     
 #if defined (NORMAL_MAP)
     Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
@@ -413,7 +535,12 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float3 lighting = float3(0.0, 0.0, 0.0);
     for (uint i = 0; i < perFrameBuffer.numLights; i++) {
         LightInfo light = lights[i];
+#if defined (PARALLAX)
+        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN);
+#else
         lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
+#endif
+
     }
 #if defined(AO_TEXTURE)
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];

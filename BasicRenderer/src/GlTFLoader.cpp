@@ -497,7 +497,7 @@ std::vector<std::shared_ptr<Texture>> loadTexturesFromImages(const json& gltfDat
             throw std::runtime_error("Failed to load texture image from binary data");
         }
 
-        auto pBuffer = std::make_shared<PixelBuffer>(image, width, height, sRGB);
+        auto pBuffer = std::make_shared<PixelBuffer>(image, width, height, 4, sRGB);
         pixelBuffers.push_back(std::move(pBuffer));
 
         stbi_image_free(image);

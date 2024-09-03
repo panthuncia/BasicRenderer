@@ -8,9 +8,9 @@
 #include "stb/stb_image.h"
 #include "ResourceManager.h"
 
-PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, bool sRGB) {
+PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    handle = resourceManager.CreateTexture(image, width, height, sRGB);
+    handle = resourceManager.CreateTexture(image, width, height, channels, sRGB);
 }
 
 UINT PixelBuffer::GetDescriptorIndex() const {

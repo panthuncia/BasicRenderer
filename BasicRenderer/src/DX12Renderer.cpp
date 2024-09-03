@@ -12,6 +12,10 @@
 #include "DeviceManager.h"
 #include "PSOManager.h"
 #include "ResourceManager.h"
+#include "RenderContext.h"
+#include "RenderGraph.h"
+#include "RenderPass.h"
+#include "ForwardRenderPass.h"
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
@@ -208,6 +212,21 @@ void DX12Renderer::Render() {
     ThrowIfFailed(commandAllocator->Reset());
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 
+
+    RenderContext context;
+    context.currentScene = currentScene.get();
+    context.device = device.Get();
+    context.commandList = commandList.Get();
+    context.textureDescriptorHeap = ResourceManager::GetInstance().GetDescriptorHeap().Get();
+    context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
+    context.rtvHeap = rtvHeap.Get();
+    context.dsvHeap = dsvHeap.Get();
+    context.renderTargets = renderTargets;
+    context.rtvDescriptorSize = rtvDescriptorSize;
+    context.frameIndex = frameIndex;
+    context.xRes = m_xRes;
+    context.yRes = m_yRes;
+
     // Set necessary state
     auto& psoManager = PSOManager::getInstance();
     commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
@@ -248,7 +267,7 @@ void DX12Renderer::Render() {
 
         for (auto& mesh : renderable->GetOpaqueMeshes()) {
             commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
-            auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
+            auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState);
             commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
@@ -266,7 +285,7 @@ void DX12Renderer::Render() {
 
         for (auto& mesh : renderable->GetTransparentMeshes()) {
             commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
-            auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
+            auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState);
             commandList->SetPipelineState(pso.Get());
             D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
             D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();

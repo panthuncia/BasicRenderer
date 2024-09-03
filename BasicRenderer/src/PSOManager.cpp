@@ -169,6 +169,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         macro.Name = L"DOUBLE_SIDED";
         defines.insert(defines.begin(), macro);
     }
+    if (psoFlags & PSOFlags::PARALLAX) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PARALLAX";
+        defines.insert(defines.begin(), macro);
+    }
     return defines;
 }
 
