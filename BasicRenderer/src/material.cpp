@@ -115,3 +115,13 @@ void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
 	m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
 	ResourceManager::GetInstance().UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
 }
+
+void Material::SetTextureScale(float scale) {
+	m_materialData.textureScale = scale;
+	ResourceManager::GetInstance().UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
+}
+
+void Material::SetHeightmapScale(float scale) {
+	m_materialData.heightMapScale = scale;
+	ResourceManager::GetInstance().UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
+}

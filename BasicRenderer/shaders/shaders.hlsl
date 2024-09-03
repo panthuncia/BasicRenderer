@@ -211,10 +211,9 @@ float3 SRGBToLinear(float3 color) {
 }
 
 // Parallax shadowing, very expensive method (per-fragment*per-light tangent-space raycast)
-float getParallaxShadow(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 lightDir, float3 viewDir, float sampleHeight) {
+float getParallaxShadow(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 lightDir, float3 viewDir, float sampleHeight, float heightmapScale) {
     lightDir = normalize(mul(TBN, lightDir));
     int steps = 64;
-    float heightmapScale = 0.05;
     float maxDistance = heightmapScale * 0.2; //0.1;
     float currentHeight = parallaxTexture.Sample(parallaxSampler, uv); //texture(u_heightMap, uv).r;
     float2 lightDirUV = normalize(lightDir.xy);
@@ -228,7 +227,7 @@ float getParallaxShadow(Texture2D<float> parallaxTexture, SamplerState parallaxS
         float heightAtSample = parallaxTexture.Sample(parallaxSampler, uv); //texture(u_heightMap, uv).r;
     
         if (heightAtSample > currentHeight) {
-            return 0.1;
+            return 0.05;
         }
     }
     
@@ -242,16 +241,15 @@ float2 WrapFloat2(float2 input) {
 
     // Contact-refinement parallax 
     // https://www.artstation.com/blogs/andreariccardi/3VPo/a-new-approach-for-parallax-mapping-presenting-the-contact-refinement-parallax-mapping-technique
-float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 viewDir) {
+float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 viewDir, float heightmapScale) {
     // Get view direction in tangent space
     uv.y = 1.0- uv.y;
     viewDir = normalize(mul(TBN, viewDir));
 
-    float heightmapScale = 0.01;
     float maxHeight = heightmapScale; //0.05;
     float minHeight = maxHeight * 0.5;
 
-    int numSteps = 10;
+    int numSteps = 32;
         // Corrects for Z view angle
     float viewCorrection = (-viewDir.z) + 2.0;
     float stepSize = 1.0 / (float(numSteps) + 1.0);
@@ -361,7 +359,7 @@ float3 fresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 #if defined(PARALLAX)
-float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0, float height, Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN) {
+float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0, float height, Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float heightmapScale) {
 #else
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0) {
 #endif
@@ -435,8 +433,8 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     }
     
 #if defined(PARALLAX)
-    //float parallaxShadow = getParallaxShadow(parallaxTexture, parallaxSampler, TBN, uv, lightDir, viewDir, height);
-    //lighting *= parallaxShadow;
+    float parallaxShadow = getParallaxShadow(parallaxTexture, parallaxSampler, TBN, uv, lightDir, viewDir, height, heightmapScale);
+    lighting *= parallaxShadow;
 #endif
     
     return lighting * albedo;
@@ -463,11 +461,11 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
     
     float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
-
+    
     float2 uv = float2(0.0, 0.0);
 #if defined(TEXTURED)
     uv = input.texcoord;
-    uv*=8.0;
+    uv*=materialInfo.textureScale;;
 #endif // TEXTURED
     
 #if defined(NORMAL_MAP) || defined(PARALLAX)
@@ -478,7 +476,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #if defined(PARALLAX)
     Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
     SamplerState parallaxSamplerState = SamplerDescriptorHeap[materialInfo.heightSamplerIndex];
-    float3 uvh = getContactRefinementParallaxCoordsAndHeight(parallaxTexture, parallaxSamplerState, TBN, uv, viewDir);
+    float3 uvh = getContactRefinementParallaxCoordsAndHeight(parallaxTexture, parallaxSamplerState, TBN, uv, viewDir, materialInfo.heightMapScale);
     uv = uvh.xy;
     //height = uvh.z;
 #endif // PARALLAX
@@ -536,7 +534,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     for (uint i = 0; i < perFrameBuffer.numLights; i++) {
         LightInfo light = lights[i];
 #if defined (PARALLAX)
-        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN);
+        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN, materialInfo.heightMapScale);
 #else
         lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
 #endif

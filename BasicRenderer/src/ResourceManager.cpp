@@ -204,11 +204,28 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, 
     // Describe and create the texture resource
 
     DXGI_FORMAT textureFormat;
+    std::vector<stbi_uc> expandedImage;
     switch (channels) {
-        case 1: textureFormat = DXGI_FORMAT_R8_UNORM; break;
-        case 3: textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM; break; // Note: DXGI does not have a R8G8B8 format
-        case 4: textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM; break;
-    default: throw std::invalid_argument("Unsupported channel count");
+    case 1:
+        textureFormat = DXGI_FORMAT_R8_UNORM;
+        break;
+    case 3:
+        textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        expandedImage.resize(width * height * 4); // 4 channels for RGBA
+        for (int i = 0; i < width * height; ++i) {
+            expandedImage[i * 4] = image[i * 3];     // R
+            expandedImage[i * 4 + 1] = image[i * 3 + 1]; // G
+            expandedImage[i * 4 + 2] = image[i * 3 + 2]; // B
+            expandedImage[i * 4 + 3] = 255;          // A
+        }
+        image = expandedImage.data(); // Use expanded data
+        channels = 4; // Update the number of channels
+        break;
+    case 4:
+        textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported channel count");
     }
 
     CD3DX12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(textureFormat, width, height);

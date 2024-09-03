@@ -175,17 +175,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
     auto cubeScene = loadGLB("models/cube.glb");
-    auto heightMap = loadTextureFromFile("textures/height.png");
+    cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
+    auto heightMap = loadTextureFromFile("textures/height.jpg");
     for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
         auto& renderable = pair.second;
         for (auto& mesh : renderable->GetOpaqueMeshes()) {
             mesh.material->SetHeightmap(heightMap);
+            mesh.material->SetHeightmapScale(0.1);
+            mesh.material->SetTextureScale(2.0);
         }
     }
     for (auto& pair : cubeScene->GetTransparentRenderableObjectIDMap()) {
         auto& renderable = pair.second;
         for (auto& mesh : renderable->GetTransparentMeshes()) {
             mesh.material->SetHeightmap(heightMap);
+            mesh.material->SetHeightmapScale(0.1);
+            mesh.material->SetTextureScale(2.0);
         }
     }
 
@@ -196,13 +201,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //renderer.GetCurrentScene()->AppendScene(*carScene);
     renderer.GetCurrentScene()->AppendScene(*cubeScene);
-    renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
-    renderer.GetCurrentScene()->AppendScene(*cubeScene);
-
-    renderer.GetCurrentScene()->AppendScene(*cubeScene);
-
-    renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
@@ -231,15 +230,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     scene->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
-    animation->addPositionKeyframe(0, { -10, 0, 0 });
-    animation->addPositionKeyframe(1, { 10, 0, 0 });
-    animation->addPositionKeyframe(2, { 10, 15, 0 });
-    animation->addPositionKeyframe(3, { -10, 15, 0 });
-    animation->addPositionKeyframe(4, { -10, 0, 0 });
-    animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
-    animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
-    animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
-    animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
+    animation->addPositionKeyframe(0, { -10, 10, -10 });
+    animation->addPositionKeyframe(2, { 10, 10, -10 });
+    animation->addPositionKeyframe(4, { 10, 10, 10 });
+    animation->addPositionKeyframe(6, { -10, 10, 10 });
+    animation->addPositionKeyframe(8, { -10, 10, -10 });
+    //animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
+    //animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
+    //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
+    //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     cubeObject->animationController->setAnimationClip(animation);
     std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", 0, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, XMFLOAT3(0, 1, 0), 0.0, 0.0);
     cubeObject->AddChild(light1);
