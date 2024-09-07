@@ -159,48 +159,48 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    //auto dragonScene = loadGLB("models/dragon.glb");
-    //dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
-    //dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+    auto dragonScene = loadGLB("models/dragon.glb");
+    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
 
-    //auto tigerScene = loadGLB("models/tiger.glb");
-    //tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
+    auto tigerScene = loadGLB("models/tiger.glb");
+    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
 
-    //auto phoenixScene = loadGLB("models/phoenix.glb");
-    //phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
-    //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+    auto phoenixScene = loadGLB("models/phoenix.glb");
+    phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
-    //auto carScene = loadGLB("models/datsun.glb");
-    //carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
-    //carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+    auto carScene = loadGLB("models/datsun.glb");
+    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
-    auto cubeScene = loadGLB("models/cube.glb");
-    cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
-    auto heightMap = loadTextureFromFile("textures/height.jpg");
-    for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
-        auto& renderable = pair.second;
-        for (auto& mesh : renderable->GetOpaqueMeshes()) {
-            mesh.material->SetHeightmap(heightMap);
-            mesh.material->SetHeightmapScale(0.1);
-            mesh.material->SetTextureScale(2.0);
-        }
-    }
-    for (auto& pair : cubeScene->GetTransparentRenderableObjectIDMap()) {
-        auto& renderable = pair.second;
-        for (auto& mesh : renderable->GetTransparentMeshes()) {
-            mesh.material->SetHeightmap(heightMap);
-            mesh.material->SetHeightmapScale(0.1);
-            mesh.material->SetTextureScale(2.0);
-        }
-    }
+    //auto cubeScene = loadGLB("models/cube.glb");
+    //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
+    //auto heightMap = loadTextureFromFile("textures/height.jpg");
+    //for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
+    //    auto& renderable = pair.second;
+    //    for (auto& mesh : renderable->GetOpaqueMeshes()) {
+    //        mesh.material->SetHeightmap(heightMap);
+    //        mesh.material->SetHeightmapScale(0.1);
+    //        mesh.material->SetTextureScale(2.0);
+    //    }
+    //}
+    //for (auto& pair : cubeScene->GetTransparentRenderableObjectIDMap()) {
+    //    auto& renderable = pair.second;
+    //    for (auto& mesh : renderable->GetTransparentMeshes()) {
+    //        mesh.material->SetHeightmap(heightMap);
+    //        mesh.material->SetHeightmapScale(0.1);
+    //        mesh.material->SetTextureScale(2.0);
+    //    }
+    //}
 
 
     renderer.SetCurrentScene(baseScene);
-    //renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //renderer.GetCurrentScene()->AppendScene(*carScene);
-    renderer.GetCurrentScene()->AppendScene(*cubeScene);
+    renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    renderer.GetCurrentScene()->AppendScene(*carScene);
+    //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 
 
@@ -262,6 +262,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
             renderer.Update(elapsedSeconds.count());
+            spdlog::info("FPS: {}", 1/elapsedSeconds.count());
             renderer.Render();
         }
     }
