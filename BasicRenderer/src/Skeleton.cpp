@@ -7,10 +7,10 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const s
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
     m_inverseBindMatricesHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
-    resourceManager.UpdateStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
+    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
 }
 
-Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle<XMMATRIX> inverseBindMatricesHandle)
+Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle inverseBindMatricesHandle)
     : m_nodes(nodes), m_inverseBindMatricesHandle(inverseBindMatricesHandle) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
@@ -52,7 +52,7 @@ void Skeleton::UpdateTransforms() {
         memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
     }
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdateStructuredBuffer<DirectX::XMMATRIX>(m_transformsHandle, reinterpret_cast<XMMATRIX*>(m_boneTransforms.data()), 0, m_nodes.size());
+    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(m_transformsHandle, reinterpret_cast<XMMATRIX*>(m_boneTransforms.data()), 0, m_nodes.size());
 }
 
 UINT Skeleton::GetTransformsBufferIndex() {
@@ -63,6 +63,6 @@ UINT Skeleton::GetInverseBindMatricesBufferIndex() {
     return m_inverseBindMatricesHandle.index;
 }
 
-BufferHandle<XMMATRIX> Skeleton::GetInverseBindMatricesHandle() {
+BufferHandle Skeleton::GetInverseBindMatricesHandle() {
     return m_inverseBindMatricesHandle;
 }

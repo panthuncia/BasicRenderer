@@ -204,6 +204,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     currentScene->Update();
     UpdateConstantBuffer();
+    ResourceManager::GetInstance().UpdateGPUBuffers();
 }
 
 void DX12Renderer::Render() {

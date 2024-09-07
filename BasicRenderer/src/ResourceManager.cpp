@@ -258,9 +258,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, 
     textureData.RowPitch = width * channels; // Calculate based on the number of channels
     textureData.SlicePitch = textureData.RowPitch * height;
 
-    // TODO: Make a real upload system
-    ComPtr<ID3D12GraphicsCommandList> commandList;
-    ComPtr<ID3D12CommandAllocator> commandAllocator;
+    // Initialize copy command list, used to copy from the upload heap to the default heap
     GetCopyCommandList(commandList, commandAllocator);
 
     UpdateSubresources(commandList.Get(), textureResource.Get(), textureUploadHeap.Get(), 0, 0, 1, &textureData);
@@ -347,4 +345,50 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
     }
 
     ThrowIfFailed(commandAllocator->Reset());
+}
+
+void ResourceManager::UpdateGPUBuffers(){
+    if (buffersToUpdate.size() == 0) {
+        return;
+    }
+
+    // Reset the command allocator
+    HRESULT hr = copyCommandAllocator->Reset();
+    if (FAILED(hr)) {
+        spdlog::error("Failed to reset command allocator");
+    }
+
+    hr = copyCommandList->Reset(copyCommandAllocator.Get(), nullptr);
+    if (FAILED(hr)) {
+        spdlog::error("Failed to reset command list");
+    }
+    for (auto& bufferHandle : buffersToUpdate) {
+        // Ensure both buffers are valid
+        if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
+            D3D12_RESOURCE_BARRIER barrier = {};
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barrier.Transition.pResource = bufferHandle.dataBuffer->m_buffer.Get();
+            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_GENERIC_READ;
+            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+            // Transition the data buffer to a state suitable for copying into it
+            copyCommandList->ResourceBarrier(1, &barrier);
+
+            // Perform the copy
+            copyCommandList->CopyResource(bufferHandle.dataBuffer->m_buffer.Get(), bufferHandle.uploadBuffer->m_buffer.Get());
+
+            // Transition back to the original state
+            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            copyCommandList->ResourceBarrier(1, &barrier);
+        }
+    }
+    hr = copyCommandList->Close();
+    if (FAILED(hr)) {
+        spdlog::error("Failed to close command list");
+    }
+    WaitForCopyQueue();
+    buffersToUpdate.clear();
 }

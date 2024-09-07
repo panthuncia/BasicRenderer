@@ -1,15 +1,17 @@
 #pragma once
 
-#include "d3d12.h"
+#include <memory>
+#include <d3d12.h>
+#include <wrl/client.h>
+
 #include "DirectX/d3dx12.h"
-#include "wrl.h"
-
 #include "DynamicStructuredBuffer.h"
+#include "Buffer.h"
 
-template<typename T>
 struct BufferHandle {
     UINT index; // Index in the descriptor heap
-    ComPtr<ID3D12Resource> buffer; // The actual resource buffer
+    std::shared_ptr<Buffer> uploadBuffer; // The upload buffer
+    std::shared_ptr<Buffer> dataBuffer; // The actual resource buffer
 };
 
 template<typename T>

@@ -18,15 +18,15 @@ public:
     std::vector<int> userIDs;
 
     Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices);
-    Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle<XMMATRIX> inverseBindMatricesHandle); // For copying, since bind matrices never change between instances
+    Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle inverseBindMatricesHandle); // For copying, since bind matrices never change between instances
     void AddAnimation(const std::shared_ptr<Animation>& animation);
     void SetAnimation(size_t index);
     void UpdateTransforms();
     UINT GetTransformsBufferIndex();
     UINT GetInverseBindMatricesBufferIndex();
-    BufferHandle<XMMATRIX> GetInverseBindMatricesHandle();
+    BufferHandle GetInverseBindMatricesHandle();
 
 private:
-    BufferHandle<XMMATRIX> m_transformsHandle;
-    BufferHandle<XMMATRIX> m_inverseBindMatricesHandle;
+    BufferHandle m_transformsHandle;
+    BufferHandle m_inverseBindMatricesHandle;
 };

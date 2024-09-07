@@ -6,7 +6,7 @@
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
-    lightBufferHandle = resourceManager.CreateDynamicStructuredBuffer<LightInfo>(1);
+    lightBufferHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(1);
 }
 
 void LightManager::AddLight(Light* lightNode) {

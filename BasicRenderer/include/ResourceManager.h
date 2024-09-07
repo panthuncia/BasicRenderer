@@ -12,6 +12,7 @@
 #include "DynamicStructuredBuffer.h"
 #include "ResourceHandles.h"
 #include "PixelBuffer.h"
+#include "Buffer.h"
 
 using namespace Microsoft::WRL;
 
@@ -31,7 +32,7 @@ public:
     void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex);
 
     template<typename T>
-    BufferHandle<T> CreateIndexedConstantBuffer() {
+    BufferHandle CreateIndexedConstantBuffer() {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -39,70 +40,47 @@ public:
         // Calculate the size of the buffer to be 256-byte aligned
         UINT bufferSize = (sizeof(T) + 255) & ~255;
 
+        BufferHandle bufferHandle;
         // Create the buffer
-        D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-        ComPtr<ID3D12Resource> buffer;
-        auto hr = device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &bufferDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&buffer));
-
-        if (FAILED(hr)) {
-            spdlog::error("HRESULT failed with error code: {}", hr);
-            throw std::runtime_error("HRESULT failed");
-        }
+        bufferHandle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize);
+        bufferHandle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize);
 
         // Create a descriptor for the buffer
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-        cbvDesc.BufferLocation = buffer->GetGPUVirtualAddress();
+        cbvDesc.BufferLocation = bufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
         cbvDesc.SizeInBytes = bufferSize;
 
         UINT index = AllocateDescriptor();
         D3D12_CPU_DESCRIPTOR_HANDLE handle = GetCPUHandle(index);
+        bufferHandle.index = index;
 
         device->CreateConstantBufferView(&cbvDesc, handle);
 
-        return { index, buffer };
+        return bufferHandle;
     }
 
     template<typename T>
-    void UpdateIndexedConstantBuffer(BufferHandle<T>& handle, const T& data) {
+    void UpdateIndexedConstantBuffer(BufferHandle& handle, const T& data) {
         void* mappedData;
         D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
-        handle.buffer->Map(0, &readRange, &mappedData);
+        handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
         memcpy(mappedData, &data, sizeof(T));
-        handle.buffer->Unmap(0, nullptr);
+        handle.uploadBuffer->m_buffer->Unmap(0, nullptr);
+
+        buffersToUpdate.push_back(handle);
     }
 
     template<typename T>
-    BufferHandle<T> CreateIndexedStructuredBuffer(UINT numElements) {
+    BufferHandle CreateIndexedStructuredBuffer(UINT numElements) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
 
-        D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-        D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD); // TODO: Make a real upload system
+        BufferHandle handle;
+        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize);
+        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize);
 
-        ComPtr<ID3D12Resource> buffer;
-        auto hr = device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &bufferDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&buffer));
-
-        if (FAILED(hr)) {
-            spdlog::error("HRESULT failed with error code: {}", hr);
-            throw std::runtime_error("HRESULT failed");
-        }
-
-        UINT index = AllocateDescriptor();
-        BufferHandle<DirectX::XMMATRIX> handle = { index, buffer };
+        handle.index = AllocateDescriptor();
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -112,18 +90,18 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle(index);
-        device->CreateShaderResourceView(handle.buffer.Get(), &srvDesc, srvHandle);
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle(handle.index);
+        device->CreateShaderResourceView(handle.dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
 
         return handle;
     }
 
     template<typename T>
-    void UpdateStructuredBuffer(BufferHandle<T>& handle, T* data, UINT startIndex, UINT numElements) {
-        if (handle.buffer == nullptr) {
-            spdlog::error("Buffer not initialized.");
-            throw std::runtime_error("Buffer not initialized.");
-        }
+    void UpdateIndexedStructuredBuffer(BufferHandle& handle, T* data, UINT startIndex, UINT numElements) {
+        //if (handle.buffer == nullptr) {
+        //    spdlog::error("Buffer not initialized.");
+        //    throw std::runtime_error("Buffer not initialized.");
+        //}
 
         // Calculate the size of the data to update
         UINT elementSize = sizeof(T);
@@ -133,7 +111,7 @@ public:
         // Map the buffer
         void* mappedData = nullptr;
         D3D12_RANGE readRange = { offset, offset + updateSize }; // We specify the range we might read, which is none in this case
-        HRESULT hr = handle.buffer->Map(0, &readRange, &mappedData);
+        HRESULT hr = handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
         if (FAILED(hr)) {
             spdlog::error("Failed to map buffer with HRESULT: {}", hr);
             throw std::runtime_error("Failed to map buffer.");
@@ -144,14 +122,16 @@ public:
 
         // Unmap the buffer
         D3D12_RANGE writtenRange = { offset, offset + updateSize };
-        handle.buffer->Unmap(0, &writtenRange);
+        handle.uploadBuffer->m_buffer->Unmap(0, &writtenRange);
+
+        buffersToUpdate.push_back(handle);
     }
 
     template<typename T>
-    DynamicBufferHandle<T> CreateDynamicStructuredBuffer(UINT capacity = 64) {
+    DynamicBufferHandle<T> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
-        auto device = DeviceManager::GetInstance().GetDevice();
+        auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
@@ -174,7 +154,10 @@ public:
         CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(index);
         device->CreateShaderResourceView(dynamicBuffer.GetBuffer().Get(), &srvDesc, cpuHandle);
 
-        return { index, dynamicBuffer };
+        DynamicBufferHandle<T> handle;
+        handle.index = index;
+        handle.buffer = dynamicBuffer;
+        return handle;
     }
 
     UINT GetNextResizableBufferID() {
@@ -200,12 +183,32 @@ public:
         device->CreateShaderResourceView(buffer.Get(), &srvDesc, srvHandle);
     }
 
+    template<typename T>
+    static BufferHandle CreateConstantBuffer() {
+        static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
+
+		auto& device = DeviceManager::GetInstance().GetDevice();
+
+		// Calculate the size of the buffer to be 256-byte aligned
+		UINT bufferSize = (sizeof(T) + 255) & ~255;
+
+        BufferHandle handle;
+
+		// Create the upload and data buffers
+        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize);
+        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize);
+
+
+        return handle;
+    }
+
     TextureHandle<PixelBuffer> CreateTexture(const stbi_uc* image, int width, int height, int channels, bool sRGB);
 
     std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getCPUHandleForSampler(UINT index) const;
+    void UpdateGPUBuffers();
 
     std::unique_ptr<FrameResource> currentFrameResource;
 
@@ -249,4 +252,9 @@ private:
     UINT currentFrameIndex;
 
     DynamicBufferHandle<LightInfo> lightBufferHandle;
+
+    ComPtr<ID3D12GraphicsCommandList> commandList;
+    ComPtr<ID3D12CommandAllocator> commandAllocator;
+
+    std::vector<BufferHandle> buffersToUpdate;
 };
