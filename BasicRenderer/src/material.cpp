@@ -8,7 +8,7 @@ Material::Material(const std::string& name,
     m_psoFlags(psoFlags) {
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
-    resourceManager.UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
+    resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 
 Material::Material(const std::string& name,
@@ -74,7 +74,7 @@ Material::Material(const std::string& name,
 
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
-    resourceManager.UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
+    resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 
 std::shared_ptr<Texture> Material::createDefaultTexture() {
@@ -113,15 +113,15 @@ void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
 	m_heightMap = heightmap;
 	m_materialData.heightMapIndex = heightmap->GetBufferDescriptorIndex();
 	m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
-	ResourceManager::GetInstance().UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
+	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 
 void Material::SetTextureScale(float scale) {
 	m_materialData.textureScale = scale;
-	ResourceManager::GetInstance().UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
+	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 
 void Material::SetHeightmapScale(float scale) {
 	m_materialData.heightMapScale = scale;
-	ResourceManager::GetInstance().UpdateIndexedConstantBuffer(m_perMaterialHandle, m_materialData);
+	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
 }

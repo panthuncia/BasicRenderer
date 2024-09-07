@@ -6,6 +6,7 @@
 #include "SceneNode.h"
 #include "Mesh.h"
 #include "Buffers.h"
+#include "ResourceHandles.h"
 #include "Skeleton.h"
 
 class RenderableObject : public SceneNode {
@@ -17,7 +18,7 @@ public:
 	std::vector<Mesh>& GetTransparentMeshes();
 	bool HasTransparent() const;
 	bool HasOpaque() const;
-	ComPtr<ID3D12Resource>& GetConstantBuffer();
+	BufferHandle& GetConstantBuffer();
 	void SetSkin(std::shared_ptr<Skeleton> skeleton);
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
@@ -25,7 +26,7 @@ private:
 	void UpdateBuffers();
 	std::vector<Mesh> opaqueMeshes;
 	std::vector<Mesh> transparentMeshes;
-	ComPtr<ID3D12Resource> perObjectConstantBuffer;
+	BufferHandle perObjectConstantBuffer;
 	UINT8* pPerObjectConstantBuffer;
 	PerObjectCB perObjectCBData;
 	bool m_hasTransparent = false;

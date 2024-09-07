@@ -12,3 +12,4 @@ _deps
 .vs/
 out/
 vcpkg_installed/
+models/

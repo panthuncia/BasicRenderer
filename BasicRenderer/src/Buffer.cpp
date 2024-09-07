@@ -20,31 +20,26 @@ D3D12_HEAP_TYPE translateAccessType(ResourceCPUAccessType accessType) {
 	}
 }
 
-Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t bufferSize) {
+D3D12_RESOURCE_STATES translateUsageType(ResourceUsageType usageType) {
+	switch (usageType) {
+	case ResourceUsageType::UNKNOWN:
+		return D3D12_RESOURCE_STATE_COMMON;
+	case ResourceUsageType::UPLOAD:
+		return D3D12_RESOURCE_STATE_GENERIC_READ;
+	}
+	return D3D12_RESOURCE_STATE_COMMON;
+}
+
+Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t bufferSize, ResourceUsageType usageType = ResourceUsageType::UNKNOWN) {
 	m_accessType = accessType;
 	D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(translateAccessType(accessType));
 	D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
 	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
-	switch (accessType) {
-		case ResourceCPUAccessType::READ:
-			state = D3D12_RESOURCE_STATE_COPY_DEST;
-			break;
-		case ResourceCPUAccessType::WRITE:
-			state = D3D12_RESOURCE_STATE_GENERIC_READ;
-			break;
-		case ResourceCPUAccessType::READ_WRITE:
-			state = D3D12_RESOURCE_STATE_GENERIC_READ;
-			break;
-		case ResourceCPUAccessType::NONE:
-			state = D3D12_RESOURCE_STATE_COMMON;
-			break;
-		break;
-	}
 	auto hr = device->CreateCommittedResource(
 		&heapProps,
 		D3D12_HEAP_FLAG_NONE,
 		&bufferDesc,
-		state,
+		translateUsageType(usageType),
 		nullptr,
 		IID_PPV_ARGS(&m_buffer));
 

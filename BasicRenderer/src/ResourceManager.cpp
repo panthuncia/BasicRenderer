@@ -37,6 +37,7 @@ void ResourceManager::Initialize() {
 
     InitializeUploadHeap();
     InitializeCopyCommandQueue();
+	InitializeTransitionCommandQueue();
 
     // Create CBV
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
@@ -153,6 +154,14 @@ void ResourceManager::WaitForCopyQueue() {
     }
 }
 
+void ResourceManager::WaitForTransitionQueue() {
+    ThrowIfFailed(transitionCommandQueue->Signal(transitionFence.Get(), ++transitionFenceValue));
+    if (transitionFence->GetCompletedValue() < transitionFenceValue) {
+        ThrowIfFailed(transitionFence->SetEventOnCompletion(transitionFenceValue, transitionFenceEvent));
+        WaitForSingleObject(transitionFenceEvent, INFINITE);
+    }
+}
+
 void ResourceManager::InitializeCopyCommandQueue() {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
@@ -168,6 +177,25 @@ void ResourceManager::InitializeCopyCommandQueue() {
     ThrowIfFailed(device->CreateFence(copyFenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copyFence)));
     copyFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     if (copyFenceEvent == nullptr) {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+    }
+}
+
+void ResourceManager::InitializeTransitionCommandQueue() {
+    auto& device = DeviceManager::GetInstance().GetDevice();
+
+    D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&transitionCommandQueue)));
+
+    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&transitionCommandAllocator)));
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, transitionCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&transitionCommandList)));
+    transitionCommandList->Close();
+
+    ThrowIfFailed(device->CreateFence(transitionFenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&transitionFence)));
+    transitionFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (transitionFenceEvent == nullptr) {
         ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
     }
 }
@@ -389,6 +417,81 @@ void ResourceManager::UpdateGPUBuffers(){
     if (FAILED(hr)) {
         spdlog::error("Failed to close command list");
     }
+    // Execute the copy command list
+    ID3D12CommandList* ppCommandLists[] = { copyCommandList.Get() };
+    copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
     WaitForCopyQueue();
     buffersToUpdate.clear();
+}
+
+BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceUsageType usageType, void* pInitialData) {
+	auto& device = DeviceManager::GetInstance().GetDevice();
+	BufferHandle handle;
+	handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
+	handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, usageType);
+	if (pInitialData) {
+		UpdateBuffer(handle, pInitialData, bufferSize);
+	}
+    D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+    switch (usageType) {
+        case ResourceUsageType::INDEX:
+            state = D3D12_RESOURCE_STATE_INDEX_BUFFER;
+            break;
+        case ResourceUsageType::VERTEX:
+            state = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+            break;
+    }
+	QueueResourceTransition({ handle.dataBuffer->m_buffer.Get(), D3D12_RESOURCE_STATE_COMMON,  state});
+	return handle;
+}
+
+void ResourceManager::UpdateBuffer(BufferHandle& bufferHandle, void* pData, size_t size) {
+	if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
+        void* mappedData;
+        D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
+        bufferHandle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
+        memcpy(mappedData, pData, size);
+        bufferHandle.uploadBuffer->m_buffer->Unmap(0, nullptr);
+		buffersToUpdate.push_back(bufferHandle);
+	}
+}
+
+void ResourceManager::QueueResourceTransition(const ResourceTransition& transition) {
+	queuedResourceTransitions.push_back(transition);
+}
+
+void ResourceManager::ExecuteResourceTransitions() {
+	auto& device = DeviceManager::GetInstance().GetDevice();
+    auto& commandList = transitionCommandList;
+    auto& commandAllocator = transitionCommandAllocator;
+    if (queuedResourceTransitions.size() == 0) {
+        return;
+    }
+
+    // Reset the command allocator
+    HRESULT hr = commandAllocator->Reset();
+    if (FAILED(hr)) {
+        spdlog::error("Failed to reset command allocator");
+    }
+
+    hr = commandList->Reset(commandAllocator.Get(), nullptr);
+    if (FAILED(hr)) {
+        spdlog::error("Failed to reset command list");
+    }
+
+	for (auto& transition : queuedResourceTransitions) {
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(transition.resource, transition.beforeState, transition.afterState);
+		commandList->ResourceBarrier(1, &barrier);
+	}
+
+    hr = commandList->Close();
+    if (FAILED(hr)) {
+        spdlog::error("Failed to close command list");
+    }
+
+    ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get() };
+    transitionCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    WaitForTransitionQueue();
+
+	queuedResourceTransitions.clear();
 }

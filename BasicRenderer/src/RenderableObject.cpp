@@ -56,7 +56,9 @@ bool RenderableObject::HasTransparent() const {
 
 void RenderableObject::CreateBuffers() {
     // Create PerMesh buffer
-    perObjectConstantBuffer = CreateConstantBuffer<PerObjectCB>(&perObjectCBData);
+	auto& resourceManager = ResourceManager::GetInstance();
+    perObjectConstantBuffer = resourceManager.CreateConstantBuffer<PerObjectCB>();
+	resourceManager.UpdateConstantBuffer(perObjectConstantBuffer, perObjectCBData);
 }
 
 void RenderableObject::UpdateBuffers() {
@@ -71,13 +73,11 @@ void RenderableObject::UpdateBuffers() {
 
     perObjectCBData.normalMatrix = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
 
-    D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
-    ThrowIfFailed(perObjectConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pPerObjectConstantBuffer)));
-    memcpy(pPerObjectConstantBuffer, &perObjectCBData, sizeof(perObjectCBData));
-    perObjectConstantBuffer->Unmap(0, nullptr);
+    auto& resourceManager = ResourceManager::GetInstance();
+    resourceManager.UpdateConstantBuffer(perObjectConstantBuffer, perObjectCBData);
 }
 
-ComPtr<ID3D12Resource>& RenderableObject::GetConstantBuffer() {
+BufferHandle& RenderableObject::GetConstantBuffer() {
     return perObjectConstantBuffer;
 }
 

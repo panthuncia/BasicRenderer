@@ -42,9 +42,13 @@ public:
 
         BufferHandle bufferHandle;
         // Create the buffer
-        bufferHandle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize);
-        bufferHandle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize);
-
+        bufferHandle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
+        bufferHandle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::CONSTANT);
+        ResourceTransition transition;
+		transition.resource = bufferHandle.dataBuffer->m_buffer.Get();
+		transition.beforeState = D3D12_RESOURCE_STATE_COMMON;
+		transition.afterState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+		QueueResourceTransition(transition);
         // Create a descriptor for the buffer
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
         cbvDesc.BufferLocation = bufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
@@ -60,7 +64,7 @@ public:
     }
 
     template<typename T>
-    void UpdateIndexedConstantBuffer(BufferHandle& handle, const T& data) {
+    void UpdateConstantBuffer(BufferHandle& handle, const T& data) {
         void* mappedData;
         D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
         handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
@@ -77,8 +81,8 @@ public:
         UINT bufferSize = numElements * elementSize;
 
         BufferHandle handle;
-        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize);
-        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize);
+        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
+        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::UNKNOWN);
 
         handle.index = AllocateDescriptor();
 
@@ -184,7 +188,7 @@ public:
     }
 
     template<typename T>
-    static BufferHandle CreateConstantBuffer() {
+    BufferHandle CreateConstantBuffer() {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
 		auto& device = DeviceManager::GetInstance().GetDevice();
@@ -195,14 +199,21 @@ public:
         BufferHandle handle;
 
 		// Create the upload and data buffers
-        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize);
-        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize);
+        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
+        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::CONSTANT);
+        ResourceTransition transition;
+        transition.resource = handle.dataBuffer->m_buffer.Get();
+        transition.beforeState = D3D12_RESOURCE_STATE_COMMON;
+        transition.afterState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        QueueResourceTransition(transition);
 
 
         return handle;
     }
 
     TextureHandle<PixelBuffer> CreateTexture(const stbi_uc* image, int width, int height, int channels, bool sRGB);
+	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
+	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 
     std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
 
@@ -210,13 +221,18 @@ public:
     D3D12_CPU_DESCRIPTOR_HANDLE getCPUHandleForSampler(UINT index) const;
     void UpdateGPUBuffers();
 
+	void QueueResourceTransition(const ResourceTransition& transition);
+    void ExecuteResourceTransitions();
+
     std::unique_ptr<FrameResource> currentFrameResource;
 
 private:
     ResourceManager() : descriptorSize(0), numAllocatedDescriptors(0) {}
     void InitializeUploadHeap();
     void WaitForCopyQueue();
+    void WaitForTransitionQueue();
     void InitializeCopyCommandQueue();
+    void InitializeTransitionCommandQueue();
     UINT AllocateDescriptor();
     void ReleaseDescriptor(UINT index);
     void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
@@ -246,6 +262,13 @@ private:
     HANDLE copyFenceEvent;
     UINT64 copyFenceValue = 0;
 
+    Microsoft::WRL::ComPtr<ID3D12CommandQueue> transitionCommandQueue;
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> transitionCommandAllocator;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> transitionCommandList;
+    Microsoft::WRL::ComPtr<ID3D12Fence> transitionFence;
+    HANDLE transitionFenceEvent;
+    UINT64 transitionFenceValue = 0;
+
     ComPtr<ID3D12Resource> perFrameConstantBuffer;
     UINT8* pPerFrameConstantBuffer;
     PerFrameCB perFrameCBData;
@@ -257,4 +280,5 @@ private:
     ComPtr<ID3D12CommandAllocator> commandAllocator;
 
     std::vector<BufferHandle> buffersToUpdate;
+	std::vector<ResourceTransition> queuedResourceTransitions;
 };

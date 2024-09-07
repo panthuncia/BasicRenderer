@@ -56,12 +56,12 @@ private:
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetOpaqueMeshes();
 			
-			commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer()->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
 			for (auto& mesh : meshes) {
 				auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
 				commandList->SetPipelineState(pso.Get());
-				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer()->GetGPUVirtualAddress());
+				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
 				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
