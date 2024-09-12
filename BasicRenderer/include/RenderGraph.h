@@ -12,7 +12,7 @@ class RenderGraph {
 public:
 	void AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources);
 	void Execute(RenderContext& context);
-	void Compile(RenderContext& context);
+	void Compile();
 	//void AllocateResources(RenderContext& context);
 	void AddResource(std::shared_ptr<Resource> resource);
 	std::shared_ptr<Resource> GetResourceByName(const std::string& name);

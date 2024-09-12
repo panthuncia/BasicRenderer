@@ -160,6 +160,8 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
     device->CreateDepthStencilView(depthStencilBuffer.Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+	CreateRenderGraph();
 }
 
 void DX12Renderer::LoadAssets() {
@@ -241,64 +243,66 @@ void DX12Renderer::Render() {
 
     commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-    //commandList->SetGraphicsRootDescriptorTable(0, ResourceManager::getInstance().getGPUHandle()); // Bind descriptor table
-
-    // Set viewports and scissor rect
-    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, m_xRes, m_yRes);
-    commandList->RSSetViewports(1, &viewport);
-    CD3DX12_RECT rect = CD3DX12_RECT(0, 0, m_xRes, m_yRes);
-    commandList->RSSetScissorRects(1, &rect);
-
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+	currentRenderGraph->Execute(context);
 
-    // Record commands
-    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-    commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    //commandList->SetGraphicsRootDescriptorTable(0, ResourceManager::getInstance().getGPUHandle()); // Bind descriptor table
 
-    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    // Set viewports and scissor rect
+    //CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, m_xRes, m_yRes);
+    //commandList->RSSetViewports(1, &viewport);
+    //CD3DX12_RECT rect = CD3DX12_RECT(0, 0, m_xRes, m_yRes);
+    //commandList->RSSetScissorRects(1, &rect);
 
-    for (auto& pair : currentScene->GetOpaqueRenderableObjectIDMap()) {
-        auto& renderable = pair.second;
-        commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+    //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize);
+    //CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-        for (auto& mesh : renderable->GetOpaqueMeshes()) {
-            commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-            auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState);
-            commandList->SetPipelineState(pso.Get());
-            D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-            D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
+    //// Record commands
+    //const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    //commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+    //commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-            commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-            commandList->IASetIndexBuffer(&indexBufferView);
+    //commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-            commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
-        }
-    }
+    //for (auto& pair : currentScene->GetOpaqueRenderableObjectIDMap()) {
+    //    auto& renderable = pair.second;
+    //    commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
-    for (auto& pair : currentScene->GetTransparentRenderableObjectIDMap()) {
-        auto& renderable = pair.second;
-        commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+    //    for (auto& mesh : renderable->GetOpaqueMeshes()) {
+    //        commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+    //        auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState);
+    //        commandList->SetPipelineState(pso.Get());
+    //        D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
+    //        D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 
-        for (auto& mesh : renderable->GetTransparentMeshes()) {
-            commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-            auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState);
-            commandList->SetPipelineState(pso.Get());
-            D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-            D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
+    //        commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+    //        commandList->IASetIndexBuffer(&indexBufferView);
 
-            commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-            commandList->IASetIndexBuffer(&indexBufferView);
+    //        commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+    //    }
+    //}
 
-            commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
-        }
-    }
+    //for (auto& pair : currentScene->GetTransparentRenderableObjectIDMap()) {
+    //    auto& renderable = pair.second;
+    //    commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+
+    //    for (auto& mesh : renderable->GetTransparentMeshes()) {
+    //        commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+    //        auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState);
+    //        commandList->SetPipelineState(pso.Get());
+    //        D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
+    //        D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
+
+    //        commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+    //        commandList->IASetIndexBuffer(&indexBufferView);
+
+    //        commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+    //    }
+    //}
 
     // Indicate that the back buffer will now be used to present
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -418,6 +422,8 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 
 void DX12Renderer::CreateRenderGraph() {
     ForwardRenderPass forwardPass = ForwardRenderPass();
+    auto forwardPassParameters = PassParameters();
     currentRenderGraph = std::make_unique<RenderGraph>();
-    
+	currentRenderGraph->AddPass(std::make_shared<ForwardRenderPass>(forwardPass), forwardPassParameters);
+	currentRenderGraph->Compile();
 }

@@ -6,7 +6,7 @@ static bool mapHasResourceNotInState(std::unordered_map<std::string, ResourceSta
     return mapHasKeyNotAsValue<std::string, ResourceState>(map, resourceName, state);
 }
 
-void RenderGraph::Compile(RenderContext& context) {
+void RenderGraph::Compile() {
 
     // Determine pass batches and transitions.
     std::vector<PassBatch> batches;
@@ -63,6 +63,7 @@ void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& reso
     PassAndResources passAndResources;
     passAndResources.pass = pass;
     passAndResources.resources = resources;
+	passes.push_back(passAndResources);
 }
 
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
@@ -71,4 +72,12 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
 
 std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::string& name) {
 	return resourcesByName[name];
+}
+
+void RenderGraph::Execute(RenderContext& context) {
+	for (auto& passAndResources : passes) {
+		//passAndResources.pass->Setup(context);
+		passAndResources.pass->Execute(context);
+		//passAndResources.pass->Cleanup(context);
+	}
 }
