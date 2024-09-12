@@ -10,14 +10,23 @@
 
 class RenderGraph {
 public:
-	void AddPass(RenderPass* pass);
+	void AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources);
 	void Execute(RenderContext& context);
 	void Compile(RenderContext& context);
 	//void AllocateResources(RenderContext& context);
 	void AddResource(std::shared_ptr<Resource> resource);
 	std::shared_ptr<Resource> GetResourceByName(const std::string& name);
 private:
+	struct PassAndResources {
+		std::shared_ptr<RenderPass> pass;
+		PassParameters resources;
+	};
 
-	std::vector<RenderPass*> passes;
+	struct PassBatch {
+		std::vector<PassAndResources> passes;
+		std::unordered_map<std::string, ResourceState> resourceStates;
+	};
+
+	std::vector<PassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 };

@@ -21,3 +21,8 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::str
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
 std::shared_ptr<Texture> loadTextureFromFile(const char* filename);
+
+template <typename T1, typename T2>
+bool mapHasKeyNotAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
+    return map.contains(key) && map[key] != val;
+}

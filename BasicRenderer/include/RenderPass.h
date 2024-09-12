@@ -1,3 +1,17 @@
+#pragma once
+
+#include <vector>
+
+#include "Resource.h"
+#include "RenderContext.h"
+#include "ResourceStates.h"
+
+struct PassParameters {
+    std::vector<std::shared_ptr<Resource>> shaderResources;
+    std::vector<std::shared_ptr<Resource>> renderTargets;
+    std::shared_ptr<Resource> depthAttachment = nullptr;
+};
+
 class RenderPass {
 public:
     virtual ~RenderPass() = default;

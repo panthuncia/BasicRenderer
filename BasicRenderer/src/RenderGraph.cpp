@@ -1,18 +1,72 @@
 #include "RenderGraph.h"
 #include "RenderContext.h"
+#include "utilities.h"
+
+static bool mapHasResourceNotInState(std::unordered_map<std::string, ResourceState>& map, std::string resourceName, ResourceState state) {
+    return mapHasKeyNotAsValue<std::string, ResourceState>(map, resourceName, state);
+}
 
 void RenderGraph::Compile(RenderContext& context) {
-    // Determine resource lifetimes
-    for (auto* pass : passes) {
-        for (auto* resource : pass->GetReadResources()) {
-            resource->AddReadPass(pass);
+
+    // Determine pass batches and transitions.
+    std::vector<PassBatch> batches;
+    auto currentBatch = PassBatch();
+
+    // TODO: Decide how to use combined resource states
+    for (auto& passAndResources : passes) {
+        bool needsNewBatch = false;
+
+        for (auto& resource : passAndResources.resources.shaderResources) {
+            if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName() , ResourceState::ShaderResource)) {
+                needsNewBatch = true;
+                break;
+            }
         }
-        for (auto* resource : pass->GetWriteResources()) {
-            resource->AddWritePass(pass);
+
+        for (auto& resource : passAndResources.resources.renderTargets) {
+            if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName() , ResourceState::RenderTarget)) {
+                needsNewBatch = true;
+                break;
+            }
+        }
+
+        if (passAndResources.resources.depthAttachment) {
+            if (mapHasResourceNotInState(currentBatch.resourceStates, passAndResources.resources.depthAttachment->GetName(), ResourceState::DepthWrite)) {
+                needsNewBatch = true;
+                break;
+            }
+        }
+
+        if (needsNewBatch) {
+            batches.push_back(std::move(currentBatch));
+            currentBatch = PassBatch();
+        }
+
+        currentBatch.passes.push_back(passAndResources);
+
+        // Update resource states based on this pass
+        for (auto& resource : passAndResources.resources.shaderResources) {
+            currentBatch.resourceStates[resource->GetName()] = ResourceState::ShaderResource;
+        }
+
+        for (auto& resource : passAndResources.resources.renderTargets) {
+            currentBatch.resourceStates[resource->GetName()] = ResourceState::RenderTarget;
+        }
+
+        if (passAndResources.resources.depthAttachment) {
+            currentBatch.resourceStates[passAndResources.resources.depthAttachment->GetName()] = ResourceState::DepthWrite;
         }
     }
+}
 
-    //AllocateResources(context);
+void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources) {
+    PassAndResources passAndResources;
+    passAndResources.pass = pass;
+    passAndResources.resources = resources;
+}
+
+void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
+    resourcesByName[resource->GetName()] = resource;
 }
 
 std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::string& name) {
