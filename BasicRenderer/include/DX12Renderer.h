@@ -16,6 +16,7 @@
 #include "Buffers.h"
 #include "Scene.h"
 #include "InputManager.h"
+#include "RenderGraph.h"
 
 using namespace Microsoft::WRL;
 
@@ -55,7 +56,9 @@ private:
     float verticalAngle = 0;
     float horizontalAngle = 0;
 
-    std::shared_ptr<Scene> currentScene;// = std::make_shared<Scene>();
+    std::shared_ptr<Scene> currentScene;
+
+    std::unique_ptr<RenderGraph> currentRenderGraph;
 
     UINT m_xRes;
     UINT m_yRes;

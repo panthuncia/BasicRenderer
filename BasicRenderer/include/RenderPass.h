@@ -21,7 +21,7 @@ public:
     virtual void Cleanup(RenderContext& context) = 0;
 
     // Declare resources this pass will read from and write to
-    virtual void DeclareResources() = 0;
+    //virtual void DeclareResources() = 0;
 
     // Accessors for resource lists
     const std::vector<Resource*>& GetReadResources() const { return readResources; }

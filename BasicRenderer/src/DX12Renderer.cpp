@@ -417,5 +417,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
+    ForwardRenderPass forwardPass = ForwardRenderPass();
+    currentRenderGraph = std::make_unique<RenderGraph>();
     
 }
