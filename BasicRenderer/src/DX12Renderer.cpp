@@ -405,10 +405,6 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
     context.SetActionHandler(InputAction::RotateCamera, [this](float magnitude, const InputData& inputData) {
         horizontalAngle -= inputData.mouseDeltaX * 0.005;
         verticalAngle -= inputData.mouseDeltaY * 0.005;
-        const float upperBound = M_PI / 2 - 0.01; // Slightly less than 90 degrees
-        const float lowerBound = -M_PI / 2 + 0.01; // Slightly more than -90 degrees
-        verticalAngle = max(lowerBound, min(upperBound, verticalAngle));
-        // TODO
         });
 
     context.SetActionHandler(InputAction::ZoomIn, [this](float magnitude, const InputData& inputData) {
@@ -418,4 +414,8 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
     context.SetActionHandler(InputAction::ZoomOut, [this](float magnitude, const InputData& inputData) {
         // TODO
         });
+}
+
+void DX12Renderer::CreateRenderGraph() {
+    
 }

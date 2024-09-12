@@ -66,6 +66,7 @@ private:
     void UpdateConstantBuffer();
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
+    void CreateRenderGraph();
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateRootSignatureFromShaders(const std::vector<Microsoft::WRL::ComPtr<ID3DBlob>>& shaderBlobs);
 

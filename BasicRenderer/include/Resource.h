@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "ResourceState.h"
+#include "ResourceStates.h"
 //#include "RenderPass.h"
 
 class Resource {
