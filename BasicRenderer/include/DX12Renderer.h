@@ -64,9 +64,6 @@ private:
     UINT m_yRes;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
-    void LoadAssets();
-    void CreateConstantBuffer();
-    void UpdateConstantBuffer();
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
     void CreateRenderGraph();

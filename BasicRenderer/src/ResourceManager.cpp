@@ -200,10 +200,6 @@ void ResourceManager::InitializeTransitionCommandQueue() {
     }
 }
 
-std::unique_ptr<FrameResource>& ResourceManager::GetFrameResource(UINT frameNum) {
-    return frameResourceCopies[frameNum % 3];
-}
-
 UINT ResourceManager::CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 

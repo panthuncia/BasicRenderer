@@ -18,12 +18,4 @@ public:
     UINT frameIndex;
     UINT xRes;
     UINT yRes;
-
-    //CD3DX12_CPU_DESCRIPTOR_HANDLE GetCurrentRTVHandle() const {
-    //    return CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize);
-    //}
-
-    //CD3DX12_CPU_DESCRIPTOR_HANDLE GetDSVHandle() const {
-    //    return CD3DX12_CPU_DESCRIPTOR_HANDLE(dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    //}
 };

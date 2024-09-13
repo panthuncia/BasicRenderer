@@ -7,7 +7,6 @@
 #include <queue>
 #include "DirectX/d3dx12.h"
 #include "Buffers.h"
-#include "FrameResource.h"
 #include "spdlog/spdlog.h"
 #include "DynamicStructuredBuffer.h"
 #include "ResourceHandles.h"
@@ -114,7 +113,7 @@ public:
 
         // Map the buffer
         void* mappedData = nullptr;
-        D3D12_RANGE readRange = { offset, offset + updateSize }; // We specify the range we might read, which is none in this case
+        D3D12_RANGE readRange = { offset, offset + updateSize };
         HRESULT hr = handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
         if (FAILED(hr)) {
             spdlog::error("Failed to map buffer with HRESULT: {}", hr);
@@ -175,7 +174,7 @@ public:
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
 
-        // Create a Shader Resource View (SRV) for the buffer
+        // Create a Shader Resource View for the buffer
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -215,16 +214,12 @@ public:
 	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 
-    std::unique_ptr<FrameResource>& GetFrameResource(UINT frameNum);
-
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getCPUHandleForSampler(UINT index) const;
     void UpdateGPUBuffers();
 
 	void QueueResourceTransition(const ResourceTransition& transition);
     void ExecuteResourceTransitions();
-
-    std::unique_ptr<FrameResource> currentFrameResource;
 
 private:
     ResourceManager() : descriptorSize(0), numAllocatedDescriptors(0) {}
@@ -238,8 +233,6 @@ private:
     void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
-    
-    std::unique_ptr<FrameResource> frameResourceCopies[3];
 
     ComPtr<ID3D12DescriptorHeap> descriptorHeap;
     UINT descriptorSize;
