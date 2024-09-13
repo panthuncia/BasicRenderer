@@ -175,6 +175,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         macro.Name = L"PARALLAX";
         defines.insert(defines.begin(), macro);
     }
+    if (psoFlags & PSOFlags::SHADOW) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"SHADOW";
+        defines.insert(defines.begin(), macro);
+    }
     return defines;
 }
 

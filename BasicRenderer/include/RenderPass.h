@@ -9,14 +9,14 @@
 struct PassParameters {
     std::vector<std::shared_ptr<Resource>> shaderResources;
     std::vector<std::shared_ptr<Resource>> renderTargets;
-    std::shared_ptr<Resource> depthAttachment = nullptr;
+    std::vector<std::shared_ptr<Resource>> depthTextures;
 };
 
 class RenderPass {
 public:
     virtual ~RenderPass() = default;
 
-    virtual void Setup(RenderContext& context) = 0;
+    virtual void Setup() = 0;
     virtual void Execute(RenderContext& context) = 0;
     virtual void Cleanup(RenderContext& context) = 0;
 

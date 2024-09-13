@@ -11,4 +11,5 @@ enum PSOFlags {
     SKINNED = 1 << 7,
     DOUBLE_SIDED = 1 << 8,
     PARALLAX = 1 << 9,
+    SHADOW = 1 << 10,
 };

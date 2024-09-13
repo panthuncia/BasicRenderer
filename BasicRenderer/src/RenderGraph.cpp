@@ -30,8 +30,8 @@ void RenderGraph::Compile() {
             }
         }
 
-        if (passAndResources.resources.depthAttachment) {
-            if (mapHasResourceNotInState(currentBatch.resourceStates, passAndResources.resources.depthAttachment->GetName(), ResourceState::DepthWrite)) {
+        for (auto& resource : passAndResources.resources.depthTextures) {
+            if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::DepthWrite)) {
                 needsNewBatch = true;
                 break;
             }
@@ -53,9 +53,15 @@ void RenderGraph::Compile() {
             currentBatch.resourceStates[resource->GetName()] = ResourceState::RenderTarget;
         }
 
-        if (passAndResources.resources.depthAttachment) {
-            currentBatch.resourceStates[passAndResources.resources.depthAttachment->GetName()] = ResourceState::DepthWrite;
+        for (auto& resource : passAndResources.resources.depthTextures) {
+            currentBatch.resourceStates[resource->GetName()] = ResourceState::DepthWrite;
         }
+    }
+}
+
+void RenderGraph::Setup() {
+    for (auto& pass : passes) {
+        pass.pass->Setup();
     }
 }
 

@@ -8,8 +8,12 @@
 #include "RenderableObject.h"
 #include "mesh.h"
 #include "Scene.h"
-class ForwardRenderPass : public RenderPass {
+#include "ResourceGroup.h"
+class ShadowPass : public RenderPass {
 public:
+	ShadowPass(std::shared_ptr<ResourceGroup> shadowMaps) {
+	
+	}
 	void Setup() override {
 		// Setup the render pass
 	}
@@ -42,7 +46,7 @@ public:
 			commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
 			for (auto& mesh : meshes) {
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
+				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
@@ -60,7 +64,7 @@ public:
 			commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
 			for (auto& mesh : meshes) {
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
+				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();

@@ -16,6 +16,7 @@
 #include "RenderGraph.h"
 #include "RenderPass.h"
 #include "ForwardRenderPass.h"
+#include "ShadowPass.h"
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
@@ -350,9 +351,20 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
-    ForwardRenderPass forwardPass = ForwardRenderPass();
+
+	std::shared_ptr<ResourceGroup> shadowMaps = std::make_shared<ResourceGroup>("ShadowMaps");
+	currentRenderGraph->AddResource(shadowMaps);
+	auto shadowPass = std::make_shared<ShadowPass>(shadowMaps);
+	auto shadowPassParameters = PassParameters();
+	shadowPassParameters.depthTextures.push_back(shadowMaps);
+
+    auto forwardPass = std::make_shared<ForwardRenderPass>();
     auto forwardPassParameters = PassParameters();
+    forwardPassParameters.shaderResources.push_back(shadowMaps);
+
+
     currentRenderGraph = std::make_unique<RenderGraph>();
-	currentRenderGraph->AddPass(std::make_shared<ForwardRenderPass>(forwardPass), forwardPassParameters);
+    currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
+	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
 	currentRenderGraph->Compile();
 }
