@@ -240,10 +240,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     cubeObject->animationController->setAnimationClip(animation);
-    std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", 0, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, XMFLOAT3(0, 1, 0), 0.0, 0.0);
+    std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", LightType::Point, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, XMFLOAT3(0, 1, 0), 0.0, 0.0);
     cubeObject->AddChild(light1);
     scene->AddLight(light1);
-    std::shared_ptr<Light> light2 = std::make_shared<Light>("light2", 2, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, 1, 0));
+    std::shared_ptr<Light> light2 = std::make_shared<Light>("light2", LightType::Directional, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, 1, 0));
     scene->AddLight(light2);
 
     MSG msg = {};

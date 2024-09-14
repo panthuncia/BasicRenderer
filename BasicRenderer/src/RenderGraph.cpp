@@ -73,8 +73,7 @@ void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& reso
 }
 
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
-    auto& name = resource->GetName();
-    resourcesByName[name] = resource;
+    resourcesByName[resource->GetName()] = resource;
 }
 
 std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::string& name) {

@@ -1,6 +1,8 @@
 #include "Light.h"
+#include "ResourceManager.h"
+#include "SettingsManager.h"
 
-Light::Light(std::string name, unsigned int type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
+Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
 	m_lightInfo.type = type;
 	m_lightInfo.posWorldSpace = XMLoadFloat3(&position);
 	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
@@ -15,7 +17,7 @@ Light::Light(std::string name, unsigned int type, XMFLOAT3 position, XMFLOAT3 co
 	transform.setDirection(direction);
 }
 
-Light::Light(std::string name, unsigned int type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction) : SceneNode(name) {
+Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction) : SceneNode(name) {
 	m_lightInfo.type = type;
 	m_lightInfo.posWorldSpace = XMLoadFloat3(&position);
 	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
@@ -68,4 +70,44 @@ void Light::NotifyLightObservers() {
 
 void Light::CreateShadowMap() {
 	
+}
+
+void Light::UpdateLightMatrices() {
+	switch (m_lightFrameConstantHandles.size()) {
+	case 1: {
+		PerFrameCB frameCB;
+		frameCB.viewMatrix = XMMatrixIdentity();
+		frameCB.projectionMatrix = XMMatrixIdentity();
+		frameCB.eyePosWorldSpace = m_lightInfo.posWorldSpace;
+		frameCB.ambientLighting = m_lightInfo.color;
+		frameCB.lightBufferIndex = m_currentLightBufferIndex;
+		frameCB.numLights = 1;
+		ResourceManager::GetInstance().UpdateConstantBuffer<PerFrameCB>(m_lightFrameConstantHandles[0], frameCB);
+	}
+	}
+}
+
+void Light::CreateFrameConstantBuffers() {
+	auto& resourceManager = ResourceManager::GetInstance();
+
+	switch (m_lightInfo.type) {
+	case LightType::Point: // Six views for cubemap
+		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		break;
+	case LightType::Spot:
+		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		break;
+	case LightType::Directional:
+		uint8_t numCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+		for (int i = 0; i < numCascades; i++) {
+			m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
+		}
+		break;
+	}
+	UpdateLightMatrices();
 }

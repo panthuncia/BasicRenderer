@@ -26,8 +26,12 @@ public:
 
 private:
     DynamicBufferHandle<LightInfo> lightBufferHandle;
+    DynamicBufferHandle<DirectX::XMMATRIX> spotViewInfoHandle;
+    DynamicBufferHandle<DirectX::XMMATRIX> pointViewInfoHandle;
+    DynamicBufferHandle<DirectX::XMMATRIX> directionalViewInfoHandle;
     //std::unordered_map<int, unsigned int> lightIndexMap; // Maps localID to buffer index
     std::vector<Light*> lights; // Active light IDs
 
     unsigned int CreateLightInfo(Light* node);
+    unsigned int CreateLightViewInfo(Light* node);
 };

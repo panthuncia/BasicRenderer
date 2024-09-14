@@ -17,11 +17,19 @@
 #include "RenderPass.h"
 #include "ForwardRenderPass.h"
 #include "ShadowPass.h"
+#include "SettingsManager.h"
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
     m_yRes = y_res;
     LoadPipeline(hwnd, x_res, y_res);
+    SetSettings();
+}
+
+void DX12Renderer::SetSettings() {
+	auto& settingsManager = SettingsManager::GetInstance();
+
+	settingsManager.registerSetting<uint8_t>("numDirectionalCascades", 4);
 }
 
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
