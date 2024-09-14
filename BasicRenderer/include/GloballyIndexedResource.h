@@ -5,13 +5,15 @@
 class GloballyIndexedResource : public Resource
 {
 public:
-	uint32_t GetIndex() {
+	GloballyIndexedResource(std::string name) : Resource(name){};
+	GloballyIndexedResource() {};
+	int GetIndex() {
 		return index;
 	}
 protected:
-	SetIndex(uint32_t index) {
+	void SetIndex(int index) {
 		this->index = index;
 	}
 private:
-	uint32_t index;
+	int index = -1;
 };

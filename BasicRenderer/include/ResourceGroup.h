@@ -16,13 +16,13 @@ public:
     }
 
     virtual void RemoveGloballyIndexedResource(uint32_t index) {
-        auto iter = myUnorderedMap.find(index);
-        if (iter != myUnorderedMap.end()) {
+        auto iter = resources.find(index);
+        if (iter != resources.end()) {
             resources.erase(iter);
         }
     }
 
-    // Override the base Resouece method to transition all resources in the group
+    // Override the base Resource method to transition all resources in the group
     void SetState(ResourceState state) override {
         for (auto& pair : resources) {
             pair.second->SetState(state);

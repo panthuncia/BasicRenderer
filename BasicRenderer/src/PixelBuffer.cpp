@@ -10,7 +10,7 @@
 
 PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    handle = resourceManager.CreateTexture(image, width, height, channels, sRGB);
+    handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB);
 }
 
 UINT PixelBuffer::GetDescriptorIndex() const {

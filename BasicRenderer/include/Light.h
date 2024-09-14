@@ -37,4 +37,5 @@ private:
 	std::vector<ISceneNodeObserver<Light>*> lightObservers;
 	void NotifyLightObservers();
 	void UpdateLightInfo();
+	void CreateShadowMap();
 };

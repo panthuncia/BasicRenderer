@@ -210,7 +210,10 @@ public:
         return handle;
     }
 
-    TextureHandle<PixelBuffer> CreateTexture(const stbi_uc* image, int width, int height, int channels, bool sRGB);
+    TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB);
+    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap);
+    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap);
+
 	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 
@@ -233,6 +236,7 @@ private:
     void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
+    int GetDefaultShadowSamplerIndex();
 
     ComPtr<ID3D12DescriptorHeap> descriptorHeap;
     UINT descriptorSize;
@@ -274,4 +278,6 @@ private:
 
     std::vector<BufferHandle> buffersToUpdate;
 	std::vector<ResourceTransition> queuedResourceTransitions;
+
+	int defaultShadowSamplerIndex = -1;
 };

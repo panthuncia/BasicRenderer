@@ -222,7 +222,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getCPUHandleForSampler(UINT index) 
     return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
     // Describe and create the texture resource
@@ -304,6 +304,172 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(const stbi_uc* image, 
     srvDesc.Texture2D.MostDetailedMip = 0;
     srvDesc.Texture2D.MipLevels = 1;
     srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+
+    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
+
+    return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
+}
+
+TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, bool isCubemap) {
+    auto& device = DeviceManager::GetInstance().GetDevice();
+
+    // Describe and create the texture resource
+
+    DXGI_FORMAT textureFormat;
+    std::vector<stbi_uc> expandedImage;
+    switch (channels) {
+    case 1:
+        textureFormat = DXGI_FORMAT_R8_UNORM;
+        break;
+    case 3:
+        textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        channels = 4; // Update the number of channels to RGBA
+        break;
+    case 4:
+        textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported channel count");
+    }
+
+    CD3DX12_RESOURCE_DESC textureDesc;
+    if (isCubemap) {
+        textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            textureFormat,
+            width,
+            height,
+            6, // For a single cubemap (6 faces)
+            1, // Single mip level
+            1, // Sample count
+            0); // Sample quality
+    }
+    else {
+        textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            textureFormat,
+            width,
+            height,
+            1,  // For a single 2D texture
+            1,  // Single mip level
+            1,  // Sample count
+            0); // Sample quality
+    }
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = textureFormat;
+
+    if (isCubemap) {
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        srvDesc.TextureCube.MostDetailedMip = 0;
+        srvDesc.TextureCube.MipLevels = 1;
+        srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+    }
+    else {
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+    }
+
+    // Create the committed resource
+    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    ComPtr<ID3D12Resource> textureResource;
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &textureDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&textureResource)));
+
+    // Allocate descriptor and create shader resource view
+    UINT descriptorIndex = AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = GetGPUHandle(descriptorIndex);
+
+    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
+
+    return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
+}
+
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap) {
+    auto& device = DeviceManager::GetInstance().GetDevice();
+
+    // Describe and create the texture resource
+
+    DXGI_FORMAT textureFormat;
+    std::vector<stbi_uc> expandedImage;
+    switch (channels) {
+    case 1:
+        textureFormat = DXGI_FORMAT_R8_UNORM;
+        break;
+    case 3:
+        textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        channels = 4; // Update the number of channels
+        break;
+    case 4:
+        textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported channel count");
+    }
+
+    CD3DX12_RESOURCE_DESC textureDesc;
+    if (isCubemap) {
+        textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            textureFormat,
+            width,
+            height,
+            6 * length, // For cubemap arrays
+            1,
+            1,
+            0);
+    }
+    else {
+        textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            textureFormat,
+            width,
+            height,
+            length, // For regular texture arrays
+            1,
+            1,
+            0);
+    }
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = textureFormat;
+
+    if (isCubemap) {
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+        srvDesc.TextureCubeArray.MostDetailedMip = 0;
+        srvDesc.TextureCubeArray.MipLevels = 1;
+        srvDesc.TextureCubeArray.First2DArrayFace = 0;
+        srvDesc.TextureCubeArray.NumCubes = length;
+        srvDesc.TextureCubeArray.ResourceMinLODClamp = 0.0f;
+    }
+    else {
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        srvDesc.Texture2DArray.MostDetailedMip = 0;
+        srvDesc.Texture2DArray.MipLevels = 1;
+        srvDesc.Texture2DArray.FirstArraySlice = 0;
+        srvDesc.Texture2DArray.ArraySize = length;
+        srvDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
+    }
+
+    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    ComPtr<ID3D12Resource> textureResource;
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &textureDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&textureResource)));
+
+    UINT descriptorIndex = AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = GetGPUHandle(descriptorIndex);
 
     device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
 
@@ -490,4 +656,23 @@ void ResourceManager::ExecuteResourceTransitions() {
     WaitForTransitionQueue();
 
 	queuedResourceTransitions.clear();
+}
+
+int ResourceManager::GetDefaultShadowSamplerIndex() {
+	if (defaultShadowSamplerIndex != -1) {
+		return defaultShadowSamplerIndex;
+	}
+    D3D12_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT; // Use comparison filter
+    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // Clamp texture coordinates
+    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // Clamp texture coordinates
+    samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // Clamp texture coordinates
+    samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL; // Comparison function for shadow maps
+
+    // Optionally, adjust BorderColor, MaxAnisotropy, etc., if needed
+    //samplerDesc.BorderColor[= { 0, 0, 0// Default border color
+    samplerDesc.MaxAnisotropy = 1;
+	defaultShadowSamplerIndex = CreateIndexedSampler(samplerDesc);
+
+    return defaultShadowSamplerIndex;
 }

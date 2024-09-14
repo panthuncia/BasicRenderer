@@ -3,7 +3,8 @@
 
 #include "PixelBuffer.h"
 #include "Sampler.h"
-class Texture {
+#include "GloballyIndexedResource.h"
+class Texture : public GloballyIndexedResource{
 public:
 	Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler);
 	UINT GetBufferDescriptorIndex();

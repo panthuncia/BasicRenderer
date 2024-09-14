@@ -65,3 +65,7 @@ void Light::NotifyLightObservers() {
 		observer->OnNodeUpdated(this);
 	}
 }
+
+void Light::CreateShadowMap() {
+	
+}

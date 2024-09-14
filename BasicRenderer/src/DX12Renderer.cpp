@@ -351,7 +351,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
-
+    currentRenderGraph = std::make_unique<RenderGraph>();
 	std::shared_ptr<ResourceGroup> shadowMaps = std::make_shared<ResourceGroup>("ShadowMaps");
 	currentRenderGraph->AddResource(shadowMaps);
 	auto shadowPass = std::make_shared<ShadowPass>(shadowMaps);
@@ -362,9 +362,7 @@ void DX12Renderer::CreateRenderGraph() {
     auto forwardPassParameters = PassParameters();
     forwardPassParameters.shaderResources.push_back(shadowMaps);
 
-
-    currentRenderGraph = std::make_unique<RenderGraph>();
-    currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
+    //currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
 	currentRenderGraph->Compile();
 }
