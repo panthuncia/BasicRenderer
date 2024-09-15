@@ -1,5 +1,7 @@
 #pragma once
 #include <vector>
+#include <DirectXMath.h>
+#include <array>
 
 #include "SceneNode.h"
 #include "buffers.h"
@@ -18,6 +20,7 @@ public:
 	Light(LightInfo& lightInfo);
 
 	LightInfo& GetLightInfo();
+	LightType GetLightType() const;
 
 	int GetCurrentLightBufferIndex() {
 		return m_currentLightBufferIndex;
@@ -31,6 +34,18 @@ public:
 		m_currentLightBufferIndex = index;
 	}
 
+	int GetCurrentviewInfoIndex() {
+		return m_currentLightViewInfoIndex;
+	}
+
+	void DecrementLightViewInfoIndex() {
+		m_currentLightViewInfoIndex--;
+	}
+
+	void SetLightViewInfoIndex(int index) {
+		m_currentLightViewInfoIndex = index;
+	}
+
 	void AddLightObserver(ISceneNodeObserver<Light>* observer);
 	void RemoveLightObserver(ISceneNodeObserver<Light>* observer);
 
@@ -41,14 +56,19 @@ public:
 	}
 
 	void UpdateLightMatrices();
+	DirectX::XMMATRIX GetLightViewMatrix();
+	std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices();
 
 private:
 	std::vector<BufferHandle> m_lightFrameConstantHandles;
 	LightInfo m_lightInfo;
 	int m_currentLightBufferIndex = -1;
+	int m_currentLightViewInfoIndex = -1;
 	std::vector<ISceneNodeObserver<Light>*> lightObservers;
+	XMMATRIX m_lightProjection;
 	void NotifyLightObservers();
 	void UpdateLightInfo();
 	void CreateShadowMap();
 	void CreateFrameConstantBuffers();
+	void CreateProjectionMatrix();
 };

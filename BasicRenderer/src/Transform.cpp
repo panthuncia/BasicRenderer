@@ -1,5 +1,7 @@
 #include "Transform.h"
 
+#include "DefaultDirection.h"
+
 Transform::Transform(XMFLOAT3 pos, XMFLOAT3 rotEuler, XMFLOAT3 scale)
     : pos(pos), scale(scale), isDirty(false) {
     rot = XMQuaternionRotationRollPitchYawFromVector(XMLoadFloat3(&rotEuler));
@@ -58,7 +60,6 @@ void Transform::setLocalRotationFromQuaternion(const XMVECTOR& quaternion) {
 
 void Transform::setDirection(const XMFLOAT3& dir) {
     XMVECTOR targetDirection = XMVector3Normalize(XMLoadFloat3(&dir));
-    XMVECTOR defaultDirection = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
     float dotProduct = XMVectorGetX(XMVector3Dot(defaultDirection, targetDirection));
 
     if (dotProduct < -0.9999f) {

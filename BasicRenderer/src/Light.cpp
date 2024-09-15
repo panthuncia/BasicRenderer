@@ -15,6 +15,8 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 
 	transform.setLocalPosition(position);
 	transform.setDirection(direction);
+
+	CreateProjectionMatrix();
 }
 
 Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction) : SceneNode(name) {
@@ -28,6 +30,8 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 
 	transform.setLocalPosition(position);
 	transform.setDirection(direction);
+
+	CreateProjectionMatrix();
 }
 
 Light::Light(LightInfo& lightInfo) : SceneNode(name) {
@@ -110,4 +114,54 @@ void Light::CreateFrameConstantBuffers() {
 		break;
 	}
 	UpdateLightMatrices();
+}
+
+LightType Light::GetLightType() const {
+	return (LightType)m_lightInfo.type;
+}
+
+void Light::CreateProjectionMatrix() {
+	float aspect = 1.0f;
+	float nearZ = 0.07f;
+	float farZ = 70.0f;
+
+	switch ((LightType)m_lightInfo.type) {
+	case LightType::Spot:
+		m_lightProjection = XMMatrixPerspectiveFovRH(this->m_lightInfo.outerConeAngle * 2, aspect, nearZ, farZ);
+		break;
+	case LightType::Point:
+		m_lightProjection = XMMatrixPerspectiveFovRH(XM_PI / 2, aspect, nearZ, farZ);
+		break;
+	}
+}
+
+std::array<DirectX::XMMATRIX, 6> Light::GetCubemapViewMatrices() {
+	// Define directions and up vectors for the six faces of the cubemap
+	struct DirectionSet {
+		XMVECTOR dir;
+		XMVECTOR up;
+	};
+	const std::array<DirectionSet, 6> directions = {
+		DirectionSet{XMVectorSet(1, 0, 0, 0), XMVectorSet(0, 1, 0, 0)},
+		DirectionSet{XMVectorSet(-1, 0, 0, 0), XMVectorSet(0, 1, 0, 0)},
+		DirectionSet{XMVectorSet(0, 1, 0, 0), XMVectorSet(0, 0, 1, 0)},
+		DirectionSet{XMVectorSet(0, -1, 0, 0), XMVectorSet(0, 0, -1, 0)},
+		DirectionSet{XMVectorSet(0, 0, 1, 0), XMVectorSet(0, 1, 0, 0)},
+		DirectionSet{XMVectorSet(0, 0, -1, 0), XMVectorSet(0, 1, 0, 0)},
+	};
+
+	std::array<XMMATRIX, 6> viewMatrices{};
+	auto posVec = transform.getGlobalPosition();
+	XMVECTOR pos = XMLoadFloat3(&posVec);
+
+	for (int i = 0; i < directions.size(); ++i) {
+		XMVECTOR target = XMVectorAdd(pos, directions[i].dir);
+		viewMatrices[i] = XMMatrixLookAtRH(pos, target, directions[i].up);
+	}
+
+	return viewMatrices;
+}
+
+DirectX::XMMATRIX Light::GetLightViewMatrix() {
+	return XMMatrixTranspose(transform.modelMatrix);
 }

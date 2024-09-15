@@ -17,20 +17,23 @@ public:
     unsigned int GetLightBufferDescriptorIndex();
     unsigned int GetNumLights();
     void OnNodeUpdated(Light* light) override {
-        lightBufferHandle.buffer.UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
+        m_lightBufferHandle.buffer.UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
     }
 
     void UpdateGPU() {
-        lightBufferHandle.buffer.UpdateBuffer();
+        m_lightBufferHandle.buffer.UpdateBuffer();
     }
 
 private:
-    DynamicBufferHandle<LightInfo> lightBufferHandle;
-    DynamicBufferHandle<DirectX::XMMATRIX> spotViewInfoHandle;
-    DynamicBufferHandle<DirectX::XMMATRIX> pointViewInfoHandle;
-    DynamicBufferHandle<DirectX::XMMATRIX> directionalViewInfoHandle;
+    DynamicBufferHandle<LightInfo> m_lightBufferHandle;
+    DynamicBufferHandle<DirectX::XMMATRIX> m_spotViewInfoHandle;
+    DynamicBufferHandle<DirectX::XMMATRIX> m_pointViewInfoHandle;
+    DynamicBufferHandle<DirectX::XMMATRIX> m_directionalViewInfoHandle;
     //std::unordered_map<int, unsigned int> lightIndexMap; // Maps localID to buffer index
-    std::vector<Light*> lights; // Active light IDs
+    std::vector<Light*> m_lights; // Active light IDs
+    std::vector<Light*> m_spotLights;
+	std::vector<Light*> m_pointLights;
+	std::vector<Light*> m_directionalLights;
 
     unsigned int CreateLightInfo(Light* node);
     unsigned int CreateLightViewInfo(Light* node);
