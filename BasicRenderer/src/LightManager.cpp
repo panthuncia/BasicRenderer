@@ -79,6 +79,7 @@ unsigned int LightManager::CreateLightViewInfo(Light* node) {
 		node->SetLightViewInfoIndex(m_spotViewInfoHandle.buffer.Size());
 		m_spotViewInfoHandle.buffer.Add(node->GetLightViewMatrix());
 		break;
+	
 
 	default:
 		spdlog::warn("Light type not recognized");
