@@ -17,6 +17,9 @@ public:
     void AddLight(Light* lightNode, bool shadowCasting = false, Camera* currentCamera = nullptr);
     void RemoveLight(Light* light);
     unsigned int GetLightBufferDescriptorIndex();
+    unsigned int GetPointCubemapMatricesDescriptorIndex();
+    unsigned int GetSpotMatricesDescriptorIndex();
+    unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
     unsigned int GetNumLights();
     void OnNodeUpdated(Light* light) override {
         m_lightBufferHandle.buffer.UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());

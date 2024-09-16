@@ -46,7 +46,7 @@ UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
     return node->localID;
 }
 
-UINT Scene::AddLight(std::shared_ptr<Light> light) {
+UINT Scene::AddLight(std::shared_ptr<Light> light, bool shadowCasting) {
     light->localID = nextNodeID;
     if (light->parent == nullptr) {
         sceneRoot.AddChild(light);
@@ -55,7 +55,7 @@ UINT Scene::AddLight(std::shared_ptr<Light> light) {
     lightsByID[nextNodeID] = light;
     nextNodeID++;
 
-    lightManager.AddLight(light.get());
+    lightManager.AddLight(light.get(), shadowCasting, pCamera.get());
     return light->localID;
 }
 
@@ -210,6 +210,18 @@ UINT Scene::GetNumLights() {
 
 UINT Scene::GetLightBufferDescriptorIndex() {
     return lightManager.GetLightBufferDescriptorIndex();
+}
+
+UINT Scene::GetPointCubemapMatricesDescriptorIndex() {
+	return lightManager.GetPointCubemapMatricesDescriptorIndex();
+}
+
+UINT Scene::GetSpotMatricesDescriptorIndex() {
+	return lightManager.GetSpotMatricesDescriptorIndex();
+}
+
+UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex() {
+	return lightManager.GetDirectionalCascadeMatricesDescriptorIndex();
 }
 
 std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {

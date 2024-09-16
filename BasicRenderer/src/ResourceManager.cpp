@@ -94,7 +94,7 @@ void ResourceManager::ReleaseDescriptor(UINT index) {
 }
 
 
-void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex) {
+void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
     //DirectX::XMFLOAT4 eyeWorld = { 0.0f, 2.0f, -5.0f, 1.0f };
     //perFrameCBData.view = DirectX::XMMatrixLookAtLH(
     //    DirectX::XMLoadFloat4(&eyeWorld), // Eye position
@@ -112,6 +112,9 @@ void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX:
     perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat3(&eyeWorld);
     perFrameCBData.numLights = numLights;
     perFrameCBData.lightBufferIndex = lightBufferIndex;
+	perFrameCBData.pointLightCubemapBufferIndex = pointCubemapMatricesBufferIndex;
+	perFrameCBData.spotLightMatrixBufferIndex = spotMatricesBufferIndex;
+	perFrameCBData.directionalLightCascadeBufferIndex = directionalCascadeMatricesBufferIndex;
     // Map the upload heap and copy new data to it
     void* pUploadData;
     D3D12_RANGE readRange(0, 0);
@@ -131,6 +134,8 @@ void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX:
 
     // Wait for the copy queue to finish
     WaitForCopyQueue();
+
+    // TODO: Replace above with new buffer management system used elsewhere
 }
 
 void ResourceManager::InitializeUploadHeap() {

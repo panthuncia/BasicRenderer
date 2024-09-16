@@ -28,7 +28,7 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index);
     ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
-    void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex);
+    void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
 
     template<typename T>
     BufferHandle CreateIndexedConstantBuffer() {

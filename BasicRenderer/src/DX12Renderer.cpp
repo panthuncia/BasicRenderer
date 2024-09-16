@@ -202,7 +202,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     currentScene->Update();
     auto camera = currentScene->GetCamera();
-    ResourceManager::GetInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex());
+    ResourceManager::GetInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
     resourceManager.UpdateGPUBuffers();
     resourceManager.ExecuteResourceTransitions();

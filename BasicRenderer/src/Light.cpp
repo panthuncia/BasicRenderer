@@ -11,7 +11,7 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	m_lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
 	m_lightInfo.innerConeAngle = innerConeAngle;
 	m_lightInfo.outerConeAngle = outerConeAngle;
-	m_lightInfo.shadowCaster = 1;
+	m_lightInfo.shadowViewInfoIndex = -1;
 
 	transform.setLocalPosition(position);
 	transform.setDirection(direction);
@@ -25,7 +25,7 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
 	m_lightInfo.color *= intensity;
 	m_lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
-	m_lightInfo.shadowCaster = 1;
+	m_lightInfo.shadowViewInfoIndex = -1;
 	m_lightInfo.attenuation = XMVectorSet(0, 0, 0, 0);
 
 	transform.setLocalPosition(position);

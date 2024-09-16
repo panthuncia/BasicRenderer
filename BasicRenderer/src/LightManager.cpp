@@ -69,6 +69,18 @@ unsigned int LightManager::GetLightBufferDescriptorIndex() {
     return m_lightBufferHandle.index;
 }
 
+unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
+	return m_pointViewInfoHandle.index;
+}
+
+unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
+	return m_spotViewInfoHandle.index;
+}
+
+unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
+	return m_directionalViewInfoHandle.index;
+}
+
 unsigned int LightManager::GetNumLights() {
     return m_lights.size();
 }

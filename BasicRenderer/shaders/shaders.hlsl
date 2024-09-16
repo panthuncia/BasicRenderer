@@ -7,6 +7,9 @@ struct PerFrameBuffer {
     float4 ambientLighting;
     uint lightBufferIndex;
     uint numLights;
+    uint pointLightCubemapBufferIndex;
+    uint spotLightMatrixBufferIndex;
+    uint directionalLightCascadeBufferIndex;
 };
 
 cbuffer PerObject : register(b1) {
@@ -24,7 +27,7 @@ struct LightInfo {
     uint type;
     float innerConeAngle;
     float outerConeAngle;
-    uint shadowCaster;
+    int shadowViewInfoIndex; // -1 if no shadow map
     float4 posWorldSpace; // Position of the light
     float4 dirWorldSpace; // Direction of the light
     float4 attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
@@ -239,8 +242,8 @@ float2 WrapFloat2(float2 input) {
     return frac(input + 1.0);
 }
 
-    // Contact-refinement parallax 
-    // https://www.artstation.com/blogs/andreariccardi/3VPo/a-new-approach-for-parallax-mapping-presenting-the-contact-refinement-parallax-mapping-technique
+// Contact-refinement parallax 
+// https://www.artstation.com/blogs/andreariccardi/3VPo/a-new-approach-for-parallax-mapping-presenting-the-contact-refinement-parallax-mapping-technique
 float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 viewDir, float heightmapScale) {
     // Get view direction in tangent space
     uv.y = 1.0- uv.y;
@@ -276,7 +279,7 @@ float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxText
         if (currentHeight > currentRayDepth) {
             p1 = float2(currentRayDepth, currentHeight);
             p2 = float2(lastRayDepth, lastHeight);
-                // Break if this is the contact refinement pass
+            // Break if this is the contact refinement pass
             if (refine) {
                 lastHeight = currentHeight;
                 break;
@@ -328,7 +331,7 @@ float spotAttenuation(float3 pointToLight, float3 lightDirection, float outerCon
 
 // Approximates the percent of microfacets in a surface aligned with the halfway vector
 float TrowbridgeReitzGGX(float3 normalDir, float3 halfwayDir, float roughness) {
-        // UE4 uses alpha = roughness^2, so I will too.
+    // UE4 uses alpha = roughness^2, so I will too.
     float alpha = roughness * roughness;
     float alpha2 = alpha * alpha;
         
@@ -441,7 +444,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
 }
 
 float luminanceFromColor(float3 color) {
-        //standard luminance coefficients
+    //standard luminance coefficients
     return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
 }
 

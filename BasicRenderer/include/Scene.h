@@ -17,7 +17,7 @@ public:
     Scene();
     UINT AddObject(std::shared_ptr<RenderableObject> object);
     UINT AddNode(std::shared_ptr<SceneNode> node);
-    UINT AddLight(std::shared_ptr<Light> light);
+    UINT AddLight(std::shared_ptr<Light> light, bool shadowCasting = false);
     std::shared_ptr<SceneNode> CreateNode(std::string name = ""); // Like addNode, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> CreateRenderableObject(MeshData meshData, std::string name); // Like addObject, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> GetObjectByName(const std::string& name);
@@ -36,6 +36,9 @@ public:
     void AddSkeleton(std::shared_ptr<Skeleton>);
     UINT GetNumLights();
     UINT GetLightBufferDescriptorIndex();
+    UINT GetPointCubemapMatricesDescriptorIndex();
+    UINT GetSpotMatricesDescriptorIndex();
+    UINT GetDirectionalCascadeMatricesDescriptorIndex();
     void PostUpdate();
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
     //LightManager& GetLightManager();

@@ -242,7 +242,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     cubeObject->animationController->setAnimationClip(animation);
     std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", LightType::Point, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, XMFLOAT3(0, 1, 0), 0.0, 0.0);
     cubeObject->AddChild(light1);
-    scene->AddLight(light1);
+    scene->AddLight(light1, true);
     std::shared_ptr<Light> light2 = std::make_shared<Light>("light2", LightType::Directional, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, 1, 0));
     scene->AddLight(light2);
 

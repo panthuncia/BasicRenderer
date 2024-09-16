@@ -8,6 +8,9 @@ struct PerFrameCB {
     DirectX::XMVECTOR ambientLighting;
     unsigned int lightBufferIndex;
     unsigned int numLights;
+    unsigned int pointLightCubemapBufferIndex;
+    unsigned int spotLightMatrixBufferIndex;
+    unsigned int directionalLightCascadeBufferIndex;
 };
 
 struct PerObjectCB {
@@ -54,7 +57,7 @@ struct LightInfo {
     unsigned int type;
     float innerConeAngle;
     float outerConeAngle;
-    unsigned int shadowCaster;
+    int shadowViewInfoIndex;
     DirectX::XMVECTOR posWorldSpace; // Position of the lights
     DirectX::XMVECTOR dirWorldSpace; // Direction of the lights
     DirectX::XMVECTOR attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
