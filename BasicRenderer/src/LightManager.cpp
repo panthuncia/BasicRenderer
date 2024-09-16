@@ -14,10 +14,11 @@ LightManager::LightManager() {
 }
 
 void LightManager::Initialize() {
-	std::function<uint8_t ()> getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 }
 
-void LightManager::AddLight(Light* lightNode) {
+void LightManager::AddLight(Light* lightNode, bool shadowCasting, Camera* currentCamera) {
     if (lightNode->GetCurrentLightBufferIndex() != -1) {
         RemoveLight(lightNode);
     }
@@ -35,7 +36,9 @@ void LightManager::AddLight(Light* lightNode) {
 		break;
     }
     lightNode->SetLightBufferIndex(index);
-	CreateLightViewInfo(lightNode);
+	if (shadowCasting) {
+		CreateLightViewInfo(lightNode, currentCamera);
+	}
     lightNode->AddLightObserver(this);
 }
 
@@ -70,7 +73,7 @@ unsigned int LightManager::GetNumLights() {
     return m_lights.size();
 }
 
-unsigned int LightManager::CreateLightViewInfo(Light* node) {
+unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
     auto projectionMatrix = node->GetLightProjectionMatrix();
 	switch (node->GetLightType()) {
 	case LightType::Point: {
@@ -88,8 +91,12 @@ unsigned int LightManager::CreateLightViewInfo(Light* node) {
 		break;
 	}
 	case LightType::Directional: {
+		if (camera == nullptr) {
+			spdlog::warn("Camera must be provided for directional light shadow mapping");
+			return -1;
+		}
 		node->SetLightViewInfoIndex(m_directionalViewInfoHandle.buffer.Size());
-		auto cascades = setupCascades(getNumDirectionalLightCascades(), *node, *Camera::GetInstance(), SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits")());
+		auto cascades = setupCascades(getNumDirectionalLightCascades(), *node, *camera, getDirectionalLightCascadeSplits());
 		break;
 	}
 	default:
@@ -115,7 +122,7 @@ void LightManager::RemoveLightViewInfo(Light* node) {
 		break;
 	case LightType::Spot:
 		// Erase light in spot lights
-		m_spotLights.erase(m_spotLights.begin() + viewInfoIndex); 
+		m_spotLights.erase(m_spotLights.begin() + viewInfoIndex);
 		// Erase view info in structured buffer
 		m_spotViewInfoHandle.buffer.RemoveAt(node->GetCurrentviewInfoIndex());
 		// Update subsequent view info indices
@@ -123,9 +130,19 @@ void LightManager::RemoveLightViewInfo(Light* node) {
 			m_spotLights[i]->DecrementLightViewInfoIndex();
 		}
 		break;
+	case LightType::Directional:
+		// Erase light in directional lights
+		m_directionalLights.erase(m_directionalLights.begin() + viewInfoIndex);
+		// Erase view info in structured buffer
+		for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+			m_directionalViewInfoHandle.buffer.RemoveAt(viewInfoIndex);
+		}
+		// Update subsequent view info indices
+		for (int i = viewInfoIndex; i < m_directionalLights.size(); i++) {
+			m_directionalLights[i]->DecrementLightViewInfoIndex();
+		}
+		break;
 	default:
 		spdlog::warn("Light type not recognized");
 	}
-
-
 }

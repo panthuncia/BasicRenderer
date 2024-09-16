@@ -4,9 +4,11 @@
 #include <d3d12.h>
 #include <d3dcompiler.h>
 #include <stdexcept>
+#include <algorithm>
 #include "MeshUtilities.h"
 #include "PSOFlags.h"
 #include "DirectX/d3dx12.h"
+#include "DefaultDirection.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -116,4 +118,44 @@ std::shared_ptr<Texture> loadTextureFromFile(const char* filename) {
 	auto buffer = std::make_shared<PixelBuffer>(img.data, img.width, img.height, img.channels, false);
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
+}
+
+DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center) {
+    auto mat = XMMatrixLookAtRH(center, XMVectorAdd(center, lightDir), defaultDirection);
+    return mat;
+}
+
+std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera, const std::vector<float>& cascadeSplits) {
+    std::vector<Cascade> cascades;
+
+    for (int i = 0; i < numCascades; ++i) {
+        float size = cascadeSplits[i];
+        auto pos = camera.transform.getGlobalPosition();
+        XMVECTOR camPos = XMLoadFloat3(&pos);
+        XMVECTOR center = XMVectorSet(XMVectorGetX(camPos), 0.0f, XMVectorGetZ(camPos), 0.0f);
+        XMMATRIX viewMatrix = createDirectionalLightViewMatrix(light.GetLightDir(), center);
+        XMMATRIX orthoMatrix = XMMatrixOrthographicRH(size, size, -20.0f, 100.0f);
+
+        cascades.push_back({ size, center, orthoMatrix, viewMatrix });
+    }
+
+    return cascades;
+}
+
+std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda) {
+    std::vector<float> splits(numCascades);
+    float end = (std::min)(zFar, maxDist);
+    float logNear = std::log(zNear);
+    float logFar = std::log(end);
+    float logRange = logFar - logNear;
+    float uniformRange = end - zNear;
+
+    for (int i = 0; i < numCascades; i++) {
+        float p = (i + 1.0f) / numCascades;
+        float logSplit = std::exp(logNear + logRange * p);
+        float uniformSplit = zNear + uniformRange * p;
+        splits[i] = lambda * logSplit + (1.0f - lambda) * uniformSplit;
+    }
+
+    return splits;
 }

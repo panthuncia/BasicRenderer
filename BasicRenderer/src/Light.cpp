@@ -1,7 +1,6 @@
 #include "Light.h"
 #include "ResourceManager.h"
 #include "SettingsManager.h"
-#include "DefaultDirection.h"
 
 Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
 	m_lightInfo.type = type;

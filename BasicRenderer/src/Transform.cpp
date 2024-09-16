@@ -1,6 +1,7 @@
 #include "Transform.h"
 
 #include "DefaultDirection.h"
+DirectX::XMVECTOR defaultDirection = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
 
 Transform::Transform(XMFLOAT3 pos, XMFLOAT3 rotEuler, XMFLOAT3 scale)
     : pos(pos), scale(scale), isDirty(false) {

@@ -1,3 +1,4 @@
 #pragma once
+#include <DirectXMath.h>
 
-XMVECTOR defaultDirection = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+extern DirectX::XMVECTOR defaultDirection;

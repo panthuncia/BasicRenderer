@@ -6,6 +6,7 @@
 #include "RenderableObject.h"
 #include <chrono>
 #include <ctime>  
+#include <functional>
 #include "Mesh.h"
 #include "Camera.h"
 #include "Skeleton.h"
@@ -13,6 +14,7 @@
 
 class Scene {
 public:
+    Scene();
     UINT AddObject(std::shared_ptr<RenderableObject> object);
     UINT AddNode(std::shared_ptr<SceneNode> node);
     UINT AddLight(std::shared_ptr<Light> light);
@@ -55,4 +57,9 @@ private:
     std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
     LightManager lightManager;
+
+    std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
+    std::function<uint8_t()> getNumDirectionalLightCascades;
+    std::function<float()> getMaxShadowDistance;
+
 };

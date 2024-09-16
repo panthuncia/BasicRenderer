@@ -1,6 +1,13 @@
 #include "Scene.h"
 
 #include "Utilities.h"
+#include "SettingsManager.h"
+
+Scene::Scene(){
+    getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+    getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
+    setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
+}
 
 UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     numObjects++;
@@ -177,6 +184,7 @@ void Scene::Update() {
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
     pCamera = std::make_shared<Camera>("MainCamera", lookAt, up, fov, aspect, zNear, zFar);
+    setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, zFar, 100.f));
     AddNode(pCamera);
 }
 

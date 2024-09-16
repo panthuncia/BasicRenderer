@@ -8,12 +8,13 @@
 #include "buffers.h"
 #include "ResourceHandles.h"
 #include "Interfaces/ISceneNodeObserver.h"
+#include "Camera.h"
 
 class LightManager : public ISceneNodeObserver<Light> {
 public:
     LightManager();
     void Initialize();
-    void AddLight(Light* lightNode);
+    void AddLight(Light* lightNode, bool shadowCasting = false, Camera* currentCamera = nullptr);
     void RemoveLight(Light* light);
     unsigned int GetLightBufferDescriptorIndex();
     unsigned int GetNumLights();
@@ -38,9 +39,10 @@ private:
 
     // Settings funcs
 	std::function<uint8_t()> getNumDirectionalLightCascades;
+    std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
 
     unsigned int CreateLightInfo(Light* node);
-    unsigned int CreateLightViewInfo(Light* node);
+    unsigned int CreateLightViewInfo(Light* node, Camera* camera = nullptr);
 	void RemoveLightViewInfo(Light* node);
 
 };
