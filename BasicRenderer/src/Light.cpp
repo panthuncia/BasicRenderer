@@ -1,6 +1,7 @@
 #include "Light.h"
 #include "ResourceManager.h"
 #include "SettingsManager.h"
+#include "DefaultDirection.h"
 
 Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
 	m_lightInfo.type = type;
@@ -164,4 +165,14 @@ std::array<DirectX::XMMATRIX, 6> Light::GetCubemapViewMatrices() {
 
 DirectX::XMMATRIX Light::GetLightViewMatrix() {
 	return XMMatrixTranspose(transform.modelMatrix);
+}
+
+DirectX::XMMATRIX Light::GetLightProjectionMatrix() {
+	return m_lightProjection;
+}
+
+// Returns a 3-axis direction vector
+DirectX::XMVECTOR Light::GetLightDir() {
+	// Extract the forward vector (Z-axis)
+	return transform.modelMatrix.r[2];
 }

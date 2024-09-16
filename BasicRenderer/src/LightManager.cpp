@@ -3,13 +3,18 @@
 #include "ResourceHandles.h"
 #include "ResourceManager.h"
 #include "Interfaces/ISceneNodeObserver.h"
-
+#include "Utilities.h"
+#include "SettingsManager.h"
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
     m_lightBufferHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(1);
     m_spotViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(1);
     m_pointViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(1);
     m_directionalViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(1);
+}
+
+void LightManager::Initialize() {
+	std::function<uint8_t ()> getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 }
 
 void LightManager::AddLight(Light* lightNode) {
@@ -47,7 +52,7 @@ void LightManager::RemoveLight(Light* light) {
 		return;
     }
     
-    for (int i = index+1; i < m_lights.size(); i++) {
+    for (int i = index; i < m_lights.size(); i++) {
         m_lights[i]->DecrementLightBufferIndex();
     }
 
@@ -66,23 +71,61 @@ unsigned int LightManager::GetNumLights() {
 }
 
 unsigned int LightManager::CreateLightViewInfo(Light* node) {
+    auto projectionMatrix = node->GetLightProjectionMatrix();
 	switch (node->GetLightType()) {
-	case LightType::Point:
-		auto cubeViewIndex = m_pointViewInfoHandle.buffer.Size()/6;
+	case LightType::Point: {
+		auto cubeViewIndex = m_pointViewInfoHandle.buffer.Size() / 6;
 		node->SetLightViewInfoIndex(cubeViewIndex);
 		auto cubemapMatrices = node->GetCubemapViewMatrices();
-        for (int i = 0; i < 6; i++) {
-            m_pointViewInfoHandle.buffer.Add(cubemapMatrices[i]);
-        }
+		for (int i = 0; i < 6; i++) {
+			m_pointViewInfoHandle.buffer.Add(XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
+		}
 		break;
-	case LightType::Spot:
+	}
+	case LightType::Spot: {
 		node->SetLightViewInfoIndex(m_spotViewInfoHandle.buffer.Size());
-		m_spotViewInfoHandle.buffer.Add(node->GetLightViewMatrix());
+		m_spotViewInfoHandle.buffer.Add(XMMatrixMultiply(node->GetLightViewMatrix(), projectionMatrix));
 		break;
-	
-
+	}
+	case LightType::Directional: {
+		node->SetLightViewInfoIndex(m_directionalViewInfoHandle.buffer.Size());
+		auto cascades = setupCascades(getNumDirectionalLightCascades(), *node, *Camera::GetInstance(), SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits")());
+		break;
+	}
 	default:
 		spdlog::warn("Light type not recognized");
 		return -1;
 	}
+}
+
+void LightManager::RemoveLightViewInfo(Light* node) {
+	int viewInfoIndex = node->GetCurrentviewInfoIndex();
+	switch (node->GetLightType()) {
+	case LightType::Point:
+		// Erase light in point lights
+		m_pointLights.erase(m_pointLights.begin() + viewInfoIndex);
+		// Erase view info in structured buffer
+		for (int i = 0; i < 6; i++) {
+			m_pointViewInfoHandle.buffer.RemoveAt(viewInfoIndex);
+		}
+		// Update subsequent view info indices
+		for (int i = viewInfoIndex; i < m_pointLights.size(); i++) {
+			m_pointLights[i]->DecrementLightViewInfoIndex();
+		}
+		break;
+	case LightType::Spot:
+		// Erase light in spot lights
+		m_spotLights.erase(m_spotLights.begin() + viewInfoIndex); 
+		// Erase view info in structured buffer
+		m_spotViewInfoHandle.buffer.RemoveAt(node->GetCurrentviewInfoIndex());
+		// Update subsequent view info indices
+		for (int i = viewInfoIndex; i < m_spotLights.size(); i++) {
+			m_spotLights[i]->DecrementLightViewInfoIndex();
+		}
+		break;
+	default:
+		spdlog::warn("Light type not recognized");
+	}
+
+
 }

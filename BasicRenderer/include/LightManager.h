@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <functional>
 #include "Light.h"
 #include "buffers.h"
 #include "ResourceHandles.h"
@@ -35,6 +36,11 @@ private:
 	std::vector<Light*> m_pointLights;
 	std::vector<Light*> m_directionalLights;
 
+    // Settings funcs
+	std::function<uint8_t()> getNumDirectionalLightCascades;
+
     unsigned int CreateLightInfo(Light* node);
     unsigned int CreateLightViewInfo(Light* node);
+	void RemoveLightViewInfo(Light* node);
+
 };

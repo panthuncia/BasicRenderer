@@ -58,6 +58,8 @@ public:
 	void UpdateLightMatrices();
 	DirectX::XMMATRIX GetLightViewMatrix();
 	std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices();
+	DirectX::XMMATRIX GetLightProjectionMatrix();
+	DirectX::XMVECTOR GetLightDir();
 
 private:
 	std::vector<BufferHandle> m_lightFrameConstantHandles;
