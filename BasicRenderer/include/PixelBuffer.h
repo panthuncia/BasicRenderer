@@ -13,10 +13,10 @@ public:
 		return std::shared_ptr<PixelBuffer>(new PixelBuffer(image, width, height, channels, sRGB));
     }
     static std::shared_ptr<PixelBuffer> CreateSingleTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false) {
-    
+		return std::shared_ptr<PixelBuffer>(new PixelBuffer(width, height, channels, isCubemap, RTV, DSV, UAV));
     }
 	static std::shared_ptr<PixelBuffer> CreateTextureArray(int width, int height, int channels, int numTextures, bool RTV = false, bool DSV = false, bool UAV = false) {
-
+		return std::shared_ptr<PixelBuffer>(new PixelBuffer(width, height, channels, numTextures, RTV, DSV, UAV));
 	}
     UINT GetSRVDescriptorIndex() const;
 private:

@@ -18,7 +18,6 @@
 #include "ForwardRenderPass.h"
 #include "ShadowPass.h"
 #include "SettingsManager.h"
-#include "ShadowMaps.h"
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
@@ -37,6 +36,8 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
+	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
+	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
 }
 
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
@@ -366,6 +367,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 void DX12Renderer::CreateRenderGraph() {
     currentRenderGraph = std::make_unique<RenderGraph>();
 	std::shared_ptr<ShadowMaps> shadowMaps = std::make_shared<ShadowMaps>("ShadowMaps");
+	setShadowMaps(shadowMaps.get()); // To allow light manager to acccess shadow maps
 	currentRenderGraph->AddResource(shadowMaps);
 	auto shadowPass = std::make_shared<ShadowPass>(shadowMaps);
 	auto shadowPassParameters = PassParameters();

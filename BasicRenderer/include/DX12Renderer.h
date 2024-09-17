@@ -11,12 +11,14 @@
 #include <dxgi1_6.h>
 #include <directxmath.h>
 #include <memory>
+#include <functional>
 
 #include "Mesh.h"
 #include "Buffers.h"
 #include "Scene.h"
 #include "InputManager.h"
 #include "RenderGraph.h"
+#include "ShadowMaps.h"
 
 using namespace Microsoft::WRL;
 
@@ -72,6 +74,8 @@ private:
 
     void WaitForPreviousFrame();
     void CheckDebugMessages();
+
+    std::function<void(ShadowMaps*)> setShadowMaps;
 };
 
 #endif //DX12RENDERER_H

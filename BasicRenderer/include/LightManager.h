@@ -9,6 +9,8 @@
 #include "ResourceHandles.h"
 #include "Interfaces/ISceneNodeObserver.h"
 #include "Camera.h"
+#include "SettingsManager.h"
+#include "ShadowMaps.h"
 
 class LightManager : public ISceneNodeObserver<Light> {
 public:
@@ -43,6 +45,8 @@ private:
     // Settings funcs
 	std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
+    std::function<uint16_t()> getShadowResolution;
+    std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
 
     unsigned int CreateLightInfo(Light* node);
     unsigned int CreateLightViewInfo(Light* node, Camera* camera = nullptr);
