@@ -1,14 +1,13 @@
 #pragma once
 #include <d3d12.h>
+#include <memory>
 #include "ResourceManager.h"
 
 class Sampler {
 public:
-    Sampler(D3D12_SAMPLER_DESC samplerDesc)
-        : m_index(0), m_samplerDesc(samplerDesc) {
-        createSampler();
+    static std::shared_ptr<Sampler> CreateSampler(D3D12_SAMPLER_DESC samplerDesc) {
+		return std::shared_ptr<Sampler>(new Sampler(samplerDesc));
     }
-
     ~Sampler() {
     }
 
@@ -32,8 +31,8 @@ public:
 private:
     UINT m_index; // Index of the sampler in the descriptor heap
     D3D12_SAMPLER_DESC m_samplerDesc; // Descriptor of the sampler
-
-    void createSampler() {
+    Sampler(D3D12_SAMPLER_DESC samplerDesc)
+        : m_index(0), m_samplerDesc(samplerDesc) {
         m_index = ResourceManager::GetInstance().CreateIndexedSampler(m_samplerDesc);
     }
 

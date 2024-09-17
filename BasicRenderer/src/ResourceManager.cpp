@@ -483,7 +483,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
 	SRVInfo.gpuHandle = srvGPUHandle;
 
     handle.SRVInfo = SRVInfo;
-
+	handle.texture = textureResource;
 
     return handle;
 }

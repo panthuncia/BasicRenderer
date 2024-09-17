@@ -15,7 +15,7 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 		samplerDesc.MipLODBias = 0;
 		samplerDesc.MaxAnisotropy = 1;
 		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-		m_defaultSampler = std::make_shared<Sampler>(samplerDesc);
+		m_defaultSampler = Sampler::CreateSampler(samplerDesc);
 	}
 	return m_defaultSampler;
 }
@@ -32,7 +32,7 @@ std::shared_ptr<Sampler> Sampler::GetDefaultShadowSampler() {
 		samplerDesc.MipLODBias = 0;
 		samplerDesc.MaxAnisotropy = 1;
 		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-		m_defaultShadowSampler = std::make_shared<Sampler>(samplerDesc);
+		m_defaultShadowSampler = Sampler::CreateSampler(samplerDesc);
 	}
 	return m_defaultShadowSampler;
 }

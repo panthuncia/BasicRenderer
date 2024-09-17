@@ -1,6 +1,7 @@
 #include "Material.h"
 #include <string>
 #include "PSOFlags.h"
+#include "Sampler.h"
 
 Material::Material(const std::string& name,
     UINT psoFlags)
@@ -97,7 +98,7 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
     defaultSamplerDesc.MinLOD = 0.f;
     defaultSamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
 
-    std::shared_ptr<Sampler> defaultSampler = std::make_shared<Sampler>(defaultSamplerDesc);
+    std::shared_ptr<Sampler> defaultSampler = Sampler::CreateSampler(defaultSamplerDesc);
 
     std::shared_ptr<Texture> defaultTexture = std::make_shared<Texture>(defaultImage, defaultSampler);
 

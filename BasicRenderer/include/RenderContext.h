@@ -1,8 +1,9 @@
 #pragma once
 
 #include <d3d12.h>
-#include "Scene.h"
 #include "wrl/client.h"
+
+class Scene;
 
 class RenderContext {
 public:

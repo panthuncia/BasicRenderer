@@ -6,7 +6,9 @@
 #include <memory>
 
 #include "RenderPass.h"
-#include "Resource.h"
+#include "ResourceStates.h"
+
+class Resource;
 
 class RenderGraph {
 public:
@@ -24,11 +26,19 @@ private:
 		PassParameters resources;
 	};
 
+	struct ResourceTransition {
+		std::shared_ptr<Resource> pResource;
+		ResourceState fromState;
+		ResourceState toState;
+	};
+
 	struct PassBatch {
 		std::vector<PassAndResources> passes;
-		std::unordered_map<std::string, ResourceState> resourceStates;
+		std::unordered_map<std::string, ResourceState> resourceStates; // Desired states in this batch
+		std::vector<ResourceTransition> transitions; // Transitions needed to reach desired states
 	};
 
 	std::vector<PassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
+	std::vector<PassBatch> batches;
 };

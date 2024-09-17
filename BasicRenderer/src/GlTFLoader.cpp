@@ -566,7 +566,7 @@ std::vector<std::shared_ptr<Sampler>> parseGLTFSamplers(const json& gltfData) {
             samplerDesc.MinLOD = 0.f;
             samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
 
-            auto pSampler = std::make_shared<Sampler>(samplerDesc);
+            auto pSampler = Sampler::CreateSampler(samplerDesc);
             samplers.push_back(std::move(pSampler));
         }
     }
