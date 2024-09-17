@@ -64,4 +64,5 @@ struct LightInfo {
     DirectX::XMVECTOR color; // Color of the lights
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
+    int pad[2];
 };

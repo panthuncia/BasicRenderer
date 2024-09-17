@@ -42,6 +42,7 @@ struct LightInfo {
     float4 color; // Color of the light
     int shadowMapIndex;
     int shadowSamplerIndex;
+    int pad[2];
 };
 
 struct MaterialInfo {
