@@ -1,6 +1,8 @@
 #include "Light.h"
 #include "ResourceManager.h"
 #include "SettingsManager.h"
+#include "Texture.h"
+#include "PixelBuffer.h"
 
 Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
 	m_lightInfo.type = type;
@@ -15,6 +17,9 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 
 	transform.setLocalPosition(position);
 	transform.setDirection(direction);
+
+	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 
 	CreateProjectionMatrix();
 }
@@ -31,11 +36,19 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	transform.setLocalPosition(position);
 	transform.setDirection(direction);
 
+	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
+
 	CreateProjectionMatrix();
+
 }
 
 Light::Light(LightInfo& lightInfo) : SceneNode(name) {
 	m_lightInfo = lightInfo;
+	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
+
+	CreateProjectionMatrix();
 }
 
 LightInfo& Light::GetLightInfo() {
@@ -73,7 +86,8 @@ void Light::NotifyLightObservers() {
 }
 
 void Light::CreateShadowMap() {
-	
+	auto shadowMapRes = getShadowResolution();
+	shadowMap = ResourceManager::GetInstance().CreateTexture(shadowMapRes, shadowMapRes, 1, false);
 }
 
 void Light::UpdateLightMatrices() {
@@ -107,7 +121,7 @@ void Light::CreateFrameConstantBuffers() {
 		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
 		break;
 	case LightType::Directional:
-		uint8_t numCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+		uint8_t numCascades = getNumCascades();
 		for (int i = 0; i < numCascades; i++) {
 			m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
 		}

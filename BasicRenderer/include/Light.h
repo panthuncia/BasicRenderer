@@ -2,10 +2,12 @@
 #include <vector>
 #include <DirectXMath.h>
 #include <array>
+#include <functional>
 
 #include "SceneNode.h"
 #include "buffers.h"
 #include "ResourceHandles.h"
+#include "PixelBuffer.h"
 
 enum LightType {
 	Point = 0,
@@ -73,4 +75,9 @@ private:
 	void CreateShadowMap();
 	void CreateFrameConstantBuffers();
 	void CreateProjectionMatrix();
+
+	std::function<uint8_t()> getNumCascades;
+	std::function<uint16_t()> getShadowResolution;
+
+	TextureHandle<PixelBuffer> shadowMap;
 };

@@ -57,6 +57,7 @@ void ResourceManager::Initialize() {
     samplerDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
     numAllocatedSamplerDescriptors = 0;
 
+    
 }
 
 CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetCPUHandle(UINT index) {
@@ -315,13 +316,12 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc
     return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, bool isCubemap) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
     // Describe and create the texture resource
 
     DXGI_FORMAT textureFormat;
-    std::vector<stbi_uc> expandedImage;
     switch (channels) {
     case 1:
         textureFormat = DXGI_FORMAT_R8_UNORM;
@@ -393,6 +393,30 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = GetGPUHandle(descriptorIndex);
 
     device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
+
+    // Create Render Target View if requested
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
+    if (RTV) {
+        // Describe RTV
+        D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+        rtvDesc.Format = textureFormat;
+
+        if (isCubemap) {
+            rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+            rtvDesc.Texture2DArray.ArraySize = 6; // For cubemap
+            rtvDesc.Texture2DArray.MipSlice = 0;
+            rtvDesc.Texture2DArray.FirstArraySlice = 0;
+            rtvDesc.Texture2DArray.PlaneSlice = 0;
+        }
+        else {
+            rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            rtvDesc.Texture2D.MipSlice = 0;
+            rtvDesc.Texture2D.PlaneSlice = 0;
+        }
+
+        //rtvHandle = AllocateTemporaryRTVHandle();
+        //device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvHandle);
+    }
 
     return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
 }

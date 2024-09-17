@@ -212,7 +212,7 @@ public:
 
     TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB);
     TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap);
-    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap);
+    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false);
 
 	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
