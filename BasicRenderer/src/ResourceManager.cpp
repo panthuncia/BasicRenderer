@@ -301,7 +301,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc
     return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV, ResourceState initialState) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
     // Describe and create the texture resource
@@ -376,7 +376,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &textureDesc,
-        D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_COMMON,
         nullptr,
         IID_PPV_ARGS(&textureResource)));
 
@@ -488,7 +488,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV, bool DSV, bool UAV) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV, bool DSV, bool UAV, ResourceState initialState) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
     // Describe and create the texture resource
@@ -566,7 +566,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &textureDesc,
-        D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_COMMON,
         nullptr,
         IID_PPV_ARGS(&textureResource)));
 

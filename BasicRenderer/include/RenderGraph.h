@@ -41,4 +41,9 @@ private:
 	std::vector<PassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::vector<PassBatch> batches;
+
+	void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::string, ResourceState>& previousStates);
+	void UpdateDesiredResourceStates(PassBatch& batch, PassAndResources& passAndResources);
+	void ComputeResourceLoops(const std::unordered_map<std::string, ResourceState>& finalResourceStates);
+	bool IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResources& passAndResources);
 };

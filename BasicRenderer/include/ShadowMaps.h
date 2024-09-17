@@ -16,6 +16,7 @@ public:
     ShadowMaps(const std::string& name)
         : ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+		currentState = ResourceState::Common;
 	}
 
     void AddMap(Light* light, uint16_t shadowResolution) {

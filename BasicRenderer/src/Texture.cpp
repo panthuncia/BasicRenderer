@@ -6,6 +6,7 @@
 Texture::Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler) {
 	m_image = image;
 	m_sampler = sampler;
+    currentState = ResourceState::Common;
 }
 
 UINT Texture::GetBufferDescriptorIndex() {

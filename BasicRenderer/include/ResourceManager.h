@@ -13,7 +13,7 @@
 #include "PixelBuffer.h"
 #include "Buffer.h"
 #include "DescriptorHeap.h"
-
+#include "ResourceStates.h"
 using namespace Microsoft::WRL;
 
 class ResourceManager {
@@ -212,8 +212,8 @@ public:
     }
 
     TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB);
-    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false);
-    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false);
+    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::Common);
+    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::Common);
 
 	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
