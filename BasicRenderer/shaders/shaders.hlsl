@@ -23,6 +23,14 @@ cbuffer PerMesh : register(b2) {
     uint materialDataIndex;
 };
 
+cbuffer RootConstants1 : register(b3) {
+    int currentLightID; // Used for shadow mapping, global light index
+};
+
+cbuffer RootConstants2 : register(b4) {
+    int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
+}
+
 struct LightInfo {
     uint type;
     float innerConeAngle;
@@ -151,6 +159,29 @@ PSInput VSMain(VSInput input) {
     
     PSInput output;
     float4 worldPosition = mul(pos, model);
+    
+#if defined(SHADOW)
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
+    LightInfo light = lights[currentLightID];
+    matrix lightMatrix;
+    switch(light.type) {
+        case 0: // Point light
+            StructuredBuffer<float4> pointLightCubemapBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
+            lightMatrix = loadMatrixFromBuffer(pointLightCubemapBuffer, lightViewIndex);
+            break;
+        case 1: // Spot light
+            StructuredBuffer<float4> spotLightMatrixBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
+            lightMatrix = loadMatrixFromBuffer(spotLightMatrixBuffer, lightViewIndex);
+            break;
+        case 2: // Directional light
+            StructuredBuffer<float4> directionalLightCascadeBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+            lightMatrix = loadMatrixFromBuffer(directionalLightCascadeBuffer, lightViewIndex);
+            break;
+    }
+    output.position = mul(worldPosition, lightMatrix);
+    return output;
+#endif // SHADOW
+    
     float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
     output.positionWorldSpace = worldPosition;
     output.position = mul(viewPosition, perFrameBuffer.projection);

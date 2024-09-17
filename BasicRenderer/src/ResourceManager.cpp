@@ -367,6 +367,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
         srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
     }
 
+    TextureHandle<PixelBuffer> handle;
+
     // Create the committed resource
     D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     ComPtr<ID3D12Resource> textureResource;
@@ -386,61 +388,93 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvCPUHandle);
 
     // Create Render Target View if requested
-    NonShaderVisibleIndexInfo RTVInfo;
-    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
     if (RTV) {
-        // Describe RTV
         D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
         rtvDesc.Format = textureFormat;
 
         if (isCubemap) {
             rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-            rtvDesc.Texture2DArray.ArraySize = 6; // For cubemap
+            rtvDesc.Texture2DArray.ArraySize = 1; // One slice at a time
             rtvDesc.Texture2DArray.MipSlice = 0;
-            rtvDesc.Texture2DArray.FirstArraySlice = 0;
             rtvDesc.Texture2DArray.PlaneSlice = 0;
+
+            // Loop through all 6 cubemap faces
+            for (int layerIndex = 0; layerIndex < 6; ++layerIndex) {
+                rtvDesc.Texture2DArray.FirstArraySlice = layerIndex; // Set the array slice (cubemap face)
+
+                UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
+                CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
+
+                device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
+
+                // Store RTV information for this layer
+                NonShaderVisibleIndexInfo rtvInfo;
+                rtvInfo.index = rtvDescriptorIndex;
+                rtvInfo.cpuHandle = rtvCPUHandle;
+                handle.RTVInfo.push_back(rtvInfo); // Push to RTVInfo vector
+            }
         }
         else {
+            // Non-cubemap case
             rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
             rtvDesc.Texture2D.MipSlice = 0;
             rtvDesc.Texture2D.PlaneSlice = 0;
+
+            UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
+            CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
+
+            device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
+
+            // Store RTV information
+            NonShaderVisibleIndexInfo rtvInfo;
+            rtvInfo.index = rtvDescriptorIndex;
+            rtvInfo.cpuHandle = rtvCPUHandle;
+            handle.RTVInfo.push_back(rtvInfo); // Push to RTVInfo vector
         }
-
-		UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
-
-		device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
-
-		RTVInfo.index = rtvDescriptorIndex;
-		RTVInfo.cpuHandle = rtvCPUHandle;
     }
 
 	// Create Depth Stencil View if requested
-	NonShaderVisibleIndexInfo DSVInfo;
-	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (DSV) {
-		// Describe DSV
-		D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-		dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+        dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
 
-		if (isCubemap) {
-			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-			dsvDesc.Texture2DArray.ArraySize = 6; // For cubemap
-			dsvDesc.Texture2DArray.MipSlice = 0;
-			dsvDesc.Texture2DArray.FirstArraySlice = 0;
-		}
-		else {
-			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-			dsvDesc.Texture2D.MipSlice = 0;
-		}
+        if (isCubemap) {
+            dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+            dsvDesc.Texture2DArray.ArraySize = 1; // One slice at a time
+            dsvDesc.Texture2DArray.MipSlice = 0;
 
-		UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
+            // Loop through all 6 cubemap faces
+            for (int layerIndex = 0; layerIndex < 6; ++layerIndex) {
+                dsvDesc.Texture2DArray.FirstArraySlice = layerIndex; // Set the array slice (cubemap face)
 
-		device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+                UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
+                CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
 
-		DSVInfo.index = dsvDescriptorIndex;
-		DSVInfo.cpuHandle = dsvCPUHandle;
+                device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+
+                // Store DSV information for this layer
+                NonShaderVisibleIndexInfo dsvInfo;
+                dsvInfo.index = dsvDescriptorIndex;
+                dsvInfo.cpuHandle = dsvCPUHandle;
+                handle.DSVInfo.push_back(dsvInfo); // Push to DSVInfo vector
+            }
+        }
+        else {
+            // Non-cubemap case, similar to what you have for 2D textures
+            dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+            dsvDesc.Texture2D.MipSlice = 0;
+
+            UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
+            CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
+
+            device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+
+            // Store DSV information
+            NonShaderVisibleIndexInfo dsvInfo;
+            dsvInfo.index = dsvDescriptorIndex;
+            dsvInfo.cpuHandle = dsvCPUHandle;
+            handle.DSVInfo.push_back(dsvInfo); // Push to DSVInfo vector
+        }
 	}
 
 	ShaderVisibleIndexInfo SRVInfo;
@@ -448,10 +482,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
 	SRVInfo.cpuHandle = srvCPUHandle;
 	SRVInfo.gpuHandle = srvGPUHandle;
 
-	TextureHandle<PixelBuffer> handle;
     handle.SRVInfo = SRVInfo;
-    handle.RTVInfo = RTVInfo;
-    handle.DSVInfo = DSVInfo;
+
 
     return handle;
 }
@@ -526,6 +558,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
         srvDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
     }
 
+    TextureHandle<PixelBuffer> handle;
+
     D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     ComPtr<ID3D12Resource> textureResource;
     ThrowIfFailed(device->CreateCommittedResource(
@@ -546,62 +580,109 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
 	NonShaderVisibleIndexInfo RTVInfo;
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
 	if (RTV) {
-		// Describe RTV
-		D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-		rtvDesc.Format = textureFormat;
+        D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+        rtvDesc.Format = textureFormat;
 
-		if (isCubemap) {
-			rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-			rtvDesc.Texture2DArray.ArraySize = 6 * length; // For cubemap arrays
-			rtvDesc.Texture2DArray.MipSlice = 0;
-			rtvDesc.Texture2DArray.FirstArraySlice = 0;
-			rtvDesc.Texture2DArray.PlaneSlice = 0;
-		}
-		else {
-			rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-			rtvDesc.Texture2DArray.ArraySize = length; // For regular texture arrays
-			rtvDesc.Texture2DArray.MipSlice = 0;
-			rtvDesc.Texture2DArray.FirstArraySlice = 0;
-			rtvDesc.Texture2DArray.PlaneSlice = 0;
-		}
+        if (isCubemap) {
+            rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+            rtvDesc.Texture2DArray.ArraySize = 1; // One slice at a time (6 * length total)
+            rtvDesc.Texture2DArray.MipSlice = 0;
+            rtvDesc.Texture2DArray.PlaneSlice = 0;
 
-		UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
+            // Loop through all cubemap array layers
+            for (int arrayLayer = 0; arrayLayer < 6 * length; ++arrayLayer) {
+                rtvDesc.Texture2DArray.FirstArraySlice = arrayLayer; // Set the array slice (cubemap face + array layer)
 
-		device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
+                UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
+                CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
 
-		RTVInfo.index = rtvDescriptorIndex;
-		RTVInfo.cpuHandle = rtvCPUHandle;
+                device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
+
+                // Store RTV information for this array slice
+                NonShaderVisibleIndexInfo rtvInfo;
+                rtvInfo.index = rtvDescriptorIndex;
+                rtvInfo.cpuHandle = rtvCPUHandle;
+                handle.RTVInfo.push_back(rtvInfo); // Push to RTVInfo vector
+            }
+        }
+        else {
+            // For regular texture arrays
+            rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+            rtvDesc.Texture2DArray.ArraySize = 1; // One slice at a time (length total)
+            rtvDesc.Texture2DArray.MipSlice = 0;
+            rtvDesc.Texture2DArray.PlaneSlice = 0;
+
+            // Loop through all texture array layers
+            for (int arrayLayer = 0; arrayLayer < length; ++arrayLayer) {
+                rtvDesc.Texture2DArray.FirstArraySlice = arrayLayer; // Set the array slice
+
+                UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
+                CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
+
+                device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
+
+                // Store RTV information for this array slice
+                NonShaderVisibleIndexInfo rtvInfo;
+                rtvInfo.index = rtvDescriptorIndex;
+                rtvInfo.cpuHandle = rtvCPUHandle;
+                handle.RTVInfo.push_back(rtvInfo); // Push to RTVInfo vector
+            }
+        }
 	}
 
 	// Create Depth Stencil View if requested
 	NonShaderVisibleIndexInfo DSVInfo;
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (DSV) {
-		// Describe DSV
-		D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-		dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+        // Create Depth Stencil Views for each cubemap array layer or regular texture array layer
+        if (DSV) {
+            D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+            dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
 
-		if (isCubemap) {
-			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-			dsvDesc.Texture2DArray.ArraySize = 6 * length; // For cubemap arrays
-			dsvDesc.Texture2DArray.MipSlice = 0;
-			dsvDesc.Texture2DArray.FirstArraySlice = 0;
-		}
-		else {
-			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-			dsvDesc.Texture2DArray.ArraySize = length; // For regular texture arrays
-			dsvDesc.Texture2DArray.MipSlice = 0;
-			dsvDesc.Texture2DArray.FirstArraySlice = 0;
-		}
+            if (isCubemap) {
+                dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+                dsvDesc.Texture2DArray.ArraySize = 1; // One slice at a time (6 * length total)
+                dsvDesc.Texture2DArray.MipSlice = 0;
 
-		UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
+                // Loop through all cubemap array layers
+                for (int arrayLayer = 0; arrayLayer < 6 * length; ++arrayLayer) {
+                    dsvDesc.Texture2DArray.FirstArraySlice = arrayLayer; // Set the array slice (cubemap face + array layer)
 
-		device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+                    UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
+                    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
 
-		DSVInfo.index = dsvDescriptorIndex;
-		DSVInfo.cpuHandle = dsvCPUHandle;
+                    device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+
+                    // Store DSV information for this array slice
+                    NonShaderVisibleIndexInfo dsvInfo;
+                    dsvInfo.index = dsvDescriptorIndex;
+                    dsvInfo.cpuHandle = dsvCPUHandle;
+                    handle.DSVInfo.push_back(dsvInfo); // Push to DSVInfo vector
+                }
+            }
+            else {
+                // For regular texture arrays
+                dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+                dsvDesc.Texture2DArray.ArraySize = 1; // One slice at a time (length total)
+                dsvDesc.Texture2DArray.MipSlice = 0;
+
+                // Loop through all texture array layers
+                for (int arrayLayer = 0; arrayLayer < length; ++arrayLayer) {
+                    dsvDesc.Texture2DArray.FirstArraySlice = arrayLayer; // Set the array slice
+
+                    UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
+                    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
+
+                    device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+
+                    // Store DSV information for this array slice
+                    NonShaderVisibleIndexInfo dsvInfo;
+                    dsvInfo.index = dsvDescriptorIndex;
+                    dsvInfo.cpuHandle = dsvCPUHandle;
+                    handle.DSVInfo.push_back(dsvInfo); // Push to DSVInfo vector
+                }
+            }
+        }
 	}
 
 	ShaderVisibleIndexInfo SRVInfo;
@@ -609,11 +690,9 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
 	SRVInfo.cpuHandle = srvCPUHandle;
 	SRVInfo.gpuHandle = srvGPUHandle;
 
-	TextureHandle<PixelBuffer> handle;
 	handle.texture = textureResource;
 	handle.SRVInfo = SRVInfo;
-	handle.RTVInfo = RTVInfo;
-	handle.DSVInfo = DSVInfo;
+
 
     return handle;
 }

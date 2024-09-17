@@ -201,3 +201,7 @@ DirectX::XMVECTOR Light::GetLightDir() {
 	// Extract the forward vector (Z-axis)
 	return transform.modelMatrix.r[2];
 }
+
+TextureHandle<PixelBuffer>& Light::GetShadowMap() {
+	return shadowMap;
+}

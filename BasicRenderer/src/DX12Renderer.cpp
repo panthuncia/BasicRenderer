@@ -24,6 +24,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_yRes = y_res;
     LoadPipeline(hwnd, x_res, y_res);
     SetSettings();
+    CreateRenderGraph();
 }
 
 void DX12Renderer::SetSettings() {
@@ -172,8 +173,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
     device->CreateDepthStencilView(depthStencilBuffer.Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
-
-	CreateRenderGraph();
 }
 
 

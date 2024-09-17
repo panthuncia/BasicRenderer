@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <functional>
 
 #include "RenderPass.h"
 #include "PSOManager.h"
@@ -9,10 +10,12 @@
 #include "mesh.h"
 #include "Scene.h"
 #include "ResourceGroup.h"
+#include "SettingsManager.h"
+
 class ShadowPass : public RenderPass {
 public:
 	ShadowPass(std::shared_ptr<ResourceGroup> shadowMaps) {
-	
+		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
 	void Setup() override {
 		// Setup the render pass
@@ -39,40 +42,82 @@ public:
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-		for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetOpaqueMeshes();
+		auto drawObjects = [&]() {
+			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
+				auto& renderable = pair.second;
+				auto& meshes = renderable->GetOpaqueMeshes();
 
-			commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+				commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
-			for (auto& mesh : meshes) {
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
-				commandList->SetPipelineState(pso.Get());
-				commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-				commandList->IASetIndexBuffer(&indexBufferView);
+				for (auto& mesh : meshes) {
+					auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
+					commandList->SetPipelineState(pso.Get());
+					commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+					D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
+					D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
+					commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+					commandList->IASetIndexBuffer(&indexBufferView);
 
-				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				}
 			}
-		}
-		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetTransparentMeshes();
+			for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
+				auto& renderable = pair.second;
+				auto& meshes = renderable->GetTransparentMeshes();
 
-			commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+				commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
-			for (auto& mesh : meshes) {
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
-				commandList->SetPipelineState(pso.Get());
-				commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-				commandList->IASetIndexBuffer(&indexBufferView);
+				for (auto& mesh : meshes) {
+					auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
+					commandList->SetPipelineState(pso.Get());
+					commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+					D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
+					D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
+					commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+					commandList->IASetIndexBuffer(&indexBufferView);
 
-				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				}
+			}
+		};
+
+		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
+			auto light = lightPair.second;
+			auto& shadowMap = light->GetShadowMap();
+			switch (light->GetLightType()) {
+				case LightType::Spot: {
+					commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap.DSVInfo[0].cpuHandle);
+					int lightIndex = light->GetCurrentLightBufferIndex();
+					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
+					int lightViewIndex = light->GetCurrentviewInfoIndex();
+					commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+					drawObjects();
+					break;
+				}
+				case LightType::Point: {
+					int lightIndex = light->GetCurrentLightBufferIndex();
+					int lightViewIndex = light->GetCurrentviewInfoIndex();
+					for (int i = 0; i < 6; i++) {
+						commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap.DSVInfo[i].cpuHandle);
+						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
+						lightViewIndex += 1;
+						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+						drawObjects();
+					}
+					break;
+				}
+					case LightType::Directional: {
+					int lightViewIndex = light->GetCurrentviewInfoIndex();
+					int lightIndex = light->GetCurrentLightBufferIndex();
+					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+						commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap.DSVInfo[i].cpuHandle);
+						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
+						lightViewIndex += 1;
+						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+						drawObjects();
+
+					}
+				}
 			}
 		}
 	}
@@ -82,5 +127,5 @@ public:
 	}
 
 private:
-
+	std::function<uint8_t()> getNumDirectionalLightCascades;
 };

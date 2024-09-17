@@ -62,6 +62,7 @@ public:
 	std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices();
 	DirectX::XMMATRIX GetLightProjectionMatrix();
 	DirectX::XMVECTOR GetLightDir();
+	TextureHandle<PixelBuffer>& GetShadowMap();
 
 private:
 	std::vector<BufferHandle> m_lightFrameConstantHandles;

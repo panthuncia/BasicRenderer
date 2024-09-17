@@ -162,6 +162,10 @@ std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetTranspare
     return transparentObjectsByID;
 }
 
+std::unordered_map<UINT, std::shared_ptr<Light>>& Scene::GetLightIDMap() {
+	return lightsByID;
+}
+
 SceneNode& Scene::GetRoot() {
     return sceneRoot;
 }

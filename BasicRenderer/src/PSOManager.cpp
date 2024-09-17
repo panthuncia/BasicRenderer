@@ -296,8 +296,8 @@ void PSOManager::createRootSignature() {
     //srvDescRange.RegisterSpace = 0;
     //srvDescRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    // Root parameter for descriptor table (PerFrame buffer)
-    D3D12_ROOT_PARAMETER1 parameters[3] = {};
+    // Root parameters
+    D3D12_ROOT_PARAMETER1 parameters[5] = {};
 
     // PerFrame buffer as a descriptor table
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -317,9 +317,23 @@ void PSOManager::createRootSignature() {
     parameters[2].Descriptor.RegisterSpace = 0;
     parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+    // First integer root constant, used for shadow light ID
+    parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[3].Constants.ShaderRegister = 3; // b3 for first integer root constant
+    parameters[3].Constants.RegisterSpace = 0;
+    parameters[3].Constants.Num32BitValues = 1; // Single integer
+    parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Second integer root constant, used for shadow light view offset
+    parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[4].Constants.ShaderRegister = 4; // b4 for second integer root constant
+    parameters[4].Constants.RegisterSpace = 0;
+    parameters[4].Constants.Num32BitValues = 1; // Single integer
+    parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = 3; // three parameters: one descriptor table and two direct CBVs
+    rootSignatureDesc.NumParameters = _countof(parameters);
     rootSignatureDesc.pParameters = parameters;
     rootSignatureDesc.NumStaticSamplers = 0;
     rootSignatureDesc.pStaticSamplers = nullptr;

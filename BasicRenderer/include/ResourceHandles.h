@@ -35,6 +35,6 @@ template<typename T>
 struct TextureHandle {
     Microsoft::WRL::ComPtr<ID3D12Resource> texture; // Texture resource
     ShaderVisibleIndexInfo SRVInfo;
-    NonShaderVisibleIndexInfo RTVInfo;
-    NonShaderVisibleIndexInfo DSVInfo;
+    std::vector<NonShaderVisibleIndexInfo> RTVInfo;
+    std::vector<NonShaderVisibleIndexInfo> DSVInfo;
 };
