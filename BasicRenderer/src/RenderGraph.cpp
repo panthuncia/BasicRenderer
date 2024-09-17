@@ -97,18 +97,19 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
             break;
         }
     }
+    return false;
 }
 
 void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::string, ResourceState>& previousStates) {
     for (const auto& [resourceName, requiredState] : batch.resourceStates) {
         ResourceState previousState = ResourceState::Undefined;
         auto it = previousStates.find(resourceName);
-        std::shared_ptr<Resource> resource;
+        std::shared_ptr<Resource> resource = GetResourceByName(resourceName);
         if (it != previousStates.end()) {
             previousState = it->second;
         }
         else {
-            resource = GetResourceByName(resourceName);
+            
             // Use the resource's current state
             if (resource) {
                 previousState = resource->GetState();

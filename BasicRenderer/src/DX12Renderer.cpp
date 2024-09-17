@@ -377,7 +377,7 @@ void DX12Renderer::CreateRenderGraph() {
     auto forwardPassParameters = PassParameters();
     forwardPassParameters.shaderResources.push_back(shadowMaps);
 
-    //currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
+    currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
 	currentRenderGraph->Compile();
 }

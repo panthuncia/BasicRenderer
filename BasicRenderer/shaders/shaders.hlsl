@@ -168,18 +168,21 @@ PSInput VSMain(VSInput input) {
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     switch(light.type) {
-        case 0: // Point light
+        case 0: { // Point light
             StructuredBuffer<float4> pointLightCubemapBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
             lightMatrix = loadMatrixFromBuffer(pointLightCubemapBuffer, lightViewIndex);
             break;
-        case 1: // Spot light
+        }
+        case 1: { // Spot light
             StructuredBuffer<float4> spotLightMatrixBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
             lightMatrix = loadMatrixFromBuffer(spotLightMatrixBuffer, lightViewIndex);
             break;
-        case 2: // Directional light
+        }
+        case 2: { // Directional light
             StructuredBuffer<float4> directionalLightCascadeBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
             lightMatrix = loadMatrixFromBuffer(directionalLightCascadeBuffer, lightViewIndex);
             break;
+        }
     }
     output.position = mul(worldPosition, lightMatrix);
     return output;
@@ -494,7 +497,7 @@ float3 reinhardJodie(float3 color) {
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
 #if defined(SHADOW)
-    return; // Nothing to do here
+    return float4(0, 0, 0, 1); // Nothing to do here
 #endif // SHADOW
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
