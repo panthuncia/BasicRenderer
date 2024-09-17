@@ -12,6 +12,7 @@
 #include "ResourceHandles.h"
 #include "PixelBuffer.h"
 #include "Buffer.h"
+#include "DescriptorHeap.h"
 
 using namespace Microsoft::WRL;
 
@@ -24,9 +25,9 @@ public:
 
     void Initialize();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index);
-    ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
+    ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
     void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
 
@@ -53,8 +54,8 @@ public:
         cbvDesc.BufferLocation = bufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
         cbvDesc.SizeInBytes = bufferSize;
 
-        UINT index = AllocateDescriptor();
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = GetCPUHandle(index);
+        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbvSrvUavHeap->GetCPUHandle(index);
         bufferHandle.index = index;
 
         device->CreateConstantBufferView(&cbvDesc, handle);
@@ -83,7 +84,7 @@ public:
         handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
         handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::UNKNOWN);
 
-        handle.index = AllocateDescriptor();
+        handle.index = m_cbvSrvUavHeap->AllocateDescriptor();
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -93,7 +94,7 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle(handle.index);
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(handle.index);
         device->CreateShaderResourceView(handle.dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
 
         return handle;
@@ -152,9 +153,9 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        UINT index = AllocateDescriptor();
+        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         bufferIDDescriptorIndexMap[bufferID] = index;
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(index);
+        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
         device->CreateShaderResourceView(dynamicBuffer.GetBuffer().Get(), &srvDesc, cpuHandle);
 
         DynamicBufferHandle<T> handle;
@@ -171,7 +172,7 @@ public:
 
     void onBufferResized(UINT bufferID, UINT typeSize, UINT capacity, ComPtr<ID3D12Resource>& buffer) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GetCPUHandle(descriptorIndex);
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create a Shader Resource View for the buffer
@@ -218,35 +219,28 @@ public:
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
-    D3D12_CPU_DESCRIPTOR_HANDLE getCPUHandleForSampler(UINT index) const;
+    D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
     void UpdateGPUBuffers();
 
 	void QueueResourceTransition(const ResourceTransition& transition);
     void ExecuteResourceTransitions();
 
 private:
-    ResourceManager() : descriptorSize(0), numAllocatedDescriptors(0) {}
+    ResourceManager(){};
     void InitializeUploadHeap();
     void WaitForCopyQueue();
     void WaitForTransitionQueue();
     void InitializeCopyCommandQueue();
     void InitializeTransitionCommandQueue();
-    UINT AllocateDescriptor();
-    void ReleaseDescriptor(UINT index);
+    //UINT AllocateDescriptor();
+    //void ReleaseDescriptor(UINT index);
     void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     int GetDefaultShadowSamplerIndex();
 
-    ComPtr<ID3D12DescriptorHeap> descriptorHeap;
-    UINT descriptorSize;
-    UINT numAllocatedDescriptors;
-    std::queue<UINT> freeDescriptors;
-
-    ComPtr<ID3D12DescriptorHeap> samplerHeap;
-    UINT samplerDescriptorSize;
-    UINT numAllocatedSamplerDescriptors;
-    std::queue<UINT> freeSamplerDescriptors;
+    std::unique_ptr<DescriptorHeap> m_cbvSrvUavHeap;
+    std::unique_ptr<DescriptorHeap> m_samplerHeap;
 
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;

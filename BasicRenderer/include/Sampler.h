@@ -23,7 +23,7 @@ public:
 
     // Get the CPU handle for the sampler from the ResourceManager
     D3D12_CPU_DESCRIPTOR_HANDLE getHandle() const {
-        return ResourceManager::GetInstance().getCPUHandleForSampler(m_index);
+        return ResourceManager::GetInstance().getSamplerCPUHandle(m_index);
     }
 
     static std::shared_ptr<Sampler> GetDefaultSampler();

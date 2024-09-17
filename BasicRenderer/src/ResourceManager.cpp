@@ -11,13 +11,8 @@ void ResourceManager::Initialize() {
     //}
 
     auto& device = DeviceManager::GetInstance().GetDevice();
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1;// numDescriptors;
-    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&descriptorHeap)));
-
-    descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    m_cbvSrvUavHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1, true);
+    m_samplerHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, true);
 
     UINT perFrameBufferSize = (sizeof(PerFrameCB) + 255) & ~255; // CBV size is required to be 256-byte aligned.
     D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(perFrameBufferSize);
@@ -43,56 +38,43 @@ void ResourceManager::Initialize() {
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
     cbvDesc.BufferLocation = perFrameConstantBuffer->GetGPUVirtualAddress();
     cbvDesc.SizeInBytes = perFrameBufferSize; // CBV size is required to be 256-byte aligned.
-    device->CreateConstantBufferView(&cbvDesc, descriptorHeap->GetCPUDescriptorHandleForHeapStart());
-
-    numAllocatedDescriptors++;
-
-    // Initialize Sampler Descriptor Heap
-    D3D12_DESCRIPTOR_HEAP_DESC samplerHeapDesc = {};
-    samplerHeapDesc.NumDescriptors = 2048;
-    samplerHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
-    samplerHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE; // Must be visible to shaders
-    ThrowIfFailed(device->CreateDescriptorHeap(&samplerHeapDesc, IID_PPV_ARGS(&samplerHeap)));
-
-    samplerDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-    numAllocatedSamplerDescriptors = 0;
-
-    
+    unsigned int lightsIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+    device->CreateConstantBufferView(&cbvDesc, m_cbvSrvUavHeap->GetCPUHandle(lightsIndex));
 }
 
-CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetCPUHandle(UINT index) {
-    return CD3DX12_CPU_DESCRIPTOR_HANDLE(descriptorHeap->GetCPUDescriptorHandleForHeapStart(), index, descriptorSize);
+CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetSRVCPUHandle(UINT index) {
+	return m_cbvSrvUavHeap->GetCPUHandle(index);
 }
 
-CD3DX12_GPU_DESCRIPTOR_HANDLE ResourceManager::GetGPUHandle(UINT index) {
-    return CD3DX12_GPU_DESCRIPTOR_HANDLE(descriptorHeap->GetGPUDescriptorHandleForHeapStart(), index, descriptorSize);
+CD3DX12_GPU_DESCRIPTOR_HANDLE ResourceManager::GetSRVGPUHandle(UINT index) {
+	return m_cbvSrvUavHeap->GetGPUHandle(index);
 }
 
-ComPtr<ID3D12DescriptorHeap> ResourceManager::GetDescriptorHeap() {
-    return descriptorHeap;
+ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSRVDescriptorHeap() {
+    return m_cbvSrvUavHeap->GetHeap();
 }
 
 ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
-    return samplerHeap;
+    return m_samplerHeap->GetHeap();
 }
 
-UINT ResourceManager::AllocateDescriptor() {
-    if (!freeDescriptors.empty()) {
-        UINT freeIndex = freeDescriptors.front();
-        freeDescriptors.pop();
-        return freeIndex;
-    }
-    else {
-        if (numAllocatedDescriptors >= descriptorHeap->GetDesc().NumDescriptors) {
-            throw std::runtime_error("Out of descriptor heap space!");
-        }
-        return numAllocatedDescriptors++;
-    }
-}
-
-void ResourceManager::ReleaseDescriptor(UINT index) {
-    freeDescriptors.push(index);
-}
+//UINT ResourceManager::AllocateDescriptor() {
+//    if (!freeDescriptors.empty()) {
+//        UINT freeIndex = freeDescriptors.front();
+//        freeDescriptors.pop();
+//        return freeIndex;
+//    }
+//    else {
+//        if (numAllocatedDescriptors >= descriptorHeap->GetDesc().NumDescriptors) {
+//            throw std::runtime_error("Out of descriptor heap space!");
+//        }
+//        return numAllocatedDescriptors++;
+//    }
+//}
+//
+//void ResourceManager::ReleaseDescriptor(UINT index) {
+//    freeDescriptors.push(index);
+//}
 
 
 void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
@@ -209,23 +191,16 @@ void ResourceManager::InitializeTransitionCommandQueue() {
 UINT ResourceManager::CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
-    if (numAllocatedSamplerDescriptors >= samplerHeap->GetDesc().NumDescriptors) {
-        throw std::runtime_error("Exceeded the maximum number of samplers that can be allocated in the sampler heap.");
-    }
-
-    UINT index = numAllocatedSamplerDescriptors++;
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = samplerHeap->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += index * samplerDescriptorSize;
+	UINT index = m_samplerHeap->AllocateDescriptor();
+	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_samplerHeap->GetCPUHandle(index);
 
     device->CreateSampler(&samplerDesc, handle);
 
     return index;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getCPUHandleForSampler(UINT index) const {
-    auto handle = samplerHeap->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += index * samplerDescriptorSize;
-    return handle;
+D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getSamplerCPUHandle(UINT index) const {
+    return m_samplerHeap->GetCPUHandle(index);
 }
 
 TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
@@ -299,9 +274,9 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc
     ExecuteAndWaitForCommandList(commandList, commandAllocator);
 
     // Allocate descriptor and create shader resource view
-    UINT descriptorIndex = AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = GetGPUHandle(descriptorIndex);
+    UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -388,9 +363,9 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
         IID_PPV_ARGS(&textureResource)));
 
     // Allocate descriptor and create shader resource view
-    UINT descriptorIndex = AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = GetGPUHandle(descriptorIndex);
+    UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
 
     device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
 
@@ -496,9 +471,9 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
         nullptr,
         IID_PPV_ARGS(&textureResource)));
 
-    UINT descriptorIndex = AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = GetGPUHandle(descriptorIndex);
+    UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
 
     device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
 

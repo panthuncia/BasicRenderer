@@ -220,7 +220,7 @@ void DX12Renderer::Render() {
     context.currentScene = currentScene.get();
     context.device = device.Get();
     context.commandList = commandList.Get();
-    context.textureDescriptorHeap = ResourceManager::GetInstance().GetDescriptorHeap().Get();
+    context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     context.rtvHeap = rtvHeap.Get();
     context.dsvHeap = dsvHeap.Get();
@@ -235,7 +235,7 @@ void DX12Renderer::Render() {
     commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
     // Bind the constant buffer to the root signature
     ID3D12DescriptorHeap* descriptorHeaps[] = {
-        ResourceManager::GetInstance().GetDescriptorHeap().Get(), // The texture descriptor heap
+        ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
         ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
     };
 
