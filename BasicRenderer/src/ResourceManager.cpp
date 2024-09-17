@@ -13,6 +13,8 @@ void ResourceManager::Initialize() {
     auto& device = DeviceManager::GetInstance().GetDevice();
     m_cbvSrvUavHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1, true);
     m_samplerHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, true);
+    m_rtvHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 10000, false);
+    m_dsvHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 10000, false);
 
     UINT perFrameBufferSize = (sizeof(PerFrameCB) + 255) & ~255; // CBV size is required to be 256-byte aligned.
     D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(perFrameBufferSize);
@@ -274,9 +276,9 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc
     ExecuteAndWaitForCommandList(commandList, commandAllocator);
 
     // Allocate descriptor and create shader resource view
-    UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
+    UINT srvDescriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvCPUHandle = m_cbvSrvUavHeap->GetCPUHandle(srvDescriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle = m_cbvSrvUavHeap->GetGPUHandle(srvDescriptorIndex);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -286,9 +288,17 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc
     srvDesc.Texture2D.MipLevels = 1;
     srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
+    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvCPUHandle);
 
-    return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
+	ShaderVisibleIndexInfo SRVInfo;
+	SRVInfo.index = srvDescriptorIndex;
+	SRVInfo.cpuHandle = srvCPUHandle;
+	SRVInfo.gpuHandle = srvGPUHandle;
+
+    TextureHandle<PixelBuffer> handle;
+	handle.texture = textureResource;
+	handle.SRVInfo = SRVInfo;
+    return handle;
 }
 
 TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
@@ -299,7 +309,10 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     DXGI_FORMAT textureFormat;
     switch (channels) {
     case 1:
-        textureFormat = DXGI_FORMAT_R8_UNORM;
+		if (DSV)
+			textureFormat = DXGI_FORMAT_R32_TYPELESS;
+		else
+            textureFormat = DXGI_FORMAT_R8_UNORM;
         break;
     case 3:
         textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -333,10 +346,13 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
             1,  // Sample count
             0); // Sample quality
     }
+    if (DSV) {
+        textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    }
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format = textureFormat;
+    srvDesc.Format = textureFormat != DXGI_FORMAT_R32_TYPELESS ? textureFormat : DXGI_FORMAT_R32_FLOAT;
 
     if (isCubemap) {
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
@@ -363,13 +379,14 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
         IID_PPV_ARGS(&textureResource)));
 
     // Allocate descriptor and create shader resource view
-    UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
+    UINT srvDescriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvCPUHandle = m_cbvSrvUavHeap->GetCPUHandle(srvDescriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle = m_cbvSrvUavHeap->GetGPUHandle(srvDescriptorIndex);
 
-    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
+    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvCPUHandle);
 
     // Create Render Target View if requested
+    NonShaderVisibleIndexInfo RTVInfo;
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
     if (RTV) {
         // Describe RTV
@@ -389,14 +406,57 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
             rtvDesc.Texture2D.PlaneSlice = 0;
         }
 
-        //rtvHandle = AllocateTemporaryRTVHandle();
-        //device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvHandle);
+		UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
+
+		device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
+
+		RTVInfo.index = rtvDescriptorIndex;
+		RTVInfo.cpuHandle = rtvCPUHandle;
     }
 
-    return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
+	// Create Depth Stencil View if requested
+	NonShaderVisibleIndexInfo DSVInfo;
+	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
+	if (DSV) {
+		// Describe DSV
+		D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+		dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+
+		if (isCubemap) {
+			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+			dsvDesc.Texture2DArray.ArraySize = 6; // For cubemap
+			dsvDesc.Texture2DArray.MipSlice = 0;
+			dsvDesc.Texture2DArray.FirstArraySlice = 0;
+		}
+		else {
+			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+			dsvDesc.Texture2D.MipSlice = 0;
+		}
+
+		UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
+		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
+
+		device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+
+		DSVInfo.index = dsvDescriptorIndex;
+		DSVInfo.cpuHandle = dsvCPUHandle;
+	}
+
+	ShaderVisibleIndexInfo SRVInfo;
+	SRVInfo.index = srvDescriptorIndex;
+	SRVInfo.cpuHandle = srvCPUHandle;
+	SRVInfo.gpuHandle = srvGPUHandle;
+
+	TextureHandle<PixelBuffer> handle;
+    handle.SRVInfo = SRVInfo;
+    handle.RTVInfo = RTVInfo;
+    handle.DSVInfo = DSVInfo;
+
+    return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
     // Describe and create the texture resource
@@ -405,7 +465,10 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
     std::vector<stbi_uc> expandedImage;
     switch (channels) {
     case 1:
-        textureFormat = DXGI_FORMAT_R8_UNORM;
+		if (DSV)
+			textureFormat = DXGI_FORMAT_R32_TYPELESS;
+		else
+			textureFormat = DXGI_FORMAT_R8_UNORM;
         break;
     case 3:
         textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -439,10 +502,12 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
             1,
             0);
     }
-
+    if (DSV) {
+        textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    }
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format = textureFormat;
+    srvDesc.Format = textureFormat != DXGI_FORMAT_R32_TYPELESS ? textureFormat : DXGI_FORMAT_R32_FLOAT;
 
     if (isCubemap) {
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
@@ -471,13 +536,86 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
         nullptr,
         IID_PPV_ARGS(&textureResource)));
 
-    UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
+    UINT srvDescriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvCPUHandle = m_cbvSrvUavHeap->GetCPUHandle(srvDescriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle = m_cbvSrvUavHeap->GetGPUHandle(srvDescriptorIndex);
 
-    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, cpuHandle);
+    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvCPUHandle);
 
-    return { descriptorIndex, textureResource, cpuHandle, gpuHandle };
+	// Create Render Target View if requested
+	NonShaderVisibleIndexInfo RTVInfo;
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
+	if (RTV) {
+		// Describe RTV
+		D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+		rtvDesc.Format = textureFormat;
+
+		if (isCubemap) {
+			rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+			rtvDesc.Texture2DArray.ArraySize = 6 * length; // For cubemap arrays
+			rtvDesc.Texture2DArray.MipSlice = 0;
+			rtvDesc.Texture2DArray.FirstArraySlice = 0;
+			rtvDesc.Texture2DArray.PlaneSlice = 0;
+		}
+		else {
+			rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+			rtvDesc.Texture2DArray.ArraySize = length; // For regular texture arrays
+			rtvDesc.Texture2DArray.MipSlice = 0;
+			rtvDesc.Texture2DArray.FirstArraySlice = 0;
+			rtvDesc.Texture2DArray.PlaneSlice = 0;
+		}
+
+		UINT rtvDescriptorIndex = m_rtvHeap->AllocateDescriptor();
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvCPUHandle = m_rtvHeap->GetCPUHandle(rtvDescriptorIndex);
+
+		device->CreateRenderTargetView(textureResource.Get(), &rtvDesc, rtvCPUHandle);
+
+		RTVInfo.index = rtvDescriptorIndex;
+		RTVInfo.cpuHandle = rtvCPUHandle;
+	}
+
+	// Create Depth Stencil View if requested
+	NonShaderVisibleIndexInfo DSVInfo;
+	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
+	if (DSV) {
+		// Describe DSV
+		D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+		dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+
+		if (isCubemap) {
+			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+			dsvDesc.Texture2DArray.ArraySize = 6 * length; // For cubemap arrays
+			dsvDesc.Texture2DArray.MipSlice = 0;
+			dsvDesc.Texture2DArray.FirstArraySlice = 0;
+		}
+		else {
+			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+			dsvDesc.Texture2DArray.ArraySize = length; // For regular texture arrays
+			dsvDesc.Texture2DArray.MipSlice = 0;
+			dsvDesc.Texture2DArray.FirstArraySlice = 0;
+		}
+
+		UINT dsvDescriptorIndex = m_dsvHeap->AllocateDescriptor();
+		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvCPUHandle = m_dsvHeap->GetCPUHandle(dsvDescriptorIndex);
+
+		device->CreateDepthStencilView(textureResource.Get(), &dsvDesc, dsvCPUHandle);
+
+		DSVInfo.index = dsvDescriptorIndex;
+		DSVInfo.cpuHandle = dsvCPUHandle;
+	}
+
+	ShaderVisibleIndexInfo SRVInfo;
+	SRVInfo.index = srvDescriptorIndex;
+	SRVInfo.cpuHandle = srvCPUHandle;
+	SRVInfo.gpuHandle = srvGPUHandle;
+
+	TextureHandle<PixelBuffer> handle;
+	handle.texture = textureResource;
+	handle.SRVInfo = SRVInfo;
+	handle.RTVInfo = RTVInfo;
+	handle.DSVInfo = DSVInfo;
+
+    return handle;
 }
 
 void ResourceManager::GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator) {

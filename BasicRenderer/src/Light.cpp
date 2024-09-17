@@ -87,7 +87,19 @@ void Light::NotifyLightObservers() {
 
 void Light::CreateShadowMap() {
 	auto shadowMapRes = getShadowResolution();
-	shadowMap = ResourceManager::GetInstance().CreateTexture(shadowMapRes, shadowMapRes, 1, false);
+
+	switch (m_lightInfo.type) {
+	case LightType::Point: // Cubemap
+		shadowMap = ResourceManager::GetInstance().CreateTexture(shadowMapRes, shadowMapRes, 1, true, false, true, false);
+		break;
+	case LightType::Spot: // 2D texture
+		shadowMap = ResourceManager::GetInstance().CreateTexture(shadowMapRes, shadowMapRes, 1, true, false, false, false);
+		break;
+	case LightType::Directional: // Texture array
+		shadowMap = ResourceManager::GetInstance().CreateTextureArray(shadowMapRes, shadowMapRes, 1, getNumCascades(), false, false, true, false);
+		break;
+
+	}
 }
 
 void Light::UpdateLightMatrices() {

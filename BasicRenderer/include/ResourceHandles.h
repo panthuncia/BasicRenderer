@@ -20,10 +20,21 @@ struct DynamicBufferHandle {
     DynamicStructuredBuffer<T> buffer; // The actual resource buffer
 };
 
-template<typename T>
-struct TextureHandle {
-    UINT index; // Index in the descriptor heap
-    Microsoft::WRL::ComPtr<ID3D12Resource> texture; // Texture resource
+struct ShaderVisibleIndexInfo {
+    int index = -1; // Index in the descriptor heap
     CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle; // CPU descriptor handle
     CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle; // GPU descriptor handle
+};
+
+struct NonShaderVisibleIndexInfo {
+    int index = -1; // Index in the descriptor heap
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle; // CPU descriptor handle
+};
+
+template<typename T>
+struct TextureHandle {
+    Microsoft::WRL::ComPtr<ID3D12Resource> texture; // Texture resource
+    ShaderVisibleIndexInfo SRVInfo;
+    NonShaderVisibleIndexInfo RTVInfo;
+    NonShaderVisibleIndexInfo DSVInfo;
 };

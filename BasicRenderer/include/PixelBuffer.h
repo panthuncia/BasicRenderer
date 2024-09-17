@@ -10,7 +10,7 @@ using Microsoft::WRL::ComPtr;
 class PixelBuffer {
 public:
     PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB);
-    UINT GetDescriptorIndex() const;
+    UINT GetSRVDescriptorIndex() const;
 private:
     TextureHandle<PixelBuffer> handle;
 };

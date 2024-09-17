@@ -38,6 +38,7 @@ void LightManager::AddLight(Light* lightNode, bool shadowCasting, Camera* curren
     lightNode->SetLightBufferIndex(index);
 	if (shadowCasting) {
 		CreateLightViewInfo(lightNode, currentCamera);
+		lightNode->CreateShadowMap();
 	}
     lightNode->AddLightObserver(this);
 }

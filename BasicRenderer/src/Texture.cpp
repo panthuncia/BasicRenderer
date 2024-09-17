@@ -6,7 +6,7 @@ Texture::Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sa
 }
 
 UINT Texture::GetBufferDescriptorIndex() {
-	return m_image->GetDescriptorIndex();
+	return m_image->GetSRVDescriptorIndex();
 }
 
 UINT Texture::GetSamplerDescriptorIndex() {

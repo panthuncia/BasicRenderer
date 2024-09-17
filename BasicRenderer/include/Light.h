@@ -72,12 +72,14 @@ private:
 	XMMATRIX m_lightProjection;
 	void NotifyLightObservers();
 	void UpdateLightInfo();
-	void CreateShadowMap();
 	void CreateFrameConstantBuffers();
 	void CreateProjectionMatrix();
+	void CreateShadowMap();
 
 	std::function<uint8_t()> getNumCascades;
 	std::function<uint16_t()> getShadowResolution;
 
 	TextureHandle<PixelBuffer> shadowMap;
+
+	friend class LightManager; // Allow LightManager to access private members
 };

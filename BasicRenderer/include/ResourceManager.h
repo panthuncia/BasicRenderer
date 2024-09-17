@@ -212,7 +212,7 @@ public:
     }
 
     TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB);
-    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap);
+    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false);
     TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false);
 
 	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
@@ -224,6 +224,8 @@ public:
 
 	void QueueResourceTransition(const ResourceTransition& transition);
     void ExecuteResourceTransitions();
+
+	void CreateRenderTargetViewForExternalResource(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc);
 
 private:
     ResourceManager(){};
@@ -241,7 +243,8 @@ private:
 
     std::unique_ptr<DescriptorHeap> m_cbvSrvUavHeap;
     std::unique_ptr<DescriptorHeap> m_samplerHeap;
-
+    std::unique_ptr<DescriptorHeap> m_rtvHeap;
+    std::unique_ptr<DescriptorHeap> m_dsvHeap;
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 

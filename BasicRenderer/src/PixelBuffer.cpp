@@ -13,6 +13,6 @@ PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channe
     handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB);
 }
 
-UINT PixelBuffer::GetDescriptorIndex() const {
-    return handle.index;
+UINT PixelBuffer::GetSRVDescriptorIndex() const {
+    return handle.SRVInfo.index;
 }
