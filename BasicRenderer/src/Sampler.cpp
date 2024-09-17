@@ -1,6 +1,7 @@
 #include "Sampler.h"
 
 std::shared_ptr<Sampler> Sampler::m_defaultSampler = nullptr;
+std::shared_ptr<Sampler> Sampler::m_defaultShadowSampler = nullptr;
 
 std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 	if (m_defaultSampler == nullptr) {
@@ -17,4 +18,21 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 		m_defaultSampler = std::make_shared<Sampler>(samplerDesc);
 	}
 	return m_defaultSampler;
+}
+
+std::shared_ptr<Sampler> Sampler::GetDefaultShadowSampler() {
+	if (m_defaultShadowSampler == nullptr) {
+		D3D12_SAMPLER_DESC samplerDesc = {};
+		samplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+		samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		samplerDesc.MinLOD = 0;
+		samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+		samplerDesc.MipLODBias = 0;
+		samplerDesc.MaxAnisotropy = 1;
+		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+		m_defaultShadowSampler = std::make_shared<Sampler>(samplerDesc);
+	}
+	return m_defaultShadowSampler;
 }

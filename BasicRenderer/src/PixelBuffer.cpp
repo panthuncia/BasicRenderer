@@ -13,6 +13,16 @@ PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channe
     handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB);
 }
 
+PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
+    ResourceManager& resourceManager = ResourceManager::GetInstance();
+    handle = resourceManager.CreateTexture(width, height, channels, isCubemap, RTV, DSV, UAV);
+}
+
+PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool RTV, bool DSV, bool UAV) {
+    ResourceManager& resourceManager = ResourceManager::GetInstance();
+    handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, RTV, DSV, UAV);
+}
+
 UINT PixelBuffer::GetSRVDescriptorIndex() const {
     return handle.SRVInfo.index;
 }

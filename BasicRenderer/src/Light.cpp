@@ -19,7 +19,6 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	transform.setDirection(direction);
 
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 
 	CreateProjectionMatrix();
 }
@@ -37,7 +36,6 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	transform.setDirection(direction);
 
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 
 	CreateProjectionMatrix();
 
@@ -46,7 +44,6 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 Light::Light(LightInfo& lightInfo) : SceneNode(name) {
 	m_lightInfo = lightInfo;
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 
 	CreateProjectionMatrix();
 }
@@ -82,23 +79,6 @@ void Light::RemoveLightObserver(ISceneNodeObserver<Light>* observer) {
 void Light::NotifyLightObservers() {
 	for (auto observer : lightObservers) {
 		observer->OnNodeUpdated(this);
-	}
-}
-
-void Light::CreateShadowMap() {
-	auto shadowMapRes = getShadowResolution();
-
-	switch (m_lightInfo.type) {
-	case LightType::Point: // Cubemap
-		shadowMap = ResourceManager::GetInstance().CreateTexture(shadowMapRes, shadowMapRes, 1, true, false, true, false);
-		break;
-	case LightType::Spot: // 2D texture
-		shadowMap = ResourceManager::GetInstance().CreateTexture(shadowMapRes, shadowMapRes, 1, true, false, false, false);
-		break;
-	case LightType::Directional: // Texture array
-		shadowMap = ResourceManager::GetInstance().CreateTextureArray(shadowMapRes, shadowMapRes, 1, getNumCascades(), false, false, true, false);
-		break;
-
 	}
 }
 
@@ -202,6 +182,12 @@ DirectX::XMVECTOR Light::GetLightDir() {
 	return transform.modelMatrix.r[2];
 }
 
-TextureHandle<PixelBuffer>& Light::GetShadowMap() {
-	return shadowMap;
+void Light::SetShadowMap(std::shared_ptr<Texture> shadowMap) {
+	m_shadowMap = shadowMap;
+	m_lightInfo.shadowMapIndex = shadowMap->GetBufferDescriptorIndex();
+	m_lightInfo.shadowSamplerIndex = shadowMap->GetSamplerDescriptorIndex();
+}
+
+std::shared_ptr<Texture>& Light::getShadowMap() {
+	return m_shadowMap;
 }

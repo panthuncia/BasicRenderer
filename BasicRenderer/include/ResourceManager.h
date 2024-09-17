@@ -239,7 +239,6 @@ private:
     void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
-    int GetDefaultShadowSamplerIndex();
 
     std::unique_ptr<DescriptorHeap> m_cbvSrvUavHeap;
     std::unique_ptr<DescriptorHeap> m_samplerHeap;

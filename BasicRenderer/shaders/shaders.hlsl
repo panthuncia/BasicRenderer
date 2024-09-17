@@ -40,6 +40,8 @@ struct LightInfo {
     float4 dirWorldSpace; // Direction of the light
     float4 attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
     float4 color; // Color of the light
+    int shadowMapIndex;
+    int shadowSamplerIndex;
 };
 
 struct MaterialInfo {

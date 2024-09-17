@@ -82,11 +82,11 @@ public:
 		};
 
 		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
-			auto light = lightPair.second;
-			auto& shadowMap = light->GetShadowMap();
+			auto& light = lightPair.second;
+			auto& shadowMap = light->getShadowMap();
 			switch (light->GetLightType()) {
 				case LightType::Spot: {
-					commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap.DSVInfo[0].cpuHandle);
+					commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap->GetHandle().DSVInfo[0].cpuHandle);
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 					int lightViewIndex = light->GetCurrentviewInfoIndex();
@@ -98,7 +98,7 @@ public:
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					int lightViewIndex = light->GetCurrentviewInfoIndex();
 					for (int i = 0; i < 6; i++) {
-						commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap.DSVInfo[i].cpuHandle);
+						commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap->GetHandle().DSVInfo[i].cpuHandle);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 						lightViewIndex += 1;
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
@@ -110,7 +110,7 @@ public:
 					int lightViewIndex = light->GetCurrentviewInfoIndex();
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap.DSVInfo[i].cpuHandle);
+						commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap->GetHandle().DSVInfo[i].cpuHandle);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 						lightViewIndex += 1;
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);

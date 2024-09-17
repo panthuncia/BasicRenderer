@@ -27,6 +27,7 @@ public:
     }
 
     static std::shared_ptr<Sampler> GetDefaultSampler();
+	static std::shared_ptr<Sampler> GetDefaultShadowSampler();
 
 private:
     UINT m_index; // Index of the sampler in the descriptor heap
@@ -37,4 +38,5 @@ private:
     }
 
     static std::shared_ptr<Sampler> m_defaultSampler;
+	static std::shared_ptr<Sampler> m_defaultShadowSampler;
 };

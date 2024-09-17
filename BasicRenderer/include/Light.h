@@ -3,7 +3,9 @@
 #include <DirectXMath.h>
 #include <array>
 #include <functional>
+#include <memory>
 
+#include "Texture.h"
 #include "SceneNode.h"
 #include "buffers.h"
 #include "ResourceHandles.h"
@@ -62,7 +64,8 @@ public:
 	std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices();
 	DirectX::XMMATRIX GetLightProjectionMatrix();
 	DirectX::XMVECTOR GetLightDir();
-	TextureHandle<PixelBuffer>& GetShadowMap();
+	void SetShadowMap(std::shared_ptr<Texture> shadowMap);
+	std::shared_ptr<Texture>& getShadowMap();
 
 private:
 	std::vector<BufferHandle> m_lightFrameConstantHandles;
@@ -71,16 +74,14 @@ private:
 	int m_currentLightViewInfoIndex = -1;
 	std::vector<ISceneNodeObserver<Light>*> lightObservers;
 	XMMATRIX m_lightProjection;
+	std::shared_ptr<Texture> m_shadowMap;
+
 	void NotifyLightObservers();
 	void UpdateLightInfo();
 	void CreateFrameConstantBuffers();
 	void CreateProjectionMatrix();
-	void CreateShadowMap();
 
 	std::function<uint8_t()> getNumCascades;
-	std::function<uint16_t()> getShadowResolution;
 
-	TextureHandle<PixelBuffer> shadowMap;
-
-	friend class LightManager; // Allow LightManager to access private members
+	friend class ShadowMaps;
 };

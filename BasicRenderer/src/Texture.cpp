@@ -12,3 +12,7 @@ UINT Texture::GetBufferDescriptorIndex() {
 UINT Texture::GetSamplerDescriptorIndex() {
 	return m_sampler->GetDescriptorIndex();
 }
+
+TextureHandle<PixelBuffer>& Texture::GetHandle() {
+	return m_image->handle;
+}

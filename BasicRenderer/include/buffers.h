@@ -62,4 +62,6 @@ struct LightInfo {
     DirectX::XMVECTOR dirWorldSpace; // Direction of the lights
     DirectX::XMVECTOR attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
     DirectX::XMVECTOR color; // Color of the lights
+	int shadowMapIndex = -1;
+    int shadowSamplerIndex = -1;
 };

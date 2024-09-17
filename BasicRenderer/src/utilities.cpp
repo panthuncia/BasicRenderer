@@ -114,8 +114,7 @@ ImageData loadImage(const char* filename) {
 
 std::shared_ptr<Texture> loadTextureFromFile(const char* filename) {
 	ImageData img = loadImage(filename);
-    PixelBuffer bufferTest(img.data, img.width, img.height, img.channels, false);
-	auto buffer = std::make_shared<PixelBuffer>(img.data, img.width, img.height, img.channels, false);
+	auto buffer = PixelBuffer::CreateFromImage(img.data, img.width, img.height, img.channels, false);
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
 }

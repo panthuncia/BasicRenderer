@@ -878,22 +878,3 @@ void ResourceManager::ExecuteResourceTransitions() {
 
 	queuedResourceTransitions.clear();
 }
-
-int ResourceManager::GetDefaultShadowSamplerIndex() {
-	if (defaultShadowSamplerIndex != -1) {
-		return defaultShadowSamplerIndex;
-	}
-    D3D12_SAMPLER_DESC samplerDesc = {};
-    samplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT; // Use comparison filter
-    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // Clamp texture coordinates
-    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // Clamp texture coordinates
-    samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; // Clamp texture coordinates
-    samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL; // Comparison function for shadow maps
-
-    // Optionally, adjust BorderColor, MaxAnisotropy, etc., if needed
-    //samplerDesc.BorderColor[= { 0, 0, 0// Default border color
-    samplerDesc.MaxAnisotropy = 1;
-	defaultShadowSamplerIndex = CreateIndexedSampler(samplerDesc);
-
-    return defaultShadowSamplerIndex;
-}

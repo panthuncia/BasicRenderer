@@ -80,7 +80,7 @@ Material::Material(const std::string& name,
 std::shared_ptr<Texture> Material::createDefaultTexture() {
     // Create a 1x1 white texture
     static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
-    std::shared_ptr<PixelBuffer>defaultImage = std::make_shared<PixelBuffer>(whitePixel, 1, 1, 4, false);
+    std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::CreateFromImage(whitePixel, 1, 1, 4, false);
 
     D3D12_SAMPLER_DESC defaultSamplerDesc = {};
     defaultSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
