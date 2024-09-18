@@ -18,6 +18,7 @@
 #include "ForwardRenderPass.h"
 #include "ShadowPass.h"
 #include "SettingsManager.h"
+#include "DebugRenderPass.h"
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
@@ -369,6 +370,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 
 void DX12Renderer::CreateRenderGraph() {
     currentRenderGraph = std::make_unique<RenderGraph>();
+
 	std::shared_ptr<ShadowMaps> shadowMaps = std::make_shared<ShadowMaps>("ShadowMaps");
 	setShadowMaps(shadowMaps.get()); // To allow light manager to acccess shadow maps
 	currentRenderGraph->AddResource(shadowMaps);
@@ -380,7 +382,13 @@ void DX12Renderer::CreateRenderGraph() {
     auto forwardPassParameters = PassParameters();
     forwardPassParameters.shaderResources.push_back(shadowMaps);
 
+    debugPass = std::make_shared<DebugRenderPass>();
+    debugPass->Setup();
+    auto debugPassParameters = PassParameters();
+    debugPassParameters.shaderResources.push_back(shadowMaps);
+
     currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
+	currentRenderGraph->AddPass(debugPass, debugPassParameters);
 	currentRenderGraph->Compile();
 }

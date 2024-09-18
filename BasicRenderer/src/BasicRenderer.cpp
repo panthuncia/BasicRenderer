@@ -251,7 +251,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     std::shared_ptr<Light> light2 = std::make_shared<Light>("light2", LightType::Directional, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, 1, 0));
     scene->AddLight(light2, true);
 
+	renderer.SetDebugTexture(light2->getShadowMap().get());
+
     MSG msg = {};
+    unsigned int frameIndex = 0;
     auto lastUpdateTime = std::chrono::system_clock::now();
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -265,9 +268,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             lastUpdateTime = currentTime;
             light1->animationController->update(elapsedSeconds.count());
 
-
+            frameIndex += 1;
             renderer.Update(elapsedSeconds.count());
-            spdlog::info("FPS: {}", 1/elapsedSeconds.count());
+            if (frameIndex % 100 == 0) {
+                spdlog::info("FPS: {}", 1 / elapsedSeconds.count());
+            }
             renderer.Render();
         }
     }

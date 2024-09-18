@@ -106,8 +106,8 @@ public:
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
-						lightViewIndex += 1;
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+						lightViewIndex += 1;
 						drawObjects();
 					}
 					break;
@@ -120,8 +120,8 @@ public:
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
-						lightViewIndex += 1;
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+						lightViewIndex += 1;
 						drawObjects();
 
 					}

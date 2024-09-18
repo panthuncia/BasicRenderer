@@ -33,6 +33,10 @@ cbuffer RootConstants2 : register(b4) {
     int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
 }
 
+cbuffer RootConstants3 : register(b5) {
+    matrix shadowViewMatrix; // Used for shadow mapping, shadow view matrix
+}
+
 struct LightInfo {
     uint type;
     float innerConeAngle;
@@ -112,14 +116,15 @@ struct PSInput {
 struct PSInput {
     float4 position : SV_POSITION;
     float4 positionWorldSpace : TEXCOORD3;
-    float3 normalWorldSpace : TEXCOORD4;
+    float4 positionViewSpace : TEXCOORD4;
+    float3 normalWorldSpace : TEXCOORD5;
 #if defined(TEXTURED)
     float2 texcoord : TEXCOORD0;
 #endif // TEXTURED
 #if defined(NORMAL_MAP) || defined(PARALLAX)
-    float3 TBN_T : TEXCOORD5;      // First row of TBN
-    float3 TBN_B : TEXCOORD6;      // Second row of TBN
-    float3 TBN_N : TEXCOORD7;      // Third row of TBN
+    float3 TBN_T : TEXCOORD6;      // First row of TBN
+    float3 TBN_B : TEXCOORD7;      // Second row of TBN
+    float3 TBN_N : TEXCOORD8;      // Third row of TBN
 #endif // NORMAL_MAP
 };
 #endif
@@ -190,8 +195,9 @@ PSInput VSMain(VSInput input) {
     return output;
 #endif // SHADOW
     
-    float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
     output.positionWorldSpace = worldPosition;
+    float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
+    output.positionViewSpace = viewPosition;
     output.position = mul(viewPosition, perFrameBuffer.projection);
     
     output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
@@ -533,22 +539,22 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float3 fragPosViewSpace,
     float3 uv = fragPosLightSpace.xyz; /// fragPosLightSpace.w;
     uv = uv * 0.5 + 0.5; // Map to [0, 1]
             // Because OpenGL ES lacks CLAMP_TO_BORDER...
-    bool isOutside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || uv.z > 1.0;
+    //bool isOutside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || uv.z > 1.0;
     float shadow = 0.0;
     // Kind of a hack, not quite sure why I'm getting texcoords outside of bounds on fragments within the split distance
     // This just steps up one cascade if that happens.
-    if (isOutside && cascadeIndex != numCascades - 1) {
-        cascadeIndex += 1;
-        infoIndex += 1;
-        fragPosLightSpace = mul(fragPosWorldSpace, loadMatrixFromBuffer(cascadeViewBuffer, infoIndex));
-        uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
-        uv = uv * 0.5 + 0.5; // Map to [0, 1]
-        isOutside = false;
-    }
-    if (!isOutside) {
-        Texture2D<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
+    //if (isOutside && cascadeIndex != numCascades - 1) {
+    //    cascadeIndex += 1;
+    //    infoIndex += 1;
+    //    fragPosLightSpace = mul(fragPosWorldSpace, loadMatrixFromBuffer(cascadeViewBuffer, infoIndex));
+    //    uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    //    uv = uv * 0.5 + 0.5; // Map to [0, 1]
+    //    isOutside = false;
+    //}
+    //if (!isOutside) {
+        Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
         SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-        float closestDepth = shadowMap.Sample(shadowSampler, uv.xy);
+    float closestDepth = shadowMap.Sample(shadowSampler, float3(uv.xy, cascadeIndex));
         float currentDepth = uv.z;
 
             //float cosTheta = abs(dot(normal, u_lightDirViewSpace[lightIndex].xyz));
@@ -556,15 +562,11 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float3 fragPosViewSpace,
             //float slopeScaledBias = 0.0000;
             //float bias = max(constantBias, slopeScaledBias*cosTheta);
         shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
-    }
+    //}
     return shadow;
 }
 
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
-    
-#if defined(SHADOW)
-    return float4(0, 0, 0, 1); // Nothing to do here
-#endif // SHADOW
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
@@ -666,7 +668,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                         break;
                     }
                 case 2:{// Directional light
-                        shadow = calculateCascadedShadow(input.positionWorldSpace, input.position.xyz, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
+                        shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace.xyz, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
                         break;
                     }
             }

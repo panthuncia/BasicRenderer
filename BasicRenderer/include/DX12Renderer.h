@@ -19,6 +19,7 @@
 #include "InputManager.h"
 #include "RenderGraph.h"
 #include "ShadowMaps.h"
+#include "DebugRenderPass.h"
 
 using namespace Microsoft::WRL;
 
@@ -33,6 +34,9 @@ public:
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
+    void SetDebugTexture(Texture* texture) {
+		debugPass->SetTexture(texture);
+    }
 
 private:
     ComPtr<IDXGIFactory6> factory;
@@ -63,6 +67,8 @@ private:
 
     UINT m_xRes;
     UINT m_yRes;
+
+    std::shared_ptr<DebugRenderPass> debugPass;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
