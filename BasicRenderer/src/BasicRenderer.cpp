@@ -174,6 +174,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
     carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
+	auto mountainScene = loadGLB("models/mountain.glb");
+	mountainScene->GetRoot().transform.setLocalScale({ 0.0003, 0.0003, 0.0003 });
+	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+
     //auto cubeScene = loadGLB("models/cube.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
     //auto heightMap = loadTextureFromFile("textures/height.jpg");
@@ -198,8 +202,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.SetCurrentScene(baseScene);
     renderer.GetCurrentScene()->AppendScene(*dragonScene);
     renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    renderer.GetCurrentScene()->AppendScene(*carScene);
+    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    //renderer.GetCurrentScene()->AppendScene(*carScene);
+	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 
@@ -227,7 +232,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     cubeScaleNode->transform.setLocalScale({ 0.1, 0.1, 0.1 });
     cubeScaleNode->AddChild(cubeObject);
     scene->AddNode(cubeScaleNode);
-    scene->AddObject(cubeObject);
+    //scene->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
     animation->addPositionKeyframe(0, { -10, 10, -10 });
@@ -239,12 +244,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
-    cubeObject->animationController->setAnimationClip(animation);
     std::shared_ptr<Light> light1 = std::make_shared<Light>("light1", LightType::Point, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, XMFLOAT3(0, 1, 0), 0.0, 0.0);
-    cubeObject->AddChild(light1);
-    scene->AddLight(light1, true);
+    light1->animationController->setAnimationClip(animation);
+    cubeScaleNode->AddChild(light1);
+    //scene->AddLight(light1, true);
     std::shared_ptr<Light> light2 = std::make_shared<Light>("light2", LightType::Directional, XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, 1, 0));
-    scene->AddLight(light2);
+    scene->AddLight(light2, true);
 
     MSG msg = {};
     auto lastUpdateTime = std::chrono::system_clock::now();
@@ -258,7 +263,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             auto currentTime = std::chrono::system_clock::now();
             std::chrono::duration<double> elapsedSeconds = currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
-            cubeObject->animationController->update(elapsedSeconds.count());
+            light1->animationController->update(elapsedSeconds.count());
 
 
             renderer.Update(elapsedSeconds.count());

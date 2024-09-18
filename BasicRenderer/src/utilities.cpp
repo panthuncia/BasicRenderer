@@ -120,7 +120,7 @@ std::shared_ptr<Texture> loadTextureFromFile(const char* filename) {
 }
 
 DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center) {
-    auto mat = XMMatrixLookAtRH(center, XMVectorAdd(center, lightDir), defaultDirection);
+    auto mat = XMMatrixLookAtRH(center, XMVectorAdd(center, lightDir), XMVectorSet(0, 1, 0, 0));
     return mat;
 }
 

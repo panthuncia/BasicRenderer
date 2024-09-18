@@ -44,6 +44,7 @@ public:
 
     ComPtr<ID3D12PipelineState> GetPSO(UINT psoFlags, BlendState blendState);
     ComPtr<ID3D12RootSignature> GetRootSignature();
+    void ReloadShaders();
 
 private:
     PSOManager() = default;

@@ -70,6 +70,7 @@ void LightManager::RemoveLight(Light* light) {
 
     m_lightBufferHandle.buffer.RemoveAt(index);
     m_lightBufferHandle.buffer.UpdateBuffer();
+	light->RemoveLightObserver(this);
 }
 
 unsigned int LightManager::GetLightBufferDescriptorIndex() {
@@ -114,13 +115,49 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 			spdlog::warn("Camera must be provided for directional light shadow mapping");
 			return -1;
 		}
-		node->SetLightViewInfoIndex(m_directionalViewInfoHandle.buffer.Size());
-		auto cascades = setupCascades(getNumDirectionalLightCascades(), *node, *camera, getDirectionalLightCascadeSplits());
+		auto numCascades = getNumDirectionalLightCascades();
+		node->SetLightViewInfoIndex(m_directionalViewInfoHandle.buffer.Size() / numCascades);
+		auto cascades = setupCascades(numCascades, *node, *camera, getDirectionalLightCascadeSplits());
+		for (int i = 0; i < numCascades; i++) {
+			m_directionalViewInfoHandle.buffer.Add(XMMatrixMultiply(cascades[i].orthoMatrix, cascades[i].viewMatrix));
+		}
 		break;
 	}
 	default:
 		spdlog::warn("Light type not recognized");
 		return -1;
+	}
+}
+
+void LightManager::UpdateLightViewInfo(Light* light) {
+	auto projectionMatrix = light->GetLightProjectionMatrix();
+	switch (light->GetLightType()) {
+	case LightType::Point: {
+		auto cubemapMatrices = light->GetCubemapViewMatrices();
+		for (int i = 0; i < 6; i++) {
+			m_pointViewInfoHandle.buffer.UpdateAt(light->GetCurrentviewInfoIndex()*6+i,XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
+		}
+		break;
+	}
+	case LightType::Spot: {
+		light->SetLightViewInfoIndex(m_spotViewInfoHandle.buffer.Size());
+		m_spotViewInfoHandle.buffer.UpdateAt(light->GetCurrentviewInfoIndex(), XMMatrixMultiply(light->GetLightViewMatrix(), projectionMatrix));
+		break;
+	}
+	case LightType::Directional: {
+		if (m_currentCamera == nullptr) {
+			spdlog::warn("Camera must be provided for directional light shadow mapping");
+			return;
+		}
+		auto numCascades = getNumDirectionalLightCascades();
+		auto cascades = setupCascades(numCascades, *light, *m_currentCamera, getDirectionalLightCascadeSplits());
+		for (int i = 0; i < numCascades; i++) {
+			m_directionalViewInfoHandle.buffer.UpdateAt(light->GetCurrentviewInfoIndex()*numCascades+i, XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix));
+		}
+		break;
+	}
+	default:
+		spdlog::warn("Light type not recognized");
 	}
 }
 
@@ -164,4 +201,12 @@ void LightManager::RemoveLightViewInfo(Light* node) {
 	default:
 		spdlog::warn("Light type not recognized");
 	}
+}
+
+void LightManager::SetCurrentCamera(Camera* camera) {
+	if (m_currentCamera != nullptr) {
+		m_currentCamera->RemoveObserver(this);
+	}
+	m_currentCamera = camera;
+	m_currentCamera->AddObserver(this);
 }

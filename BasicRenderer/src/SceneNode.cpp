@@ -37,6 +37,7 @@ void SceneNode::ForceUpdate() {
     for (auto& childPair : children) {
         childPair.second->ForceUpdate();
     }
+    NotifyObservers();
 }
 
 void SceneNode::AddObserver(ISceneNodeObserver<SceneNode>* observer) {

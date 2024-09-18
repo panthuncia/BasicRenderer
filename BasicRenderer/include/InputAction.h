@@ -10,6 +10,7 @@ enum class InputAction {
     RotateCamera,
     ZoomIn,
     ZoomOut,
+    Reset,
 };
 
 struct InputData {

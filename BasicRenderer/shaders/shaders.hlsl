@@ -5,11 +5,13 @@ struct PerFrameBuffer {
     row_major matrix projection;
     float4 eyePosWorldSpace;
     float4 ambientLighting;
+    float4 shadowCascadeSplits;
     uint lightBufferIndex;
     uint numLights;
     uint pointLightCubemapBufferIndex;
     uint spotLightMatrixBufferIndex;
     uint directionalLightCascadeBufferIndex;
+    uint numShadowCascades;
 };
 
 cbuffer PerObject : register(b1) {
@@ -494,6 +496,70 @@ float3 reinhardJodie(float3 color) {
     return lerp(reinhardLuminance, reinhardPerChannel, reinhardPerChannel);
 }
 
+float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, matrix lightMatrix) {
+    float3 dir = light.posWorldSpace.xyz-fragPosWorldSpace.xyz;
+
+    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
+    float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    uv = uv * 0.5 + 0.5;
+    float shadow = 0.0;
+
+    TextureCube<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
+    SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
+    float closestDepth = shadowMap.Sample(shadowSampler, dir);
+    float currentDepth = uv.z;
+    float bias = 0.0002;
+    shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+    return shadow;
+}
+
+int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 cascadeSplits) {
+    for (int i = 0; i < numCascadeSplits; i++) {
+        if (depth < cascadeSplits[i]) {
+            return i;
+        }
+    }
+    return numCascadeSplits - 1;
+}
+
+
+float calculateCascadedShadow(float4 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<float4> cascadeViewBuffer) {
+    float depth = abs(fragPosViewSpace.z);
+    int cascadeIndex = calculateShadowCascadeIndex(depth, numCascades, cascadeSplits);
+
+    int infoIndex = numCascades * light.shadowViewInfoIndex + cascadeIndex;
+    matrix lightMatrix = loadMatrixFromBuffer(cascadeViewBuffer, infoIndex);
+    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
+    float3 uv = fragPosLightSpace.xyz; /// fragPosLightSpace.w;
+    uv = uv * 0.5 + 0.5; // Map to [0, 1]
+            // Because OpenGL ES lacks CLAMP_TO_BORDER...
+    bool isOutside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || uv.z > 1.0;
+    float shadow = 0.0;
+    // Kind of a hack, not quite sure why I'm getting texcoords outside of bounds on fragments within the split distance
+    // This just steps up one cascade if that happens.
+    if (isOutside && cascadeIndex != numCascades - 1) {
+        cascadeIndex += 1;
+        infoIndex += 1;
+        fragPosLightSpace = mul(fragPosWorldSpace, loadMatrixFromBuffer(cascadeViewBuffer, infoIndex));
+        uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
+        uv = uv * 0.5 + 0.5; // Map to [0, 1]
+        isOutside = false;
+    }
+    if (!isOutside) {
+        Texture2D<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
+        SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
+        float closestDepth = shadowMap.Sample(shadowSampler, uv.xy);
+        float currentDepth = uv.z;
+
+            //float cosTheta = abs(dot(normal, u_lightDirViewSpace[lightIndex].xyz));
+        float bias = 0.0002;
+            //float slopeScaledBias = 0.0000;
+            //float bias = max(constantBias, slopeScaledBias*cosTheta);
+        shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+    }
+    return shadow;
+}
+
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
 #if defined(SHADOW)
@@ -575,14 +641,37 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif // VERTEX_COLORS
     
     float3 lighting = float3(0.0, 0.0, 0.0);
+    StructuredBuffer<float4> pointShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
+    StructuredBuffer<float4> spotShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
+    StructuredBuffer<float4> directionalShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+    
     for (uint i = 0; i < perFrameBuffer.numLights; i++) {
         LightInfo light = lights[i];
+        float shadow = 0.0;
 #if defined (PARALLAX)
         lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN, materialInfo.heightMapScale);
 #else
         lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
 #endif
-
+        if(light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
+            switch(light.type) {
+                case 0:{ // Point light
+                        matrix lightMatrix = loadMatrixFromBuffer(pointShadowViewInfoBuffer, light.shadowViewInfoIndex);
+                        shadow = calculatePointShadow(input.positionWorldSpace, i, light, lightMatrix);
+                        break;
+                    }
+                case 1: { // Spot light
+                        matrix lightMatrix = loadMatrixFromBuffer(spotShadowViewInfoBuffer, light.shadowViewInfoIndex);
+                        //shadow = calculateSpotShadow(input.positionWorldSpace, i, light, lightMatrix);
+                        break;
+                    }
+                case 2:{// Directional light
+                        shadow = calculateCascadedShadow(input.positionWorldSpace, input.position.xyz, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
+                        break;
+                    }
+            }
+        }
+        lighting *= (1.0 - shadow);
     }
 #if defined(AO_TEXTURE)
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
@@ -592,7 +681,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #else
     float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz;
 #endif // AO_TEXTURE
-    lighting += ambient;
+    //lighting += ambient;
 #if defined(VERTEX_COLORS)
     lighting = lighting * input.color.xyz;
 #endif

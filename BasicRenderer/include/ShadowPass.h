@@ -31,14 +31,13 @@ public:
 		commandList->RSSetScissorRects(1, &scissorRect);
 
 		// Set the render target
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+		//CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
+		//commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		// Clear the render target
-		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-		commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+		//const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+		//commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -89,7 +88,9 @@ public:
 			}
 			switch (light->GetLightType()) {
 				case LightType::Spot: {
-					commandList->OMSetRenderTargets(1, nullptr, TRUE, &shadowMap->GetHandle().DSVInfo[0].cpuHandle);
+					auto& dsvHandle = shadowMap->GetHandle().DSVInfo[0].cpuHandle;
+					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 					int lightViewIndex = light->GetCurrentviewInfoIndex();
@@ -99,9 +100,11 @@ public:
 				}
 				case LightType::Point: {
 					int lightIndex = light->GetCurrentLightBufferIndex();
-					int lightViewIndex = light->GetCurrentviewInfoIndex();
+					int lightViewIndex = light->GetCurrentviewInfoIndex()*6;
 					for (int i = 0; i < 6; i++) {
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &shadowMap->GetHandle().DSVInfo[i].cpuHandle);
+						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
+						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 						lightViewIndex += 1;
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
@@ -110,10 +113,12 @@ public:
 					break;
 				}
 					case LightType::Directional: {
-					int lightViewIndex = light->GetCurrentviewInfoIndex();
+					int lightViewIndex = light->GetCurrentviewInfoIndex()*getNumDirectionalLightCascades();
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &shadowMap->GetHandle().DSVInfo[i].cpuHandle);
+						auto& dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
+						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 						lightViewIndex += 1;
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);

@@ -3,6 +3,7 @@
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
 #include "DynamicStructuredBuffer.h"
+#include "SettingsManager.h"
 
 void ResourceManager::Initialize() {
     //for (int i = 0; i < 3; i++) {
@@ -29,6 +30,21 @@ void ResourceManager::Initialize() {
         IID_PPV_ARGS(&perFrameConstantBuffer)));
 
     perFrameCBData.ambientLighting = XMVectorSet(0.1, 0.1, 0.1, 1.0);
+    perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+    auto shadowCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits")();
+    switch (perFrameCBData.numShadowCascades) {
+	case 1:
+        perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], 0, 0, 0);
+		break;
+	case 2:
+		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], 0, 0);
+		break;
+	case 3:
+		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], 0);
+		break;
+	case 4:
+		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], shadowCascadeSplits[3]);
+    }
 
     // Map the constant buffer and initialize it
 
@@ -372,12 +388,18 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     // Create the committed resource
     D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     ComPtr<ID3D12Resource> textureResource;
+
+    D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
+    depthOptimizedClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
+    depthOptimizedClearValue.DepthStencil.Stencil = 0;
+
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &textureDesc,
         D3D12_RESOURCE_STATE_COMMON,
-        nullptr,
+        DSV ? &depthOptimizedClearValue : nullptr,
         IID_PPV_ARGS(&textureResource)));
 
     // Allocate descriptor and create shader resource view
@@ -562,12 +584,18 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
 
     D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     ComPtr<ID3D12Resource> textureResource;
+
+    D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
+    depthOptimizedClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
+    depthOptimizedClearValue.DepthStencil.Stencil = 0;
+
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &textureDesc,
         D3D12_RESOURCE_STATE_COMMON,
-        nullptr,
+        DSV ? &depthOptimizedClearValue : nullptr,
         IID_PPV_ARGS(&textureResource)));
 
     UINT srvDescriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();

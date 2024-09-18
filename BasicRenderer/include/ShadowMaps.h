@@ -27,10 +27,10 @@ public:
 			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, false, true, false);
 			break;
 		case LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, false, true, false);
+			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, false, false, true, false);
 			break;
 		case LightType::Directional: // Texture array
-			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, true, false);
+			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, false, true, false);
 			break;
 
 		}

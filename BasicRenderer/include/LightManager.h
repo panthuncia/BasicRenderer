@@ -12,7 +12,7 @@
 #include "SettingsManager.h"
 #include "ShadowMaps.h"
 
-class LightManager : public ISceneNodeObserver<Light> {
+class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
 public:
     LightManager();
     void Initialize();
@@ -23,12 +23,22 @@ public:
     unsigned int GetSpotMatricesDescriptorIndex();
     unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
     unsigned int GetNumLights();
+    void SetCurrentCamera(Camera* camera);
+    void OnNodeUpdated(SceneNode* camera) override {
+        for (auto light : m_directionalLights) {
+            UpdateLightViewInfo(light);
+        }
+    }
     void OnNodeUpdated(Light* light) override {
         m_lightBufferHandle.buffer.UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
+		UpdateLightViewInfo(light);
     }
 
     void UpdateGPU() {
         m_lightBufferHandle.buffer.UpdateBuffer();
+		m_spotViewInfoHandle.buffer.UpdateBuffer();
+		m_pointViewInfoHandle.buffer.UpdateBuffer();
+		m_directionalViewInfoHandle.buffer.UpdateBuffer();
     }
 
 private:
@@ -48,8 +58,10 @@ private:
     std::function<uint16_t()> getShadowResolution;
     std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
 
+    Camera* m_currentCamera = nullptr;
+
     unsigned int CreateLightInfo(Light* node);
     unsigned int CreateLightViewInfo(Light* node, Camera* camera = nullptr);
+    void UpdateLightViewInfo(Light* node);
 	void RemoveLightViewInfo(Light* node);
-
 };

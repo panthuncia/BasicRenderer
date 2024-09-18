@@ -189,6 +189,7 @@ void Scene::Update() {
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
     pCamera = std::make_shared<Camera>("MainCamera", lookAt, up, fov, aspect, zNear, zFar);
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, zFar, 100.f));
+    lightManager.SetCurrentCamera(pCamera.get());
     AddNode(pCamera);
 }
 

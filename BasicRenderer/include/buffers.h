@@ -6,11 +6,13 @@ struct PerFrameCB {
     DirectX::XMMATRIX projectionMatrix;
     DirectX::XMVECTOR eyePosWorldSpace;
     DirectX::XMVECTOR ambientLighting;
+    DirectX::XMVECTOR shadowCascadeSplits;
     unsigned int lightBufferIndex;
     unsigned int numLights;
     unsigned int pointLightCubemapBufferIndex;
     unsigned int spotLightMatrixBufferIndex;
     unsigned int directionalLightCascadeBufferIndex;
+	unsigned int numShadowCascades;
 };
 
 struct PerObjectCB {

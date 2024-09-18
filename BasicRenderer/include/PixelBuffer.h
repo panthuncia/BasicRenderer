@@ -15,14 +15,14 @@ public:
     static std::shared_ptr<PixelBuffer> CreateSingleTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false) {
 		return std::shared_ptr<PixelBuffer>(new PixelBuffer(width, height, channels, isCubemap, RTV, DSV, UAV));
     }
-	static std::shared_ptr<PixelBuffer> CreateTextureArray(int width, int height, int channels, int numTextures, bool RTV = false, bool DSV = false, bool UAV = false) {
-		return std::shared_ptr<PixelBuffer>(new PixelBuffer(width, height, channels, numTextures, RTV, DSV, UAV));
+	static std::shared_ptr<PixelBuffer> CreateTextureArray(int width, int height, int channels, int numTextures, bool cubemap = false, bool RTV = false, bool DSV = false, bool UAV = false) {
+		return std::shared_ptr<PixelBuffer>(new PixelBuffer(width, height, channels, numTextures, cubemap, RTV, DSV, UAV));
 	}
     UINT GetSRVDescriptorIndex() const;
 private:
     PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB);
     PixelBuffer(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false);
-    PixelBuffer(int width, int height, int channels, int numTextures, bool RTV = false, bool DSV = false, bool UAV = false);
+    PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false);
 
     TextureHandle<PixelBuffer> handle;
 

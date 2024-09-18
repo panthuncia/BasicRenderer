@@ -18,9 +18,9 @@ PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bo
     handle = resourceManager.CreateTexture(width, height, channels, isCubemap, RTV, DSV, UAV);
 }
 
-PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool RTV, bool DSV, bool UAV) {
+PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, RTV, DSV, UAV);
+    handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, isCubemap, RTV, DSV, UAV);
 }
 
 UINT PixelBuffer::GetSRVDescriptorIndex() const {

@@ -22,8 +22,8 @@
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
     m_yRes = y_res;
-    LoadPipeline(hwnd, x_res, y_res);
     SetSettings();
+    LoadPipeline(hwnd, x_res, y_res);
     CreateRenderGraph();
 }
 
@@ -362,6 +362,9 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
     context.SetActionHandler(InputAction::ZoomOut, [this](float magnitude, const InputData& inputData) {
         // TODO
         });
+	context.SetActionHandler(InputAction::Reset, [this](float magnitude, const InputData& inputData) {
+        PSOManager::getInstance().ReloadShaders();
+		});
 }
 
 void DX12Renderer::CreateRenderGraph() {

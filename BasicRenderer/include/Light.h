@@ -48,6 +48,7 @@ public:
 
 	void SetLightViewInfoIndex(int index) {
 		m_currentLightViewInfoIndex = index;
+		m_lightInfo.shadowViewInfoIndex = index;
 	}
 
 	void AddLightObserver(ISceneNodeObserver<Light>* observer);

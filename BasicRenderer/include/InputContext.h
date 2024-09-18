@@ -46,22 +46,55 @@ public:
         switch (message) {
         case WM_KEYDOWN: {
             WPARAM key = toupper(wParam);
-            if (key == 'W') TriggerAction(InputAction::MoveForward, magnitude, inputData);
-            else if (key == 'S') TriggerAction(InputAction::MoveBackward, magnitude, inputData);
-            else if (key == 'A') TriggerAction(InputAction::MoveLeft, magnitude, inputData);
-            else if (key == 'D') TriggerAction(InputAction::MoveRight, magnitude, inputData);
-            else if (key == 16) TriggerAction(InputAction::MoveDown, magnitude, inputData);
-            else if (key == ' ') TriggerAction(InputAction::MoveUp, magnitude, inputData);
+            switch (key) {
+			case 'W':
+                TriggerAction(InputAction::MoveForward, magnitude, inputData);
+				break;
+			case 'S':
+				TriggerAction(InputAction::MoveBackward, magnitude, inputData);
+				break;
+			case 'A':
+				TriggerAction(InputAction::MoveLeft, magnitude, inputData);
+				break;
+			case 'D':
+				TriggerAction(InputAction::MoveRight, magnitude, inputData);
+				break;
+			case 16:
+				TriggerAction(InputAction::MoveDown, magnitude, inputData);
+				break;
+			case ' ':
+				TriggerAction(InputAction::MoveUp, magnitude, inputData);
+				break;
+			case 'R':
+				TriggerAction(InputAction::Reset, magnitude, inputData);
+				break;
+            }
+           
+
             break;
         } case WM_KEYUP: {
             WPARAM key = toupper(wParam);
-            if (key == 'W') TriggerAction(InputAction::MoveForward, 0.0f, inputData);
-            else if (key == 'S') TriggerAction(InputAction::MoveBackward, 0.0f, inputData);
-            else if (key == 'A') TriggerAction(InputAction::MoveLeft, 0.0f, inputData);
-            else if (key == 'D') TriggerAction(InputAction::MoveRight, 0.0f, inputData);
-            else if (key == 16) TriggerAction(InputAction::MoveDown, 0.0f, inputData);
-            else if (key == ' ') TriggerAction(InputAction::MoveUp, 0.0f, inputData);
-            break;
+			switch (key) {
+			case 'W':
+				TriggerAction(InputAction::MoveForward, 0.0f, inputData);
+				break;
+			case 'S':
+				TriggerAction(InputAction::MoveBackward, 0.0f, inputData);
+				break;
+			case 'A':
+				TriggerAction(InputAction::MoveLeft, 0.0f, inputData);
+				break;
+			case 'D':
+				TriggerAction(InputAction::MoveRight, 0.0f, inputData);
+				break;
+			case 16:
+				TriggerAction(InputAction::MoveDown, 0.0f, inputData);
+				break;
+			case ' ':
+				TriggerAction(InputAction::MoveUp, 0.0f, inputData);
+				break;
+			}
+			break;
         }
         case WM_LBUTTONDOWN:
             mousedown = true;
