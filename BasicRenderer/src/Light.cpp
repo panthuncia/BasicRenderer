@@ -9,18 +9,21 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	m_lightInfo.posWorldSpace = XMLoadFloat3(&position);
 	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
 	m_lightInfo.color *= intensity;
-	m_lightInfo.attenuation = XMVectorSet(constantAttenuation, linearAttenuation, quadraticAttenuation, 0.0); // TODO: max range
+	float nearPlane = 0.07;
+	float farPlane = 5.0;
+	m_lightInfo.attenuation = XMVectorSet(constantAttenuation, linearAttenuation, quadraticAttenuation, 0);
 	m_lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
 	m_lightInfo.innerConeAngle = innerConeAngle;
 	m_lightInfo.outerConeAngle = outerConeAngle;
 	m_lightInfo.shadowViewInfoIndex = -1;
-
+	m_lightInfo.nearPlane = nearPlane;
+	m_lightInfo.farPlane = farPlane;
 	transform.setLocalPosition(position);
 	transform.setDirection(direction);
 
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 
-	CreateProjectionMatrix();
+	CreateProjectionMatrix(nearPlane, farPlane);
 }
 
 Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction) : SceneNode(name) {
@@ -31,21 +34,27 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	m_lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
 	m_lightInfo.shadowViewInfoIndex = -1;
 	m_lightInfo.attenuation = XMVectorSet(0, 0, 0, 0);
+	float nearPlane = 0.07;
+	float farPlane = 5.0;
+	m_lightInfo.nearPlane = nearPlane;
+	m_lightInfo.farPlane = farPlane;
 
 	transform.setLocalPosition(position);
 	transform.setDirection(direction);
 
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-
-	CreateProjectionMatrix();
+	CreateProjectionMatrix(nearPlane, farPlane);
 
 }
 
 Light::Light(LightInfo& lightInfo) : SceneNode(name) {
 	m_lightInfo = lightInfo;
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-
-	CreateProjectionMatrix();
+	float nearPlane = 0.07;
+	float farPlane = 5.0;
+	m_lightInfo.nearPlane = nearPlane;
+	m_lightInfo.farPlane = farPlane;
+	CreateProjectionMatrix(nearPlane, farPlane);
 }
 
 LightInfo& Light::GetLightInfo() {
@@ -126,43 +135,51 @@ LightType Light::GetLightType() const {
 	return (LightType)m_lightInfo.type;
 }
 
-void Light::CreateProjectionMatrix() {
+void Light::CreateProjectionMatrix(float nearPlane, float farPlane) {
 	float aspect = 1.0f;
-	float nearZ = 0.07f;
-	float farZ = 70.0f;
 
 	switch ((LightType)m_lightInfo.type) {
 	case LightType::Spot:
-		m_lightProjection = XMMatrixPerspectiveFovRH(this->m_lightInfo.outerConeAngle * 2, aspect, nearZ, farZ);
+		m_lightProjection = XMMatrixPerspectiveFovRH(this->m_lightInfo.outerConeAngle * 2, aspect, farPlane, nearPlane);
 		break;
 	case LightType::Point:
-		m_lightProjection = XMMatrixPerspectiveFovRH(XM_PI / 2, aspect, nearZ, farZ);
+		m_lightProjection = XMMatrixPerspectiveFovRH(XM_PI / 2, aspect, nearPlane, farPlane);
 		break;
 	}
 }
 
 std::array<DirectX::XMMATRIX, 6> Light::GetCubemapViewMatrices() {
 	// Define directions and up vectors for the six faces of the cubemap
-	struct DirectionSet {
-		XMVECTOR dir;
-		XMVECTOR up;
+	// Directions for the cubemap faces
+	XMVECTOR targets[6] = {
+		XMVectorSet(1.0f,  0.0f,  0.0f, 0.0f), // +X
+		XMVectorSet(-1.0f,  0.0f,  0.0f, 0.0f), // -X
+		XMVectorSet(0.0f,  1.0f,  0.0f, 0.0f), // +Y
+		XMVectorSet(0.0f, -1.0f,  0.0f, 0.0f), // -Y
+		XMVectorSet(0.0f,  0.0f, -1.0f, 0.0f), // +Z
+		XMVectorSet(0.0f,  0.0f, 1.0f, 0.0f), // -Z
 	};
-	const std::array<DirectionSet, 6> directions = {
-		DirectionSet{XMVectorSet(1, 0, 0, 0), XMVectorSet(0, 1, 0, 0)},
-		DirectionSet{XMVectorSet(-1, 0, 0, 0), XMVectorSet(0, 1, 0, 0)},
-		DirectionSet{XMVectorSet(0, 1, 0, 0), XMVectorSet(0, 0, 1, 0)},
-		DirectionSet{XMVectorSet(0, -1, 0, 0), XMVectorSet(0, 0, -1, 0)},
-		DirectionSet{XMVectorSet(0, 0, 1, 0), XMVectorSet(0, 1, 0, 0)},
-		DirectionSet{XMVectorSet(0, 0, -1, 0), XMVectorSet(0, 1, 0, 0)},
+
+	// Up vectors for the cubemap faces
+	XMVECTOR ups[6] = {
+		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // +X
+		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // -X
+		XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), // +Y
+		XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), // -Y
+		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // +Z
+		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // -Z
 	};
 
 	std::array<XMMATRIX, 6> viewMatrices{};
 	auto posVec = transform.getGlobalPosition();
-	XMVECTOR pos = XMLoadFloat3(&posVec);
+	XMVECTOR lightPos = XMLoadFloat3(&posVec);
 
-	for (int i = 0; i < directions.size(); ++i) {
-		XMVECTOR target = XMVectorAdd(pos, directions[i].dir);
-		viewMatrices[i] = XMMatrixLookAtRH(pos, target, directions[i].up);
+	for (int i = 0; i < 6; ++i) {
+ 		viewMatrices[i] = XMMatrixLookToRH(
+			lightPos,     // Eye position
+			targets[i],   // Look direction
+			ups[i]        // Up direction
+		);
 	}
 
 	return viewMatrices;

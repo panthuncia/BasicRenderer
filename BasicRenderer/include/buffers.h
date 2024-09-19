@@ -62,9 +62,10 @@ struct LightInfo {
     int shadowViewInfoIndex;
     DirectX::XMVECTOR posWorldSpace; // Position of the lights
     DirectX::XMVECTOR dirWorldSpace; // Direction of the lights
-    DirectX::XMVECTOR attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
+    DirectX::XMVECTOR attenuation; // x,y,z = constant, linear, quadratic attenuation
     DirectX::XMVECTOR color; // Color of the lights
+    float nearPlane;
+    float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
-    int pad[2];
 };

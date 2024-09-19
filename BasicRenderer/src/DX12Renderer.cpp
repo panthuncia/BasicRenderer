@@ -389,6 +389,6 @@ void DX12Renderer::CreateRenderGraph() {
 
     currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
-	currentRenderGraph->AddPass(debugPass, debugPassParameters);
+	//currentRenderGraph->AddPass(debugPass, debugPassParameters);
 	currentRenderGraph->Compile();
 }

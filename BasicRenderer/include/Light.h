@@ -80,7 +80,7 @@ private:
 	void NotifyLightObservers();
 	void UpdateLightInfo();
 	void CreateFrameConstantBuffers();
-	void CreateProjectionMatrix();
+	void CreateProjectionMatrix(float nearPlane, float farPlane);
 
 	std::function<uint8_t()> getNumCascades;
 

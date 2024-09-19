@@ -46,9 +46,10 @@ struct LightInfo {
     float4 dirWorldSpace; // Direction of the light
     float4 attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
     float4 color; // Color of the light
+    float nearPlane;
+    float farPlane;
     int shadowMapIndex;
     int shadowSamplerIndex;
-    int pad[2];
 };
 
 struct MaterialInfo {
@@ -109,7 +110,8 @@ struct VSInput {
 struct PSInput {
     float4 position : SV_POSITION;
     float4 positionWorldSpace : TEXCOORD3;
-    float3 normalWorldSpace : TEXCOORD4;
+    float4 positionViewSpace : TEXCOORD4;
+    float3 normalWorldSpace : TEXCOORD5;
     float4 color : COLOR;
 };
 #else
@@ -502,18 +504,21 @@ float3 reinhardJodie(float3 color) {
     return lerp(reinhardLuminance, reinhardPerChannel, reinhardPerChannel);
 }
 
-float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, matrix lightMatrix) {
-    float3 dir = light.posWorldSpace.xyz-fragPosWorldSpace.xyz;
+float linearizeDepth(float d, float zNear, float zFar) {
+    return zNear * zFar / (zFar + d * (zNear - zFar));
+}
 
-    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
-    float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    uv = uv * 0.5 + 0.5;
+float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, matrix lightMatrix) {
+    float3 lightToFrag = fragPosWorldSpace.xyz-light.posWorldSpace.xyz;
+    lightToFrag.z = -lightToFrag.z;
+    float currentDepth = length(lightToFrag);
     float shadow = 0.0;
 
     TextureCube<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.Sample(shadowSampler, dir);
-    float currentDepth = uv.z;
+    float closestDepth = shadowMap.Sample(shadowSampler, lightToFrag);
+    closestDepth = linearizeDepth(closestDepth, light.nearPlane, light.farPlane)*light.farPlane; // linearize to 0-1, scale to far plane
+   
     float bias = 0.0002;
     shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
@@ -545,7 +550,6 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace,
     if (isOutside) {
         return 0;
         }
-
 
     Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
