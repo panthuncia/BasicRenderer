@@ -179,7 +179,7 @@ DirectX::XMMATRIX Light::GetLightProjectionMatrix() {
 // Returns a 3-axis direction vector
 DirectX::XMVECTOR Light::GetLightDir() {
 	// Extract the forward vector (Z-axis)
-	return transform.modelMatrix.r[2];
+	return -XMVector3Normalize(transform.modelMatrix.r[2]);
 }
 
 void Light::SetShadowMap(std::shared_ptr<Texture> shadowMap) {

@@ -214,7 +214,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     float fov = 80.0f * (XM_PI / 180.0f); // Converting degrees to radians
     float aspectRatio;
     float zNear = 0.1f;
-    float zFar = 1000.0f;
+    float zFar = 10.0f;
 
 
     int clientWidth = x_res; // TODO

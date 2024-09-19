@@ -16,6 +16,8 @@ class ShadowPass : public RenderPass {
 public:
 	ShadowPass(std::shared_ptr<ResourceGroup> shadowMaps) {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+		getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
+
 	}
 	void Setup() override {
 		// Setup the render pass
@@ -25,8 +27,9 @@ public:
 		auto& psoManager = PSOManager::getInstance();
 		auto& commandList = context.commandList;
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
-		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
+		auto shadowRes = getShadowResolution();
+		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, shadowRes, shadowRes);
+		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, shadowRes, shadowRes);
 		commandList->RSSetViewports(1, &viewport);
 		commandList->RSSetScissorRects(1, &scissorRect);
 
@@ -136,4 +139,6 @@ public:
 
 private:
 	std::function<uint8_t()> getNumDirectionalLightCascades;
+	std::function<uint16_t()> getShadowResolution;
+
 };

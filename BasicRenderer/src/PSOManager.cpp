@@ -84,7 +84,8 @@ void PSOManager::CreateDebugPSO() {
     CompileShader(L"shaders/debug.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
     static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
     };
 
     D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
@@ -218,7 +219,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     }
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     psoDesc.RasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::DOUBLE_SIDED) {
+    if (psoFlags & PSOFlags::DOUBLE_SIDED || psoFlags & PSOFlags::SHADOW) {
         psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     }
     psoDesc.BlendState = GetBlendDesc(blendState);

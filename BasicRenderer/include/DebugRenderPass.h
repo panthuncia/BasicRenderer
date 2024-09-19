@@ -24,7 +24,6 @@ public:
         auto& commandList = context.commandList;
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.xRes, context.yRes);
         CD3DX12_RECT scissorRect(0, 0, context.xRes, context.yRes);
@@ -42,8 +41,8 @@ public:
 
         commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
 
-        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
     }
 
     void Cleanup(RenderContext& context) override {
@@ -62,20 +61,23 @@ private:
 
     struct DebugVertex {
         XMFLOAT3 position;
+        XMFLOAT2 texcoord;
     };
 
     // Define the vertices for the full-screen triangle
-    DebugVertex fullscreenTriangleVertices[3] = {
-        { XMFLOAT3(-1.0f,  1.0f, 0.0f) },  // Top-left
-        { XMFLOAT3(3.0f,  1.0f, 0.0f) },  // Out of bounds to the right
-        { XMFLOAT3(-1.0f, -3.0f, 0.0f) }   // Out of bounds below
+    DebugVertex fullscreenTriangleVertices[4] = {
+        { XMFLOAT3(-1.0f,  1.0f, 0.0f), XMFLOAT2(0.0, 0.0)},
+        { XMFLOAT3(1.0f,  1.0f, 0.0f), XMFLOAT2(1.0, 0.0) },
+        { XMFLOAT3(-1.0f, -1.0f, 0.0f), XMFLOAT2(0.0, 1.0) },
+        { XMFLOAT3(1.0f, -1.0f, 0.0f), XMFLOAT2(1.0, 1.0) }
+
     };
 
     // Create the vertex buffer for the full-screen triangle
     D3D12_VERTEX_BUFFER_VIEW CreateFullscreenTriangleVertexBuffer(ID3D12Device* device) {
         ComPtr<ID3D12Resource> vertexBuffer;
 
-        const UINT vertexBufferSize = static_cast<UINT>(3 * sizeof(DebugVertex));
+        const UINT vertexBufferSize = static_cast<UINT>(4 * sizeof(DebugVertex));
 
         // Create a default heap for the vertex buffer
         CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);

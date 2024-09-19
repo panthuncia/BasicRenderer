@@ -529,40 +529,28 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
 }
 
 
-float calculateCascadedShadow(float4 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<float4> cascadeViewBuffer) {
+float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<float4> cascadeViewBuffer) {
+    
     float depth = abs(fragPosViewSpace.z);
     int cascadeIndex = calculateShadowCascadeIndex(depth, numCascades, cascadeSplits);
 
     int infoIndex = numCascades * light.shadowViewInfoIndex + cascadeIndex;
     matrix lightMatrix = loadMatrixFromBuffer(cascadeViewBuffer, infoIndex);
     float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
-    float3 uv = fragPosLightSpace.xyz; /// fragPosLightSpace.w;
-    uv = uv * 0.5 + 0.5; // Map to [0, 1]
-            // Because OpenGL ES lacks CLAMP_TO_BORDER...
-    //bool isOutside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || uv.z > 1.0;
-    float shadow = 0.0;
-    // Kind of a hack, not quite sure why I'm getting texcoords outside of bounds on fragments within the split distance
-    // This just steps up one cascade if that happens.
-    //if (isOutside && cascadeIndex != numCascades - 1) {
-    //    cascadeIndex += 1;
-    //    infoIndex += 1;
-    //    fragPosLightSpace = mul(fragPosWorldSpace, loadMatrixFromBuffer(cascadeViewBuffer, infoIndex));
-    //    uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    //    uv = uv * 0.5 + 0.5; // Map to [0, 1]
-    //    isOutside = false;
-    //}
-    //if (!isOutside) {
-        Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
-        SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.Sample(shadowSampler, float3(uv.xy, cascadeIndex));
-        float currentDepth = uv.z;
+    float3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
+    projCoords.y = 1.0 - projCoords.y;
 
-            //float cosTheta = abs(dot(normal, u_lightDirViewSpace[lightIndex].xyz));
-        float bias = 0.0002;
-            //float slopeScaledBias = 0.0000;
-            //float bias = max(constantBias, slopeScaledBias*cosTheta);
-        shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
-    //}
+
+    Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
+    SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
+    float closestDepth = shadowMap.Sample(shadowSampler, float3(projCoords.xy, cascadeIndex)).r;
+
+    float currentDepth = projCoords.z;
+    
+    float bias = 0.0002;
+
+    float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
 }
 
@@ -668,7 +656,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                         break;
                     }
                 case 2:{// Directional light
-                        shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace.xyz, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
+                        shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
                         break;
                     }
             }
@@ -703,6 +691,9 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     lighting = LinearToSRGB(lighting);
 #endif
     
+    //float depth = abs(input.positionViewSpace.z);
+    
     float opacity = baseColor.a;
+    //return float4(depth, depth, depth, opacity);
     return float4(lighting, opacity);
 }

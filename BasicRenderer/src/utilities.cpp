@@ -131,9 +131,9 @@ std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera
         float size = cascadeSplits[i];
         auto pos = camera.transform.getGlobalPosition();
         XMVECTOR camPos = XMLoadFloat3(&pos);
-        XMVECTOR center = XMVectorSet(XMVectorGetX(camPos), 0.0f, XMVectorGetZ(camPos), 0.0f);
+        XMVECTOR center = XMVectorSet(XMVectorGetX(camPos), 0.0f, XMVectorGetZ(camPos), 1.0f);
         XMMATRIX viewMatrix = createDirectionalLightViewMatrix(light.GetLightDir(), center);
-        XMMATRIX orthoMatrix = XMMatrixOrthographicRH(size, size, -20.0f, 100.0f);
+        XMMATRIX orthoMatrix = XMMatrixOrthographicRH(size, size, -20.0f, 20.0f);
 
         cascades.push_back({ size, center, orthoMatrix, viewMatrix });
     }
