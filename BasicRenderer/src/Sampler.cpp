@@ -23,7 +23,7 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 std::shared_ptr<Sampler> Sampler::GetDefaultShadowSampler() {
 	if (m_defaultShadowSampler == nullptr) {
 		D3D12_SAMPLER_DESC samplerDesc = {};
-		samplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+		samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
 		samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;

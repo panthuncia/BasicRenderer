@@ -537,16 +537,21 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace,
     int infoIndex = numCascades * light.shadowViewInfoIndex + cascadeIndex;
     matrix lightMatrix = loadMatrixFromBuffer(cascadeViewBuffer, infoIndex);
     float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
-    float3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    projCoords.xy = projCoords.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
-    projCoords.y = 1.0 - projCoords.y;
+    float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
+    uv.y = 1.0 - uv.y;
+
+    bool isOutside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || uv.z > 1.0;
+    if (isOutside) {
+        return 0;
+        }
 
 
     Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.Sample(shadowSampler, float3(projCoords.xy, cascadeIndex)).r;
+    float closestDepth = shadowMap.Sample(shadowSampler, float3(uv.xy, cascadeIndex)).r;
 
-    float currentDepth = projCoords.z;
+    float currentDepth = uv.z;
     
     float bias = 0.0002;
 

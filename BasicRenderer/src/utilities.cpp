@@ -124,18 +124,95 @@ DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR c
     return mat;
 }
 
+void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPlane, std::array<XMVECTOR, 8>& corners) {
+    float fovY = camera.GetFOV();
+    float aspectRatio = camera.GetAspect();
+
+    // Calculate the dimensions of the near and far planes
+    float tanHalfFovy = tanf(fovY / 2.0f);
+    float nearHeight = 2.0f * tanHalfFovy * nearPlane;
+    float nearWidth = nearHeight * aspectRatio;
+
+    float farHeight = 2.0f * tanHalfFovy * farPlane;
+    float farWidth = farHeight * aspectRatio;
+
+    // Get camera basis vectors
+    XMVECTOR camPos = XMLoadFloat3(&camera.transform.pos);
+    XMVECTOR camDir = camera.transform.GetForward();
+    XMVECTOR camUp = camera.transform.GetUp();
+    XMVECTOR camRight = XMVector3Cross(camDir, camUp);
+
+    // Near plane center
+    XMVECTOR nearCenter = camPos + camDir * nearPlane;
+    // Far plane center
+    XMVECTOR farCenter = camPos + camDir * farPlane;
+
+    // Calculate the corners
+    // Near plane
+    corners[0] = nearCenter + (camUp * (nearHeight / 2.0f)) - (camRight * (nearWidth / 2.0f)); // Top-left
+    corners[1] = nearCenter + (camUp * (nearHeight / 2.0f)) + (camRight * (nearWidth / 2.0f)); // Top-right
+    corners[2] = nearCenter - (camUp * (nearHeight / 2.0f)) - (camRight * (nearWidth / 2.0f)); // Bottom-left
+    corners[3] = nearCenter - (camUp * (nearHeight / 2.0f)) + (camRight * (nearWidth / 2.0f)); // Bottom-right
+
+    // Far plane
+    corners[4] = farCenter + (camUp * (farHeight / 2.0f)) - (camRight * (farWidth / 2.0f)); // Top-left
+    corners[5] = farCenter + (camUp * (farHeight / 2.0f)) + (camRight * (farWidth / 2.0f)); // Top-right
+    corners[6] = farCenter - (camUp * (farHeight / 2.0f)) - (camRight * (farWidth / 2.0f)); // Bottom-left
+    corners[7] = farCenter - (camUp * (farHeight / 2.0f)) + (camRight * (farWidth / 2.0f)); // Bottom-right
+}
+
 std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera, const std::vector<float>& cascadeSplits) {
     std::vector<Cascade> cascades;
 
-    for (int i = 0; i < numCascades; ++i) {
-        float size = cascadeSplits[i];
-        auto pos = camera.transform.getGlobalPosition();
-        XMVECTOR camPos = XMLoadFloat3(&pos);
-        XMVECTOR center = XMVectorSet(XMVectorGetX(camPos), 0.0f, XMVectorGetZ(camPos), 1.0f);
-        XMMATRIX viewMatrix = createDirectionalLightViewMatrix(light.GetLightDir(), center);
-        XMMATRIX orthoMatrix = XMMatrixOrthographicRH(size, size, -20.0f, 20.0f);
+    // Get the light's direction
+    XMVECTOR lightDir = light.GetLightDir();
+    // Compute the light's view matrix
+    XMVECTOR lightPos = XMVectorZero(); // For directional lights, position can be zero
+    XMVECTOR lightTarget = lightDir;
+    XMVECTOR lightUp = XMVectorSet(0, 1, 0, 0);
+    XMMATRIX lightViewMatrix = XMMatrixLookAtRH(lightPos, lightTarget, lightUp);
 
-        cascades.push_back({ size, center, orthoMatrix, viewMatrix });
+    float prevSplitDist = camera.GetNear();
+
+    for (int i = 0; i < numCascades; ++i)
+    {
+        float splitDist = cascadeSplits[i];
+
+        // Calculate frustum corners for the cascade
+        std::array<XMVECTOR, 8> frustumCornersWorld;
+        CalculateFrustumCorners(camera, prevSplitDist, splitDist, frustumCornersWorld);
+
+        // Transform corners to light space
+        std::array<XMVECTOR, 8> frustumCornersLightSpace;
+        for (int j = 0; j < 8; ++j)
+        {
+            frustumCornersLightSpace[j] = XMVector3Transform(frustumCornersWorld[j], lightViewMatrix);
+        }
+
+        // Compute the bounding box
+        XMVECTOR minPoint = frustumCornersLightSpace[0];
+        XMVECTOR maxPoint = frustumCornersLightSpace[0];
+
+        for (int j = 1; j < 8; ++j)
+        {
+            minPoint = XMVectorMin(minPoint, frustumCornersLightSpace[j]);
+            maxPoint = XMVectorMax(maxPoint, frustumCornersLightSpace[j]);
+        }
+
+        float minX = XMVectorGetX(minPoint);
+        float maxX = XMVectorGetX(maxPoint);
+        float minY = XMVectorGetY(minPoint);
+        float maxY = XMVectorGetY(maxPoint);
+        float minZ = XMVectorGetZ(minPoint);
+        float maxZ = XMVectorGetZ(maxPoint);
+
+        // Build the orthographic projection matrix
+        XMMATRIX orthoMatrix = XMMatrixOrthographicOffCenterRH(minX, maxX, minY, maxY, minZ - 20.0f, maxZ + 20.0f);
+
+        // Store the cascade data
+        cascades.push_back({ splitDist, orthoMatrix, lightViewMatrix });
+
+        prevSplitDist = splitDist;
     }
 
     return cascades;

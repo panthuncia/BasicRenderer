@@ -120,3 +120,10 @@ Transform Transform::copy() const {
     transform.isDirty = true;
     return transform;
 }
+
+XMVECTOR Transform::GetForward() const {
+    return -XMVector3Normalize(modelMatrix.r[2]);
+}
+XMVECTOR Transform::GetUp() const {
+    return -XMVector3Normalize(modelMatrix.r[1]);
+}

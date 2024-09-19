@@ -31,8 +31,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 void DX12Renderer::SetSettings() {
 	auto& settingsManager = SettingsManager::GetInstance();
 
-    uint8_t numDirectionalCascades = 1;
-	float maxShadowDistance = 100.0f;
+    uint8_t numDirectionalCascades = 4;
+	float maxShadowDistance = 10.0f;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
@@ -389,6 +389,6 @@ void DX12Renderer::CreateRenderGraph() {
 
     currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
-	//currentRenderGraph->AddPass(debugPass, debugPassParameters);
+	currentRenderGraph->AddPass(debugPass, debugPassParameters);
 	currentRenderGraph->Compile();
 }

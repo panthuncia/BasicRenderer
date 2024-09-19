@@ -21,12 +21,25 @@ public:
         viewProjectionMatrixInverse = XMMatrixInverse(nullptr, viewProjectionMatrix);
     }
 
-    DirectX::XMMATRIX GetViewMatrix() {
+    DirectX::XMMATRIX GetViewMatrix() const {
         return viewMatrix;
     }
-    DirectX::XMMATRIX GetProjectionMatrix() {
+    DirectX::XMMATRIX GetProjectionMatrix() const {
         return projectionMatrix;
     }
+
+    float GetNear() const {
+        return zNear;
+    }
+
+    float GetAspect() const {
+        return aspectRatio;
+    }
+
+    float GetFOV() const {
+        return fieldOfView;
+    }
+
 
 private:
 protected:

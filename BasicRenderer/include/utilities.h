@@ -30,7 +30,6 @@ bool mapHasKeyNotAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
 
 struct Cascade {
     float size;
-    XMVECTOR center;
     XMMATRIX orthoMatrix;
     XMMATRIX viewMatrix;
 };

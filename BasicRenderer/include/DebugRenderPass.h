@@ -33,13 +33,12 @@ public:
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-        const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-        commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-
         commandList->SetPipelineState(m_pso.Get());
         commandList->SetGraphicsRootSignature(psoManager.GetDebugRootSignature().Get());
 
         commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
+		auto viewMatrix = XMMatrixScaling(0.2f, 0.2f, 1.0f);
+        commandList->SetGraphicsRoot32BitConstants(1, 16, &viewMatrix, 0);
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad

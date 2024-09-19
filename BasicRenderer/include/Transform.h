@@ -35,6 +35,8 @@ public:
     void setDirection(const XMFLOAT3& dir);
     void setLocalScale(const XMFLOAT3& newScale);
     void applyMovement(const MovementState& movement, float deltaTime);
+    XMVECTOR GetUp() const;
+    XMVECTOR GetForward() const;
 
     XMFLOAT3 getGlobalPosition() const;
 
