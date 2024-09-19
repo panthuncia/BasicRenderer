@@ -142,12 +142,9 @@ void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPla
     XMVECTOR camUp = camera.transform.GetUp();
     XMVECTOR camRight = XMVector3Cross(camDir, camUp);
 
-    // Near plane center
     XMVECTOR nearCenter = camPos + camDir * nearPlane;
-    // Far plane center
     XMVECTOR farCenter = camPos + camDir * farPlane;
 
-    // Calculate the corners
     // Near plane
     corners[0] = nearCenter + (camUp * (nearHeight / 2.0f)) - (camRight * (nearWidth / 2.0f)); // Top-left
     corners[1] = nearCenter + (camUp * (nearHeight / 2.0f)) + (camRight * (nearWidth / 2.0f)); // Top-right
@@ -164,9 +161,7 @@ void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPla
 std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera, const std::vector<float>& cascadeSplits) {
     std::vector<Cascade> cascades;
 
-    // Get the light's direction
     XMVECTOR lightDir = light.GetLightDir();
-    // Compute the light's view matrix
     XMVECTOR lightPos = XMVectorZero(); // For directional lights, position can be zero
     XMVECTOR lightTarget = lightDir;
     XMVECTOR lightUp = XMVectorSet(0, 1, 0, 0);
@@ -206,10 +201,8 @@ std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera
         float minZ = XMVectorGetZ(minPoint);
         float maxZ = XMVectorGetZ(maxPoint);
 
-        // Build the orthographic projection matrix
         XMMATRIX orthoMatrix = XMMatrixOrthographicOffCenterRH(minX, maxX, minY, maxY, minZ - 20.0f, maxZ + 20.0f);
 
-        // Store the cascade data
         cascades.push_back({ splitDist, orthoMatrix, lightViewMatrix });
 
         prevSplitDist = splitDist;
