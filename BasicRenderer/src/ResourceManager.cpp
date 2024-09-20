@@ -325,10 +325,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     DXGI_FORMAT textureFormat;
     switch (channels) {
     case 1:
-		if (DSV)
-			textureFormat = DXGI_FORMAT_R32_TYPELESS;
-		else
-            textureFormat = DXGI_FORMAT_R8_UNORM;
+		textureFormat = DXGI_FORMAT_R32_TYPELESS;
         break;
     case 3:
         textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -393,13 +390,20 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     depthOptimizedClearValue.Format = DXGI_FORMAT_D32_FLOAT;
     depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
     depthOptimizedClearValue.DepthStencil.Stencil = 0;
+	
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format = DXGI_FORMAT_R32_FLOAT;
+    clearValue.Color[0] = 1.0f;
+    clearValue.Color[1] = 0.0f;
+    clearValue.Color[2] = 0.0f;
+    clearValue.Color[3] = 0.0f;
 
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &textureDesc,
         D3D12_RESOURCE_STATE_COMMON,
-        DSV ? &depthOptimizedClearValue : nullptr,
+        (DSV) ? &depthOptimizedClearValue : (channels == 1) ? &clearValue : nullptr,
         IID_PPV_ARGS(&textureResource)));
 
     // Allocate descriptor and create shader resource view
@@ -519,10 +523,12 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
     std::vector<stbi_uc> expandedImage;
     switch (channels) {
     case 1:
-		if (DSV)
-			textureFormat = DXGI_FORMAT_R32_TYPELESS;
-		else
-			textureFormat = DXGI_FORMAT_R8_UNORM;
+        if (DSV) {
+            textureFormat = DXGI_FORMAT_R32_TYPELESS;
+        }
+        else {
+            textureFormat = DXGI_FORMAT_R32_FLOAT;
+        }
         break;
     case 3:
         textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -558,6 +564,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
     }
     if (DSV) {
         textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    } if (RTV) {
+        textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
     }
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -590,12 +598,19 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
     depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
     depthOptimizedClearValue.DepthStencil.Stencil = 0;
 
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format = DXGI_FORMAT_R32_FLOAT;
+    clearValue.Color[0] = 1.0f;
+    clearValue.Color[1] = 0.0f;
+    clearValue.Color[2] = 0.0f;
+    clearValue.Color[3] = 0.0f;
+
     ThrowIfFailed(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &textureDesc,
         D3D12_RESOURCE_STATE_COMMON,
-        DSV ? &depthOptimizedClearValue : nullptr,
+        (DSV) ? &depthOptimizedClearValue : (channels == 1) ? &clearValue : nullptr,
         IID_PPV_ARGS(&textureResource)));
 
     UINT srvDescriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();

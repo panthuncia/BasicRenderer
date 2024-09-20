@@ -140,7 +140,6 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 		break;
 	}
 	case LightType::Spot: {
-		light->SetLightViewInfoIndex(m_spotViewInfoHandle.buffer.Size());
 		m_spotViewInfoHandle.buffer.UpdateAt(light->GetCurrentviewInfoIndex(), XMMatrixMultiply(light->GetLightViewMatrix(), projectionMatrix));
 		break;
 	}

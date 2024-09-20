@@ -24,19 +24,19 @@ public:
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		switch (light->GetLightType()) {
 		case LightType::Point: // Cubemap
-			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, false, true, false);
+			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, true, false, false);
 			break;
 		case LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, false, false, true, false);
+			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, false, true, false, false);
 			break;
 		case LightType::Directional: // Texture array
-			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, false, true, false);
+			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, true, false, false);
 			break;
 
 		}
 		std::shared_ptr<Texture> map = std::make_shared<Texture>(shadowMap, shadowSampler);
 		light->SetShadowMap(map);
-        AddGloballyIndexedResource(map);
+        AddGloballyIndexedResource(map->GetBuffer());
     }
 
 	void RemoveMap(Light* light) {

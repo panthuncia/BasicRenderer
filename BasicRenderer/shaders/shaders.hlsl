@@ -519,7 +519,7 @@ float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInf
     float closestDepth = shadowMap.Sample(shadowSampler, lightToFrag);
     closestDepth = linearizeDepth(closestDepth, light.nearPlane, light.farPlane)*light.farPlane; // linearize to 0-1, scale to far plane
    
-    float bias = 0.0002;
+    float bias = 0.0008;
     shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
 }
@@ -557,14 +557,33 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace,
 
     float currentDepth = uv.z;
     
-    float bias = 0.0002;
+    float bias = 0.0008;
 
+    float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+    return shadow;
+}
+
+float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix) {
+    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
+    float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
+    //uv.y = 1.0 - uv.y;
+    
+    Texture2D<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
+    SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
+    float closestDepth = shadowMap.Sample(shadowSampler, uv.xy).r;
+    float currentDepth = uv.z;
+    return currentDepth;
+    float bias = 0.0008;
     float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
 }
 
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 
+#if defined(SHADOW)
+    return input.position.z / input.position.w; // Output depth
+#endif
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
@@ -661,7 +680,8 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                     }
                 case 1: { // Spot light
                         matrix lightMatrix = loadMatrixFromBuffer(spotShadowViewInfoBuffer, light.shadowViewInfoIndex);
-                        //shadow = calculateSpotShadow(input.positionWorldSpace, i, light, lightMatrix);
+                        //shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, lightMatrix);
+                        //return float4(shadow, shadow, shadow, 1.0);
                         break;
                     }
                 case 2:{// Directional light

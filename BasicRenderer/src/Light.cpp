@@ -13,38 +13,20 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	float farPlane = 5.0;
 	m_lightInfo.attenuation = XMVectorSet(constantAttenuation, linearAttenuation, quadraticAttenuation, 0);
 	m_lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
-	m_lightInfo.innerConeAngle = innerConeAngle;
-	m_lightInfo.outerConeAngle = outerConeAngle;
+	m_lightInfo.innerConeAngle = cos(innerConeAngle);
+	m_lightInfo.outerConeAngle = cos(outerConeAngle);
 	m_lightInfo.shadowViewInfoIndex = -1;
 	m_lightInfo.nearPlane = nearPlane;
 	m_lightInfo.farPlane = farPlane;
 	transform.setLocalPosition(position);
-	transform.setDirection(direction);
+
+	if (direction.x != 0 || direction.y != 0 || direction.z || 0) {
+		transform.setDirection(direction);
+	}
 
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 
 	CreateProjectionMatrix(nearPlane, farPlane);
-}
-
-Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction) : SceneNode(name) {
-	m_lightInfo.type = type;
-	m_lightInfo.posWorldSpace = XMLoadFloat3(&position);
-	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
-	m_lightInfo.color *= intensity;
-	m_lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
-	m_lightInfo.shadowViewInfoIndex = -1;
-	m_lightInfo.attenuation = XMVectorSet(0, 0, 0, 0);
-	float nearPlane = 0.07;
-	float farPlane = 5.0;
-	m_lightInfo.nearPlane = nearPlane;
-	m_lightInfo.farPlane = farPlane;
-
-	transform.setLocalPosition(position);
-	transform.setDirection(direction);
-
-	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-	CreateProjectionMatrix(nearPlane, farPlane);
-
 }
 
 Light::Light(LightInfo& lightInfo) : SceneNode(name) {
@@ -186,6 +168,10 @@ std::array<DirectX::XMMATRIX, 6> Light::GetCubemapViewMatrices() {
 }
 
 DirectX::XMMATRIX Light::GetLightViewMatrix() {
+	//auto dir = GetLightDir();
+	//auto pos = transform.getGlobalPosition();
+	//auto up = XMFLOAT3(0, 1, 0);
+	//return XMMatrixLookToRH(XMLoadFloat3(&pos), dir, XMLoadFloat3(&up));
 	return XMMatrixTranspose(transform.modelMatrix);
 }
 

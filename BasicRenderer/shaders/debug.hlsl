@@ -21,5 +21,5 @@ Texture2DArray debugTexture : register(t0);
 SamplerState samplerState : register(s0);
 
 float4 PSMain(VS_OUTPUT input) : SV_TARGET {
-    return debugTexture.Sample(samplerState, float3(input.uv, 3));
+    return debugTexture.Sample(samplerState, float3(input.uv, 2));
 }

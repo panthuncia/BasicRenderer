@@ -249,7 +249,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     for (auto& lightPair : scene.lightsByID) {
         auto& light = lightPair.second;
         UINT oldID = light->localID;
-        auto newLight = std::make_shared<Light>(light->GetLightInfo());
+		auto newLight = Light::CopyLight(light->GetLightInfo());
         for (auto& childPair : light->children) {
             auto& child = childPair.second;
             auto dummyNode = std::make_shared<SceneNode>();

@@ -3,19 +3,20 @@
 
 #include "ResourceHandles.h"
 #include "ResourceStates.h"
-#include "GloballyIndexedResource.h"
 
 class PixelBuffer;
 class Sampler;
 class RenderContext;
 
-class Texture : public GloballyIndexedResource{
+class Texture{
 public:
 	Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler);
 	UINT GetBufferDescriptorIndex();
 	UINT GetSamplerDescriptorIndex();
 	TextureHandle<PixelBuffer>& GetHandle();
-	
+	std::shared_ptr<PixelBuffer> GetBuffer() {
+		return m_image;
+	}
 protected:
 	void Transition(RenderContext& context, ResourceState fromState, ResourceState toState);
 private:

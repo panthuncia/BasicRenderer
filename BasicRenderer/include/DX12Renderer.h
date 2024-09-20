@@ -82,6 +82,7 @@ private:
     void CheckDebugMessages();
 
     std::function<void(ShadowMaps*)> setShadowMaps;
+    std::function<uint16_t()> getShadowResolution;
 };
 
 #endif //DX12RENDERER_H

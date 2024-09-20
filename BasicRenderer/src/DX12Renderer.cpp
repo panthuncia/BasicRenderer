@@ -39,6 +39,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
+    getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 }
 
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
@@ -374,9 +375,15 @@ void DX12Renderer::CreateRenderGraph() {
 	std::shared_ptr<ShadowMaps> shadowMaps = std::make_shared<ShadowMaps>("ShadowMaps");
 	setShadowMaps(shadowMaps.get()); // To allow light manager to acccess shadow maps
 	currentRenderGraph->AddResource(shadowMaps);
-	auto shadowPass = std::make_shared<ShadowPass>(shadowMaps);
+
+    auto depthBuffer = PixelBuffer::CreateSingleTexture(getShadowResolution(), getShadowResolution(), 1, false, false, true, false);
+	depthBuffer->SetName("ShadowDepthBuffer");
+	currentRenderGraph->AddResource(depthBuffer);
+
+    auto shadowPass = std::make_shared<ShadowPass>(shadowMaps, depthBuffer);
 	auto shadowPassParameters = PassParameters();
-	shadowPassParameters.depthTextures.push_back(shadowMaps);
+	shadowPassParameters.renderTargets.push_back(shadowMaps);
+	shadowPassParameters.depthTextures.push_back(depthBuffer);
 
     auto forwardPass = std::make_shared<ForwardRenderPass>();
     auto forwardPassParameters = PassParameters();
@@ -389,6 +396,6 @@ void DX12Renderer::CreateRenderGraph() {
 
     currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
-	//currentRenderGraph->AddPass(debugPass, debugPassParameters);
+	currentRenderGraph->AddPass(debugPass, debugPassParameters);
 	currentRenderGraph->Compile();
 }

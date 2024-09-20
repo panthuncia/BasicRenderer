@@ -19,9 +19,22 @@ enum LightType {
 
 class Light : public SceneNode{
 public:
-	Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = {0, 0, 0}, float innerConeAngle = 0, float outerConeAngle = 0);
-	Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction);
-	Light(LightInfo& lightInfo);
+
+	static std::shared_ptr<Light> CreateDirectionalLight(std::string name, XMFLOAT3 color, float intensity, XMFLOAT3 direction) {
+		return std::shared_ptr<Light>(new Light(name, LightType::Directional, { 0, 0, 0 }, color, intensity, 0, 0, 0, direction));
+	}
+
+	static std::shared_ptr<Light> CreatePointLight(std::string name, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0) {
+		return std::shared_ptr<Light>(new Light(name, LightType::Point, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation));
+	}
+
+	static std::shared_ptr<Light> CreateSpotLight(std::string name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0) {
+		return std::shared_ptr<Light>(new Light(name, LightType::Spot, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation, direction, innerConeAngle, outerConeAngle));
+	}
+
+	static std::shared_ptr<Light> CopyLight(LightInfo& lightInfo) {
+		return std::shared_ptr<Light>(new Light(lightInfo));
+	}
 
 	LightInfo& GetLightInfo();
 	LightType GetLightType() const;
@@ -69,6 +82,10 @@ public:
 	std::shared_ptr<Texture>& getShadowMap();
 
 private:
+
+	Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
+	Light(LightInfo& lightInfo);
+
 	std::vector<BufferHandle> m_lightFrameConstantHandles;
 	LightInfo m_lightInfo;
 	int m_currentLightBufferIndex = -1;

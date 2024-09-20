@@ -4,10 +4,13 @@
 #include "d3d12.h"
 #include "DirectX/d3dx12.h"
 
+#include "ResourceStates.h"
 #include "ResourceHandles.h"
+#include "GloballyIndexedResource.h"
+
 using Microsoft::WRL::ComPtr;
 
-class PixelBuffer {
+class PixelBuffer : public GloballyIndexedResource {
 public:
     static std::shared_ptr<PixelBuffer> CreateFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
 		return std::shared_ptr<PixelBuffer>(new PixelBuffer(image, width, height, channels, sRGB));
@@ -19,12 +22,13 @@ public:
 		return std::shared_ptr<PixelBuffer>(new PixelBuffer(width, height, channels, numTextures, cubemap, RTV, DSV, UAV));
 	}
     UINT GetSRVDescriptorIndex() const;
+	TextureHandle<PixelBuffer>& GetHandle() { return handle; }
+    void Transition(RenderContext& context, ResourceState fromState, ResourceState toState);
+
 private:
     PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB);
     PixelBuffer(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false);
     PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false);
 
     TextureHandle<PixelBuffer> handle;
-
-    friend class Texture;
 };

@@ -14,10 +14,10 @@
 
 class ShadowPass : public RenderPass {
 public:
-	ShadowPass(std::shared_ptr<ResourceGroup> shadowMaps) {
+	ShadowPass(std::shared_ptr<ResourceGroup> shadowMaps, std::shared_ptr<PixelBuffer> depthBuffer) {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
-
+		m_depthBuffer = depthBuffer;
 	}
 	void Setup() override {
 		// Setup the render pass
@@ -89,10 +89,13 @@ public:
 			if (!shadowMap) {
 				continue;
 			}
+			auto& dsvHandle = m_depthBuffer->GetHandle().DSVInfo[0].cpuHandle;
+			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
 			switch (light->GetLightType()) {
 				case LightType::Spot: {
-					auto& dsvHandle = shadowMap->GetHandle().DSVInfo[0].cpuHandle;
-					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+					auto& rtvHandle = shadowMap->GetHandle().RTVInfo[0].cpuHandle;
+					commandList->ClearRenderTargetView(rtvHandle, clear, 0, nullptr);
+					commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
@@ -105,8 +108,9 @@ public:
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					int lightViewIndex = light->GetCurrentviewInfoIndex()*6;
 					for (int i = 0; i < 6; i++) {
-						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+						D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = shadowMap->GetHandle().RTVInfo[i].cpuHandle;
+						commandList->ClearRenderTargetView(rtvHandle, clear, 0, nullptr);
+						commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
@@ -119,8 +123,9 @@ public:
 					int lightViewIndex = light->GetCurrentviewInfoIndex()*getNumDirectionalLightCascades();
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						auto& dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+						auto& rtvHandle = shadowMap->GetHandle().RTVInfo[i].cpuHandle;
+						commandList->ClearRenderTargetView(rtvHandle, clear, 0, nullptr);
+						commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
 						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
@@ -140,5 +145,5 @@ public:
 private:
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<uint16_t()> getShadowResolution;
-
+	std::shared_ptr<PixelBuffer> m_depthBuffer;
 };

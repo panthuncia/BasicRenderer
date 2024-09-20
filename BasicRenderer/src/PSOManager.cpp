@@ -215,12 +215,12 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.InputLayout = { inputElementDescs.data(), static_cast<unsigned int>(inputElementDescs.size())};
     psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    if (!(psoFlags & PSOFlags::SHADOW)) {
+    //if (!(psoFlags & PSOFlags::SHADOW)) {
         psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    }
+    //}
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     psoDesc.RasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::DOUBLE_SIDED || psoFlags & PSOFlags::SHADOW) {
+    if (psoFlags & PSOFlags::DOUBLE_SIDED) {
         psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     }
     psoDesc.BlendState = GetBlendDesc(blendState);
@@ -228,7 +228,13 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	if (psoFlags & PSOFlags::SHADOW) {
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT;
+	}
+	else {
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	}
+
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
 
