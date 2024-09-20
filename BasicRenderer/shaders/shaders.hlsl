@@ -194,7 +194,6 @@ PSInput VSMain(VSInput input) {
         }
     }
     output.position = mul(worldPosition, lightMatrix);
-    output.positionViewSpace = float4(0, 0, length(worldPosition - light.posWorldSpace), 0);
     return output;
 #endif // SHADOW
     output.positionWorldSpace = worldPosition;
@@ -504,25 +503,42 @@ float3 reinhardJodie(float3 color) {
     return lerp(reinhardLuminance, reinhardPerChannel, reinhardPerChannel);
 }
 
-float linearizeDepth(float d, float zNear, float zFar) {
-    return zNear * zFar / (zFar + d * (zNear - zFar));
-}
-
-float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, matrix lightMatrix) {
+float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, StructuredBuffer<float4> pointShadowViewInfoBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz-light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
     float3 dir = normalize(lightToFrag);
-    float currentDepth = length(lightToFrag);
-    
+    int faceIndex = 0;
+    float maxDir = max(max(abs(dir.x), abs(dir.y)), abs(dir.z));
+
+    if (dir.x == maxDir) {
+        faceIndex = 0; // +X
+    }
+    else if (dir.x == -maxDir) {
+        faceIndex = 1; // -X
+    }
+    else if (dir.y == maxDir) {
+        faceIndex = 2; // +Y
+    }
+    else if (dir.y == -maxDir) {
+        faceIndex = 3; // -Y
+    }
+    else if (dir.z == maxDir) {
+        faceIndex = 4; // +Z
+    }
+    else if (dir.z == -maxDir) {
+        faceIndex = 5; // -Z
+    }
+    matrix lightMatrix = loadMatrixFromBuffer(pointShadowViewInfoBuffer, light.shadowViewInfoIndex+faceIndex);
     float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
+    float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    uv.xy = uv.xy * 0.5 + 0.5;
+    float currentDepth = uv.z;
     
     float shadow = 0.0;
 
     TextureCube<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.Sample(shadowSampler, lightToFrag);
-    //return currentDepth-closestDepth;
-    //closestDepth = linearizeDepth(closestDepth, light.nearPlane, light.farPlane)*light.farPlane; // linearize to 0-1, scale to far plane
+    float closestDepth = shadowMap.Sample(shadowSampler, dir);
    
     float bias = 0.005;
     shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
@@ -587,7 +603,7 @@ float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo lig
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 
 #if defined(SHADOW)
-    return (input.positionViewSpace.z); // Output depth
+    return (input.position.z); // Output depth
 #endif
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
@@ -679,9 +695,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         if(light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
             switch(light.type) {
                 case 0:{ // Point light
-                        matrix lightMatrix = loadMatrixFromBuffer(pointShadowViewInfoBuffer, light.shadowViewInfoIndex);
-                        shadow = calculatePointShadow(input.positionWorldSpace, i, light, lightMatrix);
-                        //return float4(shadow, shadow, shadow, 1.0);
+                        shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoBuffer);
                         break;
                     }
                 case 1: { // Spot light
