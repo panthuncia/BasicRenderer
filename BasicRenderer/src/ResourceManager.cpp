@@ -325,7 +325,12 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     DXGI_FORMAT textureFormat;
     switch (channels) {
     case 1:
-		textureFormat = DXGI_FORMAT_R32_TYPELESS;
+        if (DSV) {
+            textureFormat = DXGI_FORMAT_R32_TYPELESS;
+        }
+        else {
+            textureFormat = DXGI_FORMAT_R32_FLOAT;
+        }
         break;
     case 3:
         textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -361,6 +366,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
     }
     if (DSV) {
         textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    } if (RTV) {
+        textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
     }
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};

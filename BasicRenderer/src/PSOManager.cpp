@@ -469,6 +469,13 @@ void PSOManager::createRootSignature() {
     parameters[4].Constants.Num32BitValues = 1; // Single integer
     parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+    // root matrix constant, used for shadow light view matrix
+    //parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    //parameters[5].Constants.ShaderRegister = 4; // b4 for second integer root constant
+    //parameters[5].Constants.RegisterSpace = 0;
+    //parameters[5].Constants.Num32BitValues = 16; // Single integer
+    //parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
     rootSignatureDesc.NumParameters = _countof(parameters);

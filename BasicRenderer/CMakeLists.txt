@@ -44,5 +44,5 @@ endif()
 # Include directories
 include_directories(include/)
 
-# Find and link DirectX 12
+# Find and link DirectX 12r
 target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib spdlog::spdlog)

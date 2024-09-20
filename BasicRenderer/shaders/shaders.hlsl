@@ -194,9 +194,9 @@ PSInput VSMain(VSInput input) {
         }
     }
     output.position = mul(worldPosition, lightMatrix);
+    output.positionViewSpace = float4(0, 0, length(worldPosition - light.posWorldSpace), 0);
     return output;
 #endif // SHADOW
-    
     output.positionWorldSpace = worldPosition;
     float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
     output.positionViewSpace = viewPosition;
@@ -511,15 +511,20 @@ float linearizeDepth(float d, float zNear, float zFar) {
 float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, matrix lightMatrix) {
     float3 lightToFrag = fragPosWorldSpace.xyz-light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
+    float3 dir = normalize(lightToFrag);
     float currentDepth = length(lightToFrag);
+    
+    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
+    
     float shadow = 0.0;
 
     TextureCube<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
     float closestDepth = shadowMap.Sample(shadowSampler, lightToFrag);
-    closestDepth = linearizeDepth(closestDepth, light.nearPlane, light.farPlane)*light.farPlane; // linearize to 0-1, scale to far plane
+    //return currentDepth-closestDepth;
+    //closestDepth = linearizeDepth(closestDepth, light.nearPlane, light.farPlane)*light.farPlane; // linearize to 0-1, scale to far plane
    
-    float bias = 0.0008;
+    float bias = 0.005;
     shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
 }
@@ -582,7 +587,7 @@ float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo lig
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 
 #if defined(SHADOW)
-    return input.position.z / input.position.w; // Output depth
+    return (input.positionViewSpace.z); // Output depth
 #endif
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
@@ -593,7 +598,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float2 uv = float2(0.0, 0.0);
 #if defined(TEXTURED)
     uv = input.texcoord;
-    uv*=materialInfo.textureScale;;
+    uv*=materialInfo.textureScale;
 #endif // TEXTURED
     
 #if defined(NORMAL_MAP) || defined(PARALLAX)
@@ -676,6 +681,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                 case 0:{ // Point light
                         matrix lightMatrix = loadMatrixFromBuffer(pointShadowViewInfoBuffer, light.shadowViewInfoIndex);
                         shadow = calculatePointShadow(input.positionWorldSpace, i, light, lightMatrix);
+                        //return float4(shadow, shadow, shadow, 1.0);
                         break;
                     }
                 case 1: { // Spot light
