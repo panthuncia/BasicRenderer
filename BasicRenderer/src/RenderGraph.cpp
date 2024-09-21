@@ -2,15 +2,15 @@
 #include "RenderContext.h"
 #include "utilities.h"
 
-static bool mapHasResourceNotInState(std::unordered_map<std::string, ResourceState>& map, std::string resourceName, ResourceState state) {
-    return mapHasKeyNotAsValue<std::string, ResourceState>(map, resourceName, state);
+static bool mapHasResourceNotInState(std::unordered_map<std::wstring, ResourceState>& map, std::wstring resourceName, ResourceState state) {
+    return mapHasKeyNotAsValue<std::wstring, ResourceState>(map, resourceName, state);
 }
 
 void RenderGraph::Compile() {
     batches.clear();
     auto currentBatch = PassBatch();
-    std::unordered_map<std::string, ResourceState> previousBatchResourceStates;
-    std::unordered_map<std::string, ResourceState> finalResourceStates; // To track final states
+    std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
+    std::unordered_map<std::wstring, ResourceState> finalResourceStates; // To track final states
 
     for (auto& passAndResources : passes) {
         bool needsNewBatch = false;
@@ -60,7 +60,7 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
     resourcesByName[resource->GetName()] = resource;
 }
 
-std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::string& name) {
+std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::wstring& name) {
 	return resourcesByName[name];
 }
 
@@ -100,7 +100,7 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
     return false;
 }
 
-void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::string, ResourceState>& previousStates) {
+void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates) {
     for (const auto& [resourceName, requiredState] : batch.resourceStates) {
         ResourceState previousState = ResourceState::Undefined;
         auto it = previousStates.find(resourceName);
@@ -116,7 +116,7 @@ void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unorde
             }
             else {
                 // Handle error: resource not found
-                throw std::runtime_error("Resource not found: " + resourceName);
+                throw std::runtime_error(ws2s(L"Resource not found: " + resourceName));
             }
         }
         if (previousState != requiredState) {
@@ -138,12 +138,12 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
     }
 }
 
-void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::string, ResourceState>& finalResourceStates) {
+void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates) {
 	PassBatch loopBatch;
     for (const auto& [resourceName, finalState] : finalResourceStates) {
         auto resource = GetResourceByName(resourceName);
         if (!resource) {
-            throw std::runtime_error("Resource not found: " + resourceName);
+            throw std::runtime_error(ws2s(L"Resource not found: " + resourceName));
         }
 
         ResourceState initialState = resource->GetState();

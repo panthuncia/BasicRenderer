@@ -249,7 +249,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     light1->animationController->setAnimationClip(animation);
     cubeScaleNode->AddChild(light1);
     //scene->AddLight(light1, true);
-	auto light2 = Light::CreateDirectionalLight("light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));
+	auto light2 = Light::CreateDirectionalLight("light2", XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, -1, 1));
     scene->AddLight(light2, true);
     //auto light3 = Light::CreateDirectionalLight("light3", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(-1, -1, -1));
     auto light3 = Light::CreateSpotLight("light3", XMFLOAT3(0, 4, 0), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);

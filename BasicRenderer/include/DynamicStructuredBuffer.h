@@ -4,6 +4,8 @@
 #include <wrl.h>
 #include <vector>
 #include <functional>
+#include <typeinfo>
+#include <string>
 
 #include "DeviceManager.h"
 
@@ -13,9 +15,15 @@ template<class T>
 class DynamicStructuredBuffer {
 public:
     //template<typename T>
-    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64)
+    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"")
         : m_globalResizableBufferID(id), m_capacity(capacity), m_needsUpdate(false) {
         CreateBuffer(capacity);
+        if (name != L"") {
+            m_buffer->SetName((m_name + L": "+name).c_str());
+        }
+        else {
+			m_buffer->SetName(m_name.c_str());
+        }
     }
 
     void Add(const T& element) {
@@ -89,6 +97,7 @@ private:
     UINT m_globalResizableBufferID;
 
     std::function<void(UINT, UINT, UINT, ComPtr<ID3D12Resource>&)> onResized;
+    inline static std::wstring m_name = L"DynamicStructuredBuffer"; //s2ws(std::string(typeid(T).name())) + L">";
 
     void CreateBuffer(UINT capacity) {
         // Create the buffer

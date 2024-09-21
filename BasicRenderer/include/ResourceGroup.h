@@ -9,8 +9,9 @@
 
 class ResourceGroup : public Resource {
 public:
-    ResourceGroup(const std::string& groupName)
-        : Resource(groupName) {}
+    ResourceGroup(const std::wstring& groupName) {
+		name = groupName;
+    }
 
 
     void AddGloballyIndexedResource(std::shared_ptr<GloballyIndexedResource> resource) {

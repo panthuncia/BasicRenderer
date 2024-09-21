@@ -4,6 +4,7 @@
 
 #include "DirectX/d3dx12.h"
 #include "spdlog/spdlog.h"
+#include "RenderContext.h"
 
 using namespace Microsoft::WRL;
 
@@ -47,4 +48,24 @@ Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t 
 		spdlog::error("HRESULT failed with error code: {}", hr);
 		throw std::runtime_error("HRESULT failed");
 	}
+}
+
+void Buffer::Transition(RenderContext& context, ResourceState fromState, ResourceState toState) {
+	if (fromState == toState) return;
+
+	D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
+	D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);
+
+	// Create a resource barrier
+	D3D12_RESOURCE_BARRIER barrier = {};
+	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	barrier.Transition.pResource = m_buffer.Get();
+	barrier.Transition.StateBefore = d3dFromState;
+	barrier.Transition.StateAfter = d3dToState;
+	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+	context.commandList->ResourceBarrier(1, &barrier);
+
+	currentState = toState;
 }

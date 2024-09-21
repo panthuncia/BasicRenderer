@@ -39,3 +39,7 @@ DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR c
 std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera, const std::vector<float>& cascadeSplits);
 
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda = 0.9f);
+
+std::string ws2s(const std::wstring& wstr);
+
+std::wstring s2ws(const std::string& str);

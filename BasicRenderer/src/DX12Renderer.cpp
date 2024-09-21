@@ -372,12 +372,12 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 void DX12Renderer::CreateRenderGraph() {
     currentRenderGraph = std::make_unique<RenderGraph>();
 
-	std::shared_ptr<ShadowMaps> shadowMaps = std::make_shared<ShadowMaps>("ShadowMaps");
+	std::shared_ptr<ShadowMaps> shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
 	setShadowMaps(shadowMaps.get()); // To allow light manager to acccess shadow maps
 	currentRenderGraph->AddResource(shadowMaps);
 
     auto depthBuffer = PixelBuffer::CreateSingleTexture(getShadowResolution(), getShadowResolution(), 1, false, false, true, false);
-	depthBuffer->SetName("ShadowDepthBuffer");
+	depthBuffer->SetName(L"ShadowDepthBuffer");
 	currentRenderGraph->AddResource(depthBuffer);
 
     auto shadowPass = std::make_shared<ShadowPass>(shadowMaps, depthBuffer);

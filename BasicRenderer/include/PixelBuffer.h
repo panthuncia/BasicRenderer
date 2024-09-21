@@ -24,6 +24,7 @@ public:
     UINT GetSRVDescriptorIndex() const;
 	TextureHandle<PixelBuffer>& GetHandle() { return handle; }
     void Transition(RenderContext& context, ResourceState fromState, ResourceState toState);
+    virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 
 private:
     PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB);

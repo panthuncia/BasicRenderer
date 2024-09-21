@@ -5,7 +5,9 @@
 class GloballyIndexedResource : public Resource
 {
 public:
-	GloballyIndexedResource(std::string name) : Resource(name){};
+	GloballyIndexedResource(std::wstring name) : Resource(){
+		SetName(name);
+	};
 	GloballyIndexedResource() {};
 	int GetIndex() {
 		return index;

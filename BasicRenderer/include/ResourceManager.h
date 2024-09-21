@@ -132,14 +132,14 @@ public:
     }
 
     template<typename T>
-    DynamicBufferHandle<T> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64) {
+    DynamicBufferHandle<T> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
-        DynamicStructuredBuffer<T> dynamicBuffer(bufferID, capacity);
+        DynamicStructuredBuffer<T> dynamicBuffer(bufferID, capacity, name);
         dynamicBuffer.SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, ComPtr<ID3D12Resource>& buffer) {
             this->onBufferResized(bufferID, typeSize, capacity, buffer);
             });
@@ -160,7 +160,7 @@ public:
 
         DynamicBufferHandle<T> handle;
         handle.index = index;
-        handle.buffer = dynamicBuffer;
+        handle.buffer = std::move(dynamicBuffer);
         return handle;
     }
 
@@ -188,7 +188,7 @@ public:
     }
 
     template<typename T>
-    BufferHandle CreateConstantBuffer() {
+    BufferHandle CreateConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
 		auto& device = DeviceManager::GetInstance().GetDevice();
@@ -201,6 +201,7 @@ public:
 		// Create the upload and data buffers
         handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
         handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::CONSTANT);
+		handle.dataBuffer->SetName(name);
         ResourceTransition transition;
         transition.resource = handle.dataBuffer->m_buffer.Get();
         transition.beforeState = D3D12_RESOURCE_STATE_COMMON;

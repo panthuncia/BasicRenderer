@@ -14,7 +14,7 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indic
     }
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
-    m_pPerMeshBuffer = resourceManager.CreateConstantBuffer<PerMeshCB>();
+    m_pPerMeshBuffer = resourceManager.CreateConstantBuffer<PerMeshCB>(L"PerMeshCB");
 	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 
