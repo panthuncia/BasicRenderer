@@ -120,7 +120,7 @@ std::shared_ptr<Texture> loadTextureFromFile(const char* filename) {
 }
 
 DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center) {
-    auto mat = XMMatrixLookAtRH(center, XMVectorAdd(center, lightDir), XMVectorSet(0, 1, 0, 1));
+    auto mat = XMMatrixLookToRH(center, lightDir, XMVectorSet(0, 1, 0, 1));
     return mat;
 }
 
@@ -163,9 +163,8 @@ std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera
 
     XMVECTOR lightDir = light.GetLightDir();
     XMVECTOR lightPos = XMVectorZero(); // For directional lights, position can be zero
-    XMVECTOR lightTarget = lightDir;
     XMVECTOR lightUp = XMVectorSet(0, 1, 0, 0);
-    XMMATRIX lightViewMatrix = XMMatrixLookAtRH(lightPos, lightTarget, lightUp);
+    XMMATRIX lightViewMatrix = XMMatrixLookToRH(lightPos, lightDir, lightUp);
 
     float prevSplitDist = camera.GetNear();
 

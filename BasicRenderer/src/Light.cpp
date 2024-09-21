@@ -3,6 +3,7 @@
 #include "SettingsManager.h"
 #include "Texture.h"
 #include "PixelBuffer.h"
+#include "Utilities.h"
 
 Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
 	m_lightInfo.type = type;
@@ -122,7 +123,7 @@ void Light::CreateProjectionMatrix(float nearPlane, float farPlane) {
 
 	switch ((LightType)m_lightInfo.type) {
 	case LightType::Spot:
-		m_lightProjection = XMMatrixPerspectiveFovRH(this->m_lightInfo.outerConeAngle * 2, aspect, farPlane, nearPlane);
+		m_lightProjection = XMMatrixPerspectiveFovRH(this->m_lightInfo.outerConeAngle * 2, aspect, nearPlane, farPlane);
 		break;
 	case LightType::Point:
 		m_lightProjection = XMMatrixPerspectiveFovRH(XM_PI / 2, aspect, nearPlane, farPlane);
@@ -168,11 +169,13 @@ std::array<DirectX::XMMATRIX, 6> Light::GetCubemapViewMatrices() {
 }
 
 DirectX::XMMATRIX Light::GetLightViewMatrix() {
-	//auto dir = GetLightDir();
-	//auto pos = transform.getGlobalPosition();
-	//auto up = XMFLOAT3(0, 1, 0);
-	//return XMMatrixLookToRH(XMLoadFloat3(&pos), dir, XMLoadFloat3(&up));
-	return XMMatrixTranspose(transform.modelMatrix);
+	auto dir = GetLightDir();
+	auto pos = transform.getGlobalPosition();
+	auto up = XMFLOAT3(0, 1, 0);
+	auto matrix = XMMatrixLookToRH(XMLoadFloat3(&pos), dir, XMLoadFloat3(&up));
+	return matrix;
+	//auto matrix = XMMatrixInverse(nullptr, transform.modelMatrix);
+	//return RemoveScalingFromMatrix(matrix);
 }
 
 DirectX::XMMATRIX Light::GetLightProjectionMatrix() {
@@ -182,7 +185,7 @@ DirectX::XMMATRIX Light::GetLightProjectionMatrix() {
 // Returns a 3-axis direction vector
 DirectX::XMVECTOR Light::GetLightDir() {
 	// Extract the forward vector (Z-axis)
-	return -XMVector3Normalize(transform.modelMatrix.r[2]);
+	return XMVector3Normalize(transform.modelMatrix.r[2]);
 }
 
 void Light::SetShadowMap(std::shared_ptr<Texture> shadowMap) {

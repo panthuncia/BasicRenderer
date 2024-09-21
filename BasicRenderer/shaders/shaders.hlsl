@@ -429,13 +429,18 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     float spotAttenuationFactor = 0;
     
     // For directional lights, use light dir directly, with zero attenuation
-    if (lightType == 2) {
-        lightDir = dir;
-        attenuation = 1.0;
-    } else {
-        lightDir = normalize(lightPos - fragPos);
-        distance = length(lightPos - fragPos);
-        attenuation = 1.0 / ((constantAttenuation + linearAttenuation * distance + quadraticAttenuation * distance * distance) + 0.0001); //+0.0001 fudge-factor to prevent division by 0;
+    switch (lightType) {
+        case 2:{
+            lightDir = -dir;
+            attenuation = 1.0;
+            break;
+        }
+        default:{
+            lightDir = normalize(lightPos - fragPos);
+            distance = length(lightPos - fragPos);
+            attenuation = 1.0 / ((constantAttenuation + linearAttenuation * distance + quadraticAttenuation * distance * distance) + 0.0001); //+0.0001 fudge-factor to prevent division by 0;
+            break;
+        }
     }
     
     // Unit vector halfway between view dir and light dir. Makes more accurate specular highlights.
@@ -588,13 +593,13 @@ float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo lig
     float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
     float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
     uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
-    //uv.y = 1.0 - uv.y;
+    uv.y = 1.0 - uv.y;
     
     Texture2D<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
     float closestDepth = shadowMap.Sample(shadowSampler, uv.xy).r;
     float currentDepth = uv.z;
-    return currentDepth;
+    //return closestDepth;
     float bias = 0.0008;
     float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
@@ -687,21 +692,15 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     for (uint i = 0; i < perFrameBuffer.numLights; i++) {
         LightInfo light = lights[i];
         float shadow = 0.0;
-#if defined (PARALLAX)
-        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN, materialInfo.heightMapScale);
-#else
-        lighting += calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
-#endif
-        if(light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
-            switch(light.type) {
+        if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
+            switch (light.type) {
                 case 0:{ // Point light
                         shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoBuffer);
                         break;
                     }
-                case 1: { // Spot light
+                case 1:{ // Spot light
                         matrix lightMatrix = loadMatrixFromBuffer(spotShadowViewInfoBuffer, light.shadowViewInfoIndex);
-                        //shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, lightMatrix);
-                        //return float4(shadow, shadow, shadow, 1.0);
+                        shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, lightMatrix);
                         break;
                     }
                 case 2:{// Directional light
@@ -710,7 +709,11 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                     }
             }
         }
-        lighting *= (1.0 - shadow);
+#if defined (PARALLAX)
+        lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN, materialInfo.heightMapScale);
+#else
+        lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
+#endif
     }
 #if defined(AO_TEXTURE)
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
@@ -743,6 +746,6 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     //float depth = abs(input.positionViewSpace.z);
     
     float opacity = baseColor.a;
-    //return float4(depth, depth, depth, opacity);
+    //return float4(normalWS, opacity);
     return float4(lighting, opacity);
 }

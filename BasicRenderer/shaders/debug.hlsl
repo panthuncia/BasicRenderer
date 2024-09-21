@@ -17,9 +17,9 @@ VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0) {
 }
 
 // Pixel Shader
-Texture2DArray debugTexture : register(t0);
+Texture2D debugTexture : register(t0);
 SamplerState samplerState : register(s0);
 
 float4 PSMain(VS_OUTPUT input) : SV_TARGET {
-    return debugTexture.Sample(samplerState, float3(input.uv, 2));
+    return debugTexture.Sample(samplerState, input.uv);
 }
