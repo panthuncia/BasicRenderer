@@ -4,13 +4,15 @@
 #include <vector>
 #include <algorithm>
 #include <functional>
-#include "Light.h"
 #include "buffers.h"
 #include "ResourceHandles.h"
 #include "Interfaces/ISceneNodeObserver.h"
-#include "Camera.h"
 #include "SettingsManager.h"
-#include "ShadowMaps.h"
+
+class Camera;
+class Light;
+class ShadowMaps;
+class SceneNode;
 
 class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
 public:
@@ -24,15 +26,8 @@ public:
     unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
     unsigned int GetNumLights();
     void SetCurrentCamera(Camera* camera);
-    void OnNodeUpdated(SceneNode* camera) override {
-        for (auto light : m_directionalLights) {
-            UpdateLightViewInfo(light);
-        }
-    }
-    void OnNodeUpdated(Light* light) override {
-        m_lightBufferHandle.buffer.UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
-		UpdateLightViewInfo(light);
-    }
+    void OnNodeUpdated(SceneNode* camera) override;
+    void OnNodeUpdated(Light* light) override;
 
     void UpdateGPU() {
         m_lightBufferHandle.buffer.UpdateBuffer();

@@ -5,6 +5,11 @@
 #include "Interfaces/ISceneNodeObserver.h"
 #include "Utilities.h"
 #include "SettingsManager.h"
+#include "Light.h"
+#include "Camera.h"
+#include "SceneNode.h"
+#include "ShadowMaps.h"
+
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
     m_lightBufferHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(1, L"lightBuffer<LightInfo>");
@@ -208,4 +213,14 @@ void LightManager::SetCurrentCamera(Camera* camera) {
 	}
 	m_currentCamera = camera;
 	m_currentCamera->AddObserver(this);
+}
+
+void LightManager::OnNodeUpdated(SceneNode* camera) {
+	for (Light* light : m_directionalLights) {
+		UpdateLightViewInfo(light);
+	}
+}
+void LightManager::OnNodeUpdated(Light* light) {
+	m_lightBufferHandle.buffer.UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
+	UpdateLightViewInfo(light);
 }

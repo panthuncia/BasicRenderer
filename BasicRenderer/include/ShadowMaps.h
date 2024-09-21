@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 
 #include "SettingsManager.h"
 #include "ResourceGroup.h"
@@ -10,7 +11,7 @@
 #include "ResourceManager.h"
 #include "PixelBuffer.h"
 #include "Sampler.h"
-
+#include "utilities.h"
 class ShadowMaps : public ResourceGroup {
 public:
     ShadowMaps(const std::wstring& name)
@@ -25,12 +26,15 @@ public:
 		switch (light->GetLightType()) {
 		case LightType::Point: // Cubemap
 			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, true, false, false);
+			shadowMap->SetName(L"PointShadowMap: "+light->m_name);
 			break;
 		case LightType::Spot: // 2D texture
 			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, false, true, false, false);
+			shadowMap->SetName(L"SpotShadowMap");
 			break;
 		case LightType::Directional: // Texture array
 			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, true, false, false);
+			shadowMap->SetName(L"DirectionalShadowMap");
 			break;
 
 		}

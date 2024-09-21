@@ -10,6 +10,7 @@
 #include "PSOFlags.h"
 #include "DirectX/d3dx12.h"
 #include "DefaultDirection.h"
+#include "Sampler.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -19,7 +20,7 @@ void ThrowIfFailed(HRESULT hr) {
     }
 }
 
-std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::string name) {
+std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name) {
     std::vector<Mesh> meshes;
 
     for (auto geom : meshData.geometries) {
@@ -229,12 +230,19 @@ std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zF
     return splits;
 }
 
-std::wstring s2ws(const std::string& str) {
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
-    std::wstring wstrTo(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
-    return wstrTo;
+std::wstring to_wstring(const std::string& stringToConvert) {
+    std::wstring wideString =
+        std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes(stringToConvert);
+    return wideString;
 }
+
+std::wstring s2ws(const std::string& str) {
+    using convert_typeX = std::codecvt_utf8<wchar_t>;
+    std::wstring_convert<convert_typeX, wchar_t> converterX;
+
+    return converterX.from_bytes(str);
+}
+
 
 std::string ws2s(const std::wstring& wstr) {
     using convert_typeX = std::codecvt_utf8<wchar_t>;

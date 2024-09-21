@@ -5,7 +5,7 @@
 #include "PixelBuffer.h"
 #include "Utilities.h"
 
-Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
+Light::Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
 	m_lightInfo.type = type;
 	m_lightInfo.posWorldSpace = XMLoadFloat3(&position);
 	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
@@ -30,7 +30,7 @@ Light::Light(std::string name, LightType type, XMFLOAT3 position, XMFLOAT3 color
 	CreateProjectionMatrix(nearPlane, farPlane);
 }
 
-Light::Light(LightInfo& lightInfo) : SceneNode(name) {
+Light::Light(LightInfo& lightInfo) : SceneNode(m_name) {
 	m_lightInfo = lightInfo;
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	float nearPlane = 0.07;

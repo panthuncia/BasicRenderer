@@ -12,7 +12,7 @@ Scene::Scene(){
 UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     numObjects++;
     object->localID = nextNodeID;
-    objectsByName[object->name] = object;
+    objectsByName[object->m_name] = object;
     objectsByID[nextNodeID] = object;
     nextNodeID++;
 
@@ -40,8 +40,8 @@ UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
 
     nodesByID[nextNodeID] = node;
     nextNodeID++;
-    if (node->name != "") {
-        nodesByName[node->name] = node;
+    if (node->m_name != L"") {
+        nodesByName[node->m_name] = node;
     }
     return node->localID;
 }
@@ -59,20 +59,20 @@ UINT Scene::AddLight(std::shared_ptr<Light> light, bool shadowCasting) {
     return light->localID;
 }
 
-std::shared_ptr<SceneNode> Scene::CreateNode(std::string name) {
+std::shared_ptr<SceneNode> Scene::CreateNode(std::wstring name) {
     std::shared_ptr<SceneNode> node = std::make_shared<SceneNode>(name);
     AddNode(node);
     return node;
 }
 
-std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(MeshData meshData, std::string name) {
+std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(MeshData meshData, std::wstring name) {
     std::shared_ptr<RenderableObject> object = RenderableFromData(meshData, name);
     AddObject(object);
     return object;
 }
 
 
-std::shared_ptr<RenderableObject> Scene::GetObjectByName(const std::string& name) {
+std::shared_ptr<RenderableObject> Scene::GetObjectByName(const std::wstring& name) {
     auto it = objectsByName.find(name);
     if (it != objectsByName.end()) {
         return it->second;
@@ -105,7 +105,7 @@ std::shared_ptr<SceneNode> Scene::GetEntityByID(UINT id) {
 }
 
 
-void Scene::RemoveObjectByName(const std::string& name) {
+void Scene::RemoveObjectByName(const std::wstring& name) {
     auto it = objectsByName.find(name);
     if (it != objectsByName.end()) {
         auto idIt = std::find_if(objectsByID.begin(), objectsByID.end(),
@@ -187,7 +187,7 @@ void Scene::Update() {
 }
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
-    pCamera = std::make_shared<Camera>("MainCamera", lookAt, up, fov, aspect, zNear, zFar);
+    pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
     lightManager.SetCurrentCamera(pCamera.get());
     AddNode(pCamera);
@@ -266,7 +266,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     for (auto& objectPair : scene.objectsByID) {
         auto& object = objectPair.second;
         UINT oldID = object->localID;
-        auto newObject = std::make_shared<RenderableObject>(object->name, object->GetOpaqueMeshes(), object->GetTransparentMeshes());
+        auto newObject = std::make_shared<RenderableObject>(object->m_name, object->GetOpaqueMeshes(), object->GetTransparentMeshes());
         for (auto& childPair : object->children) {
             auto& child = childPair.second;
             auto dummyNode = std::make_shared<SceneNode>();

@@ -7,6 +7,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 #include "ResourceManager.h"
+#include "RenderContext.h"
 
 PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();

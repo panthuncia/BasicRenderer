@@ -18,12 +18,12 @@ public:
     UINT AddObject(std::shared_ptr<RenderableObject> object);
     UINT AddNode(std::shared_ptr<SceneNode> node);
     UINT AddLight(std::shared_ptr<Light> light, bool shadowCasting = false);
-    std::shared_ptr<SceneNode> CreateNode(std::string name = ""); // Like addNode, if node ids need to be pre-assigned
-    std::shared_ptr<RenderableObject> CreateRenderableObject(MeshData meshData, std::string name); // Like addObject, if node ids need to be pre-assigned
-    std::shared_ptr<RenderableObject> GetObjectByName(const std::string& name);
+    std::shared_ptr<SceneNode> CreateNode(std::wstring name = L""); // Like addNode, if node ids need to be pre-assigned
+    std::shared_ptr<RenderableObject> CreateRenderableObject(MeshData meshData, std::wstring name); // Like addObject, if node ids need to be pre-assigned
+    std::shared_ptr<RenderableObject> GetObjectByName(const std::wstring& name);
     std::shared_ptr<RenderableObject> GetObjectByID(UINT id);
     std::shared_ptr<SceneNode> GetEntityByID(UINT id);
-    void RemoveObjectByName(const std::string& name);
+    void RemoveObjectByName(const std::wstring& name);
     void RemoveObjectByID(UINT id);
     void RemoveLightByID(UINT Id);
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetRenderableObjectIDMap();
@@ -47,10 +47,10 @@ public:
 private:
     std::shared_ptr<Camera> pCamera;
 
-    std::unordered_map<std::string, std::shared_ptr<RenderableObject>> objectsByName;
+    std::unordered_map<std::wstring, std::shared_ptr<RenderableObject>> objectsByName;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> objectsByID;
     std::unordered_map<UINT, std::shared_ptr<SceneNode>> nodesByID;
-    std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodesByName;
+    std::unordered_map<std::wstring, std::shared_ptr<SceneNode>> nodesByName;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> opaqueObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> transparentObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<Light>> lightsByID;

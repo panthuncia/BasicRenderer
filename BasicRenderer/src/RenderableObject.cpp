@@ -4,11 +4,11 @@
 #include "Buffers.h"
 #include "Utilities.h"
 #include "DeviceManager.h"
-RenderableObject::RenderableObject(std::string name) : SceneNode(name) {
+RenderableObject::RenderableObject(std::wstring name) : SceneNode(name) {
     CreateBuffers();
 }
 
-RenderableObject::RenderableObject(std::string name, std::vector<Mesh> meshes) : SceneNode(name) {
+RenderableObject::RenderableObject(std::wstring name, std::vector<Mesh> meshes) : SceneNode(name) {
     for (auto& mesh : meshes) {
         if (mesh.material->m_blendState != BlendState::BLEND_STATE_OPAQUE) {
             transparentMeshes.push_back(mesh);
@@ -22,7 +22,7 @@ RenderableObject::RenderableObject(std::string name, std::vector<Mesh> meshes) :
     CreateBuffers();
 }
 
-RenderableObject::RenderableObject(std::string name, std::vector<Mesh>& newOpaqueMeshes, std::vector<Mesh>& newTransparentMeshes) : SceneNode(name) {
+RenderableObject::RenderableObject(std::wstring name, std::vector<Mesh>& newOpaqueMeshes, std::vector<Mesh>& newTransparentMeshes) : SceneNode(name) {
     if (newOpaqueMeshes.size() > 0) {
         m_hasOpaque = true;
         for (auto& mesh : newOpaqueMeshes) {

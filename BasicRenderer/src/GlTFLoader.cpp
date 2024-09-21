@@ -14,6 +14,7 @@
 #include "PixelBuffer.h"
 #include "Animation.h"
 #include "Skeleton.h"
+#include "utilities.h"
 
 using nlohmann::json;
 
@@ -361,7 +362,8 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
         if (gltfNode.contains("mesh")) {
             int meshIndex = gltfNode["mesh"];
             const MeshData& data = meshes[meshIndex];
-            node = scene->CreateRenderableObject(data, gltfNode.value("name", ""));
+            std::string name = gltfNode.value("name", "");
+            node = scene->CreateRenderableObject(data, s2ws(name));
             
             // Skinned mesh handling. Identify them now, bind to skins later
             if (gltfNode.contains("skin")) {
@@ -372,7 +374,8 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
             }
         }
         else {
-            node = scene->CreateNode(gltfNode.value("name", ""));
+            std::string name = gltfNode.value("name", "");
+            node = scene->CreateNode(s2ws(name));
         }
 
         if (gltfNode.contains("matrix")) {

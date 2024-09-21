@@ -16,9 +16,9 @@ public:
     Transform transform;
     std::unique_ptr<AnimationController> animationController; // Use unique_ptr to avoid incomplete type issue
     int localID;
-    std::string name;
+    std::wstring m_name;
 
-    SceneNode(const std::string& name = "");
+    SceneNode(const std::wstring& name = L"");
 
     void AddChild(std::shared_ptr<SceneNode> node);
     void RemoveChild(unsigned int childId);

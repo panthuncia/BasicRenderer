@@ -18,7 +18,7 @@ void print(Args... args) {
 
 Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const std::wstring& filename, const std::string& entryPoint, const std::string& target);
 
-std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::string name);
+std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name);
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
 std::shared_ptr<Texture> loadTextureFromFile(const char* filename);
