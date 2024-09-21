@@ -139,8 +139,7 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
 }
 
 void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::string, ResourceState>& finalResourceStates) {
-    auto& lastBatch = batches.back();
-
+	PassBatch loopBatch;
     for (const auto& [resourceName, finalState] : finalResourceStates) {
         auto resource = GetResourceByName(resourceName);
         if (!resource) {
@@ -151,7 +150,8 @@ void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::string, Res
         if (finalState != initialState) {
             // Insert a transition to bring the resource back to its initial state
             ResourceTransition transition = { resource, finalState, initialState };
-            lastBatch.transitions.push_back(transition);
+            loopBatch.transitions.push_back(transition);
         }
     }
+	batches.push_back(std::move(loopBatch));
 }
