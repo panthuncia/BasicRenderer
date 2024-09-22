@@ -23,7 +23,7 @@ public:
         return instance;
     }
 
-    void Initialize();
+    void Initialize(ID3D12CommandQueue* commandQueue, ID3D12CommandAllocator* commandAllocator);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
@@ -239,6 +239,7 @@ private:
     void WaitForTransitionQueue();
     void InitializeCopyCommandQueue();
     void InitializeTransitionCommandQueue();
+	void SetTransitionCommandQueue(ID3D12CommandQueue* commandQueue, ID3D12CommandAllocator* commandAllocator);
     //UINT AllocateDescriptor();
     //void ReleaseDescriptor(UINT index);
     void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);

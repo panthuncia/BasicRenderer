@@ -62,7 +62,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Initialize device manager
     DeviceManager::GetInstance().Initialize(device);
     PSOManager::getInstance().initialize();
-    ResourceManager::GetInstance().Initialize();
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> infoQueue;
@@ -133,6 +132,8 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     // Create command allocator
     ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+
+    ResourceManager::GetInstance().Initialize(commandQueue.Get(), commandAllocator.Get());
 
     // Create the command list
     ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
@@ -206,18 +207,19 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     currentScene->Update();
     auto camera = currentScene->GetCamera();
+
+    ThrowIfFailed(commandAllocator->Reset());
+
     ResourceManager::GetInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
     resourceManager.UpdateGPUBuffers();
     resourceManager.ExecuteResourceTransitions();
+    ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 }
 
 void DX12Renderer::Render() {
     //Update buffers
     // Record all the commands we need to render the scene into the command list
-    ThrowIfFailed(commandAllocator->Reset());
-    ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
-
 
     RenderContext context;
     context.currentScene = currentScene.get();

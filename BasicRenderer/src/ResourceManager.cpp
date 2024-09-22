@@ -5,7 +5,7 @@
 #include "DynamicStructuredBuffer.h"
 #include "SettingsManager.h"
 
-void ResourceManager::Initialize() {
+void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue, ID3D12CommandAllocator* commandAllocator) {
     //for (int i = 0; i < 3; i++) {
     //    frameResourceCopies[i] = std::make_unique<FrameResource>();
     //    frameResourceCopies[i]->Initialize();
@@ -50,7 +50,8 @@ void ResourceManager::Initialize() {
 
     InitializeUploadHeap();
     InitializeCopyCommandQueue();
-	InitializeTransitionCommandQueue();
+	//InitializeTransitionCommandQueue();
+	SetTransitionCommandQueue(commandQueue, commandAllocator);
 
     // Create CBV
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
@@ -204,6 +205,16 @@ void ResourceManager::InitializeTransitionCommandQueue() {
     if (transitionFenceEvent == nullptr) {
         ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
     }
+}
+
+void ResourceManager::SetTransitionCommandQueue(ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator) {
+	transitionCommandQueue = queue;
+	transitionCommandAllocator = allocator;
+
+    auto& device = DeviceManager::GetInstance().GetDevice();
+
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, transitionCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&transitionCommandList)));
+    transitionCommandList->Close();
 }
 
 UINT ResourceManager::CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc) {
@@ -880,6 +891,7 @@ void ResourceManager::UpdateGPUBuffers(){
     copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
     WaitForCopyQueue();
     buffersToUpdate.clear();
+    dynamicBuffersToUpdate.clear();
 }
 
 BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceUsageType usageType, void* pInitialData) {
@@ -920,12 +932,12 @@ void ResourceManager::ExecuteResourceTransitions() {
     }
 
     // Reset the command allocator
-    HRESULT hr = commandAllocator->Reset();
-    if (FAILED(hr)) {
-        spdlog::error("Failed to reset command allocator");
-    }
+    //HRESULT hr = commandAllocator->Reset();
+    //if (FAILED(hr)) {
+    //    spdlog::error("Failed to reset command allocator");
+    //}
 
-    hr = commandList->Reset(commandAllocator.Get(), nullptr);
+    auto hr = commandList->Reset(commandAllocator.Get(), nullptr);
     if (FAILED(hr)) {
         spdlog::error("Failed to reset command list");
     }
@@ -942,7 +954,6 @@ void ResourceManager::ExecuteResourceTransitions() {
 
     ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get() };
     transitionCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-    WaitForTransitionQueue();
 
 	queuedResourceTransitions.clear();
 }
