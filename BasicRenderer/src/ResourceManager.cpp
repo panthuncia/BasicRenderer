@@ -823,14 +823,15 @@ void ResourceManager::UpdateGPUBuffers(){
     if (FAILED(hr)) {
         spdlog::error("Failed to reset command list");
     }
-    for (auto& bufferHandle : buffersToUpdate) {
+    for (BufferHandle& bufferHandle : buffersToUpdate) {
         // Ensure both buffers are valid
         if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
+            auto startState = TranslateUsageType(bufferHandle.dataBuffer->m_usageType);
             D3D12_RESOURCE_BARRIER barrier = {};
             barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
             barrier.Transition.pResource = bufferHandle.dataBuffer->m_buffer.Get();
-            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_GENERIC_READ;
+            barrier.Transition.StateBefore = startState;
             barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
             barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 
@@ -842,9 +843,33 @@ void ResourceManager::UpdateGPUBuffers(){
 
             // Transition back to the original state
             barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            barrier.Transition.StateAfter = startState;
             copyCommandList->ResourceBarrier(1, &barrier);
         }
+    }
+    for (DynamicBufferBase& dynamicBufferHandle : dynamicBuffersToUpdate) {
+		// Ensure both buffers are valid
+		if (dynamicBufferHandle.m_uploadBuffer && dynamicBufferHandle.m_dataBuffer) {
+            auto startState = TranslateUsageType(dynamicBufferHandle.m_dataBuffer->m_usageType);
+			D3D12_RESOURCE_BARRIER barrier = {};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+			barrier.Transition.pResource = dynamicBufferHandle.m_dataBuffer->m_buffer.Get();
+			barrier.Transition.StateBefore = startState;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+			// Transition the data buffer to a state suitable for copying into it
+			copyCommandList->ResourceBarrier(1, &barrier);
+
+			// Perform the copy
+			copyCommandList->CopyResource(dynamicBufferHandle.m_dataBuffer->m_buffer.Get(), dynamicBufferHandle.m_uploadBuffer->m_buffer.Get());
+
+			// Transition back to the original state
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			barrier.Transition.StateAfter = startState;
+			copyCommandList->ResourceBarrier(1, &barrier);
+		}
     }
     hr = copyCommandList->Close();
     if (FAILED(hr)) {
@@ -860,20 +885,13 @@ void ResourceManager::UpdateGPUBuffers(){
 BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceUsageType usageType, void* pInitialData) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	BufferHandle handle;
-	handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
-	handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, usageType);
+	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
+	handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
 	if (pInitialData) {
 		UpdateBuffer(handle, pInitialData, bufferSize);
 	}
-    D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
-    switch (usageType) {
-        case ResourceUsageType::INDEX:
-            state = D3D12_RESOURCE_STATE_INDEX_BUFFER;
-            break;
-        case ResourceUsageType::VERTEX:
-            state = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-            break;
-    }
+	D3D12_RESOURCE_STATES state = TranslateUsageType(usageType);
+
 	QueueResourceTransition({ handle.dataBuffer->m_buffer.Get(), D3D12_RESOURCE_STATE_COMMON,  state});
 	return handle;
 }

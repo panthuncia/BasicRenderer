@@ -8,6 +8,7 @@
 #include "ResourceHandles.h"
 #include "Interfaces/ISceneNodeObserver.h"
 #include "SettingsManager.h"
+#include "ResourceManager.h"
 
 class Camera;
 class Light;
@@ -29,11 +30,15 @@ public:
     void OnNodeUpdated(SceneNode* camera) override;
     void OnNodeUpdated(Light* light) override;
 
-    void UpdateGPU() {
-        m_lightBufferHandle.buffer.UpdateBuffer();
-		m_spotViewInfoHandle.buffer.UpdateBuffer();
-		m_pointViewInfoHandle.buffer.UpdateBuffer();
-		m_directionalViewInfoHandle.buffer.UpdateBuffer();
+    void UpdateBuffers() {
+        if (m_lightBufferHandle.buffer.UpdateUploadBuffer())
+		    ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_lightBufferHandle);
+		if (m_spotViewInfoHandle.buffer.UpdateUploadBuffer())
+            ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_spotViewInfoHandle);
+		if (m_pointViewInfoHandle.buffer.UpdateUploadBuffer())
+            ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfoHandle);
+		if (m_directionalViewInfoHandle.buffer.UpdateUploadBuffer())
+            ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfoHandle);
     }
 
 private:

@@ -183,7 +183,7 @@ void Scene::Update() {
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }
-    lightManager.UpdateGPU();
+    PostUpdate();
 }
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
@@ -206,7 +206,7 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
 }
 
 void Scene::PostUpdate() {
-    lightManager.UpdateGPU();
+    lightManager.UpdateBuffers();
 }
 
 UINT Scene::GetNumLights() {

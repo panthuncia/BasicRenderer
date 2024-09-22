@@ -56,7 +56,6 @@ void LightManager::AddLight(Light* lightNode, bool shadowCasting, Camera* curren
 
 unsigned int LightManager::CreateLightInfo(Light* node) {
     m_lightBufferHandle.buffer.Add(node->GetLightInfo());
-    m_lightBufferHandle.buffer.UpdateBuffer();
     return m_lightBufferHandle.buffer.Size() - 1; // Return new light's index
 }
 
@@ -74,7 +73,6 @@ void LightManager::RemoveLight(Light* light) {
     m_lights.erase(m_lights.begin() + index);
 
     m_lightBufferHandle.buffer.RemoveAt(index);
-    m_lightBufferHandle.buffer.UpdateBuffer();
 	light->RemoveLightObserver(this);
 }
 

@@ -42,8 +42,8 @@ public:
 
         BufferHandle bufferHandle;
         // Create the buffer
-        bufferHandle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
-        bufferHandle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::CONSTANT);
+        bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
+        bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
         ResourceTransition transition;
 		transition.resource = bufferHandle.dataBuffer->m_buffer.Get();
 		transition.beforeState = D3D12_RESOURCE_STATE_COMMON;
@@ -81,8 +81,8 @@ public:
         UINT bufferSize = numElements * elementSize;
 
         BufferHandle handle;
-        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
-        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::UNKNOWN);
+        handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
+        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
 
         handle.index = m_cbvSrvUavHeap->AllocateDescriptor();
 
@@ -140,7 +140,7 @@ public:
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
         DynamicStructuredBuffer<T> dynamicBuffer(bufferID, capacity, name);
-        dynamicBuffer.SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, ComPtr<ID3D12Resource>& buffer) {
+        dynamicBuffer.SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
             this->onBufferResized(bufferID, typeSize, capacity, buffer);
             });
 
@@ -156,7 +156,7 @@ public:
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         bufferIDDescriptorIndexMap[bufferID] = index;
         CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(dynamicBuffer.GetBuffer().Get(), &srvDesc, cpuHandle);
+        device->CreateShaderResourceView(dynamicBuffer.GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
         DynamicBufferHandle<T> handle;
         handle.index = index;
@@ -170,7 +170,7 @@ public:
         return val;
     }
 
-    void onBufferResized(UINT bufferID, UINT typeSize, UINT capacity, ComPtr<ID3D12Resource>& buffer) {
+    void onBufferResized(UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -184,7 +184,7 @@ public:
         srvDesc.Buffer.StructureByteStride = typeSize;
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        device->CreateShaderResourceView(buffer.Get(), &srvDesc, srvHandle);
+        device->CreateShaderResourceView(buffer->m_buffer.Get(), &srvDesc, srvHandle);
     }
 
     template<typename T>
@@ -199,8 +199,8 @@ public:
         BufferHandle handle;
 
 		// Create the upload and data buffers
-        handle.uploadBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, ResourceUsageType::UPLOAD);
-        handle.dataBuffer = std::make_shared<Buffer>(device.Get(), ResourceCPUAccessType::NONE, bufferSize, ResourceUsageType::CONSTANT);
+        handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
+        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
 		handle.dataBuffer->SetName(name);
         ResourceTransition transition;
         transition.resource = handle.dataBuffer->m_buffer.Get();
@@ -218,6 +218,10 @@ public:
 
 	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
+	template<typename T>
+    void QueueDynamicBufferUpdate(DynamicBufferHandle<T>& handle) {
+        dynamicBuffersToUpdate.push_back(handle.buffer);
+    }
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
@@ -274,6 +278,8 @@ private:
     ComPtr<ID3D12CommandAllocator> commandAllocator;
 
     std::vector<BufferHandle> buffersToUpdate;
+    std::vector<DynamicBufferBase> dynamicBuffersToUpdate;
+
 	std::vector<ResourceTransition> queuedResourceTransitions;
 
 	int defaultShadowSamplerIndex = -1;
