@@ -81,18 +81,18 @@ void RenderGraph::Execute(RenderContext& context) {
 
 bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResources& passAndResources) {
     for (auto& resource : passAndResources.resources.shaderResources) {
-        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::ShaderResource)) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::ALL_SRV)) {
             return true;
         }
     }
     for (auto& resource : passAndResources.resources.renderTargets) {
-        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::RenderTarget)) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::RENDER_TARGET)) {
             return true;
             break;
         }
     }
     for (auto& resource : passAndResources.resources.depthTextures) {
-        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::DepthWrite)) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::DEPTH_WRITE)) {
             return true;
             break;
         }
@@ -102,7 +102,7 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
 
 void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates) {
     for (const auto& [resourceName, requiredState] : batch.resourceStates) {
-        ResourceState previousState = ResourceState::Undefined;
+        ResourceState previousState = ResourceState::UNKNOWN;
         auto it = previousStates.find(resourceName);
         std::shared_ptr<Resource> resource = GetResourceByName(resourceName);
         if (it != previousStates.end()) {
@@ -128,13 +128,13 @@ void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unorde
 void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources& passAndResources) {
     // Update batch.resourceStates based on the resources used in passAndResources
     for (auto& resource : passAndResources.resources.shaderResources) {
-        batch.resourceStates[resource->GetName()] = ResourceState::ShaderResource;
+        batch.resourceStates[resource->GetName()] = ResourceState::ALL_SRV;
     }
     for (auto& resource : passAndResources.resources.renderTargets) {
-        batch.resourceStates[resource->GetName()] = ResourceState::RenderTarget;
+        batch.resourceStates[resource->GetName()] = ResourceState::RENDER_TARGET;
     }
     for (auto& resource : passAndResources.resources.depthTextures) {
-        batch.resourceStates[resource->GetName()] = ResourceState::DepthWrite;
+        batch.resourceStates[resource->GetName()] = ResourceState::DEPTH_WRITE;
     }
 }
 

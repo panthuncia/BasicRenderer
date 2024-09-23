@@ -2,6 +2,7 @@
 #include <string>
 #include "PSOFlags.h"
 #include "Sampler.h"
+#include "utilities.h"
 
 Material::Material(const std::string& name,
     UINT psoFlags)
@@ -81,6 +82,7 @@ Material::Material(const std::string& name,
 
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
+	m_perMaterialHandle.dataBuffer->SetName(L"PerMaterialCB ("+s2ws(name)+L")");
     resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 

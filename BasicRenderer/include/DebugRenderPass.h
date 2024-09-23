@@ -82,7 +82,7 @@ private:
         CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceUsageType::VERTEX, (void*)fullscreenTriangleVertices);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenTriangleVertices);
 		ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)fullscreenTriangleVertices, vertexBufferSize);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};

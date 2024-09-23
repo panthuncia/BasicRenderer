@@ -4,7 +4,6 @@
 #include "DeviceManager.h"
 #include "DynamicStructuredBuffer.h"
 #include "SettingsManager.h"
-
 void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue, ID3D12CommandAllocator* commandAllocator) {
     //for (int i = 0; i < 3; i++) {
     //    frameResourceCopies[i] = std::make_unique<FrameResource>();
@@ -17,17 +16,7 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue, ID3D12Command
     m_rtvHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 10000, false);
     m_dsvHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 10000, false);
 
-    UINT perFrameBufferSize = (sizeof(PerFrameCB) + 255) & ~255; // CBV size is required to be 256-byte aligned.
-    D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(perFrameBufferSize);
-
-    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    ThrowIfFailed(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &bufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&perFrameConstantBuffer)));
+	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
     perFrameCBData.ambientLighting = XMVectorSet(0.1, 0.1, 0.1, 1.0);
     perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
@@ -48,17 +37,10 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue, ID3D12Command
 
     // Map the constant buffer and initialize it
 
-    InitializeUploadHeap();
+    //InitializeUploadHeap();
     InitializeCopyCommandQueue();
 	//InitializeTransitionCommandQueue();
 	SetTransitionCommandQueue(commandQueue, commandAllocator);
-
-    // Create CBV
-    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-    cbvDesc.BufferLocation = perFrameConstantBuffer->GetGPUVirtualAddress();
-    cbvDesc.SizeInBytes = perFrameBufferSize; // CBV size is required to be 256-byte aligned.
-    unsigned int lightsIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-    device->CreateConstantBufferView(&cbvDesc, m_cbvSrvUavHeap->GetCPUHandle(lightsIndex));
 }
 
 CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetSRVCPUHandle(UINT index) {
@@ -96,20 +78,9 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
 //}
 
 
-void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
-    //DirectX::XMFLOAT4 eyeWorld = { 0.0f, 2.0f, -5.0f, 1.0f };
-    //perFrameCBData.view = DirectX::XMMatrixLookAtLH(
-    //    DirectX::XMLoadFloat4(&eyeWorld), // Eye position
-    //    DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),  // Focus point
-    //    DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)   // Up direction
-    //);
+void ResourceManager::UpdatePerFrameBuffer(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
+
     perFrameCBData.viewMatrix = viewMatrix;
-    //perFrameCBData.projection = DirectX::XMMatrixPerspectiveFovLH(
-    //    DirectX::XM_PIDIV2, // Field of View
-    //    800.0f / 600.0f,    // Aspect ratio
-    //    0.1f,               // Near clipping plane
-    //    100.0f              // Far clipping plane
-    //);
     perFrameCBData.projectionMatrix = projectionMatrix;
     perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat3(&eyeWorld);
     perFrameCBData.numLights = numLights;
@@ -117,40 +88,8 @@ void ResourceManager::UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX:
 	perFrameCBData.pointLightCubemapBufferIndex = pointCubemapMatricesBufferIndex;
 	perFrameCBData.spotLightMatrixBufferIndex = spotMatricesBufferIndex;
 	perFrameCBData.directionalLightCascadeBufferIndex = directionalCascadeMatricesBufferIndex;
-    // Map the upload heap and copy new data to it
-    void* pUploadData;
-    D3D12_RANGE readRange(0, 0);
-    ThrowIfFailed(uploadHeap->Map(0, &readRange, &pUploadData));
-    memcpy(pUploadData, &perFrameCBData, sizeof(perFrameCBData));
-    uploadHeap->Unmap(0, nullptr);
-
-    // Reset and record the copy command list
-    ThrowIfFailed(copyCommandAllocator->Reset());
-    ThrowIfFailed(copyCommandList->Reset(copyCommandAllocator.Get(), nullptr));
-    copyCommandList->CopyBufferRegion(perFrameConstantBuffer.Get(), 0, uploadHeap.Get(), 0, sizeof(perFrameCBData));
-    ThrowIfFailed(copyCommandList->Close());
-
-    // Execute the copy command list
-    ID3D12CommandList* ppCommandLists[] = { copyCommandList.Get() };
-    copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-
-    // Wait for the copy queue to finish
-    WaitForCopyQueue();
-
-    // TODO: Replace above with new buffer management system used elsewhere
-}
-
-void ResourceManager::InitializeUploadHeap() {
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer((sizeof(PerFrameCB) + 255) & ~255);
-    ThrowIfFailed(device->CreateCommittedResource(
-        &uploadHeapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &uploadBufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&uploadHeap)));
+    
+    UpdateConstantBuffer(perFrameBufferHandle, perFrameCBData);
 }
 
 void ResourceManager::WaitForCopyQueue() {
@@ -837,7 +776,10 @@ void ResourceManager::UpdateGPUBuffers(){
     for (BufferHandle& bufferHandle : buffersToUpdate) {
         // Ensure both buffers are valid
         if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
-            auto startState = TranslateUsageType(bufferHandle.dataBuffer->m_usageType);
+            if (bufferHandle.dataBuffer->GetName() == L"InverseBindMatrices") {
+                print("hello");
+            }
+            auto startState = ResourceStateToD3D12(bufferHandle.dataBuffer->GetState());
             D3D12_RESOURCE_BARRIER barrier = {};
             barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -860,12 +802,12 @@ void ResourceManager::UpdateGPUBuffers(){
     }
     for (DynamicBufferBase& dynamicBufferHandle : dynamicBuffersToUpdate) {
 		// Ensure both buffers are valid
-		if (dynamicBufferHandle.m_uploadBuffer && dynamicBufferHandle.m_dataBuffer) {
-            auto startState = TranslateUsageType(dynamicBufferHandle.m_dataBuffer->m_usageType);
+		if (dynamicBufferHandle.m_bufferHandle.uploadBuffer && dynamicBufferHandle.m_bufferHandle.dataBuffer) {
+            auto startState = ResourceStateToD3D12(dynamicBufferHandle.m_bufferHandle.dataBuffer->GetState());
 			D3D12_RESOURCE_BARRIER barrier = {};
 			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = dynamicBufferHandle.m_dataBuffer->m_buffer.Get();
+			barrier.Transition.pResource = dynamicBufferHandle.m_bufferHandle.dataBuffer->m_buffer.Get();
 			barrier.Transition.StateBefore = startState;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
 			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -874,7 +816,7 @@ void ResourceManager::UpdateGPUBuffers(){
 			copyCommandList->ResourceBarrier(1, &barrier);
 
 			// Perform the copy
-			copyCommandList->CopyResource(dynamicBufferHandle.m_dataBuffer->m_buffer.Get(), dynamicBufferHandle.m_uploadBuffer->m_buffer.Get());
+			copyCommandList->CopyResource(dynamicBufferHandle.m_bufferHandle.dataBuffer->m_buffer.Get(), dynamicBufferHandle.m_bufferHandle.uploadBuffer->m_buffer.Get());
 
 			// Transition back to the original state
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
@@ -894,7 +836,7 @@ void ResourceManager::UpdateGPUBuffers(){
     dynamicBuffersToUpdate.clear();
 }
 
-BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceUsageType usageType, void* pInitialData) {
+BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	BufferHandle handle;
 	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
@@ -902,9 +844,8 @@ BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceUsageType 
 	if (pInitialData) {
 		UpdateBuffer(handle, pInitialData, bufferSize);
 	}
-	D3D12_RESOURCE_STATES state = TranslateUsageType(usageType);
 
-	QueueResourceTransition({ handle.dataBuffer->m_buffer.Get(), D3D12_RESOURCE_STATE_COMMON,  state});
+	QueueResourceTransition({handle.dataBuffer.get(), handle.dataBuffer->m_buffer.Get(), ResourceState::UNKNOWN,  usageType});
 	return handle;
 }
 
@@ -941,10 +882,14 @@ void ResourceManager::ExecuteResourceTransitions() {
     if (FAILED(hr)) {
         spdlog::error("Failed to reset command list");
     }
-
+    RenderContext context;
+    context.commandList = transitionCommandList.Get();
 	for (auto& transition : queuedResourceTransitions) {
-		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(transition.resource, transition.beforeState, transition.afterState);
-		commandList->ResourceBarrier(1, &barrier);
+        if (transition.resource->GetName() == L"InverseBindMatrices") {
+            print("hello");
+        }
+        transition.resource->Transition(context, transition.beforeState, transition.afterState);
+		transition.resource->SetState(transition.afterState);
 	}
 
     hr = commandList->Close();

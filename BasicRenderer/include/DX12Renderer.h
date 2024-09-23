@@ -70,6 +70,8 @@ private:
 
     std::shared_ptr<DebugRenderPass> debugPass;
 
+    RenderContext m_context;
+
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);

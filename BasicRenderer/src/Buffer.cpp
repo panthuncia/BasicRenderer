@@ -5,6 +5,7 @@
 #include "DirectX/d3dx12.h"
 #include "spdlog/spdlog.h"
 #include "RenderContext.h"
+#include "ResourceStates.h"
 
 using namespace Microsoft::WRL;
 
@@ -21,35 +22,8 @@ D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType) {
 	}
 }
 
-D3D12_RESOURCE_STATES TranslateUsageType(ResourceUsageType usageType) {
-	switch (usageType) {
-	case ResourceUsageType::UNKNOWN:
-		return D3D12_RESOURCE_STATE_COMMON;
-	case ResourceUsageType::UPLOAD:
-		return D3D12_RESOURCE_STATE_GENERIC_READ;
-	case ResourceUsageType::RENDER_TARGET:
-		return D3D12_RESOURCE_STATE_RENDER_TARGET;
-	case ResourceUsageType::DEPTH_STENCIL:
-		return D3D12_RESOURCE_STATE_DEPTH_WRITE;
-	case ResourceUsageType::PIXEL_SRV:
-		return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-	case ResourceUsageType::NON_PIXEL_SRV:
-		return D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-	case ResourceUsageType::ALL_SRV:
-		return D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
-	case ResourceUsageType::INDEX:
-		return D3D12_RESOURCE_STATE_INDEX_BUFFER;
-	case ResourceUsageType::VERTEX:
-		return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-	case ResourceUsageType::CONSTANT:
-		return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-	}
-	throw std::runtime_error("Invalid ResourceUsageType");
-}
-
 Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t bufferSize, bool upload = false) {
 	m_accessType = accessType;
-	m_usageType = upload ? ResourceUsageType::UPLOAD : ResourceUsageType::UNKNOWN;
 	D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(TranslateAccessType(accessType));
 	D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
 	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
@@ -67,11 +41,15 @@ Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t 
 	}
 }
 
-void Buffer::Transition(RenderContext& context, ResourceState fromState, ResourceState toState) {
+void Buffer::Transition(const RenderContext& context, ResourceState fromState, ResourceState toState) {
 	if (fromState == toState) return;
 
 	D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
 	D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);
+
+	if (toState == ResourceState::NON_PIXEL_SRV) {
+		printf("What?");
+	}
 
 	// Create a resource barrier
 	D3D12_RESOURCE_BARRIER barrier = {};

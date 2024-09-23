@@ -9,14 +9,15 @@
 
 #include "DeviceManager.h"
 #include "Buffer.h"
+#include "Resource.h"
+#include "BufferHandle.h"
 
 using Microsoft::WRL::ComPtr;
 
-class DynamicBufferBase {
+class DynamicBufferBase : public Resource{
 public:
     DynamicBufferBase() {}
-    std::shared_ptr<Buffer> m_uploadBuffer;
-    std::shared_ptr<Buffer> m_dataBuffer;
+    BufferHandle m_bufferHandle;
 };
 
 template<class T>
@@ -27,17 +28,17 @@ public:
         : m_globalResizableBufferID(id), m_capacity(capacity), m_needsUpdate(false) {
         CreateBuffer(capacity);
         if (name != L"") {
-            m_dataBuffer->SetName((m_name + L": "+name).c_str());
+            m_bufferHandle.dataBuffer->SetName((m_name + L": "+name).c_str());
         }
         else {
-			m_dataBuffer->SetName(m_name.c_str());
+            m_bufferHandle.dataBuffer->SetName(m_name.c_str());
         }
     }
 
     void Add(const T& element) {
         if (m_data.size() >= m_capacity) {
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, m_dataBuffer);
+            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, m_bufferHandle.dataBuffer);
         }
         m_data.push_back(element);
         m_needsUpdate = true;
@@ -76,9 +77,9 @@ public:
             // Map buffer and copy data
             T* pData = nullptr;
             D3D12_RANGE readRange = { 0, 0 }; // We do not intend to read from this resource on the CPU.
-            m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pData));
+            m_bufferHandle.dataBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pData));
             memcpy(pData, m_data.data(), sizeof(T) * m_data.size());
-            m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+            m_bufferHandle.dataBuffer->m_buffer->Unmap(0, nullptr);
 
             m_needsUpdate = false;
             return true;
@@ -91,11 +92,15 @@ public:
     }
 
     std::shared_ptr<Buffer>& GetBuffer() {
-        return m_dataBuffer;
+        return m_bufferHandle.dataBuffer;
     }
 
     UINT Size() {
         return m_data.size();
+    }
+protected:
+    void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) override {
+        m_bufferHandle.dataBuffer->Transition(context, prevState, newState);
     }
 
 private:
@@ -111,7 +116,7 @@ private:
     void CreateBuffer(UINT capacity) {
         // Create the buffer
         auto& device = DeviceManager::GetInstance().GetDevice();
-		m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true);
-		m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false);
+		auto& resourceManager = ResourceManager::GetInstance();
+		m_bufferHandle = resourceManager.CreateBuffer(sizeof(T) * capacity, currentState, nullptr);
     }
 };

@@ -6,13 +6,8 @@
 
 #include "DirectX/d3dx12.h"
 #include "DynamicStructuredBuffer.h"
-#include "Buffer.h"
+#include "BufferHandle.h"
 
-struct BufferHandle {
-    UINT index; // Index in the descriptor heap
-    std::shared_ptr<Buffer> uploadBuffer; // The upload buffer
-    std::shared_ptr<Buffer> dataBuffer; // The actual resource buffer
-};
 
 template<typename T>
 struct DynamicBufferHandle {

@@ -13,27 +13,7 @@ enum class ResourceCPUAccessType {
 	NONE
 };
 
-enum class ResourceUsageType {
-	UNKNOWN,
-	INDEX,
-	VERTEX,
-	CONSTANT,
-	PIXEL_SRV,
-	NON_PIXEL_SRV,
-	ALL_SRV,
-	RENDER_TARGET,
-	DEPTH_STENCIL,
-	UPLOAD
-};
-
-struct ResourceTransition {
-	ID3D12Resource* resource;
-	D3D12_RESOURCE_STATES beforeState;
-	D3D12_RESOURCE_STATES afterState;
-};
-
 D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType);
-D3D12_RESOURCE_STATES TranslateUsageType(ResourceUsageType usageType);
 
 class RenderContext;
 
@@ -47,10 +27,10 @@ public:
 	}
 	~Buffer() = default;
 	ResourceCPUAccessType m_accessType;
-	ResourceUsageType m_usageType;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
-	void SetName(const std::wstring& name) { m_buffer->SetName(name.c_str()); }
-	void Transition(RenderContext& context, ResourceState prevState, ResourceState newState);
+	void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState);
+protected:
+	void OnSetName() override { m_buffer->SetName(name.c_str()); }
 private:
 	Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t bufferSize, bool upload);
 };

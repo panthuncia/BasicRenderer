@@ -12,10 +12,10 @@
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
-    m_lightBufferHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(1, L"lightBuffer<LightInfo>");
-    m_spotViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(1, L"spotViewInfo<matrix>");
-    m_pointViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(1, L"pointViewInfo<matrix>");
-    m_directionalViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(1, L"direcitonalViewInfo<matrix>");
+    m_lightBufferHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 1, L"lightBuffer<LightInfo>");
+    m_spotViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
+    m_pointViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
+    m_directionalViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");

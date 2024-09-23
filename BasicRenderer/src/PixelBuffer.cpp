@@ -13,28 +13,28 @@ PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channe
     ResourceManager& resourceManager = ResourceManager::GetInstance();
     handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB);
     SetIndex(GetSRVDescriptorIndex());
-    currentState = ResourceState::Common;
+    currentState = ResourceState::UNKNOWN;
 }
 
 PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
     handle = resourceManager.CreateTexture(width, height, channels, isCubemap, RTV, DSV, UAV);
     SetIndex(GetSRVDescriptorIndex());
-    currentState = ResourceState::Common;
+    currentState = ResourceState::UNKNOWN;
 }
 
 PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
     handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, isCubemap, RTV, DSV, UAV);
     SetIndex(GetSRVDescriptorIndex());
-    currentState = ResourceState::Common;
+    currentState = ResourceState::UNKNOWN;
 }
 
 UINT PixelBuffer::GetSRVDescriptorIndex() const {
     return handle.SRVInfo.index;
 }
 
-void PixelBuffer::Transition(RenderContext& context, ResourceState fromState, ResourceState toState) {
+void PixelBuffer::Transition(const RenderContext& context, ResourceState fromState, ResourceState toState) {
     if (fromState == toState) return;
 
     D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);

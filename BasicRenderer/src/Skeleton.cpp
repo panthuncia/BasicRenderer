@@ -5,8 +5,10 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const s
     : m_nodes(nodes), m_inverseBindMatrices(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
-    m_inverseBindMatricesHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
+    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
+    m_transformsHandle.dataBuffer->SetName(L"BoneTransforms");
+    m_inverseBindMatricesHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
+	m_inverseBindMatricesHandle.dataBuffer->SetName(L"InverseBindMatrices");
     resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
 }
 
@@ -14,7 +16,8 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferH
     : m_nodes(nodes), m_inverseBindMatricesHandle(inverseBindMatricesHandle) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size());
+    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
+    m_transformsHandle.dataBuffer->SetName(L"BoneTransforms");
 }
 
 
@@ -33,7 +36,7 @@ void Skeleton::SetAnimation(size_t index) {
         return;
     }
 
-    auto animation = animations[index];
+    auto& animation = animations[index];
     for (auto& node : m_nodes) {
         if (animation->nodesMap.find(node->localID) != animation->nodesMap.end()) {
             node->animationController->setAnimationClip(animation->nodesMap[node->localID]);

@@ -14,6 +14,7 @@
 #include "Buffer.h"
 #include "DescriptorHeap.h"
 #include "ResourceStates.h"
+#include "RenderContext.h"
 using namespace Microsoft::WRL;
 
 class ResourceManager {
@@ -29,10 +30,10 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
     ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
-    void UpdateConstantBuffers(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
+    void UpdatePerFrameBuffer(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
 
     template<typename T>
-    BufferHandle CreateIndexedConstantBuffer() {
+    BufferHandle CreateIndexedConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -44,10 +45,11 @@ public:
         // Create the buffer
         bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
         bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
+		bufferHandle.dataBuffer->SetName(name);
         ResourceTransition transition;
-		transition.resource = bufferHandle.dataBuffer->m_buffer.Get();
-		transition.beforeState = D3D12_RESOURCE_STATE_COMMON;
-		transition.afterState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+		transition.resource = bufferHandle.dataBuffer.get();
+		transition.beforeState = ResourceState::UNKNOWN;
+		transition.afterState = ResourceState::CONSTANT;
 		QueueResourceTransition(transition);
         // Create a descriptor for the buffer
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
@@ -75,7 +77,7 @@ public:
     }
 
     template<typename T>
-    BufferHandle CreateIndexedStructuredBuffer(UINT numElements) {
+    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
@@ -83,6 +85,9 @@ public:
         BufferHandle handle;
         handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
         handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
+        
+        ResourceTransition transition = { handle.dataBuffer.get(), handle.dataBuffer->m_buffer.Get(), ResourceState::UNKNOWN,  usageType };
+        QueueResourceTransition(transition);
 
         handle.index = m_cbvSrvUavHeap->AllocateDescriptor();
 
@@ -132,7 +137,7 @@ public:
     }
 
     template<typename T>
-    DynamicBufferHandle<T> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "") {
+    DynamicBufferHandle<T> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -140,6 +145,8 @@ public:
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
         DynamicStructuredBuffer<T> dynamicBuffer(bufferID, capacity, name);
+        ResourceTransition transition;
+		QueueResourceTransition({ dynamicBuffer.GetBuffer().get(), dynamicBuffer.GetBuffer()->m_buffer.Get(), ResourceState::UNKNOWN, usage });
         dynamicBuffer.SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
             this->onBufferResized(bufferID, typeSize, capacity, buffer);
             });
@@ -203,9 +210,9 @@ public:
         handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
 		handle.dataBuffer->SetName(name);
         ResourceTransition transition;
-        transition.resource = handle.dataBuffer->m_buffer.Get();
-        transition.beforeState = D3D12_RESOURCE_STATE_COMMON;
-        transition.afterState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        transition.resource = handle.dataBuffer.get();
+        transition.beforeState = ResourceState::UNKNOWN;
+        transition.afterState = ResourceState::CONSTANT;
         QueueResourceTransition(transition);
 
 
@@ -213,10 +220,10 @@ public:
     }
 
     TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB);
-    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::Common);
-    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::Common);
+    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
+    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
 
-	BufferHandle CreateBuffer(size_t size, ResourceUsageType usageType, void* pInitialData);
+	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 	template<typename T>
     void QueueDynamicBufferUpdate(DynamicBufferHandle<T>& handle) {
@@ -234,7 +241,6 @@ public:
 
 private:
     ResourceManager(){};
-    void InitializeUploadHeap();
     void WaitForCopyQueue();
     void WaitForTransitionQueue();
     void InitializeCopyCommandQueue();
@@ -253,7 +259,6 @@ private:
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> uploadHeap;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> copyCommandQueue;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> copyCommandAllocator;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> copyCommandList;
@@ -268,7 +273,7 @@ private:
     HANDLE transitionFenceEvent;
     UINT64 transitionFenceValue = 0;
 
-    ComPtr<ID3D12Resource> perFrameConstantBuffer;
+	BufferHandle perFrameBufferHandle;
     UINT8* pPerFrameConstantBuffer;
     PerFrameCB perFrameCBData;
     UINT currentFrameIndex;

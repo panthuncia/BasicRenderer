@@ -27,7 +27,7 @@ public:
 
 protected:
     // Override the base Resource method to transition all resources in the group
-    void Transition(RenderContext& context, ResourceState prevState, ResourceState newState) {
+    void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {
         for (auto& pair : resources) {
             pair.second->Transition(context, prevState, newState);
         }

@@ -210,7 +210,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
 
-    ResourceManager::GetInstance().UpdateConstantBuffers(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
+    ResourceManager::GetInstance().UpdatePerFrameBuffer(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
     resourceManager.UpdateGPUBuffers();
     resourceManager.ExecuteResourceTransitions();
@@ -218,22 +218,20 @@ void DX12Renderer::Update(double elapsedSeconds) {
 }
 
 void DX12Renderer::Render() {
-    //Update buffers
     // Record all the commands we need to render the scene into the command list
 
-    RenderContext context;
-    context.currentScene = currentScene.get();
-    context.device = device.Get();
-    context.commandList = commandList.Get();
-    context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
-    context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
-    context.rtvHeap = rtvHeap.Get();
-    context.dsvHeap = dsvHeap.Get();
-    context.renderTargets = renderTargets;
-    context.rtvDescriptorSize = rtvDescriptorSize;
-    context.frameIndex = frameIndex;
-    context.xRes = m_xRes;
-    context.yRes = m_yRes;
+    m_context.currentScene = currentScene.get();
+    m_context.device = device.Get();
+    m_context.commandList = commandList.Get();
+    m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
+    m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
+    m_context.rtvHeap = rtvHeap.Get();
+    m_context.dsvHeap = dsvHeap.Get();
+    m_context.renderTargets = renderTargets;
+    m_context.rtvDescriptorSize = rtvDescriptorSize;
+    m_context.frameIndex = frameIndex;
+    m_context.xRes = m_xRes;
+    m_context.yRes = m_yRes;
 
     // Set necessary state
     auto& psoManager = PSOManager::getInstance();
@@ -250,7 +248,7 @@ void DX12Renderer::Render() {
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
 
-	currentRenderGraph->Execute(context);
+	currentRenderGraph->Execute(m_context);
 
     // Indicate that the back buffer will now be used to present
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
