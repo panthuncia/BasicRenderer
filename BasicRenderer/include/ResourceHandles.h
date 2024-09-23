@@ -12,7 +12,7 @@
 template<typename T>
 struct DynamicBufferHandle {
     UINT index; // Index in the descriptor heap
-    DynamicStructuredBuffer<T> buffer; // The actual resource buffer
+    std::shared_ptr<DynamicStructuredBuffer<T>> buffer; // The actual resource buffer
 };
 
 struct ShaderVisibleIndexInfo {

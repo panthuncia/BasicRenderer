@@ -800,14 +800,14 @@ void ResourceManager::UpdateGPUBuffers(){
             copyCommandList->ResourceBarrier(1, &barrier);
         }
     }
-    for (DynamicBufferBase& dynamicBufferHandle : dynamicBuffersToUpdate) {
+    for (std::shared_ptr<DynamicBufferBase> dynamicBufferHandle : dynamicBuffersToUpdate) {
 		// Ensure both buffers are valid
-		if (dynamicBufferHandle.m_bufferHandle.uploadBuffer && dynamicBufferHandle.m_bufferHandle.dataBuffer) {
-            auto startState = ResourceStateToD3D12(dynamicBufferHandle.m_bufferHandle.dataBuffer->GetState());
+		if (dynamicBufferHandle->m_uploadBuffer && dynamicBufferHandle->m_dataBuffer) {
+            auto startState = ResourceStateToD3D12(dynamicBufferHandle->m_dataBuffer->GetState());
 			D3D12_RESOURCE_BARRIER barrier = {};
 			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = dynamicBufferHandle.m_bufferHandle.dataBuffer->m_buffer.Get();
+			barrier.Transition.pResource = dynamicBufferHandle->m_dataBuffer->m_buffer.Get();
 			barrier.Transition.StateBefore = startState;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
 			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -816,7 +816,7 @@ void ResourceManager::UpdateGPUBuffers(){
 			copyCommandList->ResourceBarrier(1, &barrier);
 
 			// Perform the copy
-			copyCommandList->CopyResource(dynamicBufferHandle.m_bufferHandle.dataBuffer->m_buffer.Get(), dynamicBufferHandle.m_bufferHandle.uploadBuffer->m_buffer.Get());
+			copyCommandList->CopyResource(dynamicBufferHandle->m_dataBuffer->m_buffer.Get(), dynamicBufferHandle->m_uploadBuffer->m_buffer.Get());
 
 			// Transition back to the original state
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;

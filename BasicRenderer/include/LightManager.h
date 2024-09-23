@@ -31,13 +31,13 @@ public:
     void OnNodeUpdated(Light* light) override;
 
     void UpdateBuffers() {
-        if (m_lightBufferHandle.buffer.UpdateUploadBuffer())
+        if (m_lightBufferHandle.buffer->UpdateUploadBuffer())
 		    ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_lightBufferHandle);
-		if (m_spotViewInfoHandle.buffer.UpdateUploadBuffer())
+		if (m_spotViewInfoHandle.buffer->UpdateUploadBuffer())
             ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_spotViewInfoHandle);
-		if (m_pointViewInfoHandle.buffer.UpdateUploadBuffer())
+		if (m_pointViewInfoHandle.buffer->UpdateUploadBuffer())
             ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfoHandle);
-		if (m_directionalViewInfoHandle.buffer.UpdateUploadBuffer())
+		if (m_directionalViewInfoHandle.buffer->UpdateUploadBuffer())
             ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfoHandle);
     }
 

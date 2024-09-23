@@ -174,9 +174,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
     carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
-	auto mountainScene = loadGLB("models/mountain.glb");
+	/*auto mountainScene = loadGLB("models/mountain.glb");
 	mountainScene->GetRoot().transform.setLocalScale({ 0.0003, 0.0003, 0.0003 });
-	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });*/
 
     //auto cubeScene = loadGLB("models/cube.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
@@ -204,7 +204,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //renderer.GetCurrentScene()->AppendScene(*carScene);
-	renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 

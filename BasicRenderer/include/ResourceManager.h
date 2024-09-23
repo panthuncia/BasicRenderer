@@ -144,10 +144,14 @@ public:
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
-        DynamicStructuredBuffer<T> dynamicBuffer(bufferID, capacity, name);
+        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name);
         ResourceTransition transition;
-		QueueResourceTransition({ dynamicBuffer.GetBuffer().get(), dynamicBuffer.GetBuffer()->m_buffer.Get(), ResourceState::UNKNOWN, usage });
-        dynamicBuffer.SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
+        transition.resource = pDynamicBuffer.get();
+		transition.APIResource = pDynamicBuffer->GetBuffer()->m_buffer.Get();
+		transition.beforeState = ResourceState::UNKNOWN;
+		transition.afterState = usage;
+		QueueResourceTransition(transition);
+        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
             this->onBufferResized(bufferID, typeSize, capacity, buffer);
             });
 
@@ -163,11 +167,11 @@ public:
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         bufferIDDescriptorIndexMap[bufferID] = index;
         CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(dynamicBuffer.GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+        device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
         DynamicBufferHandle<T> handle;
         handle.index = index;
-        handle.buffer = std::move(dynamicBuffer);
+        handle.buffer = pDynamicBuffer;
         return handle;
     }
 
@@ -192,6 +196,16 @@ public:
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
         device->CreateShaderResourceView(buffer->m_buffer.Get(), &srvDesc, srvHandle);
+        
+		auto bufferState = buffer->GetState();
+		// After resize, internal buffer state will not match the wrapper state
+		if (bufferState != ResourceState::UNKNOWN) {
+			ResourceTransition transition;
+			transition.resource = buffer.get();
+			transition.beforeState = ResourceState::UNKNOWN;
+			transition.afterState = buffer->GetState();
+			QueueResourceTransition(transition);
+		}
     }
 
     template<typename T>
@@ -284,7 +298,7 @@ private:
     ComPtr<ID3D12CommandAllocator> commandAllocator;
 
     std::vector<BufferHandle> buffersToUpdate;
-    std::vector<DynamicBufferBase> dynamicBuffersToUpdate;
+    std::vector<std::shared_ptr<DynamicBufferBase>> dynamicBuffersToUpdate;
 
 	std::vector<ResourceTransition> queuedResourceTransitions;
 
