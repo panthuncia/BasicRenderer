@@ -273,7 +273,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//scene->AddLight(light3, true);
     //light3->AddChild(cubeScaleNode);
 
-	renderer.SetDebugTexture(light3->getShadowMap().get());
+	renderer.SetDebugTexture(light2->getShadowMap().get());
 
     MSG msg = {};
     unsigned int frameIndex = 0;
