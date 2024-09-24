@@ -7,6 +7,7 @@
 #include <memory>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
+#include "pix/pix3.h"
 #include "Mesh.h"
 #include "DX12Renderer.h"
 #include "Utilities.h"
@@ -15,9 +16,13 @@
 #include "PSOManager.h"
 #include "Light.h"
 
+#define USE_PIX
+#pragma comment(lib, "WinPixEventRuntime.lib")
+
 DX12Renderer renderer;
 UINT x_res = 1920;
 UINT y_res = 1080;
+
 
 void ProcessRawInput(LPARAM lParam) {
     UINT dwSize = 0;
@@ -126,11 +131,23 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-    HWND hwnd = InitWindow(hInstance, nShowCmd);
-
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
+
+    //HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
+
+    //if (!hGetPixDLL) {
+    //    spdlog::warn("could not load the PIX library");
+    //}
+
+    HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
+    if (!pixLoaded) {
+        // Print the error code for debugging purposes
+        spdlog::warn("Could not load PIX! Error: ", GetLastError());
+    }
+
+    HWND hwnd = InitWindow(hInstance, nShowCmd);
 
     spdlog::info("initializing renderer...");
     renderer.Initialize(hwnd, x_res, y_res);
@@ -174,9 +191,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
     carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
-	/*auto mountainScene = loadGLB("models/mountain.glb");
+    auto mountainScene = loadGLB("models/mountain.glb");
 	mountainScene->GetRoot().transform.setLocalScale({ 0.0003, 0.0003, 0.0003 });
-	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });*/
+	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
 
     //auto cubeScene = loadGLB("models/cube.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
@@ -204,7 +221,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //renderer.GetCurrentScene()->AppendScene(*carScene);
-	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 

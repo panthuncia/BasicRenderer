@@ -776,9 +776,6 @@ void ResourceManager::UpdateGPUBuffers(){
     for (BufferHandle& bufferHandle : buffersToUpdate) {
         // Ensure both buffers are valid
         if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
-            if (bufferHandle.dataBuffer->GetName() == L"InverseBindMatrices") {
-                print("hello");
-            }
             auto startState = ResourceStateToD3D12(bufferHandle.dataBuffer->GetState());
             D3D12_RESOURCE_BARRIER barrier = {};
             barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -885,9 +882,6 @@ void ResourceManager::ExecuteResourceTransitions() {
     RenderContext context;
     context.commandList = transitionCommandList.Get();
 	for (auto& transition : queuedResourceTransitions) {
-        if (transition.resource->GetName() == L"InverseBindMatrices") {
-            print("hello");
-        }
         transition.resource->Transition(context, transition.beforeState, transition.afterState);
 		transition.resource->SetState(transition.afterState);
 	}

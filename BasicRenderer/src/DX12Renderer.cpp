@@ -6,7 +6,7 @@
 
 #define _USE_MATH_DEFINES
 #include <math.h>
-
+#include <atlbase.h>
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
@@ -19,6 +19,8 @@
 #include "ShadowPass.h"
 #include "SettingsManager.h"
 #include "DebugRenderPass.h"
+
+#define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
@@ -42,6 +44,14 @@ void DX12Renderer::SetSettings() {
     getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 }
 
+void EnableShaderBasedValidation() {
+    CComPtr<ID3D12Debug> spDebugController0;
+    CComPtr<ID3D12Debug1> spDebugController1;
+    VERIFY(D3D12GetDebugInterface(IID_PPV_ARGS(&spDebugController0)));
+    VERIFY(spDebugController0->QueryInterface(IID_PPV_ARGS(&spDebugController1)));
+    spDebugController1->SetEnableGPUBasedValidation(true);
+}
+
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
      UINT dxgiFactoryFlags = 0;
 
@@ -51,6 +61,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         debugController->EnableDebugLayer();
         dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
     }
+    EnableShaderBasedValidation();
 #endif
 
     // Create DXGI factory
