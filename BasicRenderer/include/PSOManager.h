@@ -46,6 +46,7 @@ public:
     ComPtr<ID3D12PipelineState> GetDebugPSO();
 
     ComPtr<ID3D12RootSignature> GetRootSignature();
+	ComPtr<ID3D12RootSignature> GetSkyboxRootSignature();
 	ComPtr<ID3D12RootSignature> GetDebugRootSignature();
     void ReloadShaders();
 
@@ -53,6 +54,7 @@ private:
     PSOManager() = default;
     ComPtr<ID3D12RootSignature> rootSignature;
     ComPtr<ID3D12RootSignature> debugRootSignature;
+    ComPtr<ID3D12RootSignature> skyboxRootSignature;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_psoCache;
     ComPtr<IDxcUtils> pUtils;
     ComPtr<IDxcCompiler3> pCompiler;
@@ -65,6 +67,8 @@ private:
     D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
     void CreateDebugRootSignature();
     void CreateDebugPSO();
+    void CreateSkyboxRootSignature();
+    void CreateSkyboxPSO();
 };
 
 inline PSOManager& PSOManager::getInstance() {

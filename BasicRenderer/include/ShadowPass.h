@@ -39,12 +39,12 @@ public:
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetOpaqueMeshes();
 
-				commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+				commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
 				for (auto& mesh : meshes) {
 					auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 					D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
 					D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 					commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
@@ -57,12 +57,12 @@ public:
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetTransparentMeshes();
 
-				commandList->SetGraphicsRootConstantBufferView(1, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+				commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
 				for (auto& mesh : meshes) {
 					auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					commandList->SetGraphicsRootConstantBufferView(2, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 					D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
 					D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 					commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
@@ -86,21 +86,21 @@ public:
 					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 					int lightIndex = light->GetCurrentLightBufferIndex();
-					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					int lightViewIndex = light->GetCurrentviewInfoIndex();
-					commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 					drawObjects();
 					break;
 				}
 				case LightType::Point: {
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					int lightViewIndex = light->GetCurrentviewInfoIndex()*6;
-					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					for (int i = 0; i < 6; i++) {
 						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
 						drawObjects();
 					}
@@ -109,12 +109,12 @@ public:
 					case LightType::Directional: {
 					int lightViewIndex = light->GetCurrentviewInfoIndex()*getNumDirectionalLightCascades();
 					int lightIndex = light->GetCurrentLightBufferIndex();
-					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
 						auto& dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(4, 1, &lightViewIndex, 0);
+						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
 						drawObjects();
 

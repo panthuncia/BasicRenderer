@@ -77,6 +77,42 @@ void PSOManager::CreateDebugRootSignature() {
     }
 }
 
+void PSOManager::CreateSkyboxRootSignature() {
+
+    D3D12_DESCRIPTOR_RANGE1 descRange = {};
+    descRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    descRange.NumDescriptors = 1;
+    descRange.BaseShaderRegister = 0;
+    descRange.RegisterSpace = 0;
+    descRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[4];
+
+	skyboxRootParameters[0].InitAsDescriptorTable(1, &descRange, D3D12_SHADER_VISIBILITY_ALL); // Primary descriptor table
+    skyboxRootParameters[0].InitAsConstants(16, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
+    skyboxRootParameters[1].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox texture index
+    skyboxRootParameters[2].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox sampler index
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+    rootSignatureDesc.Init_1_1(_countof(skyboxRootParameters), skyboxRootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    ComPtr<ID3DBlob> serializedRootSig;
+    ComPtr<ID3DBlob> errorBlob;
+    HRESULT hr = D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1_1, &serializedRootSig, &errorBlob);
+    if (FAILED(hr)) {
+        if (errorBlob) {
+            OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+        }
+        throw std::runtime_error("Failed to serialize root signature");
+    }
+
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&skyboxRootSignature));
+    if (FAILED(hr)) {
+        throw std::runtime_error("Failed to create root signature");
+    }
+}
+
 void PSOManager::CreateDebugPSO() {
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
@@ -152,6 +188,84 @@ void PSOManager::CreateDebugPSO() {
     auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&debugPSO));
     if (FAILED(hr)) {
         throw std::runtime_error("Failed to create debug PSO");
+    }
+}
+
+void PSOManager::CreateSkyboxPSO() {
+    // Compile shaders
+    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    CompileShader(L"shaders/debug.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+    CompileShader(L"shaders/debug.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+
+    static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+    };
+
+    D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
+    inputLayoutDesc.pInputElementDescs = inputElementDescs;
+    inputLayoutDesc.NumElements = _countof(inputElementDescs);
+
+    D3D12_RASTERIZER_DESC rasterizerDesc = {};
+    rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+    rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
+    rasterizerDesc.FrontCounterClockwise = FALSE;
+    rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+    rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+    rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+    rasterizerDesc.DepthClipEnable = TRUE;
+    rasterizerDesc.MultisampleEnable = FALSE;
+    rasterizerDesc.AntialiasedLineEnable = FALSE;
+    rasterizerDesc.ForcedSampleCount = 0;
+    rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+    D3D12_BLEND_DESC blendDesc = {};
+    blendDesc.RenderTarget[0].BlendEnable = FALSE;
+    blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
+    blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
+    blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+    blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
+    depthStencilDesc.DepthEnable = FALSE;
+    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    depthStencilDesc.StencilEnable = FALSE;
+    depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
+
+    DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout = inputLayoutDesc;   // No input layout needed for full-screen triangle
+    psoDesc.pRootSignature = skyboxRootSignature.Get();
+    psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+    psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
+    psoDesc.RasterizerState = rasterizerDesc;
+    psoDesc.BlendState = blendDesc;
+    psoDesc.DepthStencilState = depthStencilDesc;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = renderTargetFormat;
+    psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleDesc.Quality = 0;
+    psoDesc.InputLayout = inputLayoutDesc;
+
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&debugPSO));
+    if (FAILED(hr)) {
+        throw std::runtime_error("Failed to create skybox PSO");
     }
 }
 
@@ -418,63 +532,35 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 }
 
 void PSOManager::createRootSignature() {
-    // Create root signature
-    // Descriptor range for PerFrame buffer using a descriptor table
-    D3D12_DESCRIPTOR_RANGE1 descRange = {};
-    descRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    descRange.NumDescriptors = 1;
-    descRange.BaseShaderRegister = 0; // b0 for PerFrame
-    descRange.RegisterSpace = 0;
-    descRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
-    //D3D12_DESCRIPTOR_RANGE1 srvDescRange = {};
-    //srvDescRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    //srvDescRange.NumDescriptors = 1;
-    //srvDescRange.BaseShaderRegister = 2; // b2 for lights
-    //srvDescRange.RegisterSpace = 0;
-    //srvDescRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[5] = {};
+    D3D12_ROOT_PARAMETER1 parameters[4] = {};
 
-    // PerFrame buffer as a descriptor table
-    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[0].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[0].DescriptorTable.pDescriptorRanges = &descRange;
+    // PerMesh buffer as a direct root CBV
+    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    parameters[0].Descriptor.ShaderRegister = 1; // b1 for PerObject
+    parameters[0].Descriptor.RegisterSpace = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
 
     // PerMesh buffer as a direct root CBV
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameters[1].Descriptor.ShaderRegister = 1; // b1 for PerObject
+    parameters[1].Descriptor.ShaderRegister = 2; // b2 for PerMesh
     parameters[1].Descriptor.RegisterSpace = 0;
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    // PerMesh buffer as a direct root CBV
-    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameters[2].Descriptor.ShaderRegister = 2; // b2 for PerMesh
-    parameters[2].Descriptor.RegisterSpace = 0;
+    // First integer root constant, used for shadow light ID
+    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[2].Constants.ShaderRegister = 3; // b3 for first integer root constant
+    parameters[2].Constants.RegisterSpace = 0;
+    parameters[2].Constants.Num32BitValues = 1; // Single integer
     parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    // First integer root constant, used for shadow light ID
+    // Second integer root constant, used for shadow light view offset
     parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[3].Constants.ShaderRegister = 3; // b3 for first integer root constant
+    parameters[3].Constants.ShaderRegister = 4; // b4 for second integer root constant
     parameters[3].Constants.RegisterSpace = 0;
     parameters[3].Constants.Num32BitValues = 1; // Single integer
     parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // Second integer root constant, used for shadow light view offset
-    parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[4].Constants.ShaderRegister = 4; // b4 for second integer root constant
-    parameters[4].Constants.RegisterSpace = 0;
-    parameters[4].Constants.Num32BitValues = 1; // Single integer
-    parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // root matrix constant, used for shadow light view matrix
-    //parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    //parameters[5].Constants.ShaderRegister = 4; // b4 for second integer root constant
-    //parameters[5].Constants.RegisterSpace = 0;
-    //parameters[5].Constants.Num32BitValues = 16; // Single integer
-    //parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
