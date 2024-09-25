@@ -34,12 +34,21 @@ file(COPY ${COMPILER_BINARY_DIR} DESTINATION ${COMPILER_DEST_DIR})
 file(COPY ${PIX_BINARY_DIR} DESTINATION ${COMPILER_DEST_DIR})
 
 set(MODELS_DEST_DIR "${CMAKE_BINARY_DIR}/BasicRenderer/")
+set(MODELS_DEST_PATH "${CMAKE_BINARY_DIR}/BasicRenderer/models")
 set(MODELS_SRC_DIR "${CMAKE_SOURCE_DIR}/models")
 
+set(TEXTURES_SRC_DIR "${CMAKE_SOURCE_DIR}/textures")
+set(TEXTURES_DEST_DIR "${CMAKE_BINARY_DIR}/BasicRenderer/")
+set(TEXTURES_DEST_PATH "${CMAKE_BINARY_DIR}/BasicRenderer/textures")
 # Check if the destination folder exists
-if(NOT EXISTS "${DEST_FOLDER}")
+if(NOT EXISTS "${MODELS_DEST_PATH}")
     # If the folder doesn't exist, copy it
     file(COPY "${MODELS_SRC_DIR}" DESTINATION "${MODELS_DEST_DIR}")
+endif()
+
+if(NOT EXISTS "${TEXTURES_DEST_PATH}")
+    # If the folder doesn't exist, copy it
+    file(COPY "${TEXTURES_SRC_DIR}" DESTINATION "${TEXTURES_DEST_DIR}")
 endif()
 
 # Include directories

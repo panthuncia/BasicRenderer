@@ -13,3 +13,4 @@ _deps
 out/
 vcpkg_installed/
 models/
+textures/

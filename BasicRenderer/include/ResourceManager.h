@@ -234,6 +234,7 @@ public:
     }
 
     TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB);
+    TextureHandle<PixelBuffer> CreateCubemapFromImages(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB);
     TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
     TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
 

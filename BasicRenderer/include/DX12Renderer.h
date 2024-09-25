@@ -37,6 +37,9 @@ public:
     void SetDebugTexture(Texture* texture) {
 		debugPass->SetTexture(texture);
     }
+    void SetSkybox(std::shared_ptr<Texture> texture) {
+		m_currentSkybox = texture;
+    }
 
 private:
     ComPtr<IDXGIFactory6> factory;
@@ -71,6 +74,8 @@ private:
     std::shared_ptr<DebugRenderPass> debugPass;
 
     RenderContext m_context;
+
+	std::shared_ptr<Texture> m_currentSkybox;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();

@@ -15,6 +15,9 @@ public:
     static std::shared_ptr<PixelBuffer> CreateFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
 		return std::shared_ptr<PixelBuffer>(new PixelBuffer(image, width, height, channels, sRGB));
     }
+    static std::shared_ptr<PixelBuffer> CreateCubemapFromImages(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB) {
+		return std::shared_ptr<PixelBuffer>(new PixelBuffer(images, width, height, channels, sRGB));
+    }
     static std::shared_ptr<PixelBuffer> CreateSingleTexture(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false) {
 		return std::shared_ptr<PixelBuffer>(new PixelBuffer(width, height, channels, isCubemap, RTV, DSV, UAV));
     }
@@ -28,6 +31,7 @@ public:
 
 private:
     PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB);
+    PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB);
     PixelBuffer(int width, int height, int channels, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false);
     PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false);
 

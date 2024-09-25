@@ -11,6 +11,7 @@
 #include "DirectX/d3dx12.h"
 #include "DefaultDirection.h"
 #include "Sampler.h"
+#include "DescriptorHeap.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -117,6 +118,19 @@ ImageData loadImage(const char* filename) {
 std::shared_ptr<Texture> loadTextureFromFile(const char* filename) {
 	ImageData img = loadImage(filename);
 	auto buffer = PixelBuffer::CreateFromImage(img.data, img.width, img.height, img.channels, false);
+    auto sampler = Sampler::GetDefaultSampler();
+    return std::make_shared<Texture>(buffer, sampler);
+}
+
+std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
+    ImageData top = loadImage(topPath);
+	ImageData bottom = loadImage(bottomPath);
+	ImageData left = loadImage(leftPath);
+	ImageData right = loadImage(rightPath);
+	ImageData front = loadImage(frontPath);
+	ImageData back = loadImage(backPath);
+
+    auto buffer = PixelBuffer::CreateCubemapFromImages({right.data, left.data, top.data, bottom.data, front.data, back.data }, top.width, top.height, top.channels, false);
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
 }
@@ -250,3 +264,195 @@ std::string ws2s(const std::wstring& wstr) {
 
     return converterX.to_bytes(wstr);
 }
+
+DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV) {
+    if (isDSV) {
+        return DXGI_FORMAT_R32_TYPELESS;
+    }
+
+    switch (channels) {
+    case 1:
+        return DXGI_FORMAT_R8_UNORM;
+    case 3:
+    case 4:
+        return sRGB ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
+    default:
+        throw std::invalid_argument("Unsupported channel count");
+    }
+}
+
+CD3DX12_RESOURCE_DESC CreateTextureResourceDesc(
+    DXGI_FORMAT format,
+    int width,
+    int height,
+    int arraySize,
+    int mipLevels,
+    bool isCubemap,
+    bool allowRTV,
+    bool allowDSV) {
+
+    CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Tex2D(
+        format,
+        width,
+        height,
+        isCubemap ? 6 * arraySize : arraySize,
+        mipLevels);
+
+    if (allowRTV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    if (allowDSV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    return desc;
+}
+
+ComPtr<ID3D12Resource> CreateCommittedTextureResource(
+    ID3D12Device* device,
+    const CD3DX12_RESOURCE_DESC& desc,
+    D3D12_CLEAR_VALUE* clearValue,
+    D3D12_HEAP_TYPE heapType,
+    D3D12_RESOURCE_STATES initialState) {
+
+    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(heapType);
+    ComPtr<ID3D12Resource> resource;
+
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        initialState,
+        clearValue,
+        IID_PPV_ARGS(&resource)));
+
+    return resource;
+}
+
+ShaderVisibleIndexInfo CreateShaderResourceView(
+    ID3D12Device* device,
+    ID3D12Resource* resource,
+    DXGI_FORMAT format,
+    DescriptorHeap* srvHeap,
+    bool isCubemap,
+    bool isArray,
+    int arraySize) {
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = format;
+
+    if (isCubemap) {
+        srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY : D3D12_SRV_DIMENSION_TEXTURECUBE;
+        if (isArray) {
+            srvDesc.TextureCubeArray.MipLevels = 1;
+            srvDesc.TextureCubeArray.NumCubes = arraySize;
+        }
+        else {
+            srvDesc.TextureCube.MipLevels = 1;
+        }
+    }
+    else {
+        srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
+        if (isArray) {
+            srvDesc.Texture2DArray.MipLevels = 1;
+            srvDesc.Texture2DArray.ArraySize = arraySize;
+        }
+        else {
+            srvDesc.Texture2D.MipLevels = 1;
+        }
+    }
+
+    UINT descriptorIndex = srvHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = srvHeap->GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = srvHeap->GetGPUHandle(descriptorIndex);
+
+    device->CreateShaderResourceView(resource, &srvDesc, cpuHandle);
+
+    ShaderVisibleIndexInfo srvInfo;
+    srvInfo.index = descriptorIndex;
+    srvInfo.cpuHandle = cpuHandle;
+    srvInfo.gpuHandle = gpuHandle;
+
+    return srvInfo;
+}
+
+std::vector<NonShaderVisibleIndexInfo> CreateRenderTargetViews(
+    ID3D12Device* device,
+    ID3D12Resource* resource,
+    DXGI_FORMAT format,
+    DescriptorHeap* rtvHeap,
+    bool isCubemap,
+    bool isArray,
+    int arraySize) {
+
+    std::vector<NonShaderVisibleIndexInfo> rtvInfos;
+
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+    rtvDesc.Format = format;
+    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+    rtvDesc.Texture2DArray.MipSlice = 0;
+    rtvDesc.Texture2DArray.PlaneSlice = 0;
+    rtvDesc.Texture2DArray.ArraySize = 1;
+
+    int totalSlices = isCubemap ? 6 * arraySize : arraySize;
+
+    for (int slice = 0; slice < totalSlices; ++slice) {
+        rtvDesc.Texture2DArray.FirstArraySlice = slice;
+
+        UINT descriptorIndex = rtvHeap->AllocateDescriptor();
+        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = rtvHeap->GetCPUHandle(descriptorIndex);
+
+        device->CreateRenderTargetView(resource, &rtvDesc, cpuHandle);
+
+        NonShaderVisibleIndexInfo rtvInfo;
+        rtvInfo.index = descriptorIndex;
+        rtvInfo.cpuHandle = cpuHandle;
+        rtvInfos.push_back(rtvInfo);
+    }
+
+    return rtvInfos;
+}
+
+std::vector<NonShaderVisibleIndexInfo> CreateDepthStencilViews(
+    ID3D12Device* device,
+    ID3D12Resource* resource,
+    DescriptorHeap* dsvHeap,
+    bool isCubemap,
+    bool isArray,
+    int arraySize) {
+
+    std::vector<NonShaderVisibleIndexInfo> dsvInfos;
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+    dsvDesc.Texture2DArray.MipSlice = 0;
+    dsvDesc.Texture2DArray.ArraySize = 1;
+
+    int totalSlices = isCubemap ? 6 * arraySize : arraySize;
+
+    for (int slice = 0; slice < totalSlices; ++slice) {
+        dsvDesc.Texture2DArray.FirstArraySlice = slice;
+
+        UINT descriptorIndex = dsvHeap->AllocateDescriptor();
+        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = dsvHeap->GetCPUHandle(descriptorIndex);
+
+        device->CreateDepthStencilView(resource, &dsvDesc, cpuHandle);
+
+        NonShaderVisibleIndexInfo dsvInfo;
+        dsvInfo.index = descriptorIndex;
+        dsvInfo.cpuHandle = cpuHandle;
+        dsvInfos.push_back(dsvInfo);
+    }
+
+    return dsvInfos;
+}
+
+std::vector<stbi_uc> ExpandImageData(const stbi_uc* image, int width, int height) {
+    std::vector<stbi_uc> expandedData(width * height * 4);
+    for (int i = 0; i < width * height; ++i) {
+        expandedData[i * 4] = image[i * 3];         // R
+        expandedData[i * 4 + 1] = image[i * 3 + 1]; // G
+        expandedData[i * 4 + 2] = image[i * 3 + 2]; // B
+        expandedData[i * 4 + 3] = 255;              // A
+    }
+    return expandedData;
+}
+

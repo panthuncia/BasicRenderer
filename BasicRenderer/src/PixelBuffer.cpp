@@ -16,6 +16,13 @@ PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channe
     currentState = ResourceState::UNKNOWN;
 }
 
+PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB) {
+    ResourceManager& resourceManager = ResourceManager::GetInstance();
+    handle = resourceManager.CreateCubemapFromImages(images, width, height, channels, sRGB);
+    SetIndex(GetSRVDescriptorIndex());
+    currentState = ResourceState::UNKNOWN;
+}
+
 PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
     handle = resourceManager.CreateTexture(width, height, channels, isCubemap, RTV, DSV, UAV);
