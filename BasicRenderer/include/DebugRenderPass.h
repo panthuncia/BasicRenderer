@@ -37,7 +37,7 @@ public:
         commandList->SetGraphicsRootSignature(psoManager.GetDebugRootSignature().Get());
 
         commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
-		auto viewMatrix = XMMatrixScaling(0.2f, 0.2f, 1.0f);
+        auto viewMatrix = XMMatrixTranspose(XMMatrixMultiply(XMMatrixScaling(0.2f, 0.2f, 1.0f), XMMatrixTranslation(0.7, -0.7, 0)));
         commandList->SetGraphicsRoot32BitConstants(1, 16, &viewMatrix, 0);
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);

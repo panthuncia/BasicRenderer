@@ -215,9 +215,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.InputLayout = { inputElementDescs.data(), static_cast<unsigned int>(inputElementDescs.size())};
     psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    //if (!(psoFlags & PSOFlags::SHADOW)) {
+    if (!(psoFlags & PSOFlags::SHADOW)) {
         psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    //}
+    }
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     psoDesc.RasterizerState.FrontCounterClockwise = true;
     if (psoFlags & PSOFlags::DOUBLE_SIDED) {

@@ -25,15 +25,15 @@ public:
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		switch (light->GetLightType()) {
 		case LightType::Point: // Cubemap
-			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, true, false, false);
+			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, false, true, false);
 			shadowMap->SetName(L"PointShadowMap: "+light->m_name);
 			break;
 		case LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, false, true, false, false);
+			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, false, false, true, false);
 			shadowMap->SetName(L"SpotShadowMap");
 			break;
 		case LightType::Directional: // Texture array
-			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, true, false, false);
+			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, false, true, false);
 			shadowMap->SetName(L"DirectionalShadowMap");
 			break;
 

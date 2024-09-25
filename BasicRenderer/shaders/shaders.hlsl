@@ -607,9 +607,6 @@ float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo lig
 
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 
-#if defined(SHADOW)
-    return (input.position.z); // Output depth
-#endif
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
@@ -723,7 +720,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #else
     float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz;
 #endif // AO_TEXTURE
-    //lighting += ambient;
+    lighting += ambient;
 #if defined(VERTEX_COLORS)
     lighting = lighting * input.color.xyz;
 #endif
@@ -742,10 +739,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     // Gamma correction
     lighting = LinearToSRGB(lighting);
 #endif
-    
-    //float depth = abs(input.positionViewSpace.z);
-    
+        
     float opacity = baseColor.a;
-    //return float4(normalWS, opacity);
     return float4(lighting, opacity);
 }

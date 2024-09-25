@@ -182,6 +182,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto tigerScene = loadGLB("models/tiger.glb");
     tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
+	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 
     auto phoenixScene = loadGLB("models/phoenix.glb");
     phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
@@ -252,11 +253,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //scene->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
-    animation->addPositionKeyframe(0, { -10, 10, -10 });
-    animation->addPositionKeyframe(2, { 10, 10, -10 });
-    animation->addPositionKeyframe(4, { 10, 10, 10 });
-    animation->addPositionKeyframe(6, { -10, 10, 10 });
-    animation->addPositionKeyframe(8, { -10, 10, -10 });
+    animation->addPositionKeyframe(0, { -11, 10, -11 });
+    animation->addPositionKeyframe(2, { 11, 10, -11 });
+    animation->addPositionKeyframe(4, { 11, 10, 11 });
+    animation->addPositionKeyframe(6, { -11, 10, 11 });
+    animation->addPositionKeyframe(8, { -11, 10, -11 });
     //animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
     //animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
@@ -265,12 +266,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	auto light1 = Light::CreatePointLight(L"light1", XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032);
     light1->animationController->setAnimationClip(animation);
     cubeScaleNode->AddChild(light1);
-    //scene->AddLight(light1, true);
-	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 100.0, XMFLOAT3(1, -1, 1));
+    scene->AddLight(light1, true);
+	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));
     scene->AddLight(light2, true);
     //auto light3 = Light::CreateDirectionalLight("light3", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(-1, -1, -1));
     auto light3 = Light::CreateSpotLight(L"light3", XMFLOAT3(0, 4, 0), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);
-	//scene->AddLight(light3, true);
+	scene->AddLight(light3, true);
     //light3->AddChild(cubeScaleNode);
 
 	renderer.SetDebugTexture(light2->getShadowMap().get());

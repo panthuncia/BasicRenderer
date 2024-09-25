@@ -27,6 +27,10 @@ std::shared_ptr<Sampler> Sampler::GetDefaultShadowSampler() {
 		samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		samplerDesc.BorderColor[0] = 1.0f;  // Set the border color for shadow maps, 1.0 = full depth, no shadow
+		samplerDesc.BorderColor[1] = 0.0f;
+		samplerDesc.BorderColor[2] = 0.0f;
+		samplerDesc.BorderColor[3] = 1.0f;
 		samplerDesc.MinLOD = 0;
 		samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
 		samplerDesc.MipLODBias = 0;
