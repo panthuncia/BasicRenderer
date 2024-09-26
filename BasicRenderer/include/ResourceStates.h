@@ -54,8 +54,7 @@ inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 }
 
 struct ResourceTransition {
-	Resource* resource;
-	ID3D12Resource* APIResource;
+	Resource* resource = nullptr;
 	ResourceState beforeState;
 	ResourceState afterState;
 };

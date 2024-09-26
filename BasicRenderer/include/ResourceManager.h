@@ -86,7 +86,7 @@ public:
         handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
         handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
         
-        ResourceTransition transition = { handle.dataBuffer.get(), handle.dataBuffer->m_buffer.Get(), ResourceState::UNKNOWN,  usageType };
+        ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
         QueueResourceTransition(transition);
 
         handle.index = m_cbvSrvUavHeap->AllocateDescriptor();
@@ -147,7 +147,6 @@ public:
         std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name);
         ResourceTransition transition;
         transition.resource = pDynamicBuffer.get();
-		transition.APIResource = pDynamicBuffer->GetBuffer()->m_buffer.Get();
 		transition.beforeState = ResourceState::UNKNOWN;
 		transition.afterState = usage;
 		QueueResourceTransition(transition);

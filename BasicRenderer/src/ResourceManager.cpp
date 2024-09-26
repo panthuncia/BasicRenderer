@@ -282,8 +282,9 @@ TextureHandle<PixelBuffer> ResourceManager::CreateCubemapFromImages(const std::a
 	CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 		textureResource.Get(),
 		D3D12_RESOURCE_STATE_COPY_DEST,
-		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		D3D12_RESOURCE_STATE_COMMON);
 	commandList->ResourceBarrier(1, &barrier);
+
 
 	ExecuteAndWaitForCommandList(commandList, commandAllocator);
 
@@ -591,7 +592,7 @@ BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usag
 		UpdateBuffer(handle, pInitialData, bufferSize);
 	}
 
-	QueueResourceTransition({ handle.dataBuffer.get(), handle.dataBuffer->m_buffer.Get(), ResourceState::UNKNOWN,  usageType });
+	QueueResourceTransition({ handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType });
 	return handle;
 }
 
@@ -631,6 +632,10 @@ void ResourceManager::ExecuteResourceTransitions() {
 	RenderContext context;
 	context.commandList = transitionCommandList.Get();
 	for (auto& transition : queuedResourceTransitions) {
+		if (transition.resource == nullptr) {
+			spdlog::error("Resource is null in transition");
+			throw std::runtime_error("Resource is null");
+		}
 		transition.resource->Transition(context, transition.beforeState, transition.afterState);
 		transition.resource->SetState(transition.afterState);
 	}

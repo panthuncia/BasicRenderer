@@ -35,10 +35,12 @@ public:
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
     void SetDebugTexture(Texture* texture) {
-		debugPass->SetTexture(texture);
+		m_debugPass->SetTexture(texture);
     }
     void SetSkybox(std::shared_ptr<Texture> texture) {
 		m_currentSkybox = texture;
+		m_currentSkybox->SetName(L"Skybox");
+        rebuildRenderGraph = true;
     }
 
 private:
@@ -66,20 +68,22 @@ private:
 
     std::shared_ptr<Scene> currentScene;
 
-    std::unique_ptr<RenderGraph> currentRenderGraph;
+    std::unique_ptr<RenderGraph> currentRenderGraph = nullptr;
+    bool rebuildRenderGraph = true;
 
     UINT m_xRes;
     UINT m_yRes;
 
-    std::shared_ptr<DebugRenderPass> debugPass;
-
     RenderContext m_context;
 
-	std::shared_ptr<Texture> m_currentSkybox;
+	std::shared_ptr<Texture> m_currentSkybox = nullptr;
+    std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
+    std::shared_ptr<DebugRenderPass> m_debugPass = nullptr;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
+    void CreateGlobalResources();
     void CreateRenderGraph();
     void SetSettings();
 

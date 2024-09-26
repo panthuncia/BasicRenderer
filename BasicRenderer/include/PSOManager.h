@@ -46,8 +46,9 @@ public:
     ComPtr<ID3D12PipelineState> GetDebugPSO();
 
     ComPtr<ID3D12RootSignature> GetRootSignature();
-	ComPtr<ID3D12RootSignature> GetSkyboxRootSignature();
+	ComPtr<ID3D12PipelineState> GetSkyboxPSO();
 	ComPtr<ID3D12RootSignature> GetDebugRootSignature();
+    ComPtr<ID3D12RootSignature> GetSkyboxRootSignature();
     void ReloadShaders();
 
 private:
@@ -59,6 +60,7 @@ private:
     ComPtr<IDxcUtils> pUtils;
     ComPtr<IDxcCompiler3> pCompiler;
 	ComPtr<ID3D12PipelineState> debugPSO;
+    ComPtr<ID3D12PipelineState> skyboxPSO;
 
     ComPtr<ID3D12PipelineState> CreatePSO(UINT psoFlags, BlendState blendState);
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);

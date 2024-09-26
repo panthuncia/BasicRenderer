@@ -32,6 +32,8 @@ void PSOManager::initialize() {
 
     CreateDebugRootSignature();
     CreateDebugPSO();
+    CreateSkyboxRootSignature();
+    CreateSkyboxPSO();
 }
 
 void PSOManager::CreateDebugRootSignature() {
@@ -79,22 +81,14 @@ void PSOManager::CreateDebugRootSignature() {
 
 void PSOManager::CreateSkyboxRootSignature() {
 
-    D3D12_DESCRIPTOR_RANGE1 descRange = {};
-    descRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    descRange.NumDescriptors = 1;
-    descRange.BaseShaderRegister = 0;
-    descRange.RegisterSpace = 0;
-    descRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[3];
 
-    CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[4];
-
-	skyboxRootParameters[0].InitAsDescriptorTable(1, &descRange, D3D12_SHADER_VISIBILITY_ALL); // Primary descriptor table
-    skyboxRootParameters[0].InitAsConstants(16, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
-    skyboxRootParameters[1].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox texture index
-    skyboxRootParameters[2].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox sampler index
+    skyboxRootParameters[0].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
+    skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox texture index
+    skyboxRootParameters[2].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox sampler index
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-    rootSignatureDesc.Init_1_1(_countof(skyboxRootParameters), skyboxRootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    rootSignatureDesc.Init_1_1(_countof(skyboxRootParameters), skyboxRootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
 
     ComPtr<ID3DBlob> serializedRootSig;
     ComPtr<ID3DBlob> errorBlob;
@@ -195,12 +189,11 @@ void PSOManager::CreateSkyboxPSO() {
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    CompileShader(L"shaders/debug.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
-    CompileShader(L"shaders/debug.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+    CompileShader(L"shaders/skybox.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+    CompileShader(L"shaders/skybox.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
     static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
     };
 
     D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
@@ -233,15 +226,9 @@ void PSOManager::CreateSkyboxPSO() {
     blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-    depthStencilDesc.DepthEnable = FALSE;
-    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    depthStencilDesc.DepthEnable = TRUE;
+    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // Prevent skybox from writing to the depth buffer
     depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-    depthStencilDesc.StencilEnable = FALSE;
-    depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-    depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-    depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-    depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-    depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
 
     DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
@@ -263,10 +250,14 @@ void PSOManager::CreateSkyboxPSO() {
     psoDesc.InputLayout = inputLayoutDesc;
 
     auto& device = DeviceManager::GetInstance().GetDevice();
-    auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&debugPSO));
+    auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&skyboxPSO));
     if (FAILED(hr)) {
         throw std::runtime_error("Failed to create skybox PSO");
     }
+}
+
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetSkyboxPSO() {
+	return skyboxPSO;
 }
 
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetDebugPSO() {
@@ -275,6 +266,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetDebugPSO() {
 
 Microsoft::WRL::ComPtr<ID3D12RootSignature> PSOManager::GetDebugRootSignature() {
 	return debugRootSignature;
+}
+
+Microsoft::WRL::ComPtr<ID3D12RootSignature> PSOManager::GetSkyboxRootSignature() {
+	return skyboxRootSignature;
 }
 
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, BlendState blendState) {
@@ -498,7 +493,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     ComPtr<IDxcBlobUtf8> pErrors;
     result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
     if (pErrors && pErrors->GetStringLength() > 0) {
-        spdlog::warn("Shader compilation warnings/errors: {}", pErrors->GetStringPointer());
+        spdlog::error("Shader compilation warnings/errors: {}", pErrors->GetStringPointer());
 
         if (strstr(pErrors->GetStringPointer(), "error") != nullptr) {
             // If errors exist, treat this as a failure
@@ -536,6 +531,7 @@ void PSOManager::createRootSignature() {
     D3D12_ROOT_PARAMETER1 parameters[4] = {};
 
     // PerMesh buffer as a direct root CBV
+    
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 1; // b1 for PerObject
     parameters[0].Descriptor.RegisterSpace = 0;

@@ -19,6 +19,7 @@
 #include "ShadowPass.h"
 #include "SettingsManager.h"
 #include "DebugRenderPass.h"
+#include "SkyboxRenderPass.h"
 
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
@@ -27,7 +28,14 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_yRes = y_res;
     SetSettings();
     LoadPipeline(hwnd, x_res, y_res);
-    CreateRenderGraph();
+    CreateGlobalResources();
+}
+
+void DX12Renderer::CreateGlobalResources() {
+    m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
+    setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps
+    m_debugPass = std::make_shared<DebugRenderPass>();
+    m_debugPass->Setup();
 }
 
 void DX12Renderer::SetSettings() {
@@ -209,6 +217,10 @@ void DX12Renderer::WaitForPreviousFrame() {
 
 void DX12Renderer::Update(double elapsedSeconds) {
 
+    if (rebuildRenderGraph) {
+		CreateRenderGraph();
+    }
+
     currentScene->GetCamera()->transform.applyMovement(movementState, elapsedSeconds);
     currentScene->GetCamera()->transform.rotatePitchYaw(verticalAngle, horizontalAngle);
     //spdlog::info("horizontal angle: {}", horizontalAngle);
@@ -383,25 +395,33 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 void DX12Renderer::CreateRenderGraph() {
     currentRenderGraph = std::make_unique<RenderGraph>();
 
-	std::shared_ptr<ShadowMaps> shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
-	setShadowMaps(shadowMaps.get()); // To allow light manager to acccess shadow maps
-	currentRenderGraph->AddResource(shadowMaps);
-
-    auto shadowPass = std::make_shared<ShadowPass>(shadowMaps);
-	auto shadowPassParameters = PassParameters();
-	shadowPassParameters.depthTextures.push_back(shadowMaps);
-
     auto forwardPass = std::make_shared<ForwardRenderPass>();
     auto forwardPassParameters = PassParameters();
-    forwardPassParameters.shaderResources.push_back(shadowMaps);
 
-    debugPass = std::make_shared<DebugRenderPass>();
-    debugPass->Setup();
     auto debugPassParameters = PassParameters();
-    debugPassParameters.shaderResources.push_back(shadowMaps);
 
-    currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
+    if (m_shadowMaps != nullptr) {
+        currentRenderGraph->AddResource(m_shadowMaps);
+
+        auto shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
+        auto shadowPassParameters = PassParameters();
+        shadowPassParameters.depthTextures.push_back(m_shadowMaps);
+        forwardPassParameters.shaderResources.push_back(m_shadowMaps);
+        debugPassParameters.shaderResources.push_back(m_shadowMaps);
+        currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
+    }
+
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
-	currentRenderGraph->AddPass(debugPass, debugPassParameters);
+    if (m_currentSkybox != nullptr) {
+        currentRenderGraph->AddResource(m_currentSkybox);
+        auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
+		skyboxPass->Setup();
+        auto skyboxPassParameters = PassParameters();
+        skyboxPassParameters.shaderResources.push_back(m_currentSkybox);
+        currentRenderGraph->AddPass(skyboxPass, skyboxPassParameters);
+    }
+	currentRenderGraph->AddPass(m_debugPass, debugPassParameters);
 	currentRenderGraph->Compile();
+
+	rebuildRenderGraph = false;
 }

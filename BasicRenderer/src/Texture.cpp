@@ -19,3 +19,16 @@ UINT Texture::GetSamplerDescriptorIndex() {
 TextureHandle<PixelBuffer>& Texture::GetHandle() {
 	return m_image->GetHandle();
 }
+
+UINT Texture::GetSRVDescriptorIndex() const {
+	return m_image->GetSRVDescriptorIndex();
+}
+
+void Texture::Transition(const RenderContext& context, ResourceState fromState, ResourceState toState) {
+	m_image->Transition(context, fromState, toState); // Transition the underlying PixelBuffer
+}
+
+void Texture::SetName(const std::wstring& name) {
+	Resource::SetName(name);
+	m_image->SetName(name);
+}
