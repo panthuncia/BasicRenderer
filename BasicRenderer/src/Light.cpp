@@ -10,7 +10,7 @@ Light::Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 colo
 	m_lightInfo.posWorldSpace = XMLoadFloat3(&position);
 	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
 	m_lightInfo.color *= intensity;
-	float nearPlane = 0.07;
+	float nearPlane = 0.01;
 	float farPlane = 5.0;
 	m_lightInfo.attenuation = XMVectorSet(constantAttenuation, linearAttenuation, quadraticAttenuation, 0);
 	m_lightInfo.dirWorldSpace = XMLoadFloat3(&direction);

@@ -508,45 +508,53 @@ float3 reinhardJodie(float3 color) {
     return lerp(reinhardLuminance, reinhardPerChannel, reinhardPerChannel);
 }
 
+float unprojectDepth(float depth, float near, float far) {
+    return near * far / (far - depth * (far - near));
+}
+
 float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, StructuredBuffer<float4> pointShadowViewInfoBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz-light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
-    float3 dir = normalize(lightToFrag);
-    int faceIndex = 0;
-    float maxDir = max(max(abs(dir.x), abs(dir.y)), abs(dir.z));
-
-    if (dir.x == maxDir) {
-        faceIndex = 0; // +X
-    }
-    else if (dir.x == -maxDir) {
-        faceIndex = 1; // -X
-    }
-    else if (dir.y == maxDir) {
-        faceIndex = 2; // +Y
-    }
-    else if (dir.y == -maxDir) {
-        faceIndex = 3; // -Y
-    }
-    else if (dir.z == maxDir) {
-        faceIndex = 4; // +Z
-    }
-    else if (dir.z == -maxDir) {
-        faceIndex = 5; // -Z
-    }
-    matrix lightMatrix = loadMatrixFromBuffer(pointShadowViewInfoBuffer, light.shadowViewInfoIndex+faceIndex);
-    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
-    float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    uv.xy = uv.xy * 0.5 + 0.5;
-    float currentDepth = uv.z;
-    
-    float shadow = 0.0;
+    float3 worldDir = normalize(lightToFrag);
 
     TextureCube<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.Sample(shadowSampler, dir);
-   
-    float bias = 0.005;
-    shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+    float depthSample = shadowMap.Sample(shadowSampler, worldDir);
+    //depthSample = unprojectDepth(depthSample, light.nearPlane, light.farPlane);
+    if (depthSample == 1.0) {
+        return 0.0;
+    }
+    
+    int faceIndex = 0;
+    float maxDir = max(max(abs(worldDir.x), abs(worldDir.y)), abs(worldDir.z));
+
+    if (worldDir.x == maxDir) {
+        faceIndex = 0; // +X
+    }
+    else if (worldDir.x == -maxDir) {
+        faceIndex = 1; // -X
+    }
+    else if (worldDir.y == maxDir) {
+        faceIndex = 2; // +Y
+    }
+    else if (worldDir.y == -maxDir) {
+        faceIndex = 3; // -Y
+    }
+    else if (worldDir.z == maxDir) {
+        faceIndex = 4; // +Z
+    }
+    else if (worldDir.z == -maxDir) {
+        faceIndex = 5; // -Z
+    }
+    matrix lightViewProjectionMatrix = loadMatrixFromBuffer(pointShadowViewInfoBuffer, light.shadowViewInfoIndex*6 + faceIndex);
+    
+    float4 fragPosLightSpace = mul(float4(fragPosWorldSpace.xyz, 1.0), lightViewProjectionMatrix);
+    float dist = length(lightToFrag);
+    float lightSpaceDepth = fragPosLightSpace.z / fragPosLightSpace.w;
+    
+    float shadow = 0.0;
+    float bias = 0.0005;
+    shadow = lightSpaceDepth - bias > depthSample ? 1.0 : 0.0;
     return shadow;
 }
 
@@ -571,11 +579,6 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace,
     float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
     uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
     uv.y = 1.0 - uv.y;
-
-    //bool isOutside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || uv.z > 1.0;
-    //if (isOutside) {
-    //    return 0;
-    //    }
 
     Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
@@ -693,6 +696,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
             switch (light.type) {
                 case 0:{ // Point light
                         shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoBuffer);
+                        //return float4(shadow, shadow, shadow, 1.0);
                         break;
                     }
                 case 1:{ // Spot light
