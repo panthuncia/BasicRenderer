@@ -262,7 +262,7 @@ float3 SRGBToLinear(float3 color) {
 // Parallax shadowing, very expensive method (per-fragment*per-light tangent-space raycast)
 float getParallaxShadow(Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float2 uv, float3 lightDir, float3 viewDir, float sampleHeight, float heightmapScale) {
     lightDir = normalize(mul(TBN, lightDir));
-    int steps = 64;
+    int steps = 8;
     float maxDistance = heightmapScale * 0.2; //0.1;
     float currentHeight = parallaxTexture.Sample(parallaxSampler, uv); //texture(u_heightMap, uv).r;
     float2 lightDirUV = normalize(lightDir.xy);
@@ -298,8 +298,8 @@ float3 getContactRefinementParallaxCoordsAndHeight(Texture2D<float> parallaxText
     float maxHeight = heightmapScale; //0.05;
     float minHeight = maxHeight * 0.5;
 
-    int numSteps = 32;
-        // Corrects for Z view angle
+    int numSteps = 16;
+    // Corrects for Z view angle
     float viewCorrection = (-viewDir.z) + 2.0;
     float stepSize = 1.0 / (float(numSteps) + 1.0);
     float2 stepOffset = viewDir.xy * float2(maxHeight, maxHeight) * stepSize;

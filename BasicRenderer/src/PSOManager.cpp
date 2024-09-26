@@ -272,15 +272,15 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> PSOManager::GetSkyboxRootSignature()
 	return skyboxRootSignature;
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, BlendState blendState) {
-    PSOKey key(psoFlags, blendState);
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+    PSOKey key(psoFlags, blendState, wireframe);
     if (m_psoCache.find(key) == m_psoCache.end()) {
-        m_psoCache[key] = CreatePSO(psoFlags, blendState);
+        m_psoCache[key] = CreatePSO(psoFlags, blendState, wireframe);
     }
     return m_psoCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags, BlendState blendState) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
 
@@ -328,6 +328,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
         psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
     }
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    if (wireframe) {
+        psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    }
     psoDesc.RasterizerState.FrontCounterClockwise = true;
     if (psoFlags & PSOFlags::DOUBLE_SIDED) {
         psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;

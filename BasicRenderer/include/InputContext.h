@@ -68,6 +68,12 @@ public:
 			case 'R':
 				TriggerAction(InputAction::Reset, magnitude, inputData);
 				break;
+            case 'X':
+                TriggerAction(InputAction::X, magnitude, inputData);
+                break;
+            case 'Z':
+                TriggerAction(InputAction::Z, magnitude, inputData);
+                break;
             }
            
 

@@ -47,9 +47,18 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
+    settingsManager.registerSetting<float>("cameraSpeed", 1.5);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
+	settingsManager.registerSetting<bool>("wireframe", false);
+	settingsManager.registerSetting<bool>("enableShadows", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
-    getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
+    getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
+    setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
+	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");
+	setWireframe = settingsManager.getSettingSetter<bool>("wireframe");
+	getWireframe = settingsManager.getSettingGetter<bool>("wireframe");
+	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
+	getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 }
 
 void EnableShaderBasedValidation() {
@@ -347,32 +356,32 @@ void DX12Renderer::MoveForward() {
 void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& context) {
     context.SetActionHandler(InputAction::MoveForward, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving forward!");
-        movementState.forwardMagnitude = magnitude;
+        movementState.forwardMagnitude = magnitude * getCameraSpeed();
         });
 
     context.SetActionHandler(InputAction::MoveBackward, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving forward!");
-        movementState.backwardMagnitude = magnitude;
+        movementState.backwardMagnitude = magnitude * getCameraSpeed();
         });
 
     context.SetActionHandler(InputAction::MoveRight, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving right!");
-        movementState.rightMagnitude = magnitude;
+        movementState.rightMagnitude = magnitude * getCameraSpeed();
         });
 
     context.SetActionHandler(InputAction::MoveLeft, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving right!");
-        movementState.leftMagnitude = magnitude;
+        movementState.leftMagnitude = magnitude * getCameraSpeed();
         });
 
     context.SetActionHandler(InputAction::MoveUp, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving up!");
-        movementState.upMagnitude = magnitude;
+        movementState.upMagnitude = magnitude * getCameraSpeed();
         });
 
     context.SetActionHandler(InputAction::MoveDown, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving up!");
-        movementState.downMagnitude = magnitude;
+        movementState.downMagnitude = magnitude * getCameraSpeed();
         });
 
     context.SetActionHandler(InputAction::RotateCamera, [this](float magnitude, const InputData& inputData) {
@@ -387,20 +396,29 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
     context.SetActionHandler(InputAction::ZoomOut, [this](float magnitude, const InputData& inputData) {
         // TODO
         });
+
 	context.SetActionHandler(InputAction::Reset, [this](float magnitude, const InputData& inputData) {
         PSOManager::getInstance().ReloadShaders();
 		});
+
+    context.SetActionHandler(InputAction::X, [this](float magnitude, const InputData& inputData) {
+		ToggleWireframe();
+        });
+
+    context.SetActionHandler(InputAction::Z, [this](float magnitude, const InputData& inputData) {
+        ToggleShadows();
+        });
 }
 
 void DX12Renderer::CreateRenderGraph() {
     currentRenderGraph = std::make_unique<RenderGraph>();
 
-    auto forwardPass = std::make_shared<ForwardRenderPass>();
+    auto forwardPass = std::make_shared<ForwardRenderPass>(getWireframe());
     auto forwardPassParameters = PassParameters();
 
     auto debugPassParameters = PassParameters();
 
-    if (m_shadowMaps != nullptr) {
+    if (m_shadowMaps != nullptr && getShadowsEnabled()) {
         currentRenderGraph->AddResource(m_shadowMaps);
 
         auto shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
@@ -424,4 +442,14 @@ void DX12Renderer::CreateRenderGraph() {
 	currentRenderGraph->Compile();
 
 	rebuildRenderGraph = false;
+}
+
+void DX12Renderer::ToggleWireframe() {
+	setWireframe(!getWireframe());
+	rebuildRenderGraph = true;
+}
+
+void DX12Renderer::ToggleShadows() {
+	setShadowsEnabled(!getShadowsEnabled());
+	rebuildRenderGraph = true;
 }

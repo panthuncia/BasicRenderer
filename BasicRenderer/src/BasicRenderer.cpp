@@ -192,12 +192,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
     carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
-    auto mountainScene = loadGLB("models/mountain.glb");
-	mountainScene->GetRoot().transform.setLocalScale({ 0.0003, 0.0003, 0.0003 });
+    auto mountainScene = loadGLB("models/terrain.glb");
+	mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
 	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
 
     //auto cubeScene = loadGLB("models/cube.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
+    //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
     //auto heightMap = loadTextureFromFile("textures/height.jpg");
     //for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
     //    auto& renderable = pair.second;

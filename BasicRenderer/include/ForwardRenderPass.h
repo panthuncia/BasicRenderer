@@ -10,6 +10,9 @@
 #include "Scene.h"
 class ForwardRenderPass : public RenderPass {
 public:
+	ForwardRenderPass(bool wireframe) {
+		m_wireframe = wireframe;
+	}
 	void Setup() override {
 		// Setup the render pass
 	}
@@ -42,7 +45,7 @@ public:
 			commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
 			for (auto& mesh : meshes) {
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
+				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
@@ -60,7 +63,7 @@ public:
 			commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
 			for (auto& mesh : meshes) {
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags(), mesh.material->m_blendState);
+				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags, mesh.material->m_blendState);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
@@ -78,5 +81,5 @@ public:
 	}
 
 private:
-
+	bool m_wireframe;
 };

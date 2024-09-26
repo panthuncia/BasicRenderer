@@ -11,6 +11,8 @@ enum class InputAction {
     ZoomIn,
     ZoomOut,
     Reset,
+    X,
+    Z,
 };
 
 struct InputData {

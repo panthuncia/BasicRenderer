@@ -42,7 +42,8 @@ public:
 		m_currentSkybox->SetName(L"Skybox");
         rebuildRenderGraph = true;
     }
-
+    void ToggleWireframe();
+	void ToggleShadows();
 private:
     ComPtr<IDXGIFactory6> factory;
     ComPtr<ID3D12Device> device;
@@ -94,6 +95,12 @@ private:
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;
+	std::function<void(float)> setCameraSpeed;
+	std::function<float()> getCameraSpeed;
+	std::function<void(bool)> setWireframe;
+	std::function<bool()> getWireframe;
+	std::function<void(bool)> setShadowsEnabled;
+	std::function<bool()> getShadowsEnabled;
 };
 
 #endif //DX12RENDERER_H
