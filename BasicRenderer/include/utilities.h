@@ -105,3 +105,5 @@ void UploadTextureData(
     int width,
     int height,
     int channels);
+
+std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(XMFLOAT3 pos);

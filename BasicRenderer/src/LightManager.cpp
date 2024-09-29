@@ -102,7 +102,7 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 	case LightType::Point: {
 		auto cubeViewIndex = m_pointViewInfoHandle.buffer->Size() / 6;
 		node->SetLightViewInfoIndex(cubeViewIndex);
-		auto cubemapMatrices = node->GetCubemapViewMatrices();
+		auto cubemapMatrices = GetCubemapViewMatrices(node->transform.getGlobalPosition());
 		for (int i = 0; i < 6; i++) {
 			m_pointViewInfoHandle.buffer->Add(XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
 		}
@@ -136,7 +136,7 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 	auto projectionMatrix = light->GetLightProjectionMatrix();
 	switch (light->GetLightType()) {
 	case LightType::Point: {
-		auto cubemapMatrices = light->GetCubemapViewMatrices();
+		auto cubemapMatrices = GetCubemapViewMatrices(light->transform.getGlobalPosition());
 		for (int i = 0; i < 6; i++) {
 			m_pointViewInfoHandle.buffer->UpdateAt(light->GetCurrentviewInfoIndex()*6+i,XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
 		}

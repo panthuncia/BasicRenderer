@@ -15,12 +15,12 @@
 #include "RenderContext.h"
 #include "RenderGraph.h"
 #include "RenderPass.h"
-#include "ForwardRenderPass.h"
-#include "ShadowPass.h"
+#include "RenderPasses/ForwardRenderPass.h"
+#include "RenderPasses/ShadowPass.h"
 #include "SettingsManager.h"
-#include "DebugRenderPass.h"
-#include "SkyboxRenderPass.h"
-
+#include "RenderPasses/DebugRenderPass.h"
+#include "RenderPasses/SkyboxRenderPass.h"
+#include "RenderPasses/EnvironmentConversionPass.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {

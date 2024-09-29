@@ -131,43 +131,6 @@ void Light::CreateProjectionMatrix(float nearPlane, float farPlane) {
 	}
 }
 
-std::array<DirectX::XMMATRIX, 6> Light::GetCubemapViewMatrices() {
-	// Define directions and up vectors for the six faces of the cubemap
-	// Directions for the cubemap faces
-	XMVECTOR targets[6] = {
-		XMVectorSet(1.0f,  0.0f,  0.0f, 0.0f), // +X
-		XMVectorSet(-1.0f,  0.0f,  0.0f, 0.0f), // -X
-		XMVectorSet(0.0f,  1.0f,  0.0f, 0.0f), // +Y
-		XMVectorSet(0.0f, -1.0f,  0.0f, 0.0f), // -Y
-		XMVectorSet(0.0f,  0.0f, -1.0f, 0.0f), // +Z
-		XMVectorSet(0.0f,  0.0f, 1.0f, 0.0f), // -Z
-	};
-
-	// Up vectors for the cubemap faces
-	XMVECTOR ups[6] = {
-		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // +X
-		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // -X
-		XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), // +Y
-		XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), // -Y
-		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // +Z
-		XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // -Z
-	};
-
-	std::array<XMMATRIX, 6> viewMatrices{};
-	auto posVec = transform.getGlobalPosition();
-	XMVECTOR lightPos = XMLoadFloat3(&posVec);
-
-	for (int i = 0; i < 6; ++i) {
- 		viewMatrices[i] = XMMatrixLookToRH(
-			lightPos,     // Eye position
-			targets[i],   // Look direction
-			ups[i]        // Up direction
-		);
-	}
-
-	return viewMatrices;
-}
-
 DirectX::XMMATRIX Light::GetLightViewMatrix() {
 	auto dir = GetLightDir();
 	auto pos = transform.getGlobalPosition();

@@ -34,6 +34,8 @@ void PSOManager::initialize() {
     CreateDebugPSO();
     CreateSkyboxRootSignature();
     CreateSkyboxPSO();
+    CreateEnvironmentConversionRootSignature();
+	CreateEnvironmentConversionPSO();
 }
 
 void PSOManager::CreateDebugRootSignature() {
@@ -102,6 +104,49 @@ void PSOManager::CreateSkyboxRootSignature() {
 
     auto& device = DeviceManager::GetInstance().GetDevice();
     hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&skyboxRootSignature));
+    if (FAILED(hr)) {
+        throw std::runtime_error("Failed to create root signature");
+    }
+}
+
+void PSOManager::CreateEnvironmentConversionRootSignature() {
+    CD3DX12_DESCRIPTOR_RANGE1 debugDescriptorRangeSRV;
+    debugDescriptorRangeSRV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 in the shader
+
+    CD3DX12_ROOT_PARAMETER1 debugRootParameters[2];
+    debugRootParameters[0].InitAsDescriptorTable(1, &debugDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
+    debugRootParameters[1].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b1)
+
+    D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samplerDesc.MipLODBias = 0.0f;
+    samplerDesc.MaxAnisotropy = 1;
+    samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    samplerDesc.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    samplerDesc.MinLOD = 0.0f;
+    samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+    samplerDesc.ShaderRegister = 0;  // Corresponds to s0 in the shader
+    samplerDesc.RegisterSpace = 0;
+    samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+    rootSignatureDesc.Init_1_1(_countof(debugRootParameters), debugRootParameters, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    ComPtr<ID3DBlob> serializedRootSig;
+    ComPtr<ID3DBlob> errorBlob;
+    HRESULT hr = D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1_1, &serializedRootSig, &errorBlob);
+    if (FAILED(hr)) {
+        if (errorBlob) {
+            OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+        }
+        throw std::runtime_error("Failed to serialize root signature");
+    }
+
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&environmentConversionRootSignature));
     if (FAILED(hr)) {
         throw std::runtime_error("Failed to create root signature");
     }
@@ -256,12 +301,102 @@ void PSOManager::CreateSkyboxPSO() {
     }
 }
 
+void PSOManager::CreateEnvironmentConversionPSO() {
+    // Compile shaders
+    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    CompileShader(L"shaders/envToCubemap.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+    CompileShader(L"shaders/envToCubemap.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+
+    static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+
+    D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
+    inputLayoutDesc.pInputElementDescs = inputElementDescs;
+    inputLayoutDesc.NumElements = _countof(inputElementDescs);
+
+    D3D12_RASTERIZER_DESC rasterizerDesc = {};
+    rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+    rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
+    rasterizerDesc.FrontCounterClockwise = FALSE;
+    rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+    rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+    rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+    rasterizerDesc.DepthClipEnable = TRUE;
+    rasterizerDesc.MultisampleEnable = FALSE;
+    rasterizerDesc.AntialiasedLineEnable = FALSE;
+    rasterizerDesc.ForcedSampleCount = 0;
+    rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+    D3D12_BLEND_DESC blendDesc = {};
+    blendDesc.RenderTarget[0].BlendEnable = FALSE;
+    blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
+    blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
+    blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+    blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    blendDesc.RenderTarget[1].BlendEnable = FALSE;
+    blendDesc.RenderTarget[1].LogicOpEnable = FALSE;
+    blendDesc.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
+    blendDesc.RenderTarget[1].DestBlend = D3D12_BLEND_ZERO;
+    blendDesc.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
+    blendDesc.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ZERO;
+    blendDesc.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[1].LogicOp = D3D12_LOGIC_OP_NOOP;
+    blendDesc.RenderTarget[1].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
+    depthStencilDesc.DepthEnable = FALSE; 
+    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+
+    DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout = inputLayoutDesc;   // No input layout needed for full-screen triangle
+    psoDesc.pRootSignature = environmentConversionRootSignature.Get();
+    psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+    psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
+    psoDesc.RasterizerState = rasterizerDesc;
+    psoDesc.BlendState = blendDesc;
+    psoDesc.DepthStencilState = depthStencilDesc;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 2;
+    psoDesc.RTVFormats[0] = renderTargetFormat;
+	psoDesc.RTVFormats[1] = renderTargetFormat;
+    //psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleDesc.Quality = 0;
+    psoDesc.InputLayout = inputLayoutDesc;
+
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&environmentConversionPSO));
+    if (FAILED(hr)) {
+        throw std::runtime_error("Failed to create skybox PSO");
+    }
+}
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetSkyboxPSO() {
 	return skyboxPSO;
 }
 
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetDebugPSO() {
 	return debugPSO;
+}
+
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetEnvironmentConversionPSO() {
+    return environmentConversionPSO;
+}
+
+Microsoft::WRL::ComPtr<ID3D12RootSignature> PSOManager::GetEnvironmentConversionRootSignature() {
+	return environmentConversionRootSignature;
 }
 
 Microsoft::WRL::ComPtr<ID3D12RootSignature> PSOManager::GetDebugRootSignature() {

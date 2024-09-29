@@ -184,13 +184,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
 	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 
-    auto phoenixScene = loadGLB("models/phoenix.glb");
-    phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
-    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+    //auto phoenixScene = loadGLB("models/phoenix.glb");
+    //phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+    //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
-    auto carScene = loadGLB("models/datsun.glb");
-    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
-    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+    //auto carScene = loadGLB("models/datsun.glb");
+    //carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+    //carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
     auto mountainScene = loadGLB("models/terrain.glb");
 	mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
@@ -227,7 +227,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
     auto skybox = loadCubemapFromFile("textures/skybox/top.jpg", "textures/skybox/bottom.jpg", "textures/skybox/left.jpg", "textures/skybox/right.jpg", "textures/skybox/front.jpg", "textures/skybox/back.jpg");
-	renderer.SetSkybox(skybox);
+	auto skyHDR = loadTextureFromFile("textures/environment/sky.hdr");
+    renderer.SetSkybox(skybox);
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
     XMFLOAT3 up = XMFLOAT3(0.0f, 1.0f, 0.0f);

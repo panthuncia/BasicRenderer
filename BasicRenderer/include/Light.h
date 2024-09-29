@@ -76,7 +76,6 @@ public:
 
 	void UpdateLightMatrices();
 	DirectX::XMMATRIX GetLightViewMatrix();
-	std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices();
 	DirectX::XMMATRIX GetLightProjectionMatrix();
 	DirectX::XMVECTOR GetLightDir();
 	void SetShadowMap(std::shared_ptr<Texture> shadowMap);

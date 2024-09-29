@@ -18,7 +18,7 @@ struct VS_OUTPUT {
 
 VS_OUTPUT VSMain(float3 pos : POSITION) {
     VS_OUTPUT output;
-    output.direction = pos;
+    output.direction = normalize(pos);
     output.position = mul(viewProjectionMatrix, float4(pos, 1.0f));
     output.position.z = output.position.w-0.00001;
     return output;

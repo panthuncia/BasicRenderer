@@ -456,3 +456,38 @@ std::vector<stbi_uc> ExpandImageData(const stbi_uc* image, int width, int height
     return expandedData;
 }
 
+std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(XMFLOAT3 pos) {
+    // Define directions and up vectors for the six faces of the cubemap
+    // Directions for the cubemap faces
+    XMVECTOR targets[6] = {
+        XMVectorSet(1.0f,  0.0f,  0.0f, 0.0f), // +X
+        XMVectorSet(-1.0f,  0.0f,  0.0f, 0.0f), // -X
+        XMVectorSet(0.0f,  1.0f,  0.0f, 0.0f), // +Y
+        XMVectorSet(0.0f, -1.0f,  0.0f, 0.0f), // -Y
+        XMVectorSet(0.0f,  0.0f, -1.0f, 0.0f), // +Z
+        XMVectorSet(0.0f,  0.0f, 1.0f, 0.0f), // -Z
+    };
+
+    // Up vectors for the cubemap faces
+    XMVECTOR ups[6] = {
+        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // +X
+        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // -X
+        XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), // +Y
+        XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), // -Y
+        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // +Z
+        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f), // -Z
+    };
+
+    std::array<XMMATRIX, 6> viewMatrices{};
+    XMVECTOR lightPos = XMLoadFloat3(&pos);
+
+    for (int i = 0; i < 6; ++i) {
+        viewMatrices[i] = XMMatrixLookToRH(
+            lightPos,     // Eye position
+            targets[i],   // Look direction
+            ups[i]        // Up direction
+        );
+    }
+
+    return viewMatrices;
+}

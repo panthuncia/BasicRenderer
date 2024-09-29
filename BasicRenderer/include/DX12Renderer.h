@@ -19,7 +19,7 @@
 #include "InputManager.h"
 #include "RenderGraph.h"
 #include "ShadowMaps.h"
-#include "DebugRenderPass.h"
+#include "RenderPasses/DebugRenderPass.h"
 
 using namespace Microsoft::WRL;
 
