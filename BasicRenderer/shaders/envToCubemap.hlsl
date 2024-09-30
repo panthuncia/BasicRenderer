@@ -28,10 +28,13 @@ VS_OUTPUT VSMain(float3 pos : POSITION) {
 }
 
 static const float2 invAtan = float2(0.1591, 0.3183);
-float2 CubeToSpherical(float3 v) {
-    float2 uv = float2(atan2(v.x, v.z), asin(v.y));
-    uv *= invAtan;
-    uv.xy += 0.5;
+// Converts a direction vector to u,v coordinates on an equirrectangular map
+float2 CubeToSpherical(float3 dir) {
+    dir = normalize(dir);
+
+    float2 uv;
+    uv.x = (atan2(dir.z, dir.x) / (2.0 * 3.14159265359)) + 0.5;
+    uv.y = (asin(dir.y) / 3.14159265359) + 0.5;
     uv.y = 1.0 - uv.y;
     return uv;
 }

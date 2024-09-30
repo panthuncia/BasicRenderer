@@ -227,7 +227,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
     //auto skybox = loadCubemapFromFile("textures/skybox/top.jpg", "textures/skybox/bottom.jpg", "textures/skybox/left.jpg", "textures/skybox/right.jpg", "textures/skybox/front.jpg", "textures/skybox/back.jpg");
-	auto skyHDR = loadTextureFromFile("textures/environment/sky.hdr");
+	auto skyHDR = loadTextureFromFile("textures/environment/room.hdr");
     renderer.SetEnvironmentTexture(skyHDR);
     //renderer.SetSkybox(skybox);
 
