@@ -34,6 +34,8 @@ public:
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
+
 		auto drawObjects = [&]() {
 			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
 				auto& renderable = pair.second;

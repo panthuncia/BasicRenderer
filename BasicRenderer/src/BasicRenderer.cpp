@@ -192,9 +192,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
     //carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
-    auto mountainScene = loadGLB("models/terrain.glb");
-	mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
-	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+ //   auto mountainScene = loadGLB("models/terrain.glb");
+	//mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
+	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
 
     //auto cubeScene = loadGLB("models/cube.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
@@ -223,12 +223,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //renderer.GetCurrentScene()->AppendScene(*carScene);
-	renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
-    auto skybox = loadCubemapFromFile("textures/skybox/top.jpg", "textures/skybox/bottom.jpg", "textures/skybox/left.jpg", "textures/skybox/right.jpg", "textures/skybox/front.jpg", "textures/skybox/back.jpg");
+    //auto skybox = loadCubemapFromFile("textures/skybox/top.jpg", "textures/skybox/bottom.jpg", "textures/skybox/left.jpg", "textures/skybox/right.jpg", "textures/skybox/front.jpg", "textures/skybox/back.jpg");
 	auto skyHDR = loadTextureFromFile("textures/environment/sky.hdr");
-    renderer.SetSkybox(skybox);
+    renderer.SetEnvironmentTexture(skyHDR);
+    //renderer.SetSkybox(skybox);
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
     XMFLOAT3 up = XMFLOAT3(0.0f, 1.0f, 0.0f);

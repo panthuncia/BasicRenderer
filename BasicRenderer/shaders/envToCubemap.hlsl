@@ -29,9 +29,10 @@ VS_OUTPUT VSMain(float3 pos : POSITION) {
 
 static const float2 invAtan = float2(0.1591, 0.3183);
 float2 CubeToSpherical(float3 v) {
-    float2 uv = float2(atan2(v.z, v.x), asin(v.y));
+    float2 uv = float2(atan2(v.x, v.z), asin(v.y));
     uv *= invAtan;
-    uv += 0.5;
+    uv.xy += 0.5;
+    uv.y = 1.0 - uv.y;
     return uv;
 }
 
@@ -45,8 +46,9 @@ static const float PI = 3.14159265359;
 PS_OUTPUT PSMain(VS_OUTPUT input) {
     float3 color = environmentTexture.Sample(environmentSamplerState, CubeToSpherical(input.direction.xyz)).xyz;
     
-    float3 irradiance = float3(0.0, 0.0, 0.0);
-    float3 normal = input.direction.xyz;
+    float3 irradiance = float3(0.0, 1.0, 0.0);
+
+    /*float3 normal = input.direction.xyz;
     float3 up = float3(0.0, 1.0, 0.0);
     float3 right = normalize(cross(up, normal));
     up = normalize(cross(normal, right));
@@ -61,11 +63,11 @@ PS_OUTPUT PSMain(VS_OUTPUT input) {
             // tangent space to world
             float3 sampleVec = tangentSample.x * right + tangentSample.y * up + tangentSample.z * normal;
 
-            irradiance += environmentTexture.Sample(environmentState, CubeToSpherical(sampleVec)).rgb * cos(theta) * sin(theta);
+            irradiance += environmentTexture.Sample(environmentSamplerState, CubeToSpherical(sampleVec)).rgb * cos(theta) * sin(theta);
             nrSamples++;
         }
     }
-    irradiance = PI * irradiance * (1.0 / float(nrSamples));
+    irradiance = PI * irradiance * (1.0 / float(nrSamples));*/
     
     PS_OUTPUT output;
     output.color = float4(color, 1.0);

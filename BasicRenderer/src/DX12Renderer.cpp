@@ -51,6 +51,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("wireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
+	settingsManager.registerSetting<uint16_t>("skyboxResolution", 4096);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -59,6 +60,7 @@ void DX12Renderer::SetSettings() {
 	getWireframe = settingsManager.getSettingGetter<bool>("wireframe");
 	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
 	getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+	getSkyboxResolution = settingsManager.getSettingGetter<uint16_t>("skyboxResolution");
 }
 
 void EnableShaderBasedValidation() {
@@ -418,6 +420,19 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto debugPassParameters = PassParameters();
 
+    if (m_currentEnvironmentTexture != nullptr) {
+        currentRenderGraph->AddResource(m_currentEnvironmentTexture);
+		currentRenderGraph->AddResource(m_currentSkybox);
+		currentRenderGraph->AddResource(m_environmentRadiance);
+        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentRadiance);
+		environmentConversionPass->Setup();
+        auto environmentConversionPassParameters = PassParameters();
+        environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
+        environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
+        environmentConversionPassParameters.renderTargets.push_back(m_environmentRadiance);
+        currentRenderGraph->AddPass(environmentConversionPass, environmentConversionPassParameters);
+    }
+
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
         currentRenderGraph->AddResource(m_shadowMaps);
 
@@ -430,7 +445,8 @@ void DX12Renderer::CreateRenderGraph() {
     }
 
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
-    if (m_currentSkybox != nullptr) {
+
+    if (m_currentSkybox != nullptr || m_currentEnvironmentTexture != nullptr) {
         currentRenderGraph->AddResource(m_currentSkybox);
         auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
 		skyboxPass->Setup();
@@ -452,4 +468,28 @@ void DX12Renderer::ToggleWireframe() {
 void DX12Renderer::ToggleShadows() {
 	setShadowsEnabled(!getShadowsEnabled());
 	rebuildRenderGraph = true;
+}
+
+void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture) {
+    m_currentEnvironmentTexture = texture;
+    m_currentEnvironmentTexture->SetName(L"EnvironmentTexture");
+    auto buffer = m_currentEnvironmentTexture->GetBuffer();
+    // Create blank texture for skybox
+	uint16_t skyboxResolution = getSkyboxResolution();
+    auto envCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
+    auto sampler = Sampler::GetDefaultSampler();
+    m_currentSkybox = std::make_shared<Texture>(envCubemap, sampler);
+    m_currentSkybox->SetName(L"Skybox");
+
+    auto envRadianceBubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
+    m_environmentRadiance = std::make_shared<Texture>(envRadianceBubemap, sampler);
+    m_environmentRadiance->SetName(L"EnvironmentRadiance");
+
+    rebuildRenderGraph = true;
+}
+
+void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
+    m_currentSkybox = texture;
+    m_currentSkybox->SetName(L"Skybox");
+    rebuildRenderGraph = true;
 }

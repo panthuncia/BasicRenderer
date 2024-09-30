@@ -15,6 +15,7 @@ public:
 		m_environmentCubeMap = environmentCubeMap;
 		m_environmentRadiance = environmentRadiance;
         m_viewMatrices = GetCubemapViewMatrices({0.0, 0.0, 0.0});
+        getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
     }
 
     void Setup() override {
@@ -30,8 +31,9 @@ public:
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.xRes, context.yRes);
-        CD3DX12_RECT scissorRect(0, 0, context.xRes, context.yRes);
+		uint16_t skyboxRes = getSkyboxResolution();
+        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
+        CD3DX12_RECT scissorRect(0, 0, skyboxRes, skyboxRes);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
@@ -70,6 +72,8 @@ private:
 	std::shared_ptr<Texture> m_environmentCubeMap = nullptr;
 	std::shared_ptr<Texture> m_environmentRadiance = nullptr;
     std::array<XMMATRIX, 6> m_viewMatrices;
+
+    std::function<uint16_t()> getSkyboxResolution;
 
     struct SkyboxVertex {
         XMFLOAT3 position;

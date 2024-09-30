@@ -26,6 +26,9 @@ public:
 	}
     UINT GetSRVDescriptorIndex() const;
 	TextureHandle<PixelBuffer>& GetHandle() { return handle; }
+	unsigned int GetWidth() const { return m_width; }
+	unsigned int GetHeight() const { return m_height; }
+	unsigned int GetChannels() const { return m_channels; }
     void Transition(const RenderContext& context, ResourceState fromState, ResourceState toState);
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 
@@ -36,4 +39,7 @@ private:
     PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV = false, bool DSV = false, bool UAV = false);
 
     TextureHandle<PixelBuffer> handle;
+    unsigned int m_width;
+    unsigned int m_height;
+	unsigned int m_channels;
 };

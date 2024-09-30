@@ -37,11 +37,8 @@ public:
     void SetDebugTexture(Texture* texture) {
 		m_debugPass->SetTexture(texture);
     }
-    void SetSkybox(std::shared_ptr<Texture> texture) {
-		m_currentSkybox = texture;
-		m_currentSkybox->SetName(L"Skybox");
-        rebuildRenderGraph = true;
-    }
+    void SetSkybox(std::shared_ptr<Texture> texture);
+    void SetEnvironmentTexture(std::shared_ptr<Texture> texture);
     void ToggleWireframe();
 	void ToggleShadows();
 private:
@@ -78,6 +75,9 @@ private:
     RenderContext m_context;
 
 	std::shared_ptr<Texture> m_currentSkybox = nullptr;
+	std::shared_ptr<Texture> m_currentEnvironmentTexture = nullptr;
+	std::shared_ptr<Texture> m_environmentRadiance = nullptr;
+
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
     std::shared_ptr<DebugRenderPass> m_debugPass = nullptr;
 
@@ -101,6 +101,7 @@ private:
 	std::function<bool()> getWireframe;
 	std::function<void(bool)> setShadowsEnabled;
 	std::function<bool()> getShadowsEnabled;
+    std::function<uint16_t()> getSkyboxResolution;
 };
 
 #endif //DX12RENDERER_H

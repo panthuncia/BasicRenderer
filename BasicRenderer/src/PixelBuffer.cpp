@@ -14,6 +14,9 @@ PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channe
     handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
+    m_width = width;
+    m_height = height;
+	m_channels = channels;
 }
 
 PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB) {
@@ -21,6 +24,9 @@ PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width,
     handle = resourceManager.CreateCubemapFromImages(images, width, height, channels, sRGB);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
+	m_width = width;
+	m_height = height;
+	m_channels = channels;
 }
 
 PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
@@ -28,6 +34,9 @@ PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bo
     handle = resourceManager.CreateTexture(width, height, channels, isCubemap, RTV, DSV, UAV);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
+	m_width = width;
+	m_height = height;
+	m_channels = channels;
 }
 
 PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV, bool DSV, bool UAV) {
@@ -35,6 +44,9 @@ PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, b
     handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, isCubemap, RTV, DSV, UAV);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
+	m_width = width;
+	m_height = height;
+	m_channels = channels;
 }
 
 UINT PixelBuffer::GetSRVDescriptorIndex() const {
