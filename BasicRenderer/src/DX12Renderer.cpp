@@ -51,7 +51,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("wireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
-	settingsManager.registerSetting<uint16_t>("skyboxResolution", 512);
+	settingsManager.registerSetting<uint16_t>("skyboxResolution", 4096);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");

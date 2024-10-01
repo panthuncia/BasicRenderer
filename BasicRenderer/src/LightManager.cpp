@@ -215,10 +215,14 @@ void LightManager::SetCurrentCamera(Camera* camera) {
 
 void LightManager::OnNodeUpdated(SceneNode* camera) {
 	for (Light* light : m_directionalLights) {
-		UpdateLightViewInfo(light);
+		if (light->GetLightInfo().shadowMapIndex != -1) {
+			UpdateLightViewInfo(light);
+		}
 	}
 }
 void LightManager::OnNodeUpdated(Light* light) {
 	m_lightBufferHandle.buffer->UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
-	UpdateLightViewInfo(light);
+	if (light->GetLightInfo().shadowMapIndex != -1) {
+		UpdateLightViewInfo(light);
+	}
 }
