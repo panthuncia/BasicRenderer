@@ -28,13 +28,14 @@ VS_OUTPUT VSMain(float3 pos : POSITION) {
 }
 
 static const float2 invAtan = float2(0.1591, 0.3183);
+static const float PI = 3.14159265359;
 // Converts a direction vector to u,v coordinates on an equirrectangular map
 float2 CubeToSpherical(float3 dir) {
     dir = normalize(dir);
 
     float2 uv;
-    uv.x = (atan2(dir.z, dir.x) / (2.0 * 3.14159265359)) + 0.5;
-    uv.y = (asin(dir.y) / 3.14159265359) + 0.5;
+    uv.x = (atan2(dir.z, dir.x) / (2.0 * PI)) + 0.5;
+    uv.y = (asin(dir.y) / PI) + 0.5;
     uv.y = 1.0 - uv.y;
     return uv;
 }
@@ -44,19 +45,17 @@ struct PS_OUTPUT {
     float4 radiance : SV_Target1;
 };
 
-static const float PI = 3.14159265359;
-
 PS_OUTPUT PSMain(VS_OUTPUT input) {
     float3 color = environmentTexture.Sample(environmentSamplerState, CubeToSpherical(input.direction.xyz)).xyz;
     
-    float3 irradiance = float3(0.0, 1.0, 0.0);
+    float3 irradiance = float3(0.0, 0.0, 0.0);
 
-    /*float3 normal = input.direction.xyz;
+    float3 normal = input.direction.xyz;
     float3 up = float3(0.0, 1.0, 0.0);
     float3 right = normalize(cross(up, normal));
     up = normalize(cross(normal, right));
 
-    float sampleDelta = 0.025;
+    float sampleDelta = 0.125;
     float nrSamples = 0.0;
     // https://learnopengl.com/PBR/IBL/Diffuse-irradiance
     for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta) {
@@ -70,7 +69,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input) {
             nrSamples++;
         }
     }
-    irradiance = PI * irradiance * (1.0 / float(nrSamples));*/
+    irradiance = PI * irradiance * (1.0 / float(nrSamples));
     
     PS_OUTPUT output;
     output.color = float4(color, 1.0);
