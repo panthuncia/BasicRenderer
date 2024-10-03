@@ -1,6 +1,7 @@
 #pragma once
 
 # include <d3d12.h>
+#include <filesystem>
 
 #include "RenderPass.h"
 #include "PSOManager.h"
@@ -8,9 +9,11 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "Utilities.h"
+
 class EnvironmentConversionPass : public RenderPass {
 public:
-    EnvironmentConversionPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance) {
+    EnvironmentConversionPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance, std::string environmentName) {
+		m_environmentName = s2ws(environmentName);
         m_texture = environmentTexture;
 		m_environmentCubeMap = environmentCubeMap;
 		m_environmentRadiance = environmentRadiance;
@@ -58,6 +61,14 @@ public:
             commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
         }
+
+        // We can reuse the results of this pass
+		invalidated = false;
+
+		auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds");
+		SaveCubemapToDDS(context.device, context.commandList, context.commandQueue, m_environmentRadiance.get(), path);
+        path = GetCacheFilePath(m_environmentName + L"_environment.dds");
+        SaveCubemapToDDS(context.device, context.commandList, context.commandQueue, m_environmentCubeMap.get(), path);
     }
 
     void Cleanup(RenderContext& context) override {
@@ -68,6 +79,7 @@ private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     BufferHandle vertexBufferHandle;
     ComPtr<ID3D12PipelineState> m_pso;
+	std::wstring m_environmentName;
     std::shared_ptr<Texture> m_texture = nullptr;
 	std::shared_ptr<Texture> m_environmentCubeMap = nullptr;
 	std::shared_ptr<Texture> m_environmentRadiance = nullptr;

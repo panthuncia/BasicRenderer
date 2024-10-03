@@ -11,7 +11,8 @@
 
 PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB);
+    m_format = DetermineTextureFormat(channels, sRGB, false);
+    handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB, m_format);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
     m_width = width;
@@ -21,7 +22,8 @@ PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channe
 
 PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    handle = resourceManager.CreateCubemapFromImages(images, width, height, channels, sRGB);
+    m_format = DetermineTextureFormat(channels, sRGB, false);
+    handle = resourceManager.CreateCubemapFromImages(images, width, height, channels, sRGB, m_format);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
 	m_width = width;
@@ -31,7 +33,8 @@ PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width,
 
 PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    handle = resourceManager.CreateTexture(width, height, channels, isCubemap, RTV, DSV, UAV);
+    m_format = DetermineTextureFormat(channels, false, DSV);
+    handle = resourceManager.CreateTexture(width, height, channels, m_format, isCubemap, RTV, DSV, UAV);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
 	m_width = width;
@@ -41,7 +44,8 @@ PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bo
 
 PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, isCubemap, RTV, DSV, UAV);
+    m_format = DetermineTextureFormat(channels, false, DSV);
+    handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, isCubemap, m_format, RTV, DSV, UAV);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
 	m_width = width;

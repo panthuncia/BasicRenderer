@@ -25,6 +25,7 @@ UINT Texture::GetSRVDescriptorIndex() const {
 }
 
 void Texture::Transition(const RenderContext& context, ResourceState fromState, ResourceState toState) {
+	currentState = toState;
 	m_image->Transition(context, fromState, toState); // Transition the underlying PixelBuffer
 }
 

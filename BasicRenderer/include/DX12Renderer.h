@@ -20,6 +20,7 @@
 #include "RenderGraph.h"
 #include "ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
+#include "ReadbackRequest.h"
 
 using namespace Microsoft::WRL;
 
@@ -37,10 +38,15 @@ public:
     void SetDebugTexture(Texture* texture) {
 		m_debugPass->SetTexture(texture);
     }
+    void SetEnvironment(std::wstring name);
     void SetSkybox(std::shared_ptr<Texture> texture);
-    void SetEnvironmentTexture(std::shared_ptr<Texture> texture);
+	void SetRadiance(std::shared_ptr<Texture> texture);
+    void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
     void ToggleWireframe();
 	void ToggleShadows();
+    void SubmitReadbackRequest(ReadbackRequest&& request);
+    std::vector<ReadbackRequest>& GetPendingReadbackRequests();
+
 private:
     ComPtr<IDXGIFactory6> factory;
     ComPtr<ID3D12Device> device;
@@ -77,9 +83,13 @@ private:
 	std::shared_ptr<Texture> m_currentSkybox = nullptr;
 	std::shared_ptr<Texture> m_currentEnvironmentTexture = nullptr;
 	std::shared_ptr<Texture> m_environmentRadiance = nullptr;
+	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
     std::shared_ptr<DebugRenderPass> m_debugPass = nullptr;
+
+    std::mutex readbackRequestsMutex;
+	std::vector<ReadbackRequest> m_readbackRequests;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
@@ -92,6 +102,8 @@ private:
 
     void WaitForPreviousFrame();
     void CheckDebugMessages();
+
+    void ProcessReadbackRequests();
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;

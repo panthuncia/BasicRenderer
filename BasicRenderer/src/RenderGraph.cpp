@@ -49,11 +49,14 @@ void RenderGraph::Setup() {
     }
 }
 
-void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources) {
+void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name) {
     PassAndResources passAndResources;
     passAndResources.pass = pass;
     passAndResources.resources = resources;
 	passes.push_back(passAndResources);
+    if (name != "") {
+        passesByName[name] = pass;
+    }
 }
 
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
@@ -64,9 +67,19 @@ std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::wstring& nam
 	return resourcesByName[name];
 }
 
+std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) {
+    if (passesByName.contains(name)) {
+        return passesByName[name];
+    }
+    else {
+        return nullptr;
+    }
+}
+
 void RenderGraph::Execute(RenderContext& context) {
     for (auto& batch : batches) {
         // Perform resource transitions
+		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
         for (auto& transition : batch.transitions) {
             transition.pResource->Transition(context, transition.fromState, transition.toState);
 
@@ -74,7 +87,9 @@ void RenderGraph::Execute(RenderContext& context) {
 
         // Execute all passes in the batch
         for (auto& passAndResources : batch.passes) {
-            passAndResources.pass->Execute(context);
+			if (passAndResources.pass->IsInvalidated()) {
+                passAndResources.pass->Execute(context);
+			}
         }
     }
 }

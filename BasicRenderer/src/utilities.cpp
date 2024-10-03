@@ -6,12 +6,18 @@
 #include <stdexcept>
 #include <algorithm>
 #include <codecvt>
+#include <DirectXTex.h>
+#include <future>
+#include <functional>
+#include <filesystem>
+
 #include "MeshUtilities.h"
 #include "PSOFlags.h"
 #include "DirectX/d3dx12.h"
 #include "DefaultDirection.h"
 #include "Sampler.h"
 #include "DescriptorHeap.h"
+#include "ReadbackRequest.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -115,8 +121,8 @@ ImageData loadImage(const char* filename) {
     return img;
 }
 
-std::shared_ptr<Texture> loadTextureFromFile(const char* filename) {
-	ImageData img = loadImage(filename);
+std::shared_ptr<Texture> loadTextureFromFile(std::string filename) {
+	ImageData img = loadImage(filename.c_str());
 	auto buffer = PixelBuffer::CreateFromImage(img.data, img.width, img.height, img.channels, false);
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
@@ -131,6 +137,31 @@ std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bo
 	ImageData back = loadImage(backPath);
 
     auto buffer = PixelBuffer::CreateCubemapFromImages({right.data, left.data, top.data, bottom.data, front.data, back.data }, top.width, top.height, top.channels, false);
+    auto sampler = Sampler::GetDefaultSampler();
+    return std::make_shared<Texture>(buffer, sampler);
+}
+
+std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
+    DirectX::ScratchImage image;
+    DirectX::TexMetadata metadata;
+    HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+
+    if (FAILED(hr)) {
+        throw std::runtime_error("Failed to load DDS cubemap: " + ws2s(ddsFilePath));
+    }
+
+    if (!(metadata.miscFlags & DirectX::TEX_MISC_TEXTURECUBE)) {
+        throw std::runtime_error("The DDS file is not a cubemap: " + ws2s(ddsFilePath));
+    }
+
+    // Extract cubemap faces and create a PixelBuffer from them
+    std::array<const stbi_uc*, 6> faces = {};
+    for (size_t i = 0; i < 6; ++i) {
+        const DirectX::Image* img = image.GetImage(0, i, 0); // mip 0, face i, slice 0
+        faces[i] = img->pixels;
+    }
+
+    auto buffer = PixelBuffer::CreateCubemapFromImages(faces, metadata.width, metadata.height, /* channels */ 4, false);
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
 }
@@ -490,4 +521,150 @@ std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(XMFLOAT3 pos) {
     }
 
     return viewMatrices;
+}
+
+void AsyncSaveToDDS(DirectX::ScratchImage scratchImage, const std::wstring& outputFile) {
+    HRESULT hr = DirectX::SaveToDDSFile(scratchImage.GetImages(), scratchImage.GetImageCount(), scratchImage.GetMetadata(),
+        DirectX::DDS_FLAGS_NONE, outputFile.c_str());
+    if (FAILED(hr))
+    {
+        throw std::runtime_error("Failed to save the cubemap to a .dds file!");
+    }
+}
+
+
+void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* cubemap, const std::wstring& outputFile) {
+    // Ensure the resource is a cubemap
+    D3D12_RESOURCE_DESC resourceDesc = cubemap->GetHandle().texture->GetDesc();
+    //if (resourceDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || resourceDesc.DepthOrArraySize != 6)
+    //{
+    //    throw std::runtime_error("The resource is not a cubemap!");
+    //}
+
+    // Create a readback buffer for the texture
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(6);
+    std::vector<UINT> numRows(6);
+    std::vector<UINT64> rowSizesInBytes(6);
+    UINT64 totalSize = 0;
+
+    // Get the copyable footprints for each face of the cubemap
+    device->GetCopyableFootprints(
+        &resourceDesc,          // The resource description of the cubemap
+        0,                      // First subresource
+        6,                      // Number of subresources (6 for cubemap)
+        0,                      // Base offset in the resource
+        layouts.data(),         // Array to hold the layout of each subresource
+        numRows.data(),         // Array to hold the number of rows for each subresource
+        rowSizesInBytes.data(), // Array to hold the row size in bytes for each subresource
+        &totalSize);
+
+    // Describe and create the readback buffer
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_READBACK;
+    heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    heapProps.CreationNodeMask = 1;
+    heapProps.VisibleNodeMask = 1;
+
+    D3D12_RESOURCE_DESC bufferDesc = {};
+    bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufferDesc.Alignment = 0;
+    bufferDesc.Width = totalSize;
+    bufferDesc.Height = 1;
+    bufferDesc.DepthOrArraySize = 1;
+    bufferDesc.MipLevels = 1;
+    bufferDesc.Format = DXGI_FORMAT_UNKNOWN;  // Buffers don't have a format
+    bufferDesc.SampleDesc.Count = 1;
+    bufferDesc.SampleDesc.Quality = 0;
+    bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;  // Buffers should be row-major
+    bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+    ComPtr<ID3D12Resource> readbackBuffer;
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &bufferDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&readbackBuffer));
+    if (FAILED(hr))
+    {
+        throw std::runtime_error("Failed to create readback buffer!");
+    }
+    readbackBuffer->SetName(L"Readback");
+
+    auto initialState = ResourceStateToD3D12(cubemap->GetState());
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetHandle().texture.Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    commandList->ResourceBarrier(1, &barrier);
+    // Issue the copy command to copy the cubemap to the readback buffer
+    for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex)
+    {
+        D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
+        srcLocation.pResource = cubemap->GetHandle().texture.Get();
+        srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        srcLocation.SubresourceIndex = faceIndex;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLocation = {};
+        dstLocation.pResource = readbackBuffer.Get();
+        dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dstLocation.PlacedFootprint = layouts[faceIndex];
+
+        commandList->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
+    }
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetHandle().texture.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
+    commandList->ResourceBarrier(1, &barrier);
+
+    ReadbackRequest readbackRequest;
+    readbackRequest.readbackBuffer = readbackBuffer;
+    readbackRequest.layouts = layouts;
+    readbackRequest.totalSize = totalSize;
+    readbackRequest.outputFile = outputFile;
+    readbackRequest.callback = [=]() {
+        std::thread([=] {
+            // Map the readback buffer and extract the data
+            void* mappedData = nullptr;
+            D3D12_RANGE readRange{ 0, static_cast<SIZE_T>(totalSize) };
+            auto hr = readbackBuffer->Map(0, &readRange, &mappedData);
+            if (FAILED(hr))
+            {
+                throw std::runtime_error("Failed to map the readback buffer!");
+            }
+
+            // Create a ScratchImage and fill it with the cubemap data
+            DirectX::ScratchImage scratchImage;
+            for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex)
+            {
+                DirectX::Image image;
+                image.width = resourceDesc.Width;
+                image.height = resourceDesc.Height;
+                image.format = resourceDesc.Format;
+                image.rowPitch = static_cast<size_t>(layouts[faceIndex].Footprint.RowPitch);
+                image.slicePitch = image.rowPitch * resourceDesc.Height;
+                image.pixels = static_cast<uint8_t*>(mappedData) + layouts[faceIndex].Offset;
+
+                if (faceIndex == 0) {
+                    scratchImage.InitializeCube(resourceDesc.Format, image.width, image.height, 1, 1);
+                }
+                const DirectX::Image* destImage = scratchImage.GetImage(0, faceIndex, 0);
+                memcpy(destImage->pixels, image.pixels, image.slicePitch);
+            }
+
+            // Unmap the readback buffer
+            readbackBuffer->Unmap(0, nullptr);
+
+            // Save asynchronously to a DDS file
+            std::async(std::launch::async, AsyncSaveToDDS, std::move(scratchImage), outputFile);
+            }).detach();
+        };
+
+    std::function<void(ReadbackRequest&&)> submitReadbackRequest = SettingsManager::GetInstance().getSettingGetter<std::function<void(ReadbackRequest&&)>>("readbackRequestHandler")();
+    submitReadbackRequest(std::move(readbackRequest));
+}
+
+std::wstring GetCacheFilePath(const std::wstring& fileName) {
+    std::filesystem::path workingDir = std::filesystem::current_path();
+    std::filesystem::path cacheDir = workingDir / L"cache" / L"environments";
+    std::filesystem::create_directories(cacheDir);
+    std::filesystem::path filePath = cacheDir / fileName;
+    return filePath.wstring();
 }

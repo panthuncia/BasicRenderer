@@ -171,12 +171,10 @@ D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getSamplerCPUHandle(UINT index) con
 	return m_samplerHeap->GetCPUHandle(index);
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
 	// Describe and create the texture resource
-
-	DXGI_FORMAT textureFormat = DetermineTextureFormat(channels, sRGB, false);
 
 	std::vector<stbi_uc> expandedImage;
 	if (channels == 3) {
@@ -226,11 +224,9 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc
 	return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateCubemapFromImages(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB) {
+TextureHandle<PixelBuffer> ResourceManager::CreateCubemapFromImages(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat) {
 
 	auto& device = DeviceManager::GetInstance().GetDevice();
-
-	DXGI_FORMAT textureFormat = DetermineTextureFormat(channels, sRGB, false);
 
 	std::array<const stbi_uc*, 6> imageData = images;
 	std::vector<std::vector<stbi_uc>> expandedImages(6);
@@ -302,10 +298,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateCubemapFromImages(const std::a
 	return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV, ResourceState initialState) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, DXGI_FORMAT textureFormat, bool isCubemap, bool RTV, bool DSV, bool UAV, ResourceState initialState) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
-
-	DXGI_FORMAT textureFormat = DetermineTextureFormat(channels, false, DSV);
 
 	auto textureDesc = CreateTextureResourceDesc(
 		textureFormat,
@@ -371,10 +365,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
 	return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, bool RTV, bool DSV, bool UAV, ResourceState initialState) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, DXGI_FORMAT textureFormat, bool RTV, bool DSV, bool UAV, ResourceState initialState) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
-
-	DXGI_FORMAT textureFormat = DetermineTextureFormat(channels, false, DSV);
 
 	auto textureDesc = CreateTextureResourceDesc(
 		textureFormat,

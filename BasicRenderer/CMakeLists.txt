@@ -6,6 +6,7 @@
 add_definitions(-D_UNICODE -DUNICODE)
 
 find_package(spdlog CONFIG REQUIRED)
+find_package(directxtex CONFIG REQUIRED)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (BasicRenderer WIN32  ${SOURCES})
@@ -151,5 +152,5 @@ add_symlink_or_copy_per_config(
 # Include directories
 include_directories(include/)
 
-# Find and link DirectX 12r
-target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib spdlog::spdlog "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib")
+# Find and link DirectX 12
+target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib")

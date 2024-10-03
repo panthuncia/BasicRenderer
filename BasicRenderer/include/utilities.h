@@ -24,9 +24,9 @@ Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const std::wstring& filename, con
 std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name);
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
-std::shared_ptr<Texture> loadTextureFromFile(const char* filename);
+std::shared_ptr<Texture> loadTextureFromFile(std::string filename);
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
-
+std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath);
 template <typename T1, typename T2>
 bool mapHasKeyNotAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
     return map.contains(key) && map[key] != val;
@@ -107,3 +107,7 @@ void UploadTextureData(
     int channels);
 
 std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(XMFLOAT3 pos);
+
+void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* cubemap, const std::wstring& outputFile);
+
+std::wstring GetCacheFilePath(const std::wstring& fileName);

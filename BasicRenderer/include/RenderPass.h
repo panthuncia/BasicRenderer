@@ -27,7 +27,11 @@ public:
     const std::vector<Resource*>& GetReadResources() const { return readResources; }
     const std::vector<Resource*>& GetWriteResources() const { return writeResources; }
 
+	void Invalidate() { invalidated = true; }
+	bool IsInvalidated() const { return invalidated; }
+
 protected:
+	bool invalidated = true;
     std::vector<Resource*> readResources;
     std::vector<Resource*> writeResources;
 };

@@ -7,6 +7,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <atlbase.h>
+#include <filesystem>
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
@@ -52,6 +53,9 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("wireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 4096);
+	settingsManager.registerSetting<std::function<void(ReadbackRequest&&)>>("readbackRequestHandler", [this](ReadbackRequest&& request) {
+        SubmitReadbackRequest(std::move(request));
+		});
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -257,6 +261,7 @@ void DX12Renderer::Render() {
     m_context.currentScene = currentScene.get();
     m_context.device = device.Get();
     m_context.commandList = commandList.Get();
+	m_context.commandQueue = commandQueue.Get();
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
@@ -298,6 +303,8 @@ void DX12Renderer::Render() {
     ThrowIfFailed(swapChain->Present(1, 0));
 
     WaitForPreviousFrame();
+
+    ProcessReadbackRequests();
 }
 
 void DX12Renderer::Cleanup() {
@@ -424,13 +431,13 @@ void DX12Renderer::CreateRenderGraph() {
         currentRenderGraph->AddResource(m_currentEnvironmentTexture);
 		currentRenderGraph->AddResource(m_currentSkybox);
 		currentRenderGraph->AddResource(m_environmentRadiance);
-        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentRadiance);
+        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentRadiance, m_environmentName);
 		environmentConversionPass->Setup();
         auto environmentConversionPassParameters = PassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
         environmentConversionPassParameters.renderTargets.push_back(m_environmentRadiance);
-        currentRenderGraph->AddPass(environmentConversionPass, environmentConversionPassParameters);
+        currentRenderGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
     }
 
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
@@ -470,7 +477,25 @@ void DX12Renderer::ToggleShadows() {
 	rebuildRenderGraph = true;
 }
 
-void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture) {
+void DX12Renderer::SetEnvironment(std::wstring name) {
+	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
+    auto radiancePath = GetCacheFilePath(name + L"_radiance.dds");
+    auto skyboxPath = GetCacheFilePath(name + L"_environment.dds");
+    if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath)) {
+		// Load the cached environment
+        auto skybox = loadCubemapFromFile(skyboxPath);
+		auto radiance = loadCubemapFromFile(radiancePath);
+		SetSkybox(skybox);
+		SetRadiance(radiance);
+    }
+    else {
+        auto skyHDR = loadTextureFromFile("textures/environment/"+ws2s(name)+".hdr");
+		SetEnvironmentTexture(skyHDR, ws2s(name));
+    }
+}
+
+void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName) {
+	m_environmentName = environmentName;
     m_currentEnvironmentTexture = texture;
     m_currentEnvironmentTexture->SetName(L"EnvironmentTexture");
     auto buffer = m_currentEnvironmentTexture->GetBuffer();
@@ -484,7 +509,12 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture) {
     auto envRadianceBubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
     m_environmentRadiance = std::make_shared<Texture>(envRadianceBubemap, sampler);
     m_environmentRadiance->SetName(L"EnvironmentRadiance");
-
+    if (currentRenderGraph != nullptr) {
+        auto environmentPass = currentRenderGraph->GetPassByName("EnvironmentConversionPass");
+        if (environmentPass != nullptr) {
+            environmentPass->Invalidate();
+        }
+    }
     rebuildRenderGraph = true;
 }
 
@@ -492,4 +522,27 @@ void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
     m_currentSkybox = texture;
     m_currentSkybox->SetName(L"Skybox");
     rebuildRenderGraph = true;
+}
+
+void DX12Renderer::SetRadiance(std::shared_ptr<Texture> texture) {
+	m_environmentRadiance = texture;
+	m_environmentRadiance->SetName(L"EnvironmentRadiance");
+	rebuildRenderGraph = true;
+}
+
+void DX12Renderer::SubmitReadbackRequest(ReadbackRequest&& request) {
+    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+	m_readbackRequests.push_back(std::move(request));
+}
+
+std::vector<ReadbackRequest>& DX12Renderer::GetPendingReadbackRequests() {
+    return m_readbackRequests;
+}
+
+void DX12Renderer::ProcessReadbackRequests() {
+    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+    for (auto& request : m_readbackRequests) {
+        request.callback();
+    }
+    m_readbackRequests.clear();
 }

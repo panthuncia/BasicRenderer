@@ -12,7 +12,7 @@ class Resource;
 
 class RenderGraph {
 public:
-	void AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources);
+	void AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name = "");
 	void Execute(RenderContext& context);
 	void Compile();
 	void Setup();
@@ -20,6 +20,7 @@ public:
 	void AddResource(std::shared_ptr<Resource> resource);
 	void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
+	std::shared_ptr<RenderPass> GetPassByName(const std::string& name);
 private:
 	struct PassAndResources {
 		std::shared_ptr<RenderPass> pass;
@@ -39,6 +40,7 @@ private:
 	};
 
 	std::vector<PassAndResources> passes;
+	std::unordered_map<std::string, std::shared_ptr<RenderPass>> passesByName;
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
 	std::vector<PassBatch> batches;
 

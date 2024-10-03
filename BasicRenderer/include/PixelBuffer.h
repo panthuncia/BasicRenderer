@@ -42,4 +42,5 @@ private:
     unsigned int m_width;
     unsigned int m_height;
 	unsigned int m_channels;
+    DXGI_FORMAT m_format;
 };

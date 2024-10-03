@@ -226,10 +226,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
-    //auto skybox = loadCubemapFromFile("textures/skybox/top.jpg", "textures/skybox/bottom.jpg", "textures/skybox/left.jpg", "textures/skybox/right.jpg", "textures/skybox/front.jpg", "textures/skybox/back.jpg");
-	auto skyHDR = loadTextureFromFile("textures/environment/room.hdr");
-    renderer.SetEnvironmentTexture(skyHDR);
-    //renderer.SetSkybox(skybox);
+    renderer.SetEnvironment(L"room");
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
     XMFLOAT3 up = XMFLOAT3(0.0f, 1.0f, 0.0f);
