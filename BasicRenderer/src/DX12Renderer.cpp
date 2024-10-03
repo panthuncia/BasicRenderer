@@ -6,6 +6,7 @@
 
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <dxgi1_6.h>
 #include <atlbase.h>
 #include <filesystem>
 #include "Utilities.h"
@@ -23,6 +24,52 @@
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentConversionPass.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
+
+
+ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
+{
+    ComPtr<IDXGIFactory6> factory;
+    HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+    if (FAILED(hr))
+    {
+        throw std::runtime_error("Failed to create DXGI factory.");
+    }
+
+    ComPtr<IDXGIAdapter1> adapter;
+    ComPtr<IDXGIAdapter1> bestAdapter;
+    SIZE_T maxDedicatedVideoMemory = 0;
+
+    // Enumerate through all adapters
+    for (UINT adapterIndex = 0;
+        factory->EnumAdapters1(adapterIndex, &adapter) != DXGI_ERROR_NOT_FOUND;
+        ++adapterIndex)
+    {
+        DXGI_ADAPTER_DESC1 desc;
+        adapter->GetDesc1(&desc);
+
+        // Check if the adapter is a software adapter (we skip these)
+        if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+        {
+            continue;
+        }
+
+        // Check if the adapter has more dedicated video memory than the current best
+        if (desc.DedicatedVideoMemory > maxDedicatedVideoMemory)
+        {
+            maxDedicatedVideoMemory = desc.DedicatedVideoMemory;
+            bestAdapter = adapter;
+        }
+    }
+
+    if (!bestAdapter)
+    {
+        throw std::runtime_error("No suitable GPU found.");
+    }
+    DXGI_ADAPTER_DESC1 desc = {};
+    bestAdapter->GetDesc1(&desc);
+	spdlog::info("Selected adapter: {}", ws2s(desc.Description));
+    return bestAdapter;
+}
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
@@ -52,7 +99,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("wireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
-	settingsManager.registerSetting<uint16_t>("skyboxResolution", 4096);
+	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
 	settingsManager.registerSetting<std::function<void(ReadbackRequest&&)>>("readbackRequestHandler", [this](ReadbackRequest&& request) {
         SubmitReadbackRequest(std::move(request));
 		});
@@ -93,7 +140,13 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
 
     // Create device
-    ThrowIfFailed(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)));
+    ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
+    ComPtr<ID3D12Device> device;
+
+    ThrowIfFailed(D3D12CreateDevice(
+        bestAdapter.Get(),
+        D3D_FEATURE_LEVEL_12_1,
+        IID_PPV_ARGS(&device)));
 
     // Initialize device manager
     DeviceManager::GetInstance().Initialize(device);
@@ -261,7 +314,7 @@ void DX12Renderer::Render() {
     // Record all the commands we need to render the scene into the command list
 
     m_context.currentScene = currentScene.get();
-    m_context.device = device.Get();
+	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
     m_context.commandList = commandList.Get();
 	m_context.commandQueue = commandQueue.Get();
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
