@@ -12,4 +12,5 @@ enum PSOFlags {
     DOUBLE_SIDED = 1 << 8,
     PARALLAX = 1 << 9,
     SHADOW = 1 << 10,
+	IMAGE_BASED_LIGHTING = 1 << 11,
 };

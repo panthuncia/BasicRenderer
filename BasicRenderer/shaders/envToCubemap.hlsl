@@ -2,18 +2,9 @@ cbuffer RootConstants1 : register(b1) {
     matrix viewProjectionMatrix;
 };
 
-/*cbuffer RootConstants2 : register(b2) {
-    uint skyboxTextureIndex;
-};
-
-cbuffer RootConstants1 : register(b3) {
-    uint skyboxSamplerIndex;
-};*/
-
 Texture2D environmentTexture : register(t0);
 SamplerState environmentSamplerState : register(s0);
 
-// Vertex Shader
 struct VS_OUTPUT {
     float4 position : SV_POSITION;
     float3 direction : TEXCOORD1;
@@ -29,7 +20,7 @@ VS_OUTPUT VSMain(float3 pos : POSITION) {
 
 static const float2 invAtan = float2(0.1591, 0.3183);
 static const float PI = 3.14159265359;
-// Converts a direction vector to u,v coordinates on an equirrectangular map
+// Converts a direction vector to u,v coordinates on an equirectangular map
 float2 CubeToSpherical(float3 dir) {
     dir = normalize(dir);
 

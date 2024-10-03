@@ -56,6 +56,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<std::function<void(ReadbackRequest&&)>>("readbackRequestHandler", [this](ReadbackRequest&& request) {
         SubmitReadbackRequest(std::move(request));
 		});
+	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -65,6 +66,7 @@ void DX12Renderer::SetSettings() {
 	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
 	getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 	getSkyboxResolution = settingsManager.getSettingGetter<uint16_t>("skyboxResolution");
+	setImageBasedLightingEnabled = settingsManager.getSettingSetter<bool>("enableImageBasedLighting");
 }
 
 void EnableShaderBasedValidation() {
@@ -430,13 +432,13 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_currentEnvironmentTexture != nullptr) {
         currentRenderGraph->AddResource(m_currentEnvironmentTexture);
 		currentRenderGraph->AddResource(m_currentSkybox);
-		currentRenderGraph->AddResource(m_environmentRadiance);
-        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentRadiance, m_environmentName);
+		currentRenderGraph->AddResource(m_environmentIrradiance);
+        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
 		environmentConversionPass->Setup();
         auto environmentConversionPassParameters = PassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
-        environmentConversionPassParameters.renderTargets.push_back(m_environmentRadiance);
+        environmentConversionPassParameters.renderTargets.push_back(m_environmentIrradiance);
         currentRenderGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
     }
 
@@ -486,7 +488,7 @@ void DX12Renderer::SetEnvironment(std::wstring name) {
         auto skybox = loadCubemapFromFile(skyboxPath);
 		auto radiance = loadCubemapFromFile(radiancePath);
 		SetSkybox(skybox);
-		SetRadiance(radiance);
+		SetIrradiance(radiance);
     }
     else {
         auto skyHDR = loadTextureFromFile("textures/environment/"+ws2s(name)+".hdr");
@@ -507,8 +509,8 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
     m_currentSkybox->SetName(L"Skybox");
 
     auto envRadianceBubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
-    m_environmentRadiance = std::make_shared<Texture>(envRadianceBubemap, sampler);
-    m_environmentRadiance->SetName(L"EnvironmentRadiance");
+    m_environmentIrradiance = std::make_shared<Texture>(envRadianceBubemap, sampler);
+    m_environmentIrradiance->SetName(L"EnvironmentRadiance");
     if (currentRenderGraph != nullptr) {
         auto environmentPass = currentRenderGraph->GetPassByName("EnvironmentConversionPass");
         if (environmentPass != nullptr) {
@@ -524,9 +526,12 @@ void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
     rebuildRenderGraph = true;
 }
 
-void DX12Renderer::SetRadiance(std::shared_ptr<Texture> texture) {
-	m_environmentRadiance = texture;
-	m_environmentRadiance->SetName(L"EnvironmentRadiance");
+void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
+	m_environmentIrradiance = texture;
+    m_environmentIrradiance->SetName(L"EnvironmentRadiance");
+    auto& manager = ResourceManager::GetInstance();
+	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetSRVDescriptorIndex());
+	manager.setEnvironmentIrradianceMapSamplerIndex(m_environmentIrradiance->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }
 

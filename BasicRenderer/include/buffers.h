@@ -13,6 +13,8 @@ struct PerFrameCB {
     unsigned int spotLightMatrixBufferIndex;
     unsigned int directionalLightCascadeBufferIndex;
 	unsigned int numShadowCascades;
+	unsigned int environmentIrradianceMapIndex;
+	unsigned int environmentIrradianceSamplerIndex;
 };
 
 struct PerObjectCB {

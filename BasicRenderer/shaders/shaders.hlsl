@@ -12,6 +12,8 @@ struct PerFrameBuffer {
     uint spotLightMatrixBufferIndex;
     uint directionalLightCascadeBufferIndex;
     uint numShadowCascades;
+    uint environmentIrradianceMapIndex;
+    uint environmentIrradianceSamplerIndex;
 };
 
 cbuffer PerObject : register(b1) {
@@ -407,6 +409,13 @@ float geometrySmith(float3 normalDir, float3 viewDir, float roughness, float nor
 float3 fresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
+
+// Varient of Schlick's approximation that accounts for roughness, used for image-based lighting
+float3 fresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
+    float invRoughness = 1.0 - roughness;
+    return F0 + (max(float3(invRoughness, invRoughness, invRoughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 #if defined(PARALLAX)
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0, float height, Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float heightmapScale) {
 #else
@@ -716,18 +725,28 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
 #endif
     }
+    float ao = 1.0;
 #if defined(AO_TEXTURE)
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
     SamplerState aoSamplerState = SamplerDescriptorHeap[materialInfo.aoSamplerIndex];
-    float ao = aoTexture.Sample(aoSamplerState, uv).r;
-    float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz * ao;
-#else
-    float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz;
+    ao = aoTexture.Sample(aoSamplerState, uv).r;
 #endif // AO_TEXTURE
+#if defined(IMAGE_BASED_LIGHTING)
+    float3 kS = fresnelSchlickRoughness(max(dot(normalWS, viewDir), 0.0), F0, roughness);
+    float3 kD = 1.0 - kS;
+    TextureCube <float4> irradianceMap = ResourceDescriptorHeap[perFrameBuffer.environmentIrradianceMapIndex];
+    SamplerState irradianceSampler = SamplerDescriptorHeap[perFrameBuffer.environmentIrradianceSamplerIndex];
+    float3 irradiance = irradianceMap.Sample(irradianceSampler, normalWS).rgb;
+    float3 diffuse = irradiance * baseColor.xyz;
+    float3 ambient = (kD * diffuse) * ao;
+#else
+    float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz * ao;
+#endif // IMAGE_BASED_LIGHTING
+    
     lighting += ambient;
 #if defined(VERTEX_COLORS)
     lighting = lighting * input.color.xyz;
-#endif
+#endif // VERTEX_COLORS
     
 #if defined(EMISSIVE_TEXTURE)
     Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];

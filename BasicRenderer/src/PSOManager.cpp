@@ -566,6 +566,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         macro.Name = L"SHADOW";
         defines.insert(defines.begin(), macro);
     }
+	if (psoFlags & PSOFlags::IMAGE_BASED_LIGHTING) {
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"IMAGE_BASED_LIGHTING";
+		defines.insert(defines.begin(), macro);
+	}
     return defines;
 }
 

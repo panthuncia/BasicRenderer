@@ -40,7 +40,7 @@ public:
     }
     void SetEnvironment(std::wstring name);
     void SetSkybox(std::shared_ptr<Texture> texture);
-	void SetRadiance(std::shared_ptr<Texture> texture);
+	void SetIrradiance(std::shared_ptr<Texture> texture);
     void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
     void ToggleWireframe();
 	void ToggleShadows();
@@ -82,7 +82,7 @@ private:
 
 	std::shared_ptr<Texture> m_currentSkybox = nullptr;
 	std::shared_ptr<Texture> m_currentEnvironmentTexture = nullptr;
-	std::shared_ptr<Texture> m_environmentRadiance = nullptr;
+	std::shared_ptr<Texture> m_environmentIrradiance = nullptr;
 	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
@@ -114,6 +114,7 @@ private:
 	std::function<void(bool)> setShadowsEnabled;
 	std::function<bool()> getShadowsEnabled;
     std::function<uint16_t()> getSkyboxResolution;
+	std::function<void(bool)> setImageBasedLightingEnabled;
 };
 
 #endif //DX12RENDERER_H
