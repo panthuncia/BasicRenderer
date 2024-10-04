@@ -43,10 +43,12 @@ void RenderGraph::Compile() {
     ComputeResourceLoops(finalResourceStates);
 }
 
-void RenderGraph::Setup() {
+void RenderGraph::Setup(ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator) {
     for (auto& pass : passes) {
         pass.pass->Setup();
     }
+	auto& device = DeviceManager::GetInstance().GetDevice();
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(&m_transitionCommandList)));
 }
 
 void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name) {
@@ -77,18 +79,28 @@ std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) 
 }
 
 void RenderGraph::Execute(RenderContext& context) {
+	auto& manager = DeviceManager::GetInstance();
+	auto& allocator = manager.GetCommandAllocator();
+	auto& queue = manager.GetCommandQueue();
+    m_transitionCommandList->Reset(allocator.Get(), NULL);
     for (auto& batch : batches) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
+        m_transitionCommandList->Reset(allocator.Get(), NULL);
         for (auto& transition : batch.transitions) {
-            transition.pResource->Transition(context, transition.fromState, transition.toState);
+            transition.pResource->Transition(m_transitionCommandList.Get(), transition.fromState, transition.toState);
 
         }
+        m_transitionCommandList->Close();
+        ID3D12CommandList* ppCommandLists[] = { m_transitionCommandList.Get()};
+        queue->ExecuteCommandLists(1, ppCommandLists);
 
         // Execute all passes in the batch
         for (auto& passAndResources : batch.passes) {
 			if (passAndResources.pass->IsInvalidated()) {
-                passAndResources.pass->Execute(context);
+                auto& list = passAndResources.pass->Execute(context);
+				ID3D12CommandList** ppCommandLists = list.data();
+				queue->ExecuteCommandLists(static_cast<UINT>(list.size()), ppCommandLists);
 			}
         }
     }

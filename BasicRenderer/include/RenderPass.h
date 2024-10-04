@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <d3d12.h>
 
 #include "Resource.h"
 #include "RenderContext.h"
@@ -17,7 +18,7 @@ public:
     virtual ~RenderPass() = default;
 
     virtual void Setup() = 0;
-    virtual void Execute(RenderContext& context) = 0;
+    virtual std::vector<ID3D12CommandList*>& Execute(RenderContext& context) = 0;
     virtual void Cleanup(RenderContext& context) = 0;
 
     // Declare resources this pass will read from and write to

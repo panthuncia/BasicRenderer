@@ -621,14 +621,12 @@ void ResourceManager::ExecuteResourceTransitions() {
 	if (FAILED(hr)) {
 		spdlog::error("Failed to reset command list");
 	}
-	RenderContext context;
-	context.commandList = transitionCommandList.Get();
 	for (auto& transition : queuedResourceTransitions) {
 		if (transition.resource == nullptr) {
 			spdlog::error("Resource is null in transition");
 			throw std::runtime_error("Resource is null");
 		}
-		transition.resource->Transition(context, transition.beforeState, transition.afterState);
+		transition.resource->Transition(transitionCommandList.Get(), transition.beforeState, transition.afterState);
 		transition.resource->SetState(transition.afterState);
 	}
 

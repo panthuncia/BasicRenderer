@@ -8,15 +8,25 @@ class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
-    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device);
+    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator);
 
     Microsoft::WRL::ComPtr<ID3D12Device>& GetDevice() {
         return device;
     }
 
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator>& GetCommandAllocator() {
+		return commandAllocator;
+	}
+
+	Microsoft::WRL::ComPtr<ID3D12CommandQueue>& GetCommandQueue() {
+		return commandQueue;
+	}
+
 private:
     DeviceManager() = default;
     Microsoft::WRL::ComPtr<ID3D12Device> device;
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
+	Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue;
 };
 
 inline DeviceManager& DeviceManager::GetInstance() {
@@ -24,6 +34,6 @@ inline DeviceManager& DeviceManager::GetInstance() {
     return instance;
 }
 
-inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue) {
+inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator) {
     this->device = device;
 }

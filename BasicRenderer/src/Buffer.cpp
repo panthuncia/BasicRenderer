@@ -41,7 +41,7 @@ Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t 
 	}
 }
 
-void Buffer::Transition(const RenderContext& context, ResourceState fromState, ResourceState toState) {
+void Buffer::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState) {
 	if (fromState == toState) return;
 
 	D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
@@ -60,7 +60,7 @@ void Buffer::Transition(const RenderContext& context, ResourceState fromState, R
 	barrier.Transition.StateAfter = d3dToState;
 	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 
-	context.commandList->ResourceBarrier(1, &barrier);
+	commandList->ResourceBarrier(1, &barrier);
 
 	currentState = toState;
 }

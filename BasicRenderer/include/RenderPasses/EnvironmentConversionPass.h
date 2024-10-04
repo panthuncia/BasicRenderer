@@ -22,12 +22,33 @@ public:
     }
 
     void Setup() override {
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto& manager = DeviceManager::GetInstance();
+        auto& device = manager.GetDevice();
         m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
+
+        m_sampleDelta = 0.125;
+        int totalPhiSamples = static_cast<int>(2.0f * M_PI / m_sampleDelta);
+        int totalThetaSamples = static_cast<int>(0.5f * M_PI / m_sampleDelta);
+        m_normalizationFactor = M_PI / (totalPhiSamples * totalThetaSamples);
+
+        int maxPhiBatchSize = 50;
+        m_numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
+        m_phiBatchSize = totalPhiSamples / m_numPasses;
+
+        auto queue = manager.GetCommandQueue();
+        auto allocator = manager.GetCommandAllocator();
+
+        m_commandLists.clear();
+        for (int i = 0; i < m_numPasses; i++) {
+
+			m_commandLists.push_back();
+
+        }
+
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    void Execute(RenderContext& context) override {
+    std::vector<ID3D12CommandList*>& Execute(RenderContext& context) override {
 
         auto& psoManager = PSOManager::getInstance();
         m_pso = psoManager.GetEnvironmentConversionPSO();
@@ -42,23 +63,15 @@ public:
         commandList->RSSetScissorRects(1, &scissorRect);
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
 
-        float sampleDelta = 0.125;
-        int totalPhiSamples = static_cast<int>(2.0f * M_PI / sampleDelta);
-		int totalThetaSamples = static_cast<int>(0.5f * M_PI / sampleDelta);
-		float normalizationFactor = M_PI / (totalPhiSamples * totalThetaSamples);
-
-        int maxPhiBatchSize = 50;
-        int numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
-        int phiBatchSize = totalPhiSamples / numPasses;
 
         commandList->SetPipelineState(m_pso.Get());
         commandList->SetGraphicsRootSignature(psoManager.GetEnvironmentConversionRootSignature().Get());
 
-        commandList->SetGraphicsRoot32BitConstants(4, 1, &normalizationFactor, 0);
+        commandList->SetGraphicsRoot32BitConstants(4, 1, &m_normalizationFactor, 0);
 
-        for (int pass = 0; pass < numPasses; pass++) {
-            float startPhi = pass * phiBatchSize * sampleDelta;
-            float endPhi = (pass + 1) * phiBatchSize * sampleDelta;
+        for (int pass = 0; pass < m_numPasses; pass++) {
+            float startPhi = pass * m_phiBatchSize * m_sampleDelta;
+            float endPhi = (pass + 1) * m_phiBatchSize * m_sampleDelta;
 
 			commandList->SetGraphicsRoot32BitConstants(2, 1, &startPhi, 0);
 			commandList->SetGraphicsRoot32BitConstants(3, 1, &endPhi, 0);
@@ -106,6 +119,13 @@ private:
     std::array<XMMATRIX, 6> m_viewMatrices;
 
     std::function<uint16_t()> getSkyboxResolution;
+
+    float m_sampleDelta = 0.0;
+	float m_normalizationFactor = 0.0;
+	int m_numPasses = 0;
+	int m_phiBatchSize = 0;
+
+	std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
 
     struct SkyboxVertex {
         XMFLOAT3 position;

@@ -2,7 +2,7 @@
 
 #include <string>
 #include <vector>
-
+@include <d3d12.h>
 #include "ResourceStates.h"
 //#include "RenderPass.h"
 
@@ -18,7 +18,7 @@ public:
     virtual void SetName(const std::wstring& name) { this->name = name; OnSetName(); }
 
 protected:
-    virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) = 0;
+    virtual void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) = 0;
     virtual void OnSetName() {}
     ResourceState currentState;
     std::wstring name;

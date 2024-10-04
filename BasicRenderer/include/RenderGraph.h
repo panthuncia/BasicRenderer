@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <string>
 #include <memory>
+#include <wrl/client.h>
 
 #include "RenderPass.h"
 #include "ResourceStates.h"
@@ -15,7 +16,7 @@ public:
 	void AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name = "");
 	void Execute(RenderContext& context);
 	void Compile();
-	void Setup();
+	void Setup(ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator);
 	//void AllocateResources(RenderContext& context);
 	void AddResource(std::shared_ptr<Resource> resource);
 	void CreateResource(std::wstring name);
@@ -43,6 +44,8 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> passesByName;
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
 	std::vector<PassBatch> batches;
+
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_transitionCommandList;
 
 	void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
 	void UpdateDesiredResourceStates(PassBatch& batch, PassAndResources& passAndResources);

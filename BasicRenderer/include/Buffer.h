@@ -28,7 +28,7 @@ public:
 	~Buffer() = default;
 	ResourceCPUAccessType m_accessType;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
-	void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState);
+	void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState);
 protected:
 	void OnSetName() override { m_buffer->SetName(name.c_str()); }
 private:
