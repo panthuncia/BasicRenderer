@@ -35,41 +35,45 @@ public:
         m_numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
         m_phiBatchSize = totalPhiSamples / m_numPasses;
 
-        auto queue = manager.GetCommandQueue();
-        auto allocator = manager.GetCommandAllocator();
+        auto& queue = manager.GetCommandQueue();
+        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
 
         m_commandLists.clear();
         for (int i = 0; i < m_numPasses; i++) {
-
-			m_commandLists.push_back();
-
+			ComPtr<ID3D12GraphicsCommandList> commandList;
+            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+            commandList->Close();
+			m_commandLists.push_back(commandList);
         }
 
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    std::vector<ID3D12CommandList*>& Execute(RenderContext& context) override {
+    std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
 
         auto& psoManager = PSOManager::getInstance();
         m_pso = psoManager.GetEnvironmentConversionPSO();
-        auto& commandList = context.commandList;
-
-        commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
 		uint16_t skyboxRes = getSkyboxResolution();
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
         CD3DX12_RECT scissorRect(0, 0, skyboxRes, skyboxRes);
-        commandList->RSSetViewports(1, &viewport);
-        commandList->RSSetScissorRects(1, &scissorRect);
+
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
 
+        ThrowIfFailed(m_allocator->Reset());
 
-        commandList->SetPipelineState(m_pso.Get());
-        commandList->SetGraphicsRootSignature(psoManager.GetEnvironmentConversionRootSignature().Get());
-
-        commandList->SetGraphicsRoot32BitConstants(4, 1, &m_normalizationFactor, 0);
-
+		std::vector<ID3D12GraphicsCommandList*> commandLists;
         for (int pass = 0; pass < m_numPasses; pass++) {
+			auto commandList = m_commandLists[pass].Get();
+			commandList->Reset(m_allocator.Get(), m_pso.Get());
+
+            commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+            commandList->RSSetViewports(1, &viewport);
+            commandList->RSSetScissorRects(1, &scissorRect);
+            commandList->SetPipelineState(m_pso.Get());
+            commandList->SetGraphicsRootSignature(psoManager.GetEnvironmentConversionRootSignature().Get());
+
+            commandList->SetGraphicsRoot32BitConstants(4, 1, &m_normalizationFactor, 0);
             float startPhi = pass * m_phiBatchSize * m_sampleDelta;
             float endPhi = (pass + 1) * m_phiBatchSize * m_sampleDelta;
 
@@ -94,6 +98,8 @@ public:
                 commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
                 commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
             }
+			commandList->Close();
+			commandLists.push_back(commandList);
         }
         // We can reuse the results of this pass
 		invalidated = false;
@@ -102,6 +108,8 @@ public:
 		SaveCubemapToDDS(context.device, context.commandList, context.commandQueue, m_environmentRadiance.get(), path);
         path = GetCacheFilePath(m_environmentName + L"_environment.dds");
         SaveCubemapToDDS(context.device, context.commandList, context.commandQueue, m_environmentCubeMap.get(), path);
+
+		return commandLists;
     }
 
     void Cleanup(RenderContext& context) override {
@@ -125,8 +133,8 @@ private:
 	int m_numPasses = 0;
 	int m_phiBatchSize = 0;
 
-	std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
-
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_allocator;
     struct SkyboxVertex {
         XMFLOAT3 position;
     };

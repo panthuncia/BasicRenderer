@@ -57,7 +57,7 @@ UINT PixelBuffer::GetSRVDescriptorIndex() const {
     return handle.SRVInfo.index;
 }
 
-void PixelBuffer::Transition(ID3D12CommandList* commandList, ResourceState fromState, ResourceState toState) {
+void PixelBuffer::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState) {
     if (fromState == toState) return;
 
     D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);

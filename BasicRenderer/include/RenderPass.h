@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <d3d12.h>
+#include <wrl/client.h>
 
 #include "Resource.h"
 #include "RenderContext.h"
@@ -18,7 +19,7 @@ public:
     virtual ~RenderPass() = default;
 
     virtual void Setup() = 0;
-    virtual std::vector<ID3D12CommandList*>& Execute(RenderContext& context) = 0;
+    virtual std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) = 0;
     virtual void Cleanup(RenderContext& context) = 0;
 
     // Declare resources this pass will read from and write to

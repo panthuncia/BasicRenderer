@@ -27,9 +27,9 @@ public:
 
 protected:
     // Override the base Resource method to transition all resources in the group
-    void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {
+    void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) {
         for (auto& pair : resources) {
-            pair.second->Transition(context, prevState, newState);
+            pair.second->Transition(commandList, prevState, newState);
         }
         currentState = newState; // Set the state for the group as a whole
     }

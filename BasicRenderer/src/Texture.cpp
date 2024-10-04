@@ -24,9 +24,9 @@ UINT Texture::GetSRVDescriptorIndex() const {
 	return m_image->GetSRVDescriptorIndex();
 }
 
-void Texture::Transition(const RenderContext& context, ResourceState fromState, ResourceState toState) {
+void Texture::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState) {
 	currentState = toState;
-	m_image->Transition(context, fromState, toState); // Transition the underlying PixelBuffer
+	m_image->Transition(commandList, fromState, toState); // Transition the underlying PixelBuffer
 }
 
 void Texture::SetName(const std::wstring& name) {

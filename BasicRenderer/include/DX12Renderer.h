@@ -35,9 +35,7 @@ public:
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
-    void SetDebugTexture(Texture* texture) {
-		m_debugPass->SetTexture(texture);
-    }
+    void SetDebugTexture(Texture* texture);
     void SetEnvironment(std::wstring name);
     void SetSkybox(std::shared_ptr<Texture> texture);
 	void SetIrradiance(std::shared_ptr<Texture> texture);
@@ -86,7 +84,6 @@ private:
 	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
-    std::shared_ptr<DebugRenderPass> m_debugPass = nullptr;
 
     std::mutex readbackRequestsMutex;
 	std::vector<ReadbackRequest> m_readbackRequests;

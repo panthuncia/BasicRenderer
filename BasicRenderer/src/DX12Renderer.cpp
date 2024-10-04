@@ -82,8 +82,6 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 void DX12Renderer::CreateGlobalResources() {
     m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
     setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps
-    m_debugPass = std::make_shared<DebugRenderPass>();
-    m_debugPass->Setup();
 }
 
 void DX12Renderer::SetSettings() {
@@ -149,8 +147,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         IID_PPV_ARGS(&device)));
 
     // Initialize device manager
-    DeviceManager::GetInstance().Initialize(device);
-    PSOManager::getInstance().initialize();
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> infoQueue;
@@ -167,6 +163,9 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
     ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue)));
+
+    DeviceManager::GetInstance().Initialize(device, commandQueue);
+    PSOManager::getInstance().initialize();
 
     // Describe and create the swap chain
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
@@ -222,7 +221,8 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Create command allocator
     ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
 
-    ResourceManager::GetInstance().Initialize(commandQueue.Get(), commandAllocator.Get());
+
+    ResourceManager::GetInstance().Initialize(commandQueue.Get());
 
     // Create the command list
     ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
@@ -341,8 +341,15 @@ void DX12Renderer::Render() {
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
+    commandList->Close();
 
-	currentRenderGraph->Execute(m_context);
+    // Execute the command list
+    ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
+    commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+	currentRenderGraph->Execute(m_context, commandAllocator.Get());
+
+	commandList->Reset(commandAllocator.Get(), nullptr);
 
     // Indicate that the back buffer will now be used to present
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -351,7 +358,7 @@ void DX12Renderer::Render() {
     ThrowIfFailed(commandList->Close());
 
     // Execute the command list
-    ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
+    ppCommandLists[0] = commandList.Get();
     commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Present the frame
@@ -487,7 +494,6 @@ void DX12Renderer::CreateRenderGraph() {
 		currentRenderGraph->AddResource(m_currentSkybox);
 		currentRenderGraph->AddResource(m_environmentIrradiance);
         auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
-		environmentConversionPass->Setup();
         auto environmentConversionPassParameters = PassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
@@ -511,13 +517,14 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_currentSkybox != nullptr || m_currentEnvironmentTexture != nullptr) {
         currentRenderGraph->AddResource(m_currentSkybox);
         auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
-		skyboxPass->Setup();
         auto skyboxPassParameters = PassParameters();
         skyboxPassParameters.shaderResources.push_back(m_currentSkybox);
         currentRenderGraph->AddPass(skyboxPass, skyboxPassParameters);
     }
-	currentRenderGraph->AddPass(m_debugPass, debugPassParameters);
+	auto debugPass = std::make_shared<DebugRenderPass>();
+	currentRenderGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
 	currentRenderGraph->Compile();
+    currentRenderGraph->Setup(commandQueue.Get(), commandAllocator.Get());
 
 	rebuildRenderGraph = false;
 }
@@ -603,4 +610,19 @@ void DX12Renderer::ProcessReadbackRequests() {
         request.callback();
     }
     m_readbackRequests.clear();
+}
+
+void DX12Renderer::SetDebugTexture(Texture* texture) {
+    if (currentRenderGraph == nullptr) {
+        spdlog::warn("Cannot set debug texture before render graph exists");
+        return;
+    }
+    auto pPass = currentRenderGraph->GetPassByName("DebugPass");
+    if (pPass != nullptr) {
+        auto pDebugPass = std::dynamic_pointer_cast<DebugRenderPass>(pPass);
+        pDebugPass->SetTexture(texture);
+    }
+    else {
+        spdlog::warn("Debug pass does not exist");
+    }
 }

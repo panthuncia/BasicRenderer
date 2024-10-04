@@ -48,7 +48,9 @@ void RenderGraph::Setup(ID3D12CommandQueue* queue, ID3D12CommandAllocator* alloc
         pass.pass->Setup();
     }
 	auto& device = DeviceManager::GetInstance().GetDevice();
+
     ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(&m_transitionCommandList)));
+    m_transitionCommandList->Close();
 }
 
 void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name) {
@@ -78,15 +80,13 @@ std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) 
     }
 }
 
-void RenderGraph::Execute(RenderContext& context) {
+void RenderGraph::Execute(RenderContext& context, ID3D12CommandAllocator* allocator) {
 	auto& manager = DeviceManager::GetInstance();
-	auto& allocator = manager.GetCommandAllocator();
 	auto& queue = manager.GetCommandQueue();
-    m_transitionCommandList->Reset(allocator.Get(), NULL);
     for (auto& batch : batches) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
-        m_transitionCommandList->Reset(allocator.Get(), NULL);
+        m_transitionCommandList->Reset(allocator, NULL);
         for (auto& transition : batch.transitions) {
             transition.pResource->Transition(m_transitionCommandList.Get(), transition.fromState, transition.toState);
 
@@ -98,8 +98,8 @@ void RenderGraph::Execute(RenderContext& context) {
         // Execute all passes in the batch
         for (auto& passAndResources : batch.passes) {
 			if (passAndResources.pass->IsInvalidated()) {
-                auto& list = passAndResources.pass->Execute(context);
-				ID3D12CommandList** ppCommandLists = list.data();
+                auto list = passAndResources.pass->Execute(context);
+				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(list.data());
 				queue->ExecuteCommandLists(static_cast<UINT>(list.size()), ppCommandLists);
 			}
         }

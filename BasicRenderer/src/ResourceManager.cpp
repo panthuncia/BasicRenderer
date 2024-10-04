@@ -4,7 +4,7 @@
 #include "DeviceManager.h"
 #include "DynamicStructuredBuffer.h"
 #include "SettingsManager.h"
-void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue, ID3D12CommandAllocator* commandAllocator) {
+void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
 	//    frameResourceCopies[i]->Initialize();
@@ -39,8 +39,8 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue, ID3D12Command
 
 	//InitializeUploadHeap();
 	InitializeCopyCommandQueue();
-	//InitializeTransitionCommandQueue();
-	SetTransitionCommandQueue(commandQueue, commandAllocator);
+	InitializeTransitionCommandList();
+	SetTransitionCommandQueue(commandQueue);
 }
 
 CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetSRVCPUHandle(UINT index) {
@@ -127,13 +127,12 @@ void ResourceManager::InitializeCopyCommandQueue() {
 	}
 }
 
-void ResourceManager::InitializeTransitionCommandQueue() {
+void ResourceManager::InitializeTransitionCommandList() {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&transitionCommandQueue)));
 
 	ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&transitionCommandAllocator)));
 	ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, transitionCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&transitionCommandList)));
@@ -146,14 +145,8 @@ void ResourceManager::InitializeTransitionCommandQueue() {
 	}
 }
 
-void ResourceManager::SetTransitionCommandQueue(ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator) {
+void ResourceManager::SetTransitionCommandQueue(ID3D12CommandQueue* queue) {
 	transitionCommandQueue = queue;
-	transitionCommandAllocator = allocator;
-
-	auto& device = DeviceManager::GetInstance().GetDevice();
-
-	ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, transitionCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&transitionCommandList)));
-	transitionCommandList->Close();
 }
 
 UINT ResourceManager::CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc) {

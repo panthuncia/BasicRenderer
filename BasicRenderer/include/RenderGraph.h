@@ -14,7 +14,7 @@ class Resource;
 class RenderGraph {
 public:
 	void AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name = "");
-	void Execute(RenderContext& context);
+	void Execute(RenderContext& context, ID3D12CommandAllocator* allocator);
 	void Compile();
 	void Setup(ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator);
 	//void AllocateResources(RenderContext& context);

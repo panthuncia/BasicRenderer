@@ -19,7 +19,7 @@ public:
 		return m_image;
 	}
 	UINT GetSRVDescriptorIndex() const;
-	void Transition(const RenderContext& context, ResourceState fromState, ResourceState toState);
+	void Transition(ID3D12GraphicsCommandList*, ResourceState fromState, ResourceState toState);
 	virtual void SetName(const std::wstring& name);
 private:
 	std::shared_ptr<PixelBuffer> m_image;

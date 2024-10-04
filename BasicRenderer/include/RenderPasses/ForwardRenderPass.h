@@ -14,14 +14,21 @@ public:
 	ForwardRenderPass(bool wireframe) {
 		m_wireframe = wireframe;
 		getImageBasedLightingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableImageBasedLighting");
+
 	}
 	void Setup() override {
-		// Setup the render pass
+		auto& manager = DeviceManager::GetInstance();
+		auto& device = manager.GetDevice();
+		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
+		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+		m_commandList->Close();
 	}
 
-	void Execute(RenderContext& context) override {
+	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
 		auto& psoManager = PSOManager::getInstance();
-		auto& commandList = context.commandList;
+		auto commandList = m_commandList.Get();
+		ThrowIfFailed(m_allocator->Reset());
+		commandList->Reset(m_allocator.Get(), nullptr);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
@@ -39,6 +46,9 @@ public:
 		commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+		auto rootSignature = psoManager.GetRootSignature();
+		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
@@ -81,6 +91,9 @@ public:
 				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 			}
 		}
+
+		commandList->Close();
+		return { commandList };
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -88,6 +101,8 @@ public:
 	}
 
 private:
+	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	ComPtr<ID3D12CommandAllocator> m_allocator;
 	bool m_wireframe;
 	std::function<bool()> getImageBasedLightingEnabled;
 };

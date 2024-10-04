@@ -13,15 +13,21 @@ public:
     }
 
     void Setup() override {
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto& manager = DeviceManager::GetInstance();
+        auto& device = manager.GetDevice();
         m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
+        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+		m_commandList->Close();
     }
 
-    void Execute(RenderContext& context) override {
+    std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
 
         auto& psoManager = PSOManager::getInstance();
         m_pso = psoManager.GetSkyboxPSO();
-        auto& commandList = context.commandList;
+        auto commandList = m_commandList.Get();
+        ThrowIfFailed(m_allocator->Reset());
+		commandList->Reset(m_allocator.Get(), nullptr);
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
@@ -46,6 +52,9 @@ public:
         commandList->SetGraphicsRoot32BitConstant(2, m_texture->GetSamplerDescriptorIndex(), 0);
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+
+		commandList->Close();
+		return { commandList };
     }
 
     void Cleanup(RenderContext& context) override {
@@ -53,6 +62,8 @@ public:
     }
 
 private:
+    ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ComPtr<ID3D12CommandAllocator> m_allocator;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     BufferHandle vertexBufferHandle;
     ComPtr<ID3D12PipelineState> m_pso;

@@ -11,17 +11,22 @@ public:
     DebugRenderPass() {}
 
     void Setup() override {
-		auto& device = DeviceManager::GetInstance().GetDevice();
+        auto& manager = DeviceManager::GetInstance();
+		auto& device = manager.GetDevice();
 		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer(device.Get());
+        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
     }
 
-    void Execute(RenderContext& context) override {
+    std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
         if (m_texture == nullptr) {
-            return;
+            return { };
         }
         auto& psoManager = PSOManager::getInstance();
         m_pso = psoManager.GetDebugPSO();
-        auto& commandList = context.commandList;
+        auto& commandList = m_commandList;
+        ThrowIfFailed(m_allocator->Reset());
+		commandList->Reset(m_allocator.Get(), nullptr);
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
@@ -42,6 +47,10 @@ public:
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
+
+		commandList->Close();
+
+		return { commandList.Get() };
     }
 
     void Cleanup(RenderContext& context) override {
@@ -57,6 +66,9 @@ private:
     BufferHandle vertexBufferHandle;
     ComPtr<ID3D12PipelineState> m_pso;
     Texture* m_texture = nullptr;
+
+	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	ComPtr<ID3D12CommandAllocator> m_allocator;
 
     struct DebugVertex {
         XMFLOAT3 position;

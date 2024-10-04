@@ -95,9 +95,9 @@ public:
         return m_data.size();
     }
 protected:
-    void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) override {
+    void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
 		currentState = newState;
-        m_dataBuffer->Transition(context, prevState, newState);
+        m_dataBuffer->Transition(commandList, prevState, newState);
     }
 
 private:
