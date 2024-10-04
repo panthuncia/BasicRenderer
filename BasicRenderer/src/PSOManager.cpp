@@ -110,12 +110,15 @@ void PSOManager::CreateSkyboxRootSignature() {
 }
 
 void PSOManager::CreateEnvironmentConversionRootSignature() {
-    CD3DX12_DESCRIPTOR_RANGE1 debugDescriptorRangeSRV;
-    debugDescriptorRangeSRV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 in the shader
+    CD3DX12_DESCRIPTOR_RANGE1 environmentDescriptorRangeSRV;
+    environmentDescriptorRangeSRV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 in the shader
 
-    CD3DX12_ROOT_PARAMETER1 debugRootParameters[2];
-    debugRootParameters[0].InitAsDescriptorTable(1, &debugDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
-    debugRootParameters[1].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b1)
+    CD3DX12_ROOT_PARAMETER1 environmentRootParameters[5];
+    environmentRootParameters[0].InitAsDescriptorTable(1, &environmentDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
+    environmentRootParameters[1].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b1)
+	environmentRootParameters[2].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Integration range start
+	environmentRootParameters[3].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Integration range end
+    environmentRootParameters[4].InitAsConstants(1, 4, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Normalization factor
 
     D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
     samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -133,7 +136,7 @@ void PSOManager::CreateEnvironmentConversionRootSignature() {
     samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-    rootSignatureDesc.Init_1_1(_countof(debugRootParameters), debugRootParameters, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    rootSignatureDesc.Init_1_1(_countof(environmentRootParameters), environmentRootParameters, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     ComPtr<ID3DBlob> serializedRootSig;
     ComPtr<ID3DBlob> errorBlob;
@@ -340,15 +343,14 @@ void PSOManager::CreateEnvironmentConversionPSO() {
     blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
     blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
     blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-    blendDesc.RenderTarget[1].BlendEnable = FALSE;
-    blendDesc.RenderTarget[1].LogicOpEnable = FALSE;
+
+    blendDesc.RenderTarget[1].BlendEnable = TRUE;
     blendDesc.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
-    blendDesc.RenderTarget[1].DestBlend = D3D12_BLEND_ZERO;
+    blendDesc.RenderTarget[1].DestBlend = D3D12_BLEND_ONE;
     blendDesc.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
     blendDesc.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
     blendDesc.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ZERO;
     blendDesc.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-    blendDesc.RenderTarget[1].LogicOp = D3D12_LOGIC_OP_NOOP;
     blendDesc.RenderTarget[1].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};

@@ -26,6 +26,7 @@ public:
         m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
     }
 
+	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
     void Execute(RenderContext& context) override {
 
         auto& psoManager = PSOManager::getInstance();
@@ -40,28 +41,47 @@ public:
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
-        for (int i = 0; i < 6; i++) {
 
-            CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
-            rtvHandles[0] = m_environmentCubeMap->GetHandle().RTVInfo[i].cpuHandle;
-            rtvHandles[1] = m_environmentRadiance->GetHandle().RTVInfo[i].cpuHandle;
+        float sampleDelta = 0.125;
+        int totalPhiSamples = static_cast<int>(2.0f * M_PI / sampleDelta);
+		int totalThetaSamples = static_cast<int>(0.5f * M_PI / sampleDelta);
+		float normalizationFactor = M_PI / (totalPhiSamples * totalThetaSamples);
 
-            CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
+        int maxPhiBatchSize = 50;
+        int numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
+        int phiBatchSize = totalPhiSamples / numPasses;
 
-            commandList->OMSetRenderTargets(2, rtvHandles, FALSE, nullptr);
+        commandList->SetPipelineState(m_pso.Get());
+        commandList->SetGraphicsRootSignature(psoManager.GetEnvironmentConversionRootSignature().Get());
 
-            commandList->SetPipelineState(m_pso.Get());
-            commandList->SetGraphicsRootSignature(psoManager.GetEnvironmentConversionRootSignature().Get());
+        commandList->SetGraphicsRoot32BitConstants(4, 1, &normalizationFactor, 0);
 
-            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
+        for (int pass = 0; pass < numPasses; pass++) {
+            float startPhi = pass * phiBatchSize * sampleDelta;
+            float endPhi = (pass + 1) * phiBatchSize * sampleDelta;
 
-			auto viewMatrix = m_viewMatrices[i];
-            auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
-            commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
-            commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+			commandList->SetGraphicsRoot32BitConstants(2, 1, &startPhi, 0);
+			commandList->SetGraphicsRoot32BitConstants(3, 1, &endPhi, 0);
+
+            for (int i = 0; i < 6; i++) {
+
+                CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
+                rtvHandles[0] = m_environmentCubeMap->GetHandle().RTVInfo[i].cpuHandle;
+                rtvHandles[1] = m_environmentRadiance->GetHandle().RTVInfo[i].cpuHandle;
+
+                CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+                commandList->OMSetRenderTargets(2, rtvHandles, FALSE, nullptr);
+
+                commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
+
+                auto viewMatrix = m_viewMatrices[i];
+                auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
+                commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
+                commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+            }
         }
-
         // We can reuse the results of this pass
 		invalidated = false;
 
