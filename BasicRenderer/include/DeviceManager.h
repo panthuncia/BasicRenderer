@@ -24,6 +24,6 @@ inline DeviceManager& DeviceManager::GetInstance() {
     return instance;
 }
 
-inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device) {
+inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue) {
     this->device = device;
 }
