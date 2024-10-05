@@ -333,6 +333,7 @@ void PSOManager::CreateEnvironmentConversionPSO() {
     rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
     D3D12_BLEND_DESC blendDesc = {};
+	blendDesc.IndependentBlendEnable = TRUE;
     blendDesc.RenderTarget[0].BlendEnable = FALSE;
     blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
     blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
@@ -351,6 +352,7 @@ void PSOManager::CreateEnvironmentConversionPSO() {
     blendDesc.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
     blendDesc.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ZERO;
     blendDesc.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[1].LogicOpEnable = FALSE;
     blendDesc.RenderTarget[1].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};

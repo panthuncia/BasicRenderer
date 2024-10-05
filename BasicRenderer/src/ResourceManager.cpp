@@ -318,7 +318,15 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
 		colorClearValue.Color[0] = 1.0f;
 		clearValue = &colorClearValue;
 	}
-
+	else if (RTV) {
+		colorClearValue.Format = textureFormat;
+		colorClearValue.Color[0] = 0.0f;
+		colorClearValue.Color[1] = 0.0f;
+		colorClearValue.Color[2] = 0.0f;
+		colorClearValue.Color[3] = 1.0f;
+		clearValue = &colorClearValue;
+	}
+	
 	auto textureResource = CreateCommittedTextureResource(
 		device.Get(),
 		textureDesc,
@@ -383,6 +391,14 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureArray(int width, int he
 	else if (RTV && channels == 1) {
 		colorClearValue.Format = DXGI_FORMAT_R32_FLOAT;
 		colorClearValue.Color[0] = 1.0f;
+		clearValue = &colorClearValue;
+	}
+	else if (RTV) {
+		colorClearValue.Format = textureFormat;
+		colorClearValue.Color[0] = 0.0f;
+		colorClearValue.Color[1] = 0.0f;
+		colorClearValue.Color[2] = 0.0f;
+		colorClearValue.Color[3] = 1.0f;
 		clearValue = &colorClearValue;
 	}
 

@@ -14,9 +14,9 @@ class Resource;
 class RenderGraph {
 public:
 	void AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name = "");
-	void Execute(RenderContext& context, ID3D12CommandAllocator* allocator);
+	void Execute(RenderContext& context);
 	void Compile();
-	void Setup(ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator);
+	void Setup(ID3D12CommandQueue* queue);
 	//void AllocateResources(RenderContext& context);
 	void AddResource(std::shared_ptr<Resource> resource);
 	void CreateResource(std::wstring name);
@@ -45,6 +45,7 @@ private:
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
 	std::vector<PassBatch> batches;
 
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_transitionCommandList;
 
 	void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);

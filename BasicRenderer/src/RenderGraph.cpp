@@ -43,13 +43,15 @@ void RenderGraph::Compile() {
     ComputeResourceLoops(finalResourceStates);
 }
 
-void RenderGraph::Setup(ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator) {
+void RenderGraph::Setup(ID3D12CommandQueue* queue) {
     for (auto& pass : passes) {
         pass.pass->Setup();
     }
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
-    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(&m_transitionCommandList)));
+
+    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_transitionCommandList)));
     m_transitionCommandList->Close();
 }
 
@@ -80,13 +82,13 @@ std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) 
     }
 }
 
-void RenderGraph::Execute(RenderContext& context, ID3D12CommandAllocator* allocator) {
+void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto& queue = manager.GetCommandQueue();
     for (auto& batch : batches) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
-        m_transitionCommandList->Reset(allocator, NULL);
+        m_transitionCommandList->Reset(m_commandAllocator.Get(), NULL);
         for (auto& transition : batch.transitions) {
             transition.pResource->Transition(m_transitionCommandList.Get(), transition.fromState, transition.toState);
 

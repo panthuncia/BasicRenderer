@@ -26,12 +26,12 @@ public:
         auto& device = manager.GetDevice();
         m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
 
-        m_sampleDelta = 0.125;
+        m_sampleDelta = 0.025;
         int totalPhiSamples = static_cast<int>(2.0f * M_PI / m_sampleDelta);
         int totalThetaSamples = static_cast<int>(0.5f * M_PI / m_sampleDelta);
         m_normalizationFactor = M_PI / (totalPhiSamples * totalThetaSamples);
 
-        int maxPhiBatchSize = 50;
+        int maxPhiBatchSize = 10;
         m_numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
         m_phiBatchSize = totalPhiSamples / m_numPasses;
 
@@ -45,7 +45,8 @@ public:
             commandList->Close();
 			m_commandLists.push_back(commandList);
         }
-
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
+		m_copyCommandList->Close();
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
@@ -63,15 +64,32 @@ public:
         ThrowIfFailed(m_allocator->Reset());
 
 		std::vector<ID3D12GraphicsCommandList*> commandLists;
-        for (int pass = 0; pass < m_numPasses; pass++) {
+		unsigned int startPass = m_currentPass;
+        for (int pass = m_currentPass; pass < m_numPasses && pass < startPass+1; pass++) {
+            m_currentPass += 1;
 			auto commandList = m_commandLists[pass].Get();
 			commandList->Reset(m_allocator.Get(), m_pso.Get());
+            if (pass == 0) {
+                for (int i = 0; i < 6; i++) {
+                    const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+					commandList->ClearRenderTargetView(m_environmentRadiance->GetHandle().RTVInfo[i].cpuHandle, clearColor, 0, nullptr);
+                }
+            }
+            ID3D12DescriptorHeap* descriptorHeaps[] = {
+                ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
+                ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
+            };
+
+            commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+            commandList->SetGraphicsRootSignature(psoManager.GetEnvironmentConversionRootSignature().Get());
+
+            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
 
             commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
             commandList->RSSetViewports(1, &viewport);
             commandList->RSSetScissorRects(1, &scissorRect);
             commandList->SetPipelineState(m_pso.Get());
-            commandList->SetGraphicsRootSignature(psoManager.GetEnvironmentConversionRootSignature().Get());
 
             commandList->SetGraphicsRoot32BitConstants(4, 1, &m_normalizationFactor, 0);
             float startPhi = pass * m_phiBatchSize * m_sampleDelta;
@@ -90,8 +108,6 @@ public:
 
                 commandList->OMSetRenderTargets(2, rtvHandles, FALSE, nullptr);
 
-                commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
-
                 auto viewMatrix = m_viewMatrices[i];
                 auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
                 commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
@@ -102,12 +118,19 @@ public:
 			commandLists.push_back(commandList);
         }
         // We can reuse the results of this pass
-		invalidated = false;
+        if (m_currentPass == m_numPasses) {
+            
+            invalidated = false;
+			m_currentPass = 0;
 
-		auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds");
-		SaveCubemapToDDS(context.device, context.commandList, context.commandQueue, m_environmentRadiance.get(), path);
-        path = GetCacheFilePath(m_environmentName + L"_environment.dds");
-        SaveCubemapToDDS(context.device, context.commandList, context.commandQueue, m_environmentCubeMap.get(), path);
+            m_copyCommandList->Reset(m_allocator.Get(), nullptr);
+            auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds");
+            SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentRadiance.get(), path);
+            path = GetCacheFilePath(m_environmentName + L"_environment.dds");
+            SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentCubeMap.get(), path);
+            m_copyCommandList->Close();
+            commandLists.push_back(m_copyCommandList.Get());
+        }
 
 		return commandLists;
     }
@@ -132,8 +155,10 @@ private:
 	float m_normalizationFactor = 0.0;
 	int m_numPasses = 0;
 	int m_phiBatchSize = 0;
+    int m_currentPass = 0;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_copyCommandList;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_allocator;
     struct SkyboxVertex {
         XMFLOAT3 position;

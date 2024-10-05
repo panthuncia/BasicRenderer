@@ -347,9 +347,9 @@ void DX12Renderer::Render() {
     ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
     commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
-	currentRenderGraph->Execute(m_context, commandAllocator.Get());
+	currentRenderGraph->Execute(m_context); // Main render graph execution
 
-	commandList->Reset(commandAllocator.Get(), nullptr);
+    commandList->Reset(commandAllocator.Get(), nullptr);
 
     // Indicate that the back buffer will now be used to present
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -524,7 +524,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto debugPass = std::make_shared<DebugRenderPass>();
 	currentRenderGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
 	currentRenderGraph->Compile();
-    currentRenderGraph->Setup(commandQueue.Get(), commandAllocator.Get());
+    currentRenderGraph->Setup(commandQueue.Get());
 
 	rebuildRenderGraph = false;
 }

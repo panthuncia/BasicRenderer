@@ -58,7 +58,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input) {
     float3 right = normalize(cross(up, normal));
     up = normalize(cross(normal, right));
 
-    float sampleDelta = 0.125;
+    float sampleDelta = 0.025;
     // https://learnopengl.com/PBR/IBL/Diffuse-irradiance
     for (float phi = startPhi; phi < endPhi; phi += sampleDelta) {
         for (float theta = 0.0; theta < 0.5 * PI; theta += sampleDelta) {
