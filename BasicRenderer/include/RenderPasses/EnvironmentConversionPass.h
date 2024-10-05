@@ -65,7 +65,7 @@ public:
 
 		std::vector<ID3D12GraphicsCommandList*> commandLists;
 		unsigned int startPass = m_currentPass;
-        for (int pass = m_currentPass; pass < m_numPasses && pass < startPass+1; pass++) {
+		for (int pass = m_currentPass; pass < m_numPasses && pass < startPass + 1; pass++) { // Do at most one pass per frame to avoid device timeout
             m_currentPass += 1;
 			auto commandList = m_commandLists[pass].Get();
 			commandList->Reset(m_allocator.Get(), m_pso.Get());

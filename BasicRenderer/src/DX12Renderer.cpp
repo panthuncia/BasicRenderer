@@ -565,12 +565,12 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	uint16_t skyboxResolution = getSkyboxResolution();
     auto envCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
     auto sampler = Sampler::GetDefaultSampler();
-    m_currentSkybox = std::make_shared<Texture>(envCubemap, sampler);
-    m_currentSkybox->SetName(L"Skybox");
+    auto skybox = std::make_shared<Texture>(envCubemap, sampler);
+	SetSkybox(skybox);
 
     auto envRadianceCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
-    m_environmentIrradiance = std::make_shared<Texture>(envRadianceCubemap, sampler);
-    m_environmentIrradiance->SetName(L"EnvironmentRadiance");
+    auto irradiance = std::make_shared<Texture>(envRadianceCubemap, sampler);
+	SetIrradiance(irradiance);
     if (currentRenderGraph != nullptr) {
         auto environmentPass = currentRenderGraph->GetPassByName("EnvironmentConversionPass");
         if (environmentPass != nullptr) {
