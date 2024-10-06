@@ -25,6 +25,7 @@
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/BRDFIntegrationPass.h"
+#include "TextureDescription.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 
@@ -572,16 +573,41 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
     auto buffer = m_currentEnvironmentTexture->GetBuffer();
     // Create blank texture for skybox
 	uint16_t skyboxResolution = getSkyboxResolution();
-    auto envCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
+
+	TextureDescription skyboxDesc;
+	skyboxDesc.width = skyboxResolution;
+	skyboxDesc.height = skyboxResolution;
+	skyboxDesc.channels = buffer->GetChannels();
+	skyboxDesc.isCubemap = true;
+    skyboxDesc.hasRTV = true;
+	skyboxDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    auto envCubemap = PixelBuffer::Create(skyboxDesc);
     auto sampler = Sampler::GetDefaultSampler();
     auto skybox = std::make_shared<Texture>(envCubemap, sampler);
 	SetSkybox(skybox);
 
-    auto envRadianceCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
+	TextureDescription irradianceDesc;
+    irradianceDesc.width = skyboxResolution;
+	irradianceDesc.height = skyboxResolution;
+	irradianceDesc.channels = buffer->GetChannels();
+	irradianceDesc.isCubemap = true;
+	irradianceDesc.hasRTV = true;
+	irradianceDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    auto envRadianceCubemap = PixelBuffer::Create(irradianceDesc);
     auto irradiance = std::make_shared<Texture>(envRadianceCubemap, sampler);
 	SetIrradiance(irradiance);
 
-	auto prefilteredEnvironmentCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false, true);
+	TextureDescription prefilteredDesc;
+	prefilteredDesc.width = skyboxResolution;
+	prefilteredDesc.height = skyboxResolution;
+	prefilteredDesc.channels = buffer->GetChannels();
+	prefilteredDesc.isCubemap = true;
+	prefilteredDesc.hasRTV = true;
+	prefilteredDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
 	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
 	SetPrefilteredEnvironment(prefilteredEnvironment);
 

@@ -12,6 +12,7 @@
 #include "PixelBuffer.h"
 #include "Sampler.h"
 #include "utilities.h"
+#include "TextureDescription.h"
 class ShadowMaps : public ResourceGroup {
 public:
     ShadowMaps(const std::wstring& name)
@@ -23,17 +24,26 @@ public:
     void AddMap(Light* light, uint16_t shadowResolution) {
 		std::shared_ptr<PixelBuffer> shadowMap;
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
+		TextureDescription desc;
+		desc.width = shadowResolution;
+		desc.height = shadowResolution;
+		desc.hasDSV = true;
+		desc.channels = 1;
+		desc.format = DXGI_FORMAT_R32_TYPELESS;
 		switch (light->GetLightType()) {
 		case LightType::Point: // Cubemap
-			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, true, false, true, false);
+			desc.isCubemap = true;
+			shadowMap = PixelBuffer::Create(desc);
 			shadowMap->SetName(L"PointShadowMap: "+light->m_name);
 			break;
 		case LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::CreateSingleTexture(shadowResolution, shadowResolution, 1, false, false, true, false);
+			shadowMap = PixelBuffer::Create(desc);
 			shadowMap->SetName(L"SpotShadowMap");
 			break;
 		case LightType::Directional: // Texture array
-			shadowMap = PixelBuffer::CreateTextureArray(shadowResolution, shadowResolution, 1, getNumCascades(), false, false, true, false);
+			desc.isArray = true;
+			desc.arraySize = getNumCascades();
+			shadowMap = PixelBuffer::Create(desc);
 			shadowMap->SetName(L"DirectionalShadowMap");
 			break;
 

@@ -28,6 +28,7 @@ PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channe
 	desc.isArray = false;
 
 	handle = resourceManager.CreateTexture(desc, {image});
+	//handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB, m_format);
 
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
@@ -63,55 +64,15 @@ PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width,
 	m_channels = channels;
 }
 
-PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV, bool mipmap) {
+PixelBuffer::PixelBuffer(const TextureDescription& desc) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-    m_format = DetermineTextureFormat(channels, false, DSV);
-	TextureDescription desc;
-	desc.width = width;
-	desc.height = height;
-	desc.channels = channels;
-	desc.isCubemap = isCubemap;
-	desc.hasRTV = RTV;
-	desc.hasDSV = DSV;
-	desc.hasUAV = UAV;
-	desc.generateMipMaps = mipmap;
-	desc.arraySize = 1;
-	desc.isCubemap = isCubemap;
-    desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	desc.isArray = false;
 
     handle = resourceManager.CreateTexture(desc);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
-	m_width = width;
-	m_height = height;
-	m_channels = channels;
-}
-
-PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV, bool DSV, bool UAV) {
-    ResourceManager& resourceManager = ResourceManager::GetInstance();
-    m_format = DetermineTextureFormat(channels, false, DSV);
-
-	TextureDescription desc;
-	desc.width = width;
-	desc.height = height;
-	desc.channels = channels;
-	desc.isCubemap = isCubemap;
-	desc.hasRTV = RTV;
-	desc.hasDSV = DSV;
-	desc.hasUAV = UAV;
-	desc.generateMipMaps = false;
-	desc.arraySize = numTextures;
-	desc.isCubemap = isCubemap;
-	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	desc.isArray = true;
-
-    handle = resourceManager.CreateTexture(desc);
-    SetIndex(GetSRVDescriptorIndex());
-    currentState = ResourceState::UNKNOWN;
-	m_width = width;
-	m_height = height;
-	m_channels = channels;
+	m_width = desc.width;
+	m_height = desc.height;
+	m_channels = desc.channels;
 }
 
 UINT PixelBuffer::GetSRVDescriptorIndex() const {

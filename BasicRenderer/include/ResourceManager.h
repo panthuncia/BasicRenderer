@@ -16,23 +16,9 @@
 #include "ResourceStates.h"
 #include "RenderContext.h"
 #include "utilities.h"
+#include "TextureDescription.h"
 
 using namespace Microsoft::WRL;
-
-struct TextureDescription {
-    int width = 0;
-    int height = 0;
-    int channels = 0; // Number of channels in the data (e.g., 3 for RGB, 4 for RGBA)
-    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-    bool isCubemap = false;
-    bool isArray = false;
-    uint32_t arraySize = 1;
-    bool hasRTV = false;
-    bool hasDSV = false;
-    bool hasUAV = false;
-    bool generateMipMaps = false;
-    ResourceState initialState = ResourceState::UNKNOWN;
-};
 
 class ResourceManager {
 public:
@@ -249,11 +235,6 @@ public:
         return handle;
     }
 
-    TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat);
-    TextureHandle<PixelBuffer> CreateCubemapFromImages(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat);
-    TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, DXGI_FORMAT textureFormat, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
-    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, DXGI_FORMAT textureFormat, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, bool mipmap = false, ResourceState initialState = ResourceState::UNKNOWN);
-
     template <typename Container = std::vector<const stbi_uc*>>
     TextureHandle<PixelBuffer> CreateTexture(
         const TextureDescription& desc,
@@ -312,7 +293,7 @@ public:
             clearValue
         );
 
-        // Create the Shader Resource View (SRV)
+        // Create SRV
         auto srvInfo = CreateShaderResourceView(
             device.Get(),
             textureResource.Get(),
@@ -323,7 +304,7 @@ public:
             arraySize
         );
 
-        // Create Render Target Views (RTVs) if needed
+        // Create RTVs if needed
         std::vector<NonShaderVisibleIndexInfo> rtvInfos;
         if (desc.hasRTV) {
             rtvInfos = CreateRenderTargetViews(
@@ -338,7 +319,7 @@ public:
             );
         }
 
-        // Create Depth Stencil Views (DSVs) if needed
+        // Create DSVs if needed
         std::vector<NonShaderVisibleIndexInfo> dsvInfos;
         if (desc.hasDSV) {
             dsvInfos = CreateDepthStencilViews(
@@ -366,27 +347,34 @@ public:
                 nullptr,
                 IID_PPV_ARGS(&textureUploadHeap)));
 
-            // Prepare the subresource data
+            // Prepare subresource data for copy
             std::vector<D3D12_SUBRESOURCE_DATA> subresourceData(arraySize * mipLevels);
+
+            std::vector<std::vector<stbi_uc>> expandedImages;
+
+            auto dataIt = std::begin(initialData);
+            auto dataEnd = std::end(initialData);
 
             for (uint32_t arraySlice = 0; arraySlice < arraySize; ++arraySlice) {
                 for (uint32_t mip = 0; mip < mipLevels; ++mip) {
                     UINT subresourceIndex = mip + arraySlice * mipLevels;
                     D3D12_SUBRESOURCE_DATA& subData = subresourceData[subresourceIndex];
 
-                    if (mip == 0 && arraySlice < initialData.size()) {
-                        const stbi_uc* imageData = initialData[arraySlice];
+                    if (mip == 0 && dataIt != dataEnd) {
+                        const stbi_uc* imageData = *dataIt++;
 
                         // Expand image data if channels == 3
                         const stbi_uc* imagePtr = imageData;
-                        std::vector<stbi_uc> expandedImage;
+                        UINT channels = desc.channels;
                         if (desc.channels == 3) {
-                            expandedImage = ExpandImageData(imageData, desc.width, desc.height);
-                            imagePtr = expandedImage.data();
+                            // Expand image data and store it in the container
+                            expandedImages.emplace_back(ExpandImageData(imageData, desc.width, desc.height));
+                            imagePtr = expandedImages.back().data();
+                            channels = 4; // Update channels after expansion
                         }
 
                         subData.pData = imagePtr;
-                        subData.RowPitch = desc.width * (desc.channels == 3 ? 4 : desc.channels); // Assume 4 channels if expanded
+                        subData.RowPitch = desc.width * channels;
                         subData.SlicePitch = subData.RowPitch * desc.height;
                     }
                     else {
@@ -418,7 +406,7 @@ public:
             );
             commandList->ResourceBarrier(1, &barrier);
 
-            ExecuteAndWaitForCommandList(commandList, commandAllocator);
+			ExecuteAndWaitForCommandList(commandList, commandAllocator); // TODO - This is a blocking call. We could upload all textures and only wait once before they are used
         }
 
         // Build and return the texture handle
