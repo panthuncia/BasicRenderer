@@ -24,6 +24,7 @@
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
+#include "RenderPasses/BRDFIntegrationPass.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 

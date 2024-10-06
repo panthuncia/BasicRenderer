@@ -1,5 +1,6 @@
 #include "Skeleton.h"
 #include <spdlog/spdlog.h>
+#include "ResourceManager.h"
 
 Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
     : m_nodes(nodes), m_inverseBindMatrices(inverseBindMatrices) {

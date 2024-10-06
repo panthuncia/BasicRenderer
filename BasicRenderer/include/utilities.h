@@ -5,12 +5,12 @@
 #include <wrl.h>
 #include <d3dcompiler.h>
 
-#include "RenderableObject.h"
 #include "GlTFLoader.h"
 #include "Light.h"
 
 
 class DescriptorHeap;
+class RenderableObject;
 
 void ThrowIfFailed(HRESULT hr);
 

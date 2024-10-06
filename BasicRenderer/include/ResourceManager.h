@@ -15,7 +15,23 @@
 #include "DescriptorHeap.h"
 #include "ResourceStates.h"
 #include "RenderContext.h"
+
 using namespace Microsoft::WRL;
+
+struct TextureDescription {
+    int width = 0;
+    int height = 0;
+    int channels = 0; // Number of channels in the data (e.g., 3 for RGB, 4 for RGBA)
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+    bool isCubemap = false;
+    bool isArray = false;
+    uint32_t arraySize = 1;
+    bool hasRTV = false;
+    bool hasDSV = false;
+    bool hasUAV = false;
+    bool generateMipMaps = false;
+    ResourceState initialState = ResourceState::UNKNOWN;
+};
 
 class ResourceManager {
 public:
@@ -237,6 +253,183 @@ public:
     TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, DXGI_FORMAT textureFormat, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
     TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, DXGI_FORMAT textureFormat, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, bool mipmap = false, ResourceState initialState = ResourceState::UNKNOWN);
 
+    template <typename Container = std::vector<const stbi_uc*>>
+    TextureHandle<PixelBuffer> CreateTexture(
+        const TextureDescription& desc,
+        const Container& initialData = {}) {
+        auto& device = DeviceManager::GetInstance().GetDevice();
+
+        // Determine the number of mip levels
+        unsigned int mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.width, desc.height) : 1;
+
+        // Determine the array size
+        uint32_t arraySize = desc.isCubemap ? 6 : desc.arraySize;
+        if (!desc.isArray && !desc.isCubemap) {
+            arraySize = 1;
+        }
+
+        // Create the texture resource description
+        auto textureDesc = CreateTextureResourceDesc(
+            desc.format,
+            desc.width,
+            desc.height,
+            arraySize,
+            mipLevels,
+            desc.isCubemap,
+            desc.hasRTV,
+            desc.hasDSV
+        );
+
+        // Handle clear values for RTV and DSV
+        D3D12_CLEAR_VALUE* clearValue = nullptr;
+        D3D12_CLEAR_VALUE depthClearValue = {};
+        D3D12_CLEAR_VALUE colorClearValue = {};
+        if (desc.hasDSV) {
+            depthClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+            depthClearValue.DepthStencil.Depth = 1.0f;
+            depthClearValue.DepthStencil.Stencil = 0;
+            clearValue = &depthClearValue;
+        }
+        else if (desc.hasRTV) {
+            colorClearValue.Format = desc.format;
+            if (desc.channels == 1) {
+                colorClearValue.Color[0] = 1.0f;
+            }
+            else {
+                colorClearValue.Color[0] = 0.0f;
+                colorClearValue.Color[1] = 0.0f;
+                colorClearValue.Color[2] = 0.0f;
+                colorClearValue.Color[3] = 1.0f;
+            }
+            clearValue = &colorClearValue;
+        }
+
+        // Create the texture resource
+        auto textureResource = CreateCommittedTextureResource(
+            device.Get(),
+            textureDesc,
+            clearValue
+        );
+
+        // Create the Shader Resource View (SRV)
+        auto srvInfo = CreateShaderResourceView(
+            device.Get(),
+            textureResource.Get(),
+            desc.format == DXGI_FORMAT_R32_TYPELESS ? DXGI_FORMAT_R32_FLOAT : desc.format,
+            m_cbvSrvUavHeap.get(),
+            desc.isCubemap,
+            desc.isArray,
+            arraySize
+        );
+
+        // Create Render Target Views (RTVs) if needed
+        std::vector<NonShaderVisibleIndexInfo> rtvInfos;
+        if (desc.hasRTV) {
+            rtvInfos = CreateRenderTargetViews(
+                device.Get(),
+                textureResource.Get(),
+                desc.format,
+                m_rtvHeap.get(),
+                desc.isCubemap,
+                desc.isArray,
+                arraySize,
+                mipLevels
+            );
+        }
+
+        // Create Depth Stencil Views (DSVs) if needed
+        std::vector<NonShaderVisibleIndexInfo> dsvInfos;
+        if (desc.hasDSV) {
+            dsvInfos = CreateDepthStencilViews(
+                device.Get(),
+                textureResource.Get(),
+                m_dsvHeap.get(),
+                desc.isCubemap,
+                desc.isArray,
+                arraySize
+            );
+        }
+
+        // Handle initial data upload if provided
+        if (!initialData.empty()) {
+            // Create an upload heap
+            UINT64 uploadBufferSize = GetRequiredIntermediateSize(textureResource.Get(), 0, arraySize * mipLevels);
+            CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+            D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+            ComPtr<ID3D12Resource> textureUploadHeap;
+            ThrowIfFailed(device->CreateCommittedResource(
+                &uploadHeapProps,
+                D3D12_HEAP_FLAG_NONE,
+                &uploadBufferDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(&textureUploadHeap)));
+
+            // Prepare the subresource data
+            std::vector<D3D12_SUBRESOURCE_DATA> subresourceData(arraySize * mipLevels);
+
+            for (uint32_t arraySlice = 0; arraySlice < arraySize; ++arraySlice) {
+                for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+                    UINT subresourceIndex = mip + arraySlice * mipLevels;
+                    D3D12_SUBRESOURCE_DATA& subData = subresourceData[subresourceIndex];
+
+                    if (mip == 0 && arraySlice < initialData.size()) {
+                        const stbi_uc* imageData = initialData[arraySlice];
+
+                        // Expand image data if channels == 3
+                        const stbi_uc* imagePtr = imageData;
+                        std::vector<stbi_uc> expandedImage;
+                        if (desc.channels == 3) {
+                            expandedImage = ExpandImageData(imageData, desc.width, desc.height);
+                            imagePtr = expandedImage.data();
+                        }
+
+                        subData.pData = imagePtr;
+                        subData.RowPitch = desc.width * (desc.channels == 3 ? 4 : desc.channels); // Assume 4 channels if expanded
+                        subData.SlicePitch = subData.RowPitch * desc.height;
+                    }
+                    else {
+                        // For higher mip levels or missing data, set to zero
+                        subData.pData = nullptr;
+                        subData.RowPitch = 0;
+                        subData.SlicePitch = 0;
+                    }
+                }
+            }
+
+            // Record commands to upload data
+            GetCopyCommandList(commandList, commandAllocator);
+
+            UpdateSubresources(
+                commandList.Get(),
+                textureResource.Get(),
+                textureUploadHeap.Get(),
+                0,
+                0,
+                static_cast<UINT>(subresourceData.size()),
+                subresourceData.data()
+            );
+
+            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                textureResource.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_COMMON
+            );
+            commandList->ResourceBarrier(1, &barrier);
+
+            ExecuteAndWaitForCommandList(commandList, commandAllocator);
+        }
+
+        // Build and return the texture handle
+        TextureHandle<PixelBuffer> handle;
+        handle.texture = textureResource;
+        handle.SRVInfo = srvInfo;
+        handle.RTVInfo = rtvInfos;
+        handle.DSVInfo = dsvInfos;
+
+        return handle;
+    }
+
 	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 	template<typename T>
@@ -255,8 +448,8 @@ public:
 
     void setEnvironmentIrradianceMapSamplerIndex(int index) { perFrameCBData.environmentIrradianceSamplerIndex = index; }
 	void setEnvironmentIrradianceMapIndex(int index) { perFrameCBData.environmentIrradianceMapIndex = index; }
-	void setPrefilteredEnvironmentMapIndex(int index) { perFrameCBData.prefilteredEnvironmentMapIndex = index; }
-	void setPrefilteredEnvironmentMapSamplerIndex(int index) { perFrameCBData.prefilteredEnvironmentMapSamplerIndex = index; }
+	void setPrefilteredEnvironmentMapIndex(int index) { perFrameCBData.environmentPrefilteredMapIndex = index; }
+	void setPrefilteredEnvironmentMapSamplerIndex(int index) { perFrameCBData.environmentPrefilteredSamplerIndex = index; }
 private:
     ResourceManager(){};
     void WaitForCopyQueue();
