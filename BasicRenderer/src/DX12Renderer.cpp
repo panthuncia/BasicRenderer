@@ -23,6 +23,7 @@
 #include "RenderPasses/DebugRenderPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentConversionPass.h"
+#include "RenderPasses/EnvironmentFilterPass.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 
@@ -499,6 +500,13 @@ void DX12Renderer::CreateRenderGraph() {
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
         environmentConversionPassParameters.renderTargets.push_back(m_environmentIrradiance);
         currentRenderGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
+
+		currentRenderGraph->AddResource(m_prefilteredEnvironment);
+		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
+		auto environmentFilterPassParameters = PassParameters();
+		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
+		environmentFilterPassParameters.renderTargets.push_back(m_prefilteredEnvironment);
+		currentRenderGraph->AddPass(environmentFilterPass, environmentFilterPassParameters, "EnvironmentFilterPass");
     }
 
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
@@ -571,10 +579,19 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
     auto envRadianceCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false);
     auto irradiance = std::make_shared<Texture>(envRadianceCubemap, sampler);
 	SetIrradiance(irradiance);
+
+	auto prefilteredEnvironmentCubemap = PixelBuffer::CreateSingleTexture(skyboxResolution, skyboxResolution, buffer->GetChannels(), true, true, false, false, true);
+	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
+	SetPrefilteredEnvironment(prefilteredEnvironment);
+
     if (currentRenderGraph != nullptr) {
         auto environmentPass = currentRenderGraph->GetPassByName("EnvironmentConversionPass");
         if (environmentPass != nullptr) {
             environmentPass->Invalidate();
+        }
+		auto environmentFilterPass = currentRenderGraph->GetPassByName("EnvironmentFilterPass");
+        if (environmentFilterPass != nullptr) {
+            environmentFilterPass->Invalidate();
         }
     }
     rebuildRenderGraph = true;
@@ -592,6 +609,15 @@ void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
     auto& manager = ResourceManager::GetInstance();
 	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetSRVDescriptorIndex());
 	manager.setEnvironmentIrradianceMapSamplerIndex(m_environmentIrradiance->GetSamplerDescriptorIndex());
+	rebuildRenderGraph = true;
+}
+
+void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
+	m_prefilteredEnvironment = texture;
+	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");
+	auto& manager = ResourceManager::GetInstance();
+	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetSRVDescriptorIndex());
+	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }
 

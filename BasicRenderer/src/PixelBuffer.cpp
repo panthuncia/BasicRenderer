@@ -31,10 +31,10 @@ PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width,
 	m_channels = channels;
 }
 
-PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV) {
+PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bool RTV, bool DSV, bool UAV, bool mipmap) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
     m_format = DetermineTextureFormat(channels, false, DSV);
-    handle = resourceManager.CreateTexture(width, height, channels, m_format, isCubemap, RTV, DSV, UAV);
+    handle = resourceManager.CreateTexture(width, height, channels, m_format, isCubemap, RTV, DSV, UAV, mipmap);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
 	m_width = width;

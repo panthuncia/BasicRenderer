@@ -48,40 +48,26 @@ public:
     void initialize();
 
     ComPtr<ID3D12PipelineState> GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    ComPtr<ID3D12PipelineState> GetDebugPSO();
 
     ComPtr<ID3D12RootSignature> GetRootSignature();
-	ComPtr<ID3D12PipelineState> GetSkyboxPSO();
-	ComPtr<ID3D12PipelineState> GetEnvironmentConversionPSO();
-	ComPtr<ID3D12RootSignature> GetDebugRootSignature();
-    ComPtr<ID3D12RootSignature> GetSkyboxRootSignature();
-    ComPtr<ID3D12RootSignature> GetEnvironmentConversionRootSignature();
     void ReloadShaders();
+    void CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
 
 private:
     PSOManager() = default;
     ComPtr<ID3D12RootSignature> rootSignature;
     ComPtr<ID3D12RootSignature> debugRootSignature;
-    ComPtr<ID3D12RootSignature> skyboxRootSignature;
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_psoCache;
     ComPtr<IDxcUtils> pUtils;
     ComPtr<IDxcCompiler3> pCompiler;
 	ComPtr<ID3D12PipelineState> debugPSO;
-    ComPtr<ID3D12PipelineState> skyboxPSO;
     ComPtr<ID3D12PipelineState> environmentConversionPSO;
 
     ComPtr<ID3D12PipelineState> CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
-    void CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
     void createRootSignature();
     D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
-    void CreateDebugRootSignature();
-    void CreateDebugPSO();
-    void CreateSkyboxRootSignature();
-    void CreateSkyboxPSO();
-	void CreateEnvironmentConversionRootSignature();
-	void CreateEnvironmentConversionPSO();
 };
 
 inline PSOManager& PSOManager::getInstance() {

@@ -19,8 +19,6 @@ void print(Args... args) {
     (std::cout << ... << args) << std::endl;
 }
 
-Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const std::wstring& filename, const std::string& entryPoint, const std::string& target);
-
 std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name);
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
@@ -85,9 +83,10 @@ std::vector<NonShaderVisibleIndexInfo> CreateRenderTargetViews(
     ID3D12Resource* resource,
     DXGI_FORMAT format,
     DescriptorHeap* rtvHeap,
-    bool isCubemap = false,
-    bool isArray = false,
-    int arraySize = 1);
+    bool isCubemap,
+    bool isArray,
+    int arraySize = 1,
+    int mipLevels = 1);
 
 std::vector<NonShaderVisibleIndexInfo> CreateDepthStencilViews(
     ID3D12Device* device,
@@ -111,3 +110,7 @@ std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(XMFLOAT3 pos);
 void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* cubemap, const std::wstring& outputFile);
 
 std::wstring GetCacheFilePath(const std::wstring& fileName);
+
+inline uint16_t CalculateMipLevels(uint16_t width, uint16_t height) {
+    return static_cast<uint16_t>(std::floor(std::log2((std::max)(width, height)))) + 1;
+}

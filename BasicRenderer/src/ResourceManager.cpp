@@ -291,15 +291,20 @@ TextureHandle<PixelBuffer> ResourceManager::CreateCubemapFromImages(const std::a
 	return handle;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, DXGI_FORMAT textureFormat, bool isCubemap, bool RTV, bool DSV, bool UAV, ResourceState initialState) {
+TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height, int channels, DXGI_FORMAT textureFormat, bool isCubemap, bool RTV, bool DSV, bool UAV, bool mipmap, ResourceState initialState) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
+
+	unsigned int mipLevels = 1;
+	if (mipmap) {
+		mipLevels = CalculateMipLevels(width, height);
+	}
 
 	auto textureDesc = CreateTextureResourceDesc(
 		textureFormat,
 		width,
 		height,
 		isCubemap ? 6 : 1,
-		1,
+		mipLevels,
 		isCubemap,
 		RTV,
 		DSV);
@@ -346,7 +351,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTexture(int width, int height,
 			textureResource.Get(),
 			textureFormat,
 			m_rtvHeap.get(),
-			isCubemap);
+			isCubemap, false, 1, mipLevels);
 	}
 	std::vector<NonShaderVisibleIndexInfo> dsvInfos;
 	if (DSV) {

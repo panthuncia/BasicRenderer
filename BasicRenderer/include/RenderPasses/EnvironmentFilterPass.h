@@ -10,14 +10,13 @@
 #include "ResourceHandles.h"
 #include "Utilities.h"
 
-class EnvironmentConversionPass : public RenderPass {
+class EnvironmentFilterPass : public RenderPass {
 public:
-    EnvironmentConversionPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance, std::string environmentName) {
-		m_environmentName = s2ws(environmentName);
+    EnvironmentFilterPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> preFilteredEnvironment, std::string environmentName) {
+        m_environmentName = s2ws(environmentName);
         m_texture = environmentTexture;
-		m_environmentCubeMap = environmentCubeMap;
-		m_environmentRadiance = environmentRadiance;
-        m_viewMatrices = GetCubemapViewMatrices({0.0, 0.0, 0.0});
+		m_prefilteredEnvironment = preFilteredEnvironment;
+        m_viewMatrices = GetCubemapViewMatrices({ 0.0, 0.0, 0.0 });
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
     }
 
@@ -26,55 +25,30 @@ public:
         auto& device = manager.GetDevice();
         m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
 
-        m_sampleDelta = 0.025;
-        int totalPhiSamples = static_cast<int>(2.0f * M_PI / m_sampleDelta);
-        int totalThetaSamples = static_cast<int>(0.5f * M_PI / m_sampleDelta);
-        m_normalizationFactor = M_PI / (totalPhiSamples * totalThetaSamples);
-
-        int maxPhiBatchSize = 10;
-        m_numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
-        m_phiBatchSize = totalPhiSamples / m_numPasses;
-
         auto& queue = manager.GetCommandQueue();
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
 
-        m_commandLists.clear();
-        for (int i = 0; i < m_numPasses; i++) {
-			ComPtr<ID3D12GraphicsCommandList> commandList;
-            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-            commandList->Close();
-			m_commandLists.push_back(commandList);
-        }
-        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
-		m_copyCommandList->Close();
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+        m_commandList->Close();
 
-		CreateEnvironmentConversionRootSignature();
-		CreateEnvironmentConversionPSO();
+        CreateRootSignature();
+        CreatePSO();
     }
 
-	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
+    // This pass was broken into multiple passes to avoid device timeout on slower GPUs
     std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
 
-		uint16_t skyboxRes = getSkyboxResolution();
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
-        CD3DX12_RECT scissorRect(0, 0, skyboxRes, skyboxRes);
+        uint16_t skyboxRes = getSkyboxResolution();
 
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
 
         ThrowIfFailed(m_allocator->Reset());
 
-		std::vector<ID3D12GraphicsCommandList*> commandLists;
-		unsigned int startPass = m_currentPass;
-		for (int pass = m_currentPass; pass < m_numPasses && pass < startPass + 1; pass++) { // Do at most one pass per frame to avoid device timeout
-            m_currentPass += 1;
-			auto commandList = m_commandLists[pass].Get();
-			commandList->Reset(m_allocator.Get(), environmentConversionPSO.Get());
-            if (pass == 0) {
-                for (int i = 0; i < 6; i++) {
-                    const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-					commandList->ClearRenderTargetView(m_environmentRadiance->GetHandle().RTVInfo[i].cpuHandle, clearColor, 0, nullptr);
-                }
-            }
+        std::vector<ID3D12GraphicsCommandList*> commandLists;
+
+            auto commandList = m_commandList.Get();
+            commandList->Reset(m_allocator.Get(), PSO.Get());
+
             ID3D12DescriptorHeap* descriptorHeaps[] = {
                 ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
                 ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
@@ -82,57 +56,51 @@ public:
 
             commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-            commandList->SetGraphicsRootSignature(environmentConversionRootSignature.Get());
+            commandList->SetGraphicsRootSignature(rootSignature.Get());
 
             commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
 
             commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-            commandList->RSSetViewports(1, &viewport);
-            commandList->RSSetScissorRects(1, &scissorRect);
-            commandList->SetPipelineState(environmentConversionPSO.Get());
+            commandList->SetPipelineState(PSO.Get());
+            auto& rtvs = m_prefilteredEnvironment->GetHandle().RTVInfo;
+            unsigned int maxMipLevels = rtvs.size()/6;
+            for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
+            {
+                unsigned int mipWidth = skyboxRes * std::pow(0.5, mip);
+                unsigned int mipHeight = skyboxRes * std::pow(0.5, mip);
+                CD3DX12_VIEWPORT viewport(0.0f, 0.0f, mipWidth, mipHeight);
+                CD3DX12_RECT scissorRect(0, 0, mipWidth, mipHeight);
+                commandList->RSSetViewports(1, &viewport);
+                commandList->RSSetScissorRects(1, &scissorRect);
 
-            commandList->SetGraphicsRoot32BitConstants(4, 1, &m_normalizationFactor, 0);
-            float startPhi = pass * m_phiBatchSize * m_sampleDelta;
-            float endPhi = (pass + 1) * m_phiBatchSize * m_sampleDelta;
+                float roughness = (float)mip / (float)(maxMipLevels - 1);
+                commandList->SetGraphicsRoot32BitConstants(2, 1, &roughness, 0);
+                for (int i = 0; i < 6; i++) {
 
-			commandList->SetGraphicsRoot32BitConstants(2, 1, &startPhi, 0);
-			commandList->SetGraphicsRoot32BitConstants(3, 1, &endPhi, 0);
+                    //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvs[i].cpuHandle, mip, context.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV));
+					CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6*mip+i].cpuHandle;
+                    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
-            for (int i = 0; i < 6; i++) {
+                    commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-                CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
-                rtvHandles[0] = m_environmentCubeMap->GetHandle().RTVInfo[i].cpuHandle;
-                rtvHandles[1] = m_environmentRadiance->GetHandle().RTVInfo[i].cpuHandle;
-
-                CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
-
-                commandList->OMSetRenderTargets(2, rtvHandles, FALSE, nullptr);
-
-                auto viewMatrix = m_viewMatrices[i];
-                auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
-                commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
-                commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+                    auto viewMatrix = m_viewMatrices[i];
+                    auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
+                    commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
+                    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                    commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+                }
             }
-			commandList->Close();
-			commandLists.push_back(commandList);
-        }
+
         // We can reuse the results of this pass
-        if (m_currentPass == m_numPasses) {
-            
+
             invalidated = false;
-			m_currentPass = 0;
 
-            m_copyCommandList->Reset(m_allocator.Get(), nullptr);
-            auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds");
-            SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentRadiance.get(), path);
-            path = GetCacheFilePath(m_environmentName + L"_environment.dds");
-            SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentCubeMap.get(), path);
-            m_copyCommandList->Close();
-            commandLists.push_back(m_copyCommandList.Get());
-        }
+            auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds");
+            SaveCubemapToDDS(context.device, m_commandList.Get(), context.commandQueue, m_prefilteredEnvironment.get(), path);
+            m_commandList->Close();
+            commandLists.push_back(m_commandList.Get());
 
-		return commandLists;
+        return commandLists;
     }
 
     void Cleanup(RenderContext& context) override {
@@ -142,26 +110,18 @@ public:
 private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     BufferHandle vertexBufferHandle;
-	std::wstring m_environmentName;
+    std::wstring m_environmentName;
     std::shared_ptr<Texture> m_texture = nullptr;
-	std::shared_ptr<Texture> m_environmentCubeMap = nullptr;
-	std::shared_ptr<Texture> m_environmentRadiance = nullptr;
+	std::shared_ptr<Texture> m_prefilteredEnvironment = nullptr;
     std::array<XMMATRIX, 6> m_viewMatrices;
 
     std::function<uint16_t()> getSkyboxResolution;
 
-    float m_sampleDelta = 0.0;
-	float m_normalizationFactor = 0.0;
-	int m_numPasses = 0;
-	int m_phiBatchSize = 0;
-    int m_currentPass = 0;
-
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_copyCommandList;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_allocator;
 
-    ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
-    ComPtr<ID3D12PipelineState> environmentConversionPSO;
+    ComPtr<ID3D12RootSignature> rootSignature;
+    ComPtr<ID3D12PipelineState> PSO;
 
     struct SkyboxVertex {
         XMFLOAT3 position;
@@ -234,16 +194,14 @@ private:
         return vertexBufferView;
     }
 
-    void CreateEnvironmentConversionRootSignature() {
+    void CreateRootSignature() {
         CD3DX12_DESCRIPTOR_RANGE1 environmentDescriptorRangeSRV;
         environmentDescriptorRangeSRV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 in the shader
 
-        CD3DX12_ROOT_PARAMETER1 environmentRootParameters[5];
+        CD3DX12_ROOT_PARAMETER1 environmentRootParameters[3];
         environmentRootParameters[0].InitAsDescriptorTable(1, &environmentDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
         environmentRootParameters[1].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b1)
-        environmentRootParameters[2].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Integration range start
-        environmentRootParameters[3].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Integration range end
-        environmentRootParameters[4].InitAsConstants(1, 4, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Normalization factor
+        environmentRootParameters[2].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Roughness
 
         D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
         samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -274,18 +232,18 @@ private:
         }
 
         auto& device = DeviceManager::GetInstance().GetDevice();
-        hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&environmentConversionRootSignature));
+        hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&rootSignature));
         if (FAILED(hr)) {
             throw std::runtime_error("Failed to create root signature");
         }
     }
 
-    void CreateEnvironmentConversionPSO() {
+    void CreatePSO() {
         // Compile shaders
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::getInstance().CompileShader(L"shaders/envToCubemap.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::getInstance().CompileShader(L"shaders/envToCubemap.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+        PSOManager::getInstance().CompileShader(L"shaders/blurEnvironment.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+        PSOManager::getInstance().CompileShader(L"shaders/blurEnvironment.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
         static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -321,15 +279,15 @@ private:
         blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
         blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-        blendDesc.RenderTarget[1].BlendEnable = TRUE;
-        blendDesc.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[1].DestBlend = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ZERO;
-        blendDesc.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[1].LogicOpEnable = FALSE;
-        blendDesc.RenderTarget[1].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        //blendDesc.RenderTarget[1].BlendEnable = TRUE;
+        //blendDesc.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
+        //blendDesc.RenderTarget[1].DestBlend = D3D12_BLEND_ONE;
+        //blendDesc.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
+        //blendDesc.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
+        //blendDesc.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ZERO;
+        //blendDesc.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        //blendDesc.RenderTarget[1].LogicOpEnable = FALSE;
+        //blendDesc.RenderTarget[1].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
         D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
         depthStencilDesc.DepthEnable = FALSE;
@@ -340,7 +298,7 @@ private:
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.InputLayout = inputLayoutDesc;   // No input layout needed for full-screen triangle
-        psoDesc.pRootSignature = environmentConversionRootSignature.Get();
+        psoDesc.pRootSignature = rootSignature.Get();
         psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
         psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
         psoDesc.RasterizerState = rasterizerDesc;
@@ -348,16 +306,16 @@ private:
         psoDesc.DepthStencilState = depthStencilDesc;
         psoDesc.SampleMask = UINT_MAX;
         psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 2;
+        psoDesc.NumRenderTargets = 1;
         psoDesc.RTVFormats[0] = renderTargetFormat;
-        psoDesc.RTVFormats[1] = renderTargetFormat;
+        //psoDesc.RTVFormats[1] = renderTargetFormat;
         //psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
         psoDesc.SampleDesc.Count = 1;
         psoDesc.SampleDesc.Quality = 0;
         psoDesc.InputLayout = inputLayoutDesc;
 
         auto& device = DeviceManager::GetInstance().GetDevice();
-        auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&environmentConversionPSO));
+        auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&PSO));
         if (FAILED(hr)) {
             throw std::runtime_error("Failed to create skybox PSO");
         }

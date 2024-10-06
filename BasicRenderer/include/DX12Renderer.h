@@ -39,6 +39,7 @@ public:
     void SetEnvironment(std::wstring name);
     void SetSkybox(std::shared_ptr<Texture> texture);
 	void SetIrradiance(std::shared_ptr<Texture> texture);
+	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
     void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
     void ToggleWireframe();
 	void ToggleShadows();
@@ -81,6 +82,7 @@ private:
 	std::shared_ptr<Texture> m_currentSkybox = nullptr;
 	std::shared_ptr<Texture> m_currentEnvironmentTexture = nullptr;
 	std::shared_ptr<Texture> m_environmentIrradiance = nullptr;
+	std::shared_ptr<Texture> m_prefilteredEnvironment = nullptr;
 	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;

@@ -235,7 +235,7 @@ public:
     TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat);
     TextureHandle<PixelBuffer> CreateCubemapFromImages(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat);
     TextureHandle<PixelBuffer> CreateTextureArray(int width, int height, int channels, uint32_t length, bool isCubemap, DXGI_FORMAT textureFormat, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
-    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, DXGI_FORMAT textureFormat, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, ResourceState initialState = ResourceState::UNKNOWN);
+    TextureHandle<PixelBuffer> CreateTexture(int width, int height, int channels, DXGI_FORMAT textureFormat, bool isCubemap = false, bool RTV = false, bool DSV = false, bool UAV = false, bool mipmap = false, ResourceState initialState = ResourceState::UNKNOWN);
 
 	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
@@ -255,7 +255,8 @@ public:
 
     void setEnvironmentIrradianceMapSamplerIndex(int index) { perFrameCBData.environmentIrradianceSamplerIndex = index; }
 	void setEnvironmentIrradianceMapIndex(int index) { perFrameCBData.environmentIrradianceMapIndex = index; }
-
+	void setPrefilteredEnvironmentMapIndex(int index) { perFrameCBData.prefilteredEnvironmentMapIndex = index; }
+	void setPrefilteredEnvironmentMapSamplerIndex(int index) { perFrameCBData.prefilteredEnvironmentMapSamplerIndex = index; }
 private:
     ResourceManager(){};
     void WaitForCopyQueue();

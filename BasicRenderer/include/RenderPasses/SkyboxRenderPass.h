@@ -19,12 +19,12 @@ public:
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 		m_commandList->Close();
+        CreateSkyboxRootSignature();
+		CreateSkyboxPSO();
     }
 
     std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
 
-        auto& psoManager = PSOManager::getInstance();
-        m_pso = psoManager.GetSkyboxPSO();
         auto commandList = m_commandList.Get();
         ThrowIfFailed(m_allocator->Reset());
 		commandList->Reset(m_allocator.Get(), nullptr);
@@ -41,8 +41,8 @@ public:
 
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-        commandList->SetPipelineState(m_pso.Get());
-        commandList->SetGraphicsRootSignature(psoManager.GetSkyboxRootSignature().Get());
+        commandList->SetPipelineState(skyboxPSO.Get());
+        commandList->SetGraphicsRootSignature(skyboxRootSignature.Get());
 
 		auto viewMatrix = context.currentScene->GetCamera()->GetViewMatrix();
 		viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
@@ -66,8 +66,10 @@ private:
     ComPtr<ID3D12CommandAllocator> m_allocator;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     BufferHandle vertexBufferHandle;
-    ComPtr<ID3D12PipelineState> m_pso;
     std::shared_ptr<Texture> m_texture = nullptr;
+
+    ComPtr<ID3D12RootSignature> skyboxRootSignature;
+    ComPtr<ID3D12PipelineState> skyboxPSO;
 
     struct SkyboxVertex {
         XMFLOAT3 position;
@@ -138,5 +140,103 @@ private:
         vertexBufferView.SizeInBytes = vertexBufferSize;
 
         return vertexBufferView;
+    }
+    void CreateSkyboxRootSignature() {
+
+        CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[3];
+
+        skyboxRootParameters[0].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
+        skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox texture index
+        skyboxRootParameters[2].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox sampler index
+
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+        rootSignatureDesc.Init_1_1(_countof(skyboxRootParameters), skyboxRootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
+
+        ComPtr<ID3DBlob> serializedRootSig;
+        ComPtr<ID3DBlob> errorBlob;
+        HRESULT hr = D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1_1, &serializedRootSig, &errorBlob);
+        if (FAILED(hr)) {
+            if (errorBlob) {
+                OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+            }
+            throw std::runtime_error("Failed to serialize root signature");
+        }
+
+        auto& device = DeviceManager::GetInstance().GetDevice();
+        hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&skyboxRootSignature));
+        if (FAILED(hr)) {
+            throw std::runtime_error("Failed to create root signature");
+        }
+    }
+
+    void CreateSkyboxPSO() {
+        // Compile shaders
+        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+        PSOManager::getInstance().CompileShader(L"shaders/skybox.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+        PSOManager::getInstance().CompileShader(L"shaders/skybox.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+
+        static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        };
+
+        D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
+        inputLayoutDesc.pInputElementDescs = inputElementDescs;
+        inputLayoutDesc.NumElements = _countof(inputElementDescs);
+
+        D3D12_RASTERIZER_DESC rasterizerDesc = {};
+        rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+        rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
+        rasterizerDesc.FrontCounterClockwise = FALSE;
+        rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+        rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+        rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+        rasterizerDesc.DepthClipEnable = TRUE;
+        rasterizerDesc.MultisampleEnable = FALSE;
+        rasterizerDesc.AntialiasedLineEnable = FALSE;
+        rasterizerDesc.ForcedSampleCount = 0;
+        rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+        D3D12_BLEND_DESC blendDesc = {};
+        blendDesc.RenderTarget[0].BlendEnable = FALSE;
+        blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
+        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
+        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
+        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
+        depthStencilDesc.DepthEnable = TRUE;
+        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // Prevent skybox from writing to the depth buffer
+        depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+
+        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+        psoDesc.InputLayout = inputLayoutDesc;   // No input layout needed for full-screen triangle
+        psoDesc.pRootSignature = skyboxRootSignature.Get();
+        psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+        psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
+        psoDesc.RasterizerState = rasterizerDesc;
+        psoDesc.BlendState = blendDesc;
+        psoDesc.DepthStencilState = depthStencilDesc;
+        psoDesc.SampleMask = UINT_MAX;
+        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        psoDesc.NumRenderTargets = 1;
+        psoDesc.RTVFormats[0] = renderTargetFormat;
+        psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        psoDesc.SampleDesc.Count = 1;
+        psoDesc.SampleDesc.Quality = 0;
+        psoDesc.InputLayout = inputLayoutDesc;
+
+        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&skyboxPSO));
+        if (FAILED(hr)) {
+            throw std::runtime_error("Failed to create skybox PSO");
+        }
     }
 };

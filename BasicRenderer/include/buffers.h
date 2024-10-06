@@ -15,6 +15,8 @@ struct PerFrameCB {
 	unsigned int numShadowCascades;
 	unsigned int environmentIrradianceMapIndex;
 	unsigned int environmentIrradianceSamplerIndex;
+	unsigned int environmentPrefilteredMapIndex;
+	unsigned int environmentPrefilteredSamplerIndex;
 };
 
 struct PerObjectCB {

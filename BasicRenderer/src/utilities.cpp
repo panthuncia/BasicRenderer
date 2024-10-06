@@ -411,31 +411,35 @@ std::vector<NonShaderVisibleIndexInfo> CreateRenderTargetViews(
     DescriptorHeap* rtvHeap,
     bool isCubemap,
     bool isArray,
-    int arraySize) {
-
+    int arraySize,
+    int mipLevels)
+{
     std::vector<NonShaderVisibleIndexInfo> rtvInfos;
 
     D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
     rtvDesc.Format = format;
     rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-    rtvDesc.Texture2DArray.MipSlice = 0;
     rtvDesc.Texture2DArray.PlaneSlice = 0;
     rtvDesc.Texture2DArray.ArraySize = 1;
 
     int totalSlices = isCubemap ? 6 * arraySize : arraySize;
 
-    for (int slice = 0; slice < totalSlices; ++slice) {
-        rtvDesc.Texture2DArray.FirstArraySlice = slice;
+    for (int mip = 0; mip < mipLevels; ++mip) {
+        rtvDesc.Texture2DArray.MipSlice = mip;  // Set the MipSlice for each mip level
 
-        UINT descriptorIndex = rtvHeap->AllocateDescriptor();
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = rtvHeap->GetCPUHandle(descriptorIndex);
+        for (int slice = 0; slice < totalSlices; ++slice) {
+            rtvDesc.Texture2DArray.FirstArraySlice = slice;
 
-        device->CreateRenderTargetView(resource, &rtvDesc, cpuHandle);
+            UINT descriptorIndex = rtvHeap->AllocateDescriptor();
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = rtvHeap->GetCPUHandle(descriptorIndex);
 
-        NonShaderVisibleIndexInfo rtvInfo;
-        rtvInfo.index = descriptorIndex;
-        rtvInfo.cpuHandle = cpuHandle;
-        rtvInfos.push_back(rtvInfo);
+            device->CreateRenderTargetView(resource, &rtvDesc, cpuHandle);
+
+            NonShaderVisibleIndexInfo rtvInfo;
+            rtvInfo.index = descriptorIndex;
+            rtvInfo.cpuHandle = cpuHandle;
+            rtvInfos.push_back(rtvInfo);
+        }
     }
 
     return rtvInfos;
@@ -534,28 +538,26 @@ void AsyncSaveToDDS(DirectX::ScratchImage scratchImage, const std::wstring& outp
 
 
 void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* cubemap, const std::wstring& outputFile) {
-    // Ensure the resource is a cubemap
     D3D12_RESOURCE_DESC resourceDesc = cubemap->GetHandle().texture->GetDesc();
-    //if (resourceDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || resourceDesc.DepthOrArraySize != 6)
-    //{
-    //    throw std::runtime_error("The resource is not a cubemap!");
-    //}
 
-    // Create a readback buffer for the texture
-    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(6);
-    std::vector<UINT> numRows(6);
-    std::vector<UINT64> rowSizesInBytes(6);
+    // Get the number of mip levels and subresources
+    UINT numMipLevels = resourceDesc.MipLevels;
+    UINT numSubresources = 6 * numMipLevels;  // 6 faces, each with multiple mip levels
+
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(numSubresources);
+    std::vector<UINT> numRows(numSubresources);
+    std::vector<UINT64> rowSizesInBytes(numSubresources);
     UINT64 totalSize = 0;
 
-    // Get the copyable footprints for each face of the cubemap
+    // Get the copyable footprints for each mip level of each face
     device->GetCopyableFootprints(
-        &resourceDesc,          // The resource description of the cubemap
-        0,                      // First subresource
-        6,                      // Number of subresources (6 for cubemap)
-        0,                      // Base offset in the resource
-        layouts.data(),         // Array to hold the layout of each subresource
-        numRows.data(),         // Array to hold the number of rows for each subresource
-        rowSizesInBytes.data(), // Array to hold the row size in bytes for each subresource
+        &resourceDesc,
+        0,
+        numSubresources,
+        0,
+        layouts.data(),
+        numRows.data(),
+        rowSizesInBytes.data(),
         &totalSize);
 
     // Describe and create the readback buffer
@@ -596,21 +598,26 @@ void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
     auto initialState = ResourceStateToD3D12(cubemap->GetState());
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetHandle().texture.Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
     commandList->ResourceBarrier(1, &barrier);
-    // Issue the copy command to copy the cubemap to the readback buffer
-    for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex)
-    {
-        D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
-        srcLocation.pResource = cubemap->GetHandle().texture.Get();
-        srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        srcLocation.SubresourceIndex = faceIndex;
 
-        D3D12_TEXTURE_COPY_LOCATION dstLocation = {};
-        dstLocation.pResource = readbackBuffer.Get();
-        dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        dstLocation.PlacedFootprint = layouts[faceIndex];
+    // Issue copy commands for each mip level of each face
+    for (UINT mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
+        for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex) {
+            UINT subresourceIndex = D3D12CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, 6);
 
-        commandList->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
+            D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
+            srcLocation.pResource = cubemap->GetHandle().texture.Get();
+            srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            srcLocation.SubresourceIndex = subresourceIndex;
+
+            D3D12_TEXTURE_COPY_LOCATION dstLocation = {};
+            dstLocation.pResource = readbackBuffer.Get();
+            dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            dstLocation.PlacedFootprint = layouts[subresourceIndex];
+
+            commandList->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
+        }
     }
+
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetHandle().texture.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
     commandList->ResourceBarrier(1, &barrier);
 
@@ -621,7 +628,6 @@ void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
     readbackRequest.outputFile = outputFile;
     readbackRequest.callback = [=]() {
         std::thread([=] {
-            // Map the readback buffer and extract the data
             void* mappedData = nullptr;
             D3D12_RANGE readRange{ 0, static_cast<SIZE_T>(totalSize) };
             auto hr = readbackBuffer->Map(0, &readRange, &mappedData);
@@ -630,30 +636,54 @@ void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
                 throw std::runtime_error("Failed to map the readback buffer!");
             }
 
-            // Create a ScratchImage and fill it with the cubemap data
+            // Create a ScratchImage and fill it with the cubemap and mipmap data
             DirectX::ScratchImage scratchImage;
-            for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex)
-            {
-                DirectX::Image image;
-                image.width = resourceDesc.Width;
-                image.height = resourceDesc.Height;
-                image.format = resourceDesc.Format;
-                image.rowPitch = static_cast<size_t>(layouts[faceIndex].Footprint.RowPitch);
-                image.slicePitch = image.rowPitch * resourceDesc.Height;
-                image.pixels = static_cast<uint8_t*>(mappedData) + layouts[faceIndex].Offset;
+            scratchImage.InitializeCube(resourceDesc.Format, resourceDesc.Width, resourceDesc.Height, 1, numMipLevels);  // Initialize with mip levels
 
-                if (faceIndex == 0) {
-                    scratchImage.InitializeCube(resourceDesc.Format, image.width, image.height, 1, 1);
+            for (UINT mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
+                for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex) {
+                    UINT subresourceIndex = D3D12CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, 6);
+
+                    DirectX::Image image;
+                    image.width = resourceDesc.Width >> mipLevel;
+                    image.height = resourceDesc.Height >> mipLevel;
+                    image.format = resourceDesc.Format;
+                    image.rowPitch = static_cast<size_t>(layouts[subresourceIndex].Footprint.RowPitch);
+                    image.slicePitch = image.rowPitch * image.height;
+                    image.pixels = static_cast<uint8_t*>(mappedData) + layouts[subresourceIndex].Offset;
+
+                    const DirectX::Image* destImage = scratchImage.GetImage(mipLevel, faceIndex, 0);
+                    
+					// Sometimes, due to formatting weirdness, the row pitch of the source image is less than the row pitch of the destination image
+					// We copy row by row to avoid heap corruption
+                    // I don't know why ScratchImage does this
+					// TODO: Does this break smaller mip levels?
+
+                    size_t destRowPitch = destImage->rowPitch;
+                    size_t srcRowPitch = image.rowPitch;
+                    size_t rowCount = image.height;
+
+                    uint8_t* destPixels = destImage->pixels;
+                    uint8_t* srcPixels = image.pixels;
+
+                    for (size_t row = 0; row < rowCount; ++row)
+                    {
+                        memcpy(destPixels + row * destRowPitch, srcPixels + row * srcRowPitch, (std::min)(destRowPitch, srcRowPitch));
+                    }
+
+                    //memcpy(destImage->pixels, image.pixels, image.slicePitch);
                 }
-                const DirectX::Image* destImage = scratchImage.GetImage(0, faceIndex, 0);
-                memcpy(destImage->pixels, image.pixels, image.slicePitch);
             }
 
-            // Unmap the readback buffer
             readbackBuffer->Unmap(0, nullptr);
 
-            // Save asynchronously to a DDS file
-            std::async(std::launch::async, AsyncSaveToDDS, std::move(scratchImage), outputFile);
+            hr = DirectX::SaveToDDSFile(scratchImage.GetImages(), scratchImage.GetImageCount(), scratchImage.GetMetadata(), DirectX::DDS_FLAGS_NONE, outputFile.c_str());
+            if (FAILED(hr))
+            {
+                throw std::runtime_error("Failed to save the cubemap to a .dds file!");
+            }
+            // Save asynchronously to a DDS file with mipmaps
+            //std::async(std::launch::async, AsyncSaveToDDS, std::move(scratchImage), outputFile);
             }).detach();
         };
 
