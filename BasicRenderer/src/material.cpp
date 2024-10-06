@@ -3,6 +3,7 @@
 #include "PSOFlags.h"
 #include "Sampler.h"
 #include "utilities.h"
+#include "TextureDescription.h"
 
 Material::Material(const std::string& name,
     UINT psoFlags)
@@ -89,7 +90,15 @@ Material::Material(const std::string& name,
 std::shared_ptr<Texture> Material::createDefaultTexture() {
     // Create a 1x1 white texture
     static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
-    std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::CreateFromImage(whitePixel, 1, 1, 4, false);
+
+	TextureDescription desc;
+	desc.channels = 4;
+	desc.width = 1;
+	desc.height = 1;
+	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::Create(desc, {whitePixel});
+    //std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::CreateFromImage(whitePixel, 1, 1, 4, false);
 
     D3D12_SAMPLER_DESC defaultSamplerDesc = {};
     defaultSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;

@@ -27,6 +27,8 @@ public:
         return instance;
     }
 
+    TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat);
+
     void Initialize(ID3D12CommandQueue* commandQueue);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);

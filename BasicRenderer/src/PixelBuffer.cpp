@@ -9,70 +9,16 @@
 #include "ResourceManager.h"
 #include "RenderContext.h"
 
-PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
-    ResourceManager& resourceManager = ResourceManager::GetInstance();
-    m_format = DetermineTextureFormat(channels, sRGB, false);
-
-	TextureDescription desc;
-	desc.width = width;
-	desc.height = height;
-	desc.channels = channels;
-	desc.isCubemap = false;
-	desc.hasRTV = false;
-	desc.hasDSV = false;
-	desc.hasUAV = false;
-	desc.generateMipMaps = false;
-	desc.arraySize = 1;
-	desc.isCubemap = false;
-	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	desc.isArray = false;
-
-	handle = resourceManager.CreateTexture(desc, {image});
-	//handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB, m_format);
-
-    SetIndex(GetSRVDescriptorIndex());
-    currentState = ResourceState::UNKNOWN;
-    m_width = width;
-    m_height = height;
-	m_channels = channels;
-}
-
-PixelBuffer::PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB) {
-    ResourceManager& resourceManager = ResourceManager::GetInstance();
-    m_format = DetermineTextureFormat(channels, sRGB, false);
-
-    TextureDescription desc;
-	desc.width = width;
-	desc.height = height;
-	desc.channels = channels;
-	desc.isCubemap = true;
-	desc.hasRTV = false;
-	desc.hasDSV = false;
-	desc.hasUAV = false;
-	desc.generateMipMaps = false;
-	desc.arraySize = 1;
-	desc.isCubemap = true;
-	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	desc.isArray = false;
-
-    handle = resourceManager.CreateTexture(desc, images);
-
-    SetIndex(GetSRVDescriptorIndex());
-    currentState = ResourceState::UNKNOWN;
-	m_width = width;
-	m_height = height;
-	m_channels = channels;
-}
-
-PixelBuffer::PixelBuffer(const TextureDescription& desc) {
+PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
 
-    handle = resourceManager.CreateTexture(desc);
+    handle = resourceManager.CreateTexture(desc, initialData);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
 	m_width = desc.width;
 	m_height = desc.height;
 	m_channels = desc.channels;
+	m_format = desc.format;
 }
 
 UINT PixelBuffer::GetSRVDescriptorIndex() const {

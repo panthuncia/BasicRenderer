@@ -336,7 +336,6 @@ private:
         depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
         depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
 
-        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.InputLayout = inputLayoutDesc;   // No input layout needed for full-screen triangle
@@ -349,8 +348,8 @@ private:
         psoDesc.SampleMask = UINT_MAX;
         psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         psoDesc.NumRenderTargets = 2;
-        psoDesc.RTVFormats[0] = renderTargetFormat;
-        psoDesc.RTVFormats[1] = renderTargetFormat;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM;
         //psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
         psoDesc.SampleDesc.Count = 1;
         psoDesc.SampleDesc.Quality = 0;

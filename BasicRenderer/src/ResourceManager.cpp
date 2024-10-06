@@ -365,3 +365,56 @@ void ResourceManager::ExecuteResourceTransitions() {
 
 	queuedResourceTransitions.clear();
 }
+
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat) {
+	auto& device = DeviceManager::GetInstance().GetDevice();
+
+	// Describe and create the texture resource
+
+	std::vector<stbi_uc> expandedImage;
+	if (channels == 3) {
+		expandedImage = ExpandImageData(image, width, height);
+		image = expandedImage.data();
+		channels = 4;
+	}
+
+	auto textureDesc = CreateTextureResourceDesc(textureFormat, width, height);
+
+	auto textureResource = CreateCommittedTextureResource(device.Get(), textureDesc);
+
+	// Create an upload heap
+	const UINT64 uploadBufferSize = GetRequiredIntermediateSize(textureResource.Get(), 0, 1);
+	CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+	D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	ComPtr<ID3D12Resource> textureUploadHeap;
+	ThrowIfFailed(device->CreateCommittedResource(
+		&uploadHeapProps,
+		D3D12_HEAP_FLAG_NONE,
+		&uploadBufferDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&textureUploadHeap)));
+
+	// Upload the texture data to the GPU
+	D3D12_SUBRESOURCE_DATA textureData = {};
+	textureData.pData = image;
+	textureData.RowPitch = width * channels; // Calculate based on the number of channels
+	textureData.SlicePitch = textureData.RowPitch * height;
+
+	// Initialize copy command list, used to copy from the upload heap to the default heap
+	GetCopyCommandList(commandList, commandAllocator);
+
+	UpdateSubresources(commandList.Get(), textureResource.Get(), textureUploadHeap.Get(), 0, 0, 1, &textureData);
+
+	CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(textureResource.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
+	commandList->ResourceBarrier(1, &barrier);
+
+	ExecuteAndWaitForCommandList(commandList, commandAllocator);
+
+	auto SRVInfo = CreateShaderResourceView(device.Get(), textureResource.Get(), textureFormat, m_cbvSrvUavHeap.get());
+
+	TextureHandle<PixelBuffer> handle;
+	handle.texture = textureResource;
+	handle.SRVInfo = SRVInfo;
+	return handle;
+}

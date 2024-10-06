@@ -125,7 +125,30 @@ ImageData loadImage(const char* filename) {
 
 std::shared_ptr<Texture> loadTextureFromFile(std::string filename) {
 	ImageData img = loadImage(filename.c_str());
-	auto buffer = PixelBuffer::CreateFromImage(img.data, img.width, img.height, img.channels, false);
+    // Determine DXGI_FORMAT based on number of channels
+	DXGI_FORMAT format;
+    switch (img.channels) {
+        case 1:
+            format = DXGI_FORMAT_R8_UNORM;
+            break;
+        case 2:
+            format = DXGI_FORMAT_R8G8_UNORM;
+            break;
+        case 3:
+        case 4:
+            format = DXGI_FORMAT_R8G8B8A8_UNORM; // RGBA
+            break;
+		default:
+			throw std::runtime_error("Unsupported channel count");
+    }
+
+    TextureDescription desc;
+	desc.channels = img.channels;
+	desc.width = img.width;
+	desc.height = img.height;
+	desc.format = format;
+	auto buffer = PixelBuffer::Create(desc, { img.data });
+
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
 }
@@ -138,7 +161,15 @@ std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bo
 	ImageData front = loadImage(frontPath);
 	ImageData back = loadImage(backPath);
 
-    auto buffer = PixelBuffer::CreateCubemapFromImages({right.data, left.data, top.data, bottom.data, front.data, back.data }, top.width, top.height, top.channels, false);
+
+	TextureDescription desc;
+	desc.height = top.height;
+	desc.width = top.width;
+	desc.channels = top.channels;
+	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.isCubemap = true;
+
+    auto buffer = PixelBuffer::Create(desc, {right.data, left.data, top.data, bottom.data, front.data, back.data });
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
 }
@@ -147,7 +178,7 @@ std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
-
+    
     if (FAILED(hr)) {
         throw std::runtime_error("Failed to load DDS cubemap: " + ws2s(ddsFilePath));
     }
@@ -157,13 +188,21 @@ std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
     }
 
     // Extract cubemap faces and create a PixelBuffer from them
-    std::array<const stbi_uc*, 6> faces = {};
+    std::vector<const stbi_uc*> faces = {};
     for (size_t i = 0; i < 6; ++i) {
         const DirectX::Image* img = image.GetImage(0, i, 0); // mip 0, face i, slice 0
-        faces[i] = img->pixels;
+        faces.push_back(img->pixels);
     }
 
-    auto buffer = PixelBuffer::CreateCubemapFromImages(faces, metadata.width, metadata.height, /* channels */ 4, false);
+    TextureDescription desc;
+	desc.channels = 4;
+	desc.width = metadata.width;
+	desc.height = metadata.height;
+    desc.format = metadata.format;
+	desc.isCubemap = true;
+
+	auto buffer = PixelBuffer::Create(desc, faces);
+
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
 }
