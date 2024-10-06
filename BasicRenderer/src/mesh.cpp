@@ -4,6 +4,7 @@
 #include "DeviceManager.h"
 #include "PSOFlags.h"
 #include "ResourceManager.h"
+#include "Material.h"
 
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, bool skinned) {
     CreateBuffers(vertices, indices);

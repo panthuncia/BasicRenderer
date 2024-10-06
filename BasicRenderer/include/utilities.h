@@ -7,7 +7,8 @@
 
 #include "GlTFLoader.h"
 #include "Light.h"
-
+#include "MeshData.h"
+#include "Camera.h"
 
 class DescriptorHeap;
 class RenderableObject;

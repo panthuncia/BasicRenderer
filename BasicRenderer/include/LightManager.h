@@ -7,8 +7,6 @@
 #include "buffers.h"
 #include "ResourceHandles.h"
 #include "Interfaces/ISceneNodeObserver.h"
-#include "SettingsManager.h"
-#include "ResourceManager.h"
 
 class Camera;
 class Light;
@@ -29,17 +27,7 @@ public:
     void SetCurrentCamera(Camera* camera);
     void OnNodeUpdated(SceneNode* camera) override;
     void OnNodeUpdated(Light* light) override;
-
-    void UpdateBuffers() {
-        if (m_lightBufferHandle.buffer->UpdateUploadBuffer())
-		    ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_lightBufferHandle);
-		if (m_spotViewInfoHandle.buffer->UpdateUploadBuffer())
-            ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_spotViewInfoHandle);
-		if (m_pointViewInfoHandle.buffer->UpdateUploadBuffer())
-            ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfoHandle);
-		if (m_directionalViewInfoHandle.buffer->UpdateUploadBuffer())
-            ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfoHandle);
-    }
+    void UpdateBuffers();
 
 private:
     DynamicBufferHandle<LightInfo> m_lightBufferHandle;

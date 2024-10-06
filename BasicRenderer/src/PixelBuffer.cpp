@@ -12,7 +12,23 @@
 PixelBuffer::PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
     m_format = DetermineTextureFormat(channels, sRGB, false);
-    handle = resourceManager.CreateTextureFromImage(image, width, height, channels, sRGB, m_format);
+
+	TextureDescription desc;
+	desc.width = width;
+	desc.height = height;
+	desc.channels = channels;
+	desc.isCubemap = false;
+	desc.hasRTV = false;
+	desc.hasDSV = false;
+	desc.hasUAV = false;
+	desc.generateMipMaps = false;
+	desc.arraySize = 1;
+	desc.isCubemap = false;
+	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.isArray = false;
+
+	handle = resourceManager.CreateTexture(desc, {image});
+
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
     m_width = width;
@@ -75,7 +91,22 @@ PixelBuffer::PixelBuffer(int width, int height, int channels, bool isCubemap, bo
 PixelBuffer::PixelBuffer(int width, int height, int channels, int numTextures, bool isCubemap, bool RTV, bool DSV, bool UAV) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
     m_format = DetermineTextureFormat(channels, false, DSV);
-    handle = resourceManager.CreateTextureArray(width, height, channels, numTextures, isCubemap, m_format, RTV, DSV, UAV);
+
+	TextureDescription desc;
+	desc.width = width;
+	desc.height = height;
+	desc.channels = channels;
+	desc.isCubemap = isCubemap;
+	desc.hasRTV = RTV;
+	desc.hasDSV = DSV;
+	desc.hasUAV = UAV;
+	desc.generateMipMaps = false;
+	desc.arraySize = numTextures;
+	desc.isCubemap = isCubemap;
+	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.isArray = true;
+
+    handle = resourceManager.CreateTexture(desc);
     SetIndex(GetSRVDescriptorIndex());
     currentState = ResourceState::UNKNOWN;
 	m_width = width;

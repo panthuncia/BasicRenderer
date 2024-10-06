@@ -1,6 +1,7 @@
 #include "PSOManager.h"
 
 #include <fstream>
+#include <spdlog/spdlog.h>
 
 #include "DirectX/d3dx12.h"
 #include "Utilities.h"

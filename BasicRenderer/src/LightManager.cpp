@@ -9,6 +9,8 @@
 #include "Camera.h"
 #include "SceneNode.h"
 #include "ShadowMaps.h"
+#include "ResourceManager.h"
+#include "SettingsManager.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -225,4 +227,15 @@ void LightManager::OnNodeUpdated(Light* light) {
 	if (light->GetLightInfo().shadowMapIndex != -1) {
 		UpdateLightViewInfo(light);
 	}
+}
+
+void LightManager::UpdateBuffers() {
+	if (m_lightBufferHandle.buffer->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_lightBufferHandle);
+	if (m_spotViewInfoHandle.buffer->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_spotViewInfoHandle);
+	if (m_pointViewInfoHandle.buffer->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfoHandle);
+	if (m_directionalViewInfoHandle.buffer->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfoHandle);
 }

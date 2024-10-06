@@ -7,11 +7,11 @@
 #include <chrono>
 #include <ctime>  
 #include <functional>
-#include "Mesh.h"
 #include "Camera.h"
 #include "Skeleton.h"
 #include "LightManager.h"
-
+#include "MeshData.h"
+#include "Light.h"
 class Scene {
 public:
     Scene();

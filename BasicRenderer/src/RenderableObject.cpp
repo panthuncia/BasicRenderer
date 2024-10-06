@@ -4,6 +4,7 @@
 #include "Buffers.h"
 #include "Utilities.h"
 #include "DeviceManager.h"
+#include "Material.h"
 RenderableObject::RenderableObject(std::wstring name) : SceneNode(name) {
     CreateBuffers();
 }

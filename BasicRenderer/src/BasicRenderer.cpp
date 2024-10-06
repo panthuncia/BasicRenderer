@@ -15,7 +15,7 @@
 #include "GlTFLoader.h"
 #include "PSOManager.h"
 #include "Light.h"
-
+#include "Material.h"
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;

@@ -18,6 +18,8 @@
 #include "Sampler.h"
 #include "DescriptorHeap.h"
 #include "ReadbackRequest.h"
+#include "Material.h"
+#include "SettingsManager.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {

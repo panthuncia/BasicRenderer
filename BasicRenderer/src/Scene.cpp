@@ -1,5 +1,7 @@
 #include "Scene.h"
 
+#include <spdlog/spdlog.h>
+
 #include "Utilities.h"
 #include "SettingsManager.h"
 

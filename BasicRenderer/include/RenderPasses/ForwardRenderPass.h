@@ -9,6 +9,8 @@
 #include "RenderableObject.h"
 #include "mesh.h"
 #include "Scene.h"
+#include "Material.h"
+
 class ForwardRenderPass : public RenderPass {
 public:
 	ForwardRenderPass(bool wireframe) {

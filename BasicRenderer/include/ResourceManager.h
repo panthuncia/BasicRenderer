@@ -15,6 +15,7 @@
 #include "DescriptorHeap.h"
 #include "ResourceStates.h"
 #include "RenderContext.h"
+#include "utilities.h"
 
 using namespace Microsoft::WRL;
 
