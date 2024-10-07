@@ -7,7 +7,6 @@ VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0) {
     VS_OUTPUT output;
     output.position = float4(pos, 1.0);
     output.uv = uv;
-    //output.uv.y = 1.0 - output.uv.y;
     return output;
 }
 

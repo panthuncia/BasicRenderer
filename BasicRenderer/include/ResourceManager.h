@@ -245,9 +245,13 @@ public:
         unsigned int mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.width, desc.height) : 1;
 
         // Determine the array size
-        uint32_t arraySize = desc.isCubemap ? 6 * desc.arraySize : desc.arraySize;
+        uint32_t arraySize = desc.arraySize;
         if (!desc.isArray && !desc.isCubemap) {
             arraySize = 1;
+        }
+
+        if (desc.isCubemap) {
+            print("hello");
         }
 
         // Create the texture resource description
@@ -299,6 +303,7 @@ public:
             textureResource.Get(),
             desc.format == DXGI_FORMAT_R32_TYPELESS ? DXGI_FORMAT_R32_FLOAT : desc.format,
             m_cbvSrvUavHeap.get(),
+			mipLevels,
             desc.isCubemap,
             desc.isArray,
             arraySize
@@ -334,8 +339,12 @@ public:
 
         // Handle initial data upload if provided
         if (!initialData.empty()) {
+            // Ensure initialData has the correct size
+			size_t numTextures = arraySize * desc.isCubemap ? 6 : 1;
+            size_t numSubresources = numTextures * mipLevels;
+
             // Create an upload heap
-            UINT64 uploadBufferSize = GetRequiredIntermediateSize(textureResource.Get(), 0, arraySize * mipLevels);
+            UINT64 uploadBufferSize = GetRequiredIntermediateSize(textureResource.Get(), 0, numSubresources);
             CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
             D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
             ComPtr<ID3D12Resource> textureUploadHeap;
@@ -348,15 +357,13 @@ public:
                 IID_PPV_ARGS(&textureUploadHeap)));
 
             // Prepare the subresource data
-            std::vector<D3D12_SUBRESOURCE_DATA> subresourceData(arraySize * mipLevels);
+            std::vector<D3D12_SUBRESOURCE_DATA> subresourceData(numSubresources);
             std::vector<std::vector<stbi_uc>> expandedImages;
 
-            // Ensure initialData has the correct size
-            size_t expectedDataSize = arraySize * mipLevels;
-            std::vector<const stbi_uc*> fullInitialData(expectedDataSize, nullptr);
+            std::vector<const stbi_uc*> fullInitialData(numSubresources, nullptr);
             std::copy(initialData.begin(), initialData.end(), fullInitialData.begin());
 
-            for (uint32_t arraySlice = 0; arraySlice < arraySize; ++arraySlice) {
+            for (uint32_t arraySlice = 0; arraySlice < numTextures; ++arraySlice) {
                 for (uint32_t mip = 0; mip < mipLevels; ++mip) {
                     UINT subresourceIndex = mip + arraySlice * mipLevels;
                     D3D12_SUBRESOURCE_DATA& subData = subresourceData[subresourceIndex];

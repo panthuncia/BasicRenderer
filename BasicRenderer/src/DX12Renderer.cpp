@@ -631,6 +631,7 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	prefilteredDesc.isCubemap = true;
 	prefilteredDesc.hasRTV = true;
 	prefilteredDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	prefilteredDesc.generateMipMaps = true;
 
 	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
 	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);

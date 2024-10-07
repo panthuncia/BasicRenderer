@@ -75,6 +75,7 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
     ID3D12Resource* resource,
     DXGI_FORMAT format,
     DescriptorHeap* srvHeap,
+    int mipLevels = 1,
     bool isCubemap = false,
     bool isArray = false,
     int arraySize = 1);

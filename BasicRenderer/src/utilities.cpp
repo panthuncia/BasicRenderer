@@ -202,6 +202,9 @@ std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
 	desc.height = metadata.height;
     desc.format = metadata.format;
 	desc.isCubemap = true;
+    if (metadata.mipLevels != 1) {
+		desc.generateMipMaps = true;
+    }
 
 	auto buffer = PixelBuffer::Create(desc, faces);
 
@@ -404,6 +407,7 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
     ID3D12Resource* resource,
     DXGI_FORMAT format,
     DescriptorHeap* srvHeap,
+    int mipLevels,
     bool isCubemap,
     bool isArray,
     int arraySize) {
@@ -415,21 +419,21 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
     if (isCubemap) {
         srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY : D3D12_SRV_DIMENSION_TEXTURECUBE;
         if (isArray) {
-            srvDesc.TextureCubeArray.MipLevels = 1;
+            srvDesc.TextureCubeArray.MipLevels = mipLevels;
             srvDesc.TextureCubeArray.NumCubes = arraySize;
         }
         else {
-            srvDesc.TextureCube.MipLevels = 1;
+            srvDesc.TextureCube.MipLevels = mipLevels;
         }
     }
     else {
         srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
         if (isArray) {
-            srvDesc.Texture2DArray.MipLevels = 1;
+            srvDesc.Texture2DArray.MipLevels = mipLevels;
             srvDesc.Texture2DArray.ArraySize = arraySize;
         }
         else {
-            srvDesc.Texture2D.MipLevels = 1;
+            srvDesc.Texture2D.MipLevels = mipLevels;
         }
     }
 
