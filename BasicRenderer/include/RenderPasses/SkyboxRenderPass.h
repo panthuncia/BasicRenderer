@@ -29,6 +29,12 @@ public:
         ThrowIfFailed(m_allocator->Reset());
 		commandList->Reset(m_allocator.Get(), nullptr);
 
+        ID3D12DescriptorHeap* descriptorHeaps[] = {
+            context.textureDescriptorHeap, // The texture descriptor heap
+            context.samplerDescriptorHeap, // The sampler descriptor heap
+        };
+        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.xRes, context.yRes);

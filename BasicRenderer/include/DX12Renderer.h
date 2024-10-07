@@ -83,6 +83,7 @@ private:
 	std::shared_ptr<Texture> m_currentEnvironmentTexture = nullptr;
 	std::shared_ptr<Texture> m_environmentIrradiance = nullptr;
 	std::shared_ptr<Texture> m_prefilteredEnvironment = nullptr;
+	std::shared_ptr<Texture> m_lutTexture = nullptr;
 	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;

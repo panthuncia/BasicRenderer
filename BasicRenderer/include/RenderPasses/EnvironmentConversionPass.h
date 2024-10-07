@@ -124,9 +124,9 @@ public:
 			m_currentPass = 0;
 
             m_copyCommandList->Reset(m_allocator.Get(), nullptr);
-            auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds");
+            auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds", L"environments");
             SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentRadiance.get(), path);
-            path = GetCacheFilePath(m_environmentName + L"_environment.dds");
+            path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
             SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentCubeMap.get(), path);
             m_copyCommandList->Close();
             commandLists.push_back(m_copyCommandList.Get());

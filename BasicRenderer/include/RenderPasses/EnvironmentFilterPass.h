@@ -95,7 +95,7 @@ public:
 
             invalidated = false;
 
-            auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds");
+            auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds", L"environments");
             SaveCubemapToDDS(context.device, m_commandList.Get(), context.commandQueue, m_prefilteredEnvironment.get(), path);
             m_commandList->Close();
             commandLists.push_back(m_commandList.Get());

@@ -17,6 +17,8 @@ struct PerFrameCB {
 	unsigned int environmentIrradianceSamplerIndex;
 	unsigned int environmentPrefilteredMapIndex;
 	unsigned int environmentPrefilteredSamplerIndex;
+	unsigned int environmentBRDFLUTIndex;
+	unsigned int environmentBRDFLUTSamplerIndex;
 };
 
 struct PerObjectCB {

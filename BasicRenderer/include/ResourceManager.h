@@ -27,8 +27,6 @@ public:
         return instance;
     }
 
-    TextureHandle<PixelBuffer> CreateTextureFromImage(const stbi_uc* image, int width, int height, int channels, bool sRGB, DXGI_FORMAT textureFormat);
-
     void Initialize(ID3D12CommandQueue* commandQueue);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);
@@ -247,7 +245,7 @@ public:
         unsigned int mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.width, desc.height) : 1;
 
         // Determine the array size
-        uint32_t arraySize = desc.isCubemap ? 6 : desc.arraySize;
+        uint32_t arraySize = desc.isCubemap ? 6 * desc.arraySize : desc.arraySize;
         if (!desc.isArray && !desc.isCubemap) {
             arraySize = 1;
         }
@@ -349,38 +347,41 @@ public:
                 nullptr,
                 IID_PPV_ARGS(&textureUploadHeap)));
 
-            // Prepare subresource data for copy
+            // Prepare the subresource data
             std::vector<D3D12_SUBRESOURCE_DATA> subresourceData(arraySize * mipLevels);
-
             std::vector<std::vector<stbi_uc>> expandedImages;
 
-            auto dataIt = std::begin(initialData);
-            auto dataEnd = std::end(initialData);
+            // Ensure initialData has the correct size
+            size_t expectedDataSize = arraySize * mipLevels;
+            std::vector<const stbi_uc*> fullInitialData(expectedDataSize, nullptr);
+            std::copy(initialData.begin(), initialData.end(), fullInitialData.begin());
 
             for (uint32_t arraySlice = 0; arraySlice < arraySize; ++arraySlice) {
                 for (uint32_t mip = 0; mip < mipLevels; ++mip) {
                     UINT subresourceIndex = mip + arraySlice * mipLevels;
                     D3D12_SUBRESOURCE_DATA& subData = subresourceData[subresourceIndex];
 
-                    if (mip == 0 && dataIt != dataEnd) {
-                        const stbi_uc* imageData = *dataIt++;
+                    const stbi_uc* imageData = fullInitialData[subresourceIndex];
 
+                    if (imageData != nullptr) {
                         // Expand image data if channels == 3
                         const stbi_uc* imagePtr = imageData;
+                        UINT width = desc.width >> mip;
+                        UINT height = desc.height >> mip;
                         UINT channels = desc.channels;
-                        if (desc.channels == 3) {
+                        if (channels == 3) {
                             // Expand image data and store it in the container
-                            expandedImages.emplace_back(ExpandImageData(imageData, desc.width, desc.height));
+                            expandedImages.emplace_back(ExpandImageData(imageData, width, height));
                             imagePtr = expandedImages.back().data();
                             channels = 4; // Update channels after expansion
                         }
 
                         subData.pData = imagePtr;
-                        subData.RowPitch = desc.width * channels;
-                        subData.SlicePitch = subData.RowPitch * desc.height;
+                        subData.RowPitch = width * channels;
+                        subData.SlicePitch = subData.RowPitch * height;
                     }
                     else {
-                        // For higher mip levels or missing data, set to zero
+                        // For missing data, set pData to nullptr
                         subData.pData = nullptr;
                         subData.RowPitch = 0;
                         subData.SlicePitch = 0;
@@ -391,15 +392,29 @@ public:
             // Record commands to upload data
             GetCopyCommandList(commandList, commandAllocator);
 
-            UpdateSubresources(
-                commandList.Get(),
-                textureResource.Get(),
-                textureUploadHeap.Get(),
-                0,
-                0,
-                static_cast<UINT>(subresourceData.size()),
-                subresourceData.data()
-            );
+            // Update only subresources with valid data
+            std::vector<D3D12_SUBRESOURCE_DATA> validSubresourceData;
+            UINT firstValidSubresource = UINT_MAX;
+            for (UINT i = 0; i < subresourceData.size(); ++i) {
+                if (subresourceData[i].pData != nullptr) {
+                    if (firstValidSubresource == UINT_MAX) {
+                        firstValidSubresource = i;
+                    }
+                    validSubresourceData.push_back(subresourceData[i]);
+                }
+            }
+
+            if (!validSubresourceData.empty()) {
+                UpdateSubresources(
+                    commandList.Get(),
+                    textureResource.Get(),
+                    textureUploadHeap.Get(),
+                    0,
+                    firstValidSubresource,
+                    static_cast<UINT>(validSubresourceData.size()),
+                    validSubresourceData.data()
+                );
+            }
 
             CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
                 textureResource.Get(),
@@ -441,6 +456,8 @@ public:
 	void setEnvironmentIrradianceMapIndex(int index) { perFrameCBData.environmentIrradianceMapIndex = index; }
 	void setPrefilteredEnvironmentMapIndex(int index) { perFrameCBData.environmentPrefilteredMapIndex = index; }
 	void setPrefilteredEnvironmentMapSamplerIndex(int index) { perFrameCBData.environmentPrefilteredSamplerIndex = index; }
+	void setEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
+	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 private:
     ResourceManager(){};
     void WaitForCopyQueue();

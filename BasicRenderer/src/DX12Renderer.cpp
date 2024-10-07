@@ -332,14 +332,6 @@ void DX12Renderer::Render() {
 
     // Set necessary state
     auto& psoManager = PSOManager::getInstance();
-    commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
-    // Bind the constant buffer to the root signature
-    ID3D12DescriptorHeap* descriptorHeaps[] = {
-        ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
-        ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
-    };
-
-    commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -492,6 +484,31 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto debugPassParameters = PassParameters();
 
+    if (m_lutTexture == nullptr) {
+		TextureDescription lutDesc;
+		lutDesc.width = 512;
+		lutDesc.height = 512;
+		lutDesc.channels = 2;
+		lutDesc.isCubemap = false;
+		lutDesc.hasRTV = true;
+		lutDesc.format = DXGI_FORMAT_R16G16_FLOAT;
+		auto lutBuffer = PixelBuffer::Create(lutDesc);
+		auto sampler = Sampler::GetDefaultSampler();
+		m_lutTexture = std::make_shared<Texture>(lutBuffer, sampler);
+		m_lutTexture->SetName(L"LUTTexture");
+
+        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetSRVDescriptorIndex());
+		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
+
+		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
+		auto brdfIntegrationPassParameters = PassParameters();
+		brdfIntegrationPassParameters.renderTargets.push_back(m_lutTexture);
+		currentRenderGraph->AddPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
+    }
+
+    currentRenderGraph->AddResource(m_lutTexture);
+	forwardPassParameters.shaderResources.push_back(m_lutTexture);
+
     if (m_currentEnvironmentTexture != nullptr) {
         currentRenderGraph->AddResource(m_currentEnvironmentTexture);
 		currentRenderGraph->AddResource(m_currentSkybox);
@@ -511,6 +528,11 @@ void DX12Renderer::CreateRenderGraph() {
 		currentRenderGraph->AddPass(environmentFilterPass, environmentFilterPassParameters, "EnvironmentFilterPass");
     }
 
+    if (m_prefilteredEnvironment != nullptr) {
+		currentRenderGraph->AddResource(m_prefilteredEnvironment);
+		forwardPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
+    }
+
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
         currentRenderGraph->AddResource(m_shadowMaps);
 
@@ -524,7 +546,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
 
-    if (m_currentSkybox != nullptr || m_currentEnvironmentTexture != nullptr) {
+    if (m_currentSkybox != nullptr) {
         currentRenderGraph->AddResource(m_currentSkybox);
         auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
         auto skyboxPassParameters = PassParameters();
@@ -551,14 +573,17 @@ void DX12Renderer::ToggleShadows() {
 
 void DX12Renderer::SetEnvironment(std::wstring name) {
 	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
-    auto radiancePath = GetCacheFilePath(name + L"_radiance.dds");
-    auto skyboxPath = GetCacheFilePath(name + L"_environment.dds");
+    auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
+    auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
+	auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
     if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath)) {
 		// Load the cached environment
         auto skybox = loadCubemapFromFile(skyboxPath);
 		auto radiance = loadCubemapFromFile(radiancePath);
+        auto prefiltered = loadCubemapFromFile(prefilteredPath);
 		SetSkybox(skybox);
 		SetIrradiance(radiance);
+		SetPrefilteredEnvironment(prefiltered);
     }
     else {
         auto skyHDR = loadTextureFromFile("textures/environment/"+ws2s(name)+".hdr");

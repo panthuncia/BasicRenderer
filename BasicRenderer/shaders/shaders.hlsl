@@ -16,6 +16,8 @@ struct PerFrameBuffer {
     uint environmentIrradianceSamplerIndex;
     uint environmentPrefilteredMapIndex;
     uint environmentPrefilteredSamplerIndex;
+    uint environmentBRDFLUTIndex;
+    uint environmentBRDFLUTSamplerIndex;
 };
 
 cbuffer PerObject : register(b1) {
@@ -741,7 +743,21 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     SamplerState irradianceSampler = SamplerDescriptorHeap[perFrameBuffer.environmentIrradianceSamplerIndex];
     float3 irradiance = irradianceMap.Sample(irradianceSampler, normalWS).rgb;
     float3 diffuse = irradiance * baseColor.xyz;
-    float3 ambient = (kD * diffuse) * ao;
+    
+    const float MAX_REFLECTION_LOD = 12.0;
+    float3 R = reflect(-viewDir, normalWS);
+    TextureCube<float4> prefilteredMap = ResourceDescriptorHeap[perFrameBuffer.environmentPrefilteredMapIndex];
+    SamplerState prefilteredSampler = SamplerDescriptorHeap[perFrameBuffer.environmentPrefilteredSamplerIndex];
+    float roughnessLod = roughness * MAX_REFLECTION_LOD;
+    float3 reflection = prefilteredMap.SampleLevel(prefilteredSampler, R, roughnessLod).rgb;
+    
+    Texture2D<float2> brdfLUT = ResourceDescriptorHeap[perFrameBuffer.environmentBRDFLUTIndex];
+    SamplerState brdfSampler = SamplerDescriptorHeap[perFrameBuffer.environmentBRDFLUTSamplerIndex];
+    float2 brdf = brdfLUT.Sample(brdfSampler, float2(max(dot(normalWS, viewDir), 0.0), roughness)).rg;
+    
+    float3 specular = reflection * (kS * brdf.x + brdf.y);
+    
+    float3 ambient = (kD * diffuse + specular) * ao;
 #else
     float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz * ao;
 #endif // IMAGE_BASED_LIGHTING

@@ -5,6 +5,7 @@
 #include "RenderContext.h"
 #include "Texture.h"
 #include "ResourceHandles.h"
+#include "utilities.h"
 
 class BRDFIntegrationPass : public RenderPass {
 public:
@@ -19,7 +20,12 @@ public:
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 
-		CreateRootSignature();
+		m_commandList->Close();
+		
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
+        m_copyCommandList->Close();
+
+        CreateRootSignature();
 		CreatePSO();
     }
 
@@ -31,8 +37,8 @@ public:
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.xRes, context.yRes);
-        CD3DX12_RECT scissorRect(0, 0, context.xRes, context.yRes);
+        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, 512, 512);
+        CD3DX12_RECT scissorRect(0, 0, 512, 512);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
 
@@ -47,6 +53,13 @@ public:
 
 		commandList->Close();
 
+		invalidated = false;
+
+        m_copyCommandList->Reset(m_allocator.Get(), nullptr);
+        auto path = GetCacheFilePath(L"lut.dds", L"luts");
+        SaveTextureToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_lutTexture.get(), path);
+		m_copyCommandList->Close();
+
 		return { commandList.Get() };
     }
 
@@ -60,6 +73,7 @@ private:
     std::shared_ptr<Texture> m_lutTexture = nullptr;
 
 	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ComPtr<ID3D12GraphicsCommandList> m_copyCommandList;
 	ComPtr<ID3D12CommandAllocator> m_allocator;
 
     ComPtr<ID3D12RootSignature> rootSignature;

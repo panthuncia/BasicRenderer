@@ -17,6 +17,7 @@ public:
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 
+		m_commandList->Close();
 		CreateDebugRootSignature();
 		CreateDebugPSO();
     }
@@ -29,6 +30,12 @@ public:
         auto& commandList = m_commandList;
         ThrowIfFailed(m_allocator->Reset());
 		commandList->Reset(m_allocator.Get(), nullptr);
+
+        ID3D12DescriptorHeap* descriptorHeaps[] = {
+            context.textureDescriptorHeap, // The texture descriptor heap
+            context.samplerDescriptorHeap, // The sampler descriptor heap
+        };
+        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
