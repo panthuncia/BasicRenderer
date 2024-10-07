@@ -47,7 +47,7 @@ public:
     std::vector<ReadbackRequest>& GetPendingReadbackRequests();
 
 private:
-    ComPtr<IDXGIFactory6> factory;
+    ComPtr<IDXGIFactory7> factory;
     ComPtr<ID3D12Device> device;
     ComPtr<IDXGISwapChain4> swapChain;
     ComPtr<ID3D12CommandQueue> commandQueue;

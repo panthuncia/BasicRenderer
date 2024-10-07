@@ -658,7 +658,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     baseColor.rgb = SRGBToLinear(baseColor.rgb);
 #endif //BASE_COLOR_TEXTURE
 #if defined(PBR)
-        baseColor = materialInfo.baseColorFactor * baseColor;
+    baseColor = materialInfo.baseColorFactor * baseColor;
 #endif // PBR
     float3 normalWS = input.normalWorldSpace.xyz;
     

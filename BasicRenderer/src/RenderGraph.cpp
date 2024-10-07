@@ -85,6 +85,7 @@ std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) 
 void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto& queue = manager.GetCommandQueue();
+    m_commandAllocator->Reset();
     for (auto& batch : batches) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set

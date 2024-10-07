@@ -12,21 +12,35 @@
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+struct FrameContext {
+    ID3D12CommandAllocator* CommandAllocator;
+    UINT64                  FenceValue;
+};
+
+static UINT g_frameIndex = 0;
+static HANDLE g_hSwapChainWaitableObject = nullptr;
+constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 2;
+static FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {};
+static ID3D12Fence* g_fence = nullptr;
+static HANDLE g_fenceEvent = nullptr;
+static UINT64 g_fenceLastSignaledValue = 0;
+
 class Menu {
 public:
     static Menu& GetInstance();
 
-    void Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue);
+    void Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain);
     void Render(const RenderContext& context);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> g_pd3dSrvDescHeap = nullptr;
     Menu() { ImGui::CreateContext(); };
+	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swapChain = nullptr;
     Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_allocator;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    FrameContext* WaitForNextFrameResources();
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 	bool show_demo_window = true;
@@ -42,12 +56,15 @@ inline bool Menu::HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
 }
 
-inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue) {
+inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain) {
     this->device = device;
     this->commandQueue = queue;
+	m_swapChain = swapChain;
 
-    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
-    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+    for (UINT i = 0; i < NUM_FRAMES_IN_FLIGHT; i++)
+        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_frameContext[i].CommandAllocator)));
+
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_frameContext[0].CommandAllocator, nullptr, IID_PPV_ARGS(&m_commandList)));
     m_commandList->Close();
 
     D3D12_DESCRIPTOR_HEAP_DESC desc = {};
@@ -57,7 +74,6 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     if (device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&g_pd3dSrvDescHeap)) != S_OK)
 		throw std::runtime_error("Failed to create descriptor heap");
 
-    constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 1;
     IMGUI_CHECKVERSION();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
@@ -74,6 +90,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         g_pd3dSrvDescHeap->GetCPUDescriptorHandleForHeapStart(),
         g_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart());
 
+    g_hSwapChainWaitableObject = m_swapChain->GetFrameLatencyWaitableObject();
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -106,7 +123,10 @@ inline void Menu::Render(const RenderContext& context) {
 	// Rendering
 	ImGui::Render();
 
-	m_commandList->Reset(m_allocator.Get(), nullptr);
+    FrameContext* frameCtx = WaitForNextFrameResources();
+
+    frameCtx->CommandAllocator->Reset();
+    m_commandList->Reset(frameCtx->CommandAllocator, nullptr);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
     CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
@@ -120,4 +140,26 @@ inline void Menu::Render(const RenderContext& context) {
 
 	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
 	commandQueue->ExecuteCommandLists(1, ppCommandLists);
+}
+
+inline FrameContext* Menu::WaitForNextFrameResources() {
+    UINT nextFrameIndex = g_frameIndex + 1;
+    g_frameIndex = nextFrameIndex;
+
+    HANDLE waitableObjects[] = { g_hSwapChainWaitableObject, nullptr };
+    DWORD numWaitableObjects = 1;
+
+    FrameContext* frameCtx = &g_frameContext[nextFrameIndex % NUM_FRAMES_IN_FLIGHT];
+    UINT64 fenceValue = frameCtx->FenceValue;
+    if (fenceValue != 0) // means no fence was signaled
+    {
+        frameCtx->FenceValue = 0;
+        g_fence->SetEventOnCompletion(fenceValue, g_fenceEvent);
+        waitableObjects[1] = g_fenceEvent;
+        numWaitableObjects = 2;
+    }
+
+    WaitForMultipleObjects(numWaitableObjects, waitableObjects, TRUE, INFINITE);
+
+    return frameCtx;
 }

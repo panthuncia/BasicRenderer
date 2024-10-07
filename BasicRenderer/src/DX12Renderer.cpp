@@ -81,7 +81,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     SetSettings();
     LoadPipeline(hwnd, x_res, y_res);
     CreateGlobalResources();
-	Menu::GetInstance().Initialize(hwnd, device, commandQueue);
+	Menu::GetInstance().Initialize(hwnd, device, commandQueue, swapChain);
 }
 
 void DX12Renderer::CreateGlobalResources() {
