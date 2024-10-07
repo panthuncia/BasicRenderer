@@ -118,3 +118,5 @@ std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& 
 inline uint16_t CalculateMipLevels(uint16_t width, uint16_t height) {
     return static_cast<uint16_t>(std::floor(std::log2((std::max)(width, height)))) + 1;
 }
+
+std::string tolower(const std::string& str);

@@ -897,3 +897,9 @@ std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& 
     std::filesystem::path filePath = cacheDir / fileName;
     return filePath.wstring();
 }
+
+std::string tolower(const std::string& str) {
+	std::string lower = str;
+	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+	return lower;
+}
