@@ -7,6 +7,8 @@
 #include <memory>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
+#include <imgui.h>
+
 #include "pix/pix3.h"
 #include "Mesh.h"
 #include "DX12Renderer.h"
@@ -16,6 +18,7 @@
 #include "PSOManager.h"
 #include "Light.h"
 #include "Material.h"
+#include "Menu.h"
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
@@ -314,12 +317,30 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 // Window callback procedure
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
-    renderer.GetInputManager().ProcessInput(message, wParam, lParam);
+
+	if (Menu::GetInstance().HandleInput(hWnd, message, wParam, lParam)) {
+		return true;
+    }
+
+    ImGuiIO& io = ImGui::GetIO();
+
+    // Check if the mouse is hovering any ImGui window
+    bool isMouseOverAnyWindow = ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || ImGui::IsAnyItemHovered();
+
+    // Otherwise, we rely on ImGui's own input capture logic
+    bool isMouseCaptured = io.WantCaptureMouse;
+    bool isKeyboardCaptured = io.WantCaptureKeyboard;
+
+    // If neither the mouse nor the keyboard is captured by ImGui, pass input to the renderer
+	// Also allow the renderer to process key up events to prevent the camera from getting stuck moving.
+    if ((!isMouseCaptured && !isKeyboardCaptured) || message == WM_KEYUP || !isMouseOverAnyWindow) {
+        renderer.GetInputManager().ProcessInput(message, wParam, lParam);
+    }
 
     switch (message)
     {
     case WM_INPUT:
-        ProcessRawInput(lParam);
+        //ProcessRawInput(lParam);
         break;
     case WM_DESTROY:
         PostQuitMessage(0);

@@ -26,6 +26,7 @@
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "TextureDescription.h"
+#include "Menu.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 
@@ -80,6 +81,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     SetSettings();
     LoadPipeline(hwnd, x_res, y_res);
     CreateGlobalResources();
+	Menu::GetInstance().Initialize(hwnd, device, commandQueue);
 }
 
 void DX12Renderer::CreateGlobalResources() {
@@ -142,7 +144,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     // Create device
     ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
-    ComPtr<ID3D12Device> device;
 
     ThrowIfFailed(D3D12CreateDevice(
         bestAdapter.Get(),
@@ -343,6 +344,8 @@ void DX12Renderer::Render() {
     commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
 	currentRenderGraph->Execute(m_context); // Main render graph execution
+
+	Menu::GetInstance().Render(m_context); // Render menu
 
     commandList->Reset(commandAllocator.Get(), nullptr);
 
