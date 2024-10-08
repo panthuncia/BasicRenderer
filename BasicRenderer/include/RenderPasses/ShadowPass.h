@@ -32,6 +32,13 @@ public:
 		ThrowIfFailed(m_allocator->Reset());
 		commandList->Reset(m_allocator.Get(), nullptr);
 
+		ID3D12DescriptorHeap* descriptorHeaps[] = {
+			context.textureDescriptorHeap, // The texture descriptor heap
+			context.samplerDescriptorHeap, // The sampler descriptor heap
+		};
+
+		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
 		auto shadowRes = getShadowResolution();
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, shadowRes, shadowRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, shadowRes, shadowRes);

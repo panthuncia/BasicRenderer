@@ -293,7 +293,7 @@ std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera
         float minZ = XMVectorGetZ(minPoint);
         float maxZ = XMVectorGetZ(maxPoint);
 
-        XMMATRIX orthoMatrix = XMMatrixOrthographicOffCenterRH(minX, maxX, minY, maxY, minZ - 20.0f, maxZ + 20.0f);
+        XMMATRIX orthoMatrix = XMMatrixOrthographicOffCenterRH(minX, maxX, minY, maxY, minZ - 100.0f, maxZ + 100.0f);
 
         cascades.push_back({ splitDist, orthoMatrix, lightViewMatrix });
 

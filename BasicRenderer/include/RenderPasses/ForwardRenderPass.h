@@ -49,11 +49,6 @@ public:
 		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-		// Clear the render target
-		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-		commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 		auto rootSignature = psoManager.GetRootSignature();

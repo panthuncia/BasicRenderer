@@ -337,6 +337,16 @@ void DX12Renderer::Render() {
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
+    
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.rtvDescriptorSize);
+    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+    // Clear the render target
+    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
     commandList->Close();
 
     // Execute the command list
@@ -547,8 +557,6 @@ void DX12Renderer::CreateRenderGraph() {
         currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
     }
 
-	currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
-
     if (m_currentSkybox != nullptr) {
         currentRenderGraph->AddResource(m_currentSkybox);
         auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
@@ -556,6 +564,9 @@ void DX12Renderer::CreateRenderGraph() {
         skyboxPassParameters.shaderResources.push_back(m_currentSkybox);
         currentRenderGraph->AddPass(skyboxPass, skyboxPassParameters);
     }
+
+    currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
+
 	auto debugPass = std::make_shared<DebugRenderPass>();
 	currentRenderGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
 	currentRenderGraph->Compile();
