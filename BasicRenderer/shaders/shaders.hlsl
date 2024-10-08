@@ -225,44 +225,13 @@ PSInput VSMain(VSInput input) {
 }
 
 float3 LinearToSRGB(float3 color) {
-    // Clamp color to the [0, 1] range
-    float3 result = saturate(color);
-
-    // Apply the sRGB gamma curve using select for component-wise operation
-    float3 linearThreshold = float3(0.0031308, 0.0031308, 0.0031308);
-    float3 sRGBMultiplier = float3(12.92, 12.92, 12.92);
-    float3 sRGBOffset = float3(0.055, 0.055, 0.055);
-    float3 sRGBScale = float3(1.055, 1.055, 1.055);
-
-    // Calculate using select() for component-wise conditional evaluation
-    result = select(
-        sRGBScale * pow(result, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - sRGBOffset,
-        sRGBMultiplier * result,
-        result <= linearThreshold
-    );
-
-    return result;
+    static const float invGamma = 1/2.2;
+    return pow(color, float3(invGamma, invGamma, invGamma));
 }
 
 float3 SRGBToLinear(float3 color) {
-    // Clamp color to the [0, 1] range
-    float3 result = saturate(color);
-
-    // Apply the inverse sRGB gamma curve using select for component-wise operation
-    float3 sRGBThreshold = float3(0.04045, 0.04045, 0.04045);
-    float3 linearMultiplier = float3(12.92, 12.92, 12.92);
-    float3 linearOffset = float3(0.055, 0.055, 0.055);
-    float3 linearScale = float3(1.055, 1.055, 1.055);
-    float3 gamma = float3(2.4, 2.4, 2.4);
-
-    // Calculate using select() for component-wise conditional evaluation
-    result = select(
-        pow((result + linearOffset) / linearScale, gamma),
-        result / linearMultiplier,
-        result <= sRGBThreshold
-    );
-
-    return result;
+    float gamma = 2.2;
+    return pow(color, float3(gamma, gamma, gamma));
 }
 
 // Parallax shadowing, very expensive method (per-fragment*per-light tangent-space raycast)
@@ -522,6 +491,26 @@ float3 reinhardJodie(float3 color) {
     return lerp(reinhardLuminance, reinhardPerChannel, reinhardPerChannel);
 }
 
+float3 toneMap_KhronosPbrNeutral(float3 color) {
+    const float startCompression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression)
+        return color;
+
+    const float d = 1. - startCompression;
+    float newPeak = 1. - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+
+    float g = 1. - 1. / (desaturation * (peak - newPeak) + 1.);
+    return lerp(color, newPeak * float3(1, 1, 1), g);
+}
+
 float unprojectDepth(float depth, float near, float far) {
     return near * far / (far - depth * (far - near));
 }
@@ -620,6 +609,53 @@ float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo lig
     float bias = 0.0008;
     float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
+}
+
+
+float clampedDot(float3 x, float3 y) {
+    return clamp(dot(x, y), 0.0, 1.0);
+}
+
+float4 getSpecularSample(float3 reflection, float lod, TextureCube<float4> prefilteredEnvironment, SamplerState environmentSampler) {
+    float4 textureSample = prefilteredEnvironment.SampleLevel(environmentSampler, reflection, lod); //textureLod(u_GGXEnvSampler, u_EnvRotation * reflection, lod);
+    textureSample.rgb *= 2.0; // u_EnvIntensity;
+    return textureSample;
+}
+
+float3 getDiffuseLight(float3 n, TextureCube<float4> environmentRadiance, SamplerState radianceSampler) {
+    float3 textureSample = environmentRadiance.Sample(radianceSampler, n).rgb; //texture(u_LambertianEnvSampler, u_EnvRotation * n);
+    textureSample.rgb *= 1.0;//0.3; //u_EnvIntensity;
+    return textureSample.rgb;
+}
+
+float3 getIBLRadianceGGX(float3 n, float3 v, float roughness, TextureCube<float4> prefilteredEnvironment, SamplerState environmentSampler) {
+    float NdotV = clampedDot(n, v);
+    float lod = roughness * float(12 - 1);
+    float3 reflection = normalize(reflect(-v, n));
+    float4 specularSample = getSpecularSample(reflection, lod, prefilteredEnvironment, environmentSampler);
+
+    float3 specularLight = specularSample.rgb;
+
+    return specularLight;
+}
+
+float3 getIBLGGXFresnel(float3 n, float3 v, float roughness, float3 F0, float specularWeight, Texture2D<float2> LUT, SamplerState samplerState) {
+    // see https://bruop.github.io/ibl/#single_scattering_results at Single Scattering Results
+    // Roughness dependent fresnel, from Fdez-Aguera
+    float NdotV = clampedDot(n, v);
+    float2 brdfSamplePoint = clamp(float2(NdotV, roughness), float2(0.0, 0.0), float2(1.0, 1.0));
+    float2 f_ab = LUT.Sample(samplerState, brdfSamplePoint); // texture(u_GGXLUT, brdfSamplePoint).rg;
+    float invRoughness = 1.0 - roughness;
+    float3 Fr = max(float3(invRoughness, invRoughness, invRoughness), F0) - F0;
+    float3 k_S = F0 + Fr * pow(1.0 - NdotV, 5.0);
+    float3 FssEss = specularWeight * (k_S * f_ab.x + f_ab.y);
+
+    // Multiple scattering, from Fdez-Aguera
+    float Ems = (1.0 - (f_ab.x + f_ab.y));
+    float3 F_avg = specularWeight * (F0 + (1.0 - F0) / 21.0);
+    float3 FmsEms = Ems * FssEss * F_avg / (1.0 - F_avg * Ems);
+
+    return FssEss + FmsEms;
 }
 
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
@@ -735,30 +771,37 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
     SamplerState aoSamplerState = SamplerDescriptorHeap[materialInfo.aoSamplerIndex];
     ao = aoTexture.Sample(aoSamplerState, uv).r;
-#endif // AO_TEXTURE
-#if defined(IMAGE_BASED_LIGHTING)
-    float3 kS = fresnelSchlickRoughness(max(dot(normalWS, viewDir), 0.0), F0, roughness);
-    float3 kD = 1.0 - kS;
-    TextureCube <float4> irradianceMap = ResourceDescriptorHeap[perFrameBuffer.environmentIrradianceMapIndex];
+#endif
+    
+  #if defined(IMAGE_BASED_LIGHTING)
+  
+    // irradiance
+    TextureCube<float4> irradianceMap = ResourceDescriptorHeap[perFrameBuffer.environmentIrradianceMapIndex];
     SamplerState irradianceSampler = SamplerDescriptorHeap[perFrameBuffer.environmentIrradianceSamplerIndex];
-    float3 irradiance = irradianceMap.Sample(irradianceSampler, normalWS).rgb;
-    float3 diffuse = irradiance * baseColor.xyz;
+    float3 f_diffuse = getDiffuseLight(normalWS, irradianceMap, irradianceSampler) * baseColor.rgb;
     
-    const float MAX_REFLECTION_LOD = 12.0;
-    float3 R = reflect(-viewDir, normalWS);
-    TextureCube<float4> prefilteredMap = ResourceDescriptorHeap[perFrameBuffer.environmentPrefilteredMapIndex];
+    // metallic and dielectric specular
+    TextureCube<float4> prefilteredEnvironment = ResourceDescriptorHeap[perFrameBuffer.environmentPrefilteredMapIndex];
     SamplerState prefilteredSampler = SamplerDescriptorHeap[perFrameBuffer.environmentPrefilteredSamplerIndex];
-    float roughnessLod = roughness * MAX_REFLECTION_LOD;
-    float3 reflection = prefilteredMap.SampleLevel(prefilteredSampler, R, roughnessLod).rgb;
+    float3 f_specular_metal = getIBLRadianceGGX(normalWS, viewDir, roughness, prefilteredEnvironment, prefilteredSampler);
+    float3 f_specular_dielectric = f_specular_metal;
     
+    // Metallic fresnel
     Texture2D<float2> brdfLUT = ResourceDescriptorHeap[perFrameBuffer.environmentBRDFLUTIndex];
     SamplerState brdfSampler = SamplerDescriptorHeap[perFrameBuffer.environmentBRDFLUTSamplerIndex];
-    float2 brdf = brdfLUT.Sample(brdfSampler, float2(max(dot(normalWS, viewDir), 0.0), roughness)).rg;
+    float3 f_metal_fresnel_ibl = getIBLGGXFresnel(normalWS, viewDir, roughness, baseColor.rgb, 1.0, brdfLUT, brdfSampler);
+    float3 f_metal_brdf_ibl = f_metal_fresnel_ibl * f_specular_metal;
     
-    float3 specular = reflection * (kS * brdf.x + brdf.y);
+    // Dielectric fresnel
+    float specularWeight = 1.0;
+    float3 f_dielectric_fresnel_ibl = getIBLGGXFresnel(normalWS, viewDir, roughness, baseColor.rgb, specularWeight, brdfLUT, brdfSampler);
+    float3 f_dielectric_brdf_ibl = lerp(f_diffuse, f_specular_dielectric, f_dielectric_fresnel_ibl);
     
-    float3 ambient = (kD * diffuse + specular) * ao;
-#else
+    float3 ambient = lerp(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
+    
+    //return float4(lighting, 1.0);
+    
+#else 
     float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz * ao;
 #endif // IMAGE_BASED_LIGHTING
     
@@ -777,6 +820,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
     // Reinhard tonemapping
     lighting = reinhardJodie(lighting);
+    //lighting = toneMap_KhronosPbrNeutral(lighting);
 #if defined(PBR)
     // Gamma correction
     lighting = LinearToSRGB(lighting);
