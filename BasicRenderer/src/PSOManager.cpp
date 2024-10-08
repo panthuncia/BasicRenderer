@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <spdlog/spdlog.h>
+#include <filesystem>
 
 #include "DirectX/d3dx12.h"
 #include "Utilities.h"
@@ -206,7 +207,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     ComPtr<IDxcIncludeHandler> includeHandler;
 
     UINT32 codePage = CP_UTF8;
-    pUtils->LoadFile(filename.c_str(), &codePage, &sourceBlob);
+    pUtils->LoadFile((std::filesystem::path(GetExePath())/filename).c_str(), &codePage, &sourceBlob);
     //library->CreateIncludeHandler(&includeHandler);
 
     DxcBuffer sourceBuffer;

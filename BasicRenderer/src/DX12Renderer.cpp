@@ -631,8 +631,15 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
         rebuildRenderGraph = true;
     }
     else {
-        auto skyHDR = loadTextureFromFile("textures/environment/"+ws2s(name)+".hdr");
-		SetEnvironmentTexture(skyHDR, ws2s(name));
+        std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
+        
+        if (std::filesystem::exists(envpath)) {
+            auto skyHDR = loadTextureFromFile(envpath.string());
+            SetEnvironmentTexture(skyHDR, ws2s(name));
+        }
+        else {
+            spdlog::error("Environment file not found: " + envpath.string());
+        }
     }
 }
 

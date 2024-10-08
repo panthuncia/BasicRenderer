@@ -8,6 +8,8 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 #include <functional>
+#include <windows.h>
+#include <filesystem>
 
 #include "RenderContext.h"
 #include "utilities.h"
@@ -47,6 +49,10 @@ private:
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
 
     void DrawEnvironmentsDropdown();
+    void DrawBrowseButton(const std::wstring& targetDirectory);
+
+    
+    std::filesystem::path environmentsDir;
 
     std::string environmentName;
     std::vector<std::string> hdrFiles;
@@ -78,6 +84,9 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     this->device = device;
     this->commandQueue = queue;
 	m_swapChain = swapChain;
+
+
+    environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
     for (UINT i = 0; i < NUM_FRAMES_IN_FLIGHT; i++)
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_frameContext[i].CommandAllocator)));
@@ -127,7 +136,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
 	shadowsEnabled = getShadowsEnabled();
 
-    hdrFiles = GetFilesInDirectoryMatchingExtension(L"textures/environment", L".hdr");
+    hdrFiles = GetFilesInDirectoryMatchingExtension(environmentsDir.wstring(), L".hdr");
 	environmentName = getEnvironmentName();
     settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
         environmentName = getEnvironmentName();
@@ -155,6 +164,7 @@ inline void Menu::Render(const RenderContext& context) {
 			setShadowsEnabled(shadowsEnabled);
 		}
         DrawEnvironmentsDropdown();
+        DrawBrowseButton(environmentsDir.wstring());
 
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();
@@ -233,5 +243,24 @@ inline void Menu::DrawEnvironmentsDropdown() {
                 ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
+    }
+}
+
+
+inline void Menu::DrawBrowseButton(const std::wstring& targetDirectory) {
+    if (ImGui::Button("Browse"))
+    {
+        std::wstring selectedFile;
+        if (OpenFileDialog(selectedFile))
+        {
+            spdlog::info("Selected file: {}", ws2s(selectedFile));
+
+            CopyFileToDirectory(selectedFile, targetDirectory);
+            hdrFiles = GetFilesInDirectoryMatchingExtension(environmentsDir, L".hdr");
+        }
+        else
+        {
+            spdlog::warn("No file selected.");
+        }
     }
 }

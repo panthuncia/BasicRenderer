@@ -122,3 +122,9 @@ inline uint16_t CalculateMipLevels(uint16_t width, uint16_t height) {
 std::string tolower(const std::string& str);
 
 std::vector<std::string> GetFilesInDirectoryMatchingExtension(const std::wstring& directory, const std::wstring& extension);
+
+bool OpenFileDialog(std::wstring& selectedFile);
+
+void CopyFileToDirectory(const std::wstring& sourceFile, const std::wstring& destinationDirectory);
+
+std::wstring GetExePath();

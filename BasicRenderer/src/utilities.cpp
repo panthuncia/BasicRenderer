@@ -10,6 +10,7 @@
 #include <future>
 #include <functional>
 #include <filesystem>
+#include <fstream>
 
 #include "MeshUtilities.h"
 #include "PSOFlags.h"
@@ -924,4 +925,56 @@ std::vector<std::string> GetFilesInDirectoryMatchingExtension(const std::wstring
     }
 
     return hdrFiles;
+}
+
+bool OpenFileDialog(std::wstring& selectedFile) {
+    // Buffer for the selected file path
+    wchar_t fileBuffer[MAX_PATH] = { 0 };
+
+    OPENFILENAMEW ofn;
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;  // Handle to owner window (can be NULL for now)
+    ofn.lpstrFile = fileBuffer;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrFilter = L"HDR Files\0*.hdr\0All Files\0*.*\0";
+    ofn.nFilterIndex = 1;  // Default to .hdr files
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;  // Prevent directory change
+
+    // Show the file dialog
+    if (GetOpenFileNameW(&ofn) == TRUE)
+    {
+        selectedFile = fileBuffer;
+        return true;  // File was selected
+    }
+
+    return false;  // Dialog was canceled or failed
+}
+
+void CopyFileToDirectory(const std::wstring& sourceFile, const std::wstring& destinationDirectory) {
+    try
+    {
+        std::filesystem::path destinationPath = destinationDirectory;
+        destinationPath /= std::filesystem::path(sourceFile).filename();  // Use the same file name
+
+        // Copy the file to the destination
+        std::filesystem::copy_file(sourceFile, destinationPath, std::filesystem::copy_options::overwrite_existing);
+
+        std::ofstream fileStream(destinationPath, std::ios::out | std::ios::binary | std::ios::app);
+        fileStream.flush();  // Flush the file stream to ensure the data is written
+        fileStream.close();
+
+        spdlog::info("File copied to: {}", ws2s(destinationPath.wstring()));
+    }
+    catch (const std::exception& e)
+    {
+        spdlog::error(std::string("Error copying file: ") + e.what());
+    }
+}
+
+std::wstring GetExePath() {
+    TCHAR buffer[MAX_PATH] = { 0 };
+    GetModuleFileName(NULL, buffer, MAX_PATH);
+    std::wstring::size_type pos = std::wstring(buffer).find_last_of(L"\\/");
+    return std::wstring(buffer).substr(0, pos);
 }
