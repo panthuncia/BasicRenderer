@@ -74,7 +74,7 @@ std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::wstring& nam
 }
 
 std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) {
-    if (passesByName.contains(name)) {
+    if (passesByName.find(name)!= passesByName.end()) {
         return passesByName[name];
     }
     else {

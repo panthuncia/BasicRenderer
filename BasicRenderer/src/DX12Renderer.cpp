@@ -505,7 +505,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
-    currentRenderGraph = std::make_unique<RenderGraph>();
+    auto newGraph = std::make_unique<RenderGraph>();
 
     auto forwardPass = std::make_shared<ForwardRenderPass>(getWireframe());
     auto forwardPassParameters = PassParameters();
@@ -531,61 +531,77 @@ void DX12Renderer::CreateRenderGraph() {
 		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
 		auto brdfIntegrationPassParameters = PassParameters();
 		brdfIntegrationPassParameters.renderTargets.push_back(m_lutTexture);
-		currentRenderGraph->AddPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
+        newGraph->AddPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
     }
 
-    currentRenderGraph->AddResource(m_lutTexture);
+    newGraph->AddResource(m_lutTexture);
 	forwardPassParameters.shaderResources.push_back(m_lutTexture);
 
-    if (m_currentEnvironmentTexture != nullptr) {
-        currentRenderGraph->AddResource(m_currentEnvironmentTexture);
-		currentRenderGraph->AddResource(m_currentSkybox);
-		currentRenderGraph->AddResource(m_environmentIrradiance);
+    // Check if we've already computed this environment
+    bool skipEnvironmentPass = false;
+    if (currentRenderGraph != nullptr) {
+        auto currentEnvironmentPass = currentRenderGraph->GetPassByName("EnvironmentConversionPass");
+        if (currentEnvironmentPass != nullptr) {
+            if (!currentEnvironmentPass->IsInvalidated()) {
+                skipEnvironmentPass = true;
+				MarkForDelete(m_currentEnvironmentTexture);
+                m_currentEnvironmentTexture = nullptr;
+            }
+        }
+    }
+
+    if (m_currentEnvironmentTexture != nullptr && !skipEnvironmentPass) {
+
+        newGraph->AddResource(m_currentEnvironmentTexture);
+        newGraph->AddResource(m_currentSkybox);
+        newGraph->AddResource(m_environmentIrradiance);
         auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
         auto environmentConversionPassParameters = PassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
         environmentConversionPassParameters.renderTargets.push_back(m_environmentIrradiance);
-        currentRenderGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
+        newGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
-		currentRenderGraph->AddResource(m_prefilteredEnvironment);
+        newGraph->AddResource(m_prefilteredEnvironment);
 		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 		auto environmentFilterPassParameters = PassParameters();
 		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
 		environmentFilterPassParameters.renderTargets.push_back(m_prefilteredEnvironment);
-		currentRenderGraph->AddPass(environmentFilterPass, environmentFilterPassParameters, "EnvironmentFilterPass");
+        newGraph->AddPass(environmentFilterPass, environmentFilterPassParameters, "EnvironmentFilterPass");
     }
 
     if (m_prefilteredEnvironment != nullptr) {
-		currentRenderGraph->AddResource(m_prefilteredEnvironment);
+        newGraph->AddResource(m_prefilteredEnvironment);
 		forwardPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
     }
 
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
-        currentRenderGraph->AddResource(m_shadowMaps);
+        newGraph->AddResource(m_shadowMaps);
 
         auto shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
         auto shadowPassParameters = PassParameters();
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
-        currentRenderGraph->AddPass(shadowPass, shadowPassParameters);
+        newGraph->AddPass(shadowPass, shadowPassParameters);
     }
 
     if (m_currentSkybox != nullptr) {
-        currentRenderGraph->AddResource(m_currentSkybox);
+        newGraph->AddResource(m_currentSkybox);
         auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
         auto skyboxPassParameters = PassParameters();
         skyboxPassParameters.shaderResources.push_back(m_currentSkybox);
-        currentRenderGraph->AddPass(skyboxPass, skyboxPassParameters);
+        newGraph->AddPass(skyboxPass, skyboxPassParameters);
     }
 
-    currentRenderGraph->AddPass(forwardPass, forwardPassParameters);
+    newGraph->AddPass(forwardPass, forwardPassParameters);
 
 	auto debugPass = std::make_shared<DebugRenderPass>();
-	currentRenderGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
-	currentRenderGraph->Compile();
-    currentRenderGraph->Setup(commandQueue.Get());
+    newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+    newGraph->Compile();
+    newGraph->Setup(commandQueue.Get());
+
+	currentRenderGraph = std::move(newGraph);
 
 	rebuildRenderGraph = false;
 }
