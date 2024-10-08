@@ -293,6 +293,7 @@ std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera
         float minZ = XMVectorGetZ(minPoint);
         float maxZ = XMVectorGetZ(maxPoint);
 
+        // TODO: Figure out why the cascades are kinda broken. Hack by making them thicc for now.
         XMMATRIX orthoMatrix = XMMatrixOrthographicOffCenterRH(minX, maxX, minY, maxY, minZ - 100.0f, maxZ + 100.0f);
 
         cascades.push_back({ splitDist, orthoMatrix, lightViewMatrix });
@@ -902,4 +903,25 @@ std::string tolower(const std::string& str) {
 	std::string lower = str;
 	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
 	return lower;
+}
+
+std::vector<std::string> GetFilesInDirectoryMatchingExtension(const std::wstring& directory, const std::wstring& extension) {
+    std::vector<std::string> hdrFiles;
+
+    try
+    {
+        for (const auto& entry : std::filesystem::directory_iterator(directory))
+        {
+            if (entry.is_regular_file() && entry.path().extension() == extension)
+            {
+                hdrFiles.push_back(entry.path().stem().string());
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        spdlog::error(std::string("Error accessing directory: ") + e.what());
+    }
+
+    return hdrFiles;
 }

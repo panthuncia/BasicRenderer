@@ -107,6 +107,8 @@ void DX12Renderer::SetSettings() {
         SubmitReadbackRequest(std::move(request));
 		});
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
+	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
+	settingsManager.registerSetting<std::string>("environmentName", "");
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -115,8 +117,16 @@ void DX12Renderer::SetSettings() {
 	getWireframe = settingsManager.getSettingGetter<bool>("wireframe");
 	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
 	getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+    settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
+            // Trigger recompilation of the render graph when setting changes
+		    rebuildRenderGraph = true;
+        });
 	getSkyboxResolution = settingsManager.getSettingGetter<uint16_t>("skyboxResolution");
 	setImageBasedLightingEnabled = settingsManager.getSettingSetter<bool>("enableImageBasedLighting");
+	setEnvironment = settingsManager.getSettingSetter<std::string>("environmentName");
+	settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
+		SetEnvironmentInternal(s2ws(newValue));
+		});
 }
 
 void EnableShaderBasedValidation() {
@@ -375,6 +385,8 @@ void DX12Renderer::Render() {
     WaitForPreviousFrame();
 
     ProcessReadbackRequests();
+
+    m_stuffToDelete.clear(); // Deferred deletion
 }
 
 void DX12Renderer::Cleanup() {
@@ -396,6 +408,10 @@ void DX12Renderer::CheckDebugMessages() {
         }
         infoQueue->ClearStoredMessages();
     }
+}
+
+void DX12Renderer::SetEnvironment(std::string environmentName) {
+	setEnvironment(environmentName);
 }
 
 ComPtr<ID3D12Device>& DX12Renderer::GetDevice() {
@@ -485,7 +501,6 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
         });
 
     context.SetActionHandler(InputAction::Z, [this](float magnitude, const InputData& inputData) {
-        ToggleShadows();
         });
 }
 
@@ -580,17 +595,16 @@ void DX12Renderer::ToggleWireframe() {
 	rebuildRenderGraph = true;
 }
 
-void DX12Renderer::ToggleShadows() {
-	setShadowsEnabled(!getShadowsEnabled());
-	rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SetEnvironment(std::wstring name) {
+void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
 	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
     auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
     auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
 	auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
-    if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath)) {
+    if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
+        if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
+            MarkForDelete(m_currentEnvironmentTexture);
+            m_currentEnvironmentTexture = nullptr;
+        }
 		// Load the cached environment
         auto skybox = loadCubemapFromFile(skyboxPath);
 		auto radiance = loadCubemapFromFile(radiancePath);
@@ -598,6 +612,7 @@ void DX12Renderer::SetEnvironment(std::wstring name) {
 		SetSkybox(skybox);
 		SetIrradiance(radiance);
 		SetPrefilteredEnvironment(prefiltered);
+        rebuildRenderGraph = true;
     }
     else {
         auto skyHDR = loadTextureFromFile("textures/environment/"+ws2s(name)+".hdr");
@@ -607,6 +622,9 @@ void DX12Renderer::SetEnvironment(std::wstring name) {
 
 void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName) {
 	m_environmentName = environmentName;
+	if (m_currentEnvironmentTexture != nullptr) { // Don't delete resources mid-frame
+		MarkForDelete(m_currentEnvironmentTexture);
+	}
     m_currentEnvironmentTexture = texture;
     m_currentEnvironmentTexture->SetName(L"EnvironmentTexture");
     auto buffer = m_currentEnvironmentTexture->GetBuffer();
@@ -665,12 +683,18 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 }
 
 void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
+    if (m_currentSkybox != nullptr) { // Don't delete resources mid-frame
+        MarkForDelete(m_currentSkybox);
+    }
     m_currentSkybox = texture;
     m_currentSkybox->SetName(L"Skybox");
     rebuildRenderGraph = true;
 }
 
 void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
+    if (m_environmentIrradiance != nullptr) { // Don't delete resources mid-frame
+        MarkForDelete(m_environmentIrradiance);
+    }
 	m_environmentIrradiance = texture;
     m_environmentIrradiance->SetName(L"EnvironmentRadiance");
     auto& manager = ResourceManager::GetInstance();
@@ -680,6 +704,9 @@ void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
 }
 
 void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
+	if (m_prefilteredEnvironment != nullptr) { // Don't delete resources mid-frame
+		MarkForDelete(m_prefilteredEnvironment);
+	}
 	m_prefilteredEnvironment = texture;
 	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");
 	auto& manager = ResourceManager::GetInstance();

@@ -39,8 +39,9 @@ cbuffer RootConstants2 : register(b4) {
     int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
 }
 
-cbuffer RootConstants3 : register(b5) {
-    matrix shadowViewMatrix; // Used for shadow mapping, shadow view matrix
+cbuffer Settings : register(b5) {
+    bool enableShadows;
+    bool enablePunctualLights;
 }
 
 struct LightInfo {
@@ -511,6 +512,47 @@ float3 toneMap_KhronosPbrNeutral(float3 color) {
     return lerp(color, newPeak * float3(1, 1, 1), g);
 }
 
+// sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT
+static const float3x3 ACESInputMat = float3x3
+(
+    0.59719, 0.07600, 0.02840,
+    0.35458, 0.90834, 0.13383,
+    0.04823, 0.01566, 0.83777
+);
+
+
+// ODT_SAT => XYZ => D60_2_D65 => sRGB
+static const float3x3 ACESOutputMat = float3x3
+(
+    1.60475, -0.10208, -0.00327,
+    -0.53108, 1.10813, -0.07276,
+    -0.07367, -0.00605, 1.07602
+);
+
+// ACES filmic tone map approximation
+// see https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
+float3 RRTAndODTFit(float3 color) {
+    float3 a = color * (color + 0.0245786) - 0.000090537;
+    float3 b = color * (0.983729 * color + 0.4329510) + 0.238081;
+    return a / b;
+}
+
+
+// tone mapping
+float3 toneMapACES_Hill(float3 color) {
+    color = mul(color, ACESInputMat);
+
+    // Apply RRT and ODT
+    color = RRTAndODTFit(color);
+
+    color = mul(color, ACESOutputMat);
+
+    // Clamp to [0, 1]
+    color = clamp(color, 0.0, 1.0);
+
+    return color;
+}
+
 float unprojectDepth(float depth, float near, float far) {
     return near * far / (far - depth * (far - near));
 }
@@ -733,38 +775,42 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #if defined(VERTEX_COLORS)
     baseColor *= input.color;
 #endif // VERTEX_COLORS
-    
     float3 lighting = float3(0.0, 0.0, 0.0);
-    StructuredBuffer<float4> pointShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
-    StructuredBuffer<float4> spotShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
-    StructuredBuffer<float4> directionalShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
     
-    for (uint i = 0; i < perFrameBuffer.numLights; i++) {
-        LightInfo light = lights[i];
-        float shadow = 0.0;
-        if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
-            switch (light.type) {
-                case 0:{ // Point light
-                        shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoBuffer);
+    if (enablePunctualLights) {
+        StructuredBuffer<float4> pointShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
+        StructuredBuffer<float4> spotShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
+        StructuredBuffer<float4> directionalShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+    
+        for (uint i = 0; i < perFrameBuffer.numLights; i++) {
+            LightInfo light = lights[i];
+            float shadow = 0.0;
+            if (enableShadows) {
+                if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
+                    switch (light.type) {
+                        case 0:{ // Point light
+                                shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoBuffer);
                         //return float4(shadow, shadow, shadow, 1.0);
-                        break;
+                                break;
+                            }
+                        case 1:{ // Spot light
+                                matrix lightMatrix = loadMatrixFromBuffer(spotShadowViewInfoBuffer, light.shadowViewInfoIndex);
+                                shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, lightMatrix);
+                                break;
+                            }
+                        case 2:{// Directional light
+                                shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
+                                break;
+                            }
                     }
-                case 1:{ // Spot light
-                        matrix lightMatrix = loadMatrixFromBuffer(spotShadowViewInfoBuffer, light.shadowViewInfoIndex);
-                        shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, lightMatrix);
-                        break;
-                    }
-                case 2:{// Directional light
-                        shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
-                        break;
-                    }
+                }
             }
-        }
 #if defined (PARALLAX)
         lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN, materialInfo.heightMapScale);
 #else
-        lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
+            lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
 #endif
+        }
     }
     float ao = 1.0;
 #if defined(AO_TEXTURE)
@@ -821,6 +867,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     // Reinhard tonemapping
     lighting = reinhardJodie(lighting);
     //lighting = toneMap_KhronosPbrNeutral(lighting);
+    //lighting = toneMapACES_Hill(lighting);
 #if defined(PBR)
     // Gamma correction
     lighting = LinearToSRGB(lighting);

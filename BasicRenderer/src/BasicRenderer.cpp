@@ -197,9 +197,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
     //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
-    //auto carScene = loadGLB("models/datsun.glb");
-    //carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
-    //carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+    auto carScene = loadGLB("models/datsun.glb");
+    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 
     auto mountainScene = loadGLB("models/terrain.glb");
 	mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
@@ -231,11 +231,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(*dragonScene);
     renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //renderer.GetCurrentScene()->AppendScene(*carScene);
+    renderer.GetCurrentScene()->AppendScene(*carScene);
 	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
-    renderer.SetEnvironment(L"studio");
+    renderer.SetEnvironment("studio");
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
     XMFLOAT3 up = XMFLOAT3(0.0f, 1.0f, 0.0f);

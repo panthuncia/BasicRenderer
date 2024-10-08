@@ -7,8 +7,10 @@
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
+#include <functional>
 
 #include "RenderContext.h"
+#include "utilities.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -42,9 +44,25 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
     FrameContext* WaitForNextFrameResources();
 
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-	bool show_demo_window = true;
-	bool show_another_window = false;
+    int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
+
+    void DrawEnvironmentsDropdown();
+
+    std::string environmentName;
+    std::vector<std::string> hdrFiles;
+
+	std::function<std::string()> getEnvironmentName;
+	std::function<void(std::string)> setEnvironment;
+
+	bool imageBasedLightingEnabled = false;
+    std::function<bool()> getImageBasedLightingEnabled;
+    std::function<void(bool)> setImageBasedLightingEnabled;
+	bool punctualLightingEnabled = false;
+	std::function<bool()> getPunctualLightingEnabled;
+	std::function<void(bool)> setPunctualLightingEnabled;
+    bool shadowsEnabled = false;
+	std::function<bool()> getShadowsEnabled;
+	std::function<void(bool)> setShadowsEnabled;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -78,6 +96,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    io.FontGlobalScale = 1.2f;
 
     // Setup Dear ImGui style
     ImGui::StyleColorsDark();
@@ -91,6 +110,28 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         g_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart());
 
     g_hSwapChainWaitableObject = m_swapChain->GetFrameLatencyWaitableObject();
+
+	getEnvironmentName = SettingsManager::GetInstance().getSettingGetter<std::string>("environmentName");
+	setEnvironment = SettingsManager::GetInstance().getSettingSetter<std::string>("environmentName");
+
+    auto& settingsManager = SettingsManager::GetInstance();
+    getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
+    setImageBasedLightingEnabled = settingsManager.getSettingSetter<bool>("enableImageBasedLighting");
+	imageBasedLightingEnabled = getImageBasedLightingEnabled();
+
+	getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
+	setPunctualLightingEnabled = settingsManager.getSettingSetter<bool>("enablePunctualLighting");
+	punctualLightingEnabled = getPunctualLightingEnabled();
+
+	getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
+	shadowsEnabled = getShadowsEnabled();
+
+    hdrFiles = GetFilesInDirectoryMatchingExtension(L"textures/environment", L".hdr");
+	environmentName = getEnvironmentName();
+    settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
+        environmentName = getEnvironmentName();
+        });
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -102,19 +143,18 @@ inline void Menu::Render(const RenderContext& context) {
 		static float f = 0.0f;
 		static int counter = 0;
 
-		ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
+		ImGui::Begin("Renderer Configuration");
 
-		ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-		ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-		ImGui::Checkbox("Another Window", &show_another_window);
-
-		ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f    
-		ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-		if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-			counter++;
-		ImGui::SameLine();
-		ImGui::Text("counter = %d", counter);
+        if (ImGui::Checkbox("Image-Based Lighting", &imageBasedLightingEnabled)) {
+			setImageBasedLightingEnabled(imageBasedLightingEnabled);
+        }
+		if (ImGui::Checkbox("Punctual Lighting", &punctualLightingEnabled)) {
+			setPunctualLightingEnabled(punctualLightingEnabled);
+		}
+		if (ImGui::Checkbox("Shadows", &shadowsEnabled)) {
+			setShadowsEnabled(shadowsEnabled);
+		}
+        DrawEnvironmentsDropdown();
 
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();
@@ -162,4 +202,36 @@ inline FrameContext* Menu::WaitForNextFrameResources() {
     WaitForMultipleObjects(numWaitableObjects, waitableObjects, TRUE, INFINITE);
 
     return frameCtx;
+}
+
+inline int Menu::FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile) {
+    for (int i = 0; i < hdrFiles.size(); ++i)
+    {
+        if (hdrFiles[i] == existingFile)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+inline void Menu::DrawEnvironmentsDropdown() {
+
+    static int selectedItemIndex = FindFileIndex(hdrFiles, environmentName);
+    if (ImGui::BeginCombo("HDR Files", hdrFiles[selectedItemIndex].c_str())) // Current item
+    {
+        for (int i = 0; i < hdrFiles.size(); ++i)
+        {
+            bool isSelected = (selectedItemIndex == i);
+            if (ImGui::Selectable(hdrFiles[i].c_str(), isSelected))
+            {
+                selectedItemIndex = i;  // Update the selected index
+				environmentName = hdrFiles[i];
+				setEnvironment(hdrFiles[i]);
+            }
+            if (isSelected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
 }

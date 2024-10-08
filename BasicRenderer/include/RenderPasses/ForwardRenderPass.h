@@ -15,7 +15,11 @@ class ForwardRenderPass : public RenderPass {
 public:
 	ForwardRenderPass(bool wireframe) {
 		m_wireframe = wireframe;
-		getImageBasedLightingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableImageBasedLighting");
+
+		auto& settingsManager = SettingsManager::GetInstance();
+		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
+		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
+		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 
 	}
 	void Setup() override {
@@ -53,6 +57,10 @@ public:
 
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
+
+		unsigned int settings[2] = {getShadowsEnabled(), getPunctualLightingEnabled()}; // HLSL bools are 32 bits
+		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
+		commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
@@ -109,4 +117,7 @@ private:
 	ComPtr<ID3D12CommandAllocator> m_allocator;
 	bool m_wireframe;
 	std::function<bool()> getImageBasedLightingEnabled;
+	std::function<bool()> getPunctualLightingEnabled;
+	std::function<bool()> getShadowsEnabled;
+
 };

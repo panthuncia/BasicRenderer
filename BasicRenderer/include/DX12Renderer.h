@@ -36,13 +36,12 @@ public:
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
     void SetDebugTexture(Texture* texture);
-    void SetEnvironment(std::wstring name);
+    void SetEnvironment(std::string name);
     void SetSkybox(std::shared_ptr<Texture> texture);
 	void SetIrradiance(std::shared_ptr<Texture> texture);
 	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
     void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
     void ToggleWireframe();
-	void ToggleShadows();
     void SubmitReadbackRequest(ReadbackRequest&& request);
     std::vector<ReadbackRequest>& GetPendingReadbackRequests();
 
@@ -91,19 +90,25 @@ private:
     std::mutex readbackRequestsMutex;
 	std::vector<ReadbackRequest> m_readbackRequests;
 
+    std::vector<std::shared_ptr<void>> m_stuffToDelete; // Some things need deferred deletion
+
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
     void CreateGlobalResources();
     void CreateRenderGraph();
     void SetSettings();
-
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateRootSignatureFromShaders(const std::vector<Microsoft::WRL::ComPtr<ID3DBlob>>& shaderBlobs);
+    void SetEnvironmentInternal(std::wstring name);
 
     void WaitForPreviousFrame();
     void CheckDebugMessages();
 
     void ProcessReadbackRequests();
+
+    template <typename T>
+    void MarkForDelete(const std::shared_ptr<T>& ptr) {
+        m_stuffToDelete.push_back(std::static_pointer_cast<void>(ptr));
+    }
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;
@@ -115,6 +120,7 @@ private:
 	std::function<bool()> getShadowsEnabled;
     std::function<uint16_t()> getSkyboxResolution;
 	std::function<void(bool)> setImageBasedLightingEnabled;
+	std::function<void(std::string)> setEnvironment;
 };
 
 #endif //DX12RENDERER_H
