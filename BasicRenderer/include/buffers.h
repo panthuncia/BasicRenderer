@@ -19,6 +19,7 @@ struct PerFrameCB {
 	unsigned int environmentPrefilteredSamplerIndex;
 	unsigned int environmentBRDFLUTIndex;
 	unsigned int environmentBRDFLUTSamplerIndex;
+    unsigned int outputType;
 };
 
 struct PerObjectCB {

@@ -72,7 +72,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<ISetting>> settings;
    
     SettingsManager() = default;
-    // Helper function to retrieve the setting by name
+    // Helper function to retrieve a setting by name
     ISetting& getSettingByName(const std::string& name) {
         if (settings.find(name) == settings.end()) {
             throw std::runtime_error("Setting not found: " + name);

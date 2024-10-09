@@ -22,18 +22,9 @@ public:
     virtual std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) = 0;
     virtual void Cleanup(RenderContext& context) = 0;
 
-    // Declare resources this pass will read from and write to
-    //virtual void DeclareResources() = 0;
-
-    // Accessors for resource lists
-    const std::vector<Resource*>& GetReadResources() const { return readResources; }
-    const std::vector<Resource*>& GetWriteResources() const { return writeResources; }
-
 	void Invalidate() { invalidated = true; }
 	bool IsInvalidated() const { return invalidated; }
 
 protected:
 	bool invalidated = true;
-    std::vector<Resource*> readResources;
-    std::vector<Resource*> writeResources;
 };

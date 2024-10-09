@@ -18,7 +18,7 @@ public:
 
     void Initialize() {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        // Create the constant buffer resource
+
         D3D12_HEAP_PROPERTIES heapProperties = {};
         heapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
         heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
@@ -51,15 +51,13 @@ public:
         );
 
         if (FAILED(hr)) {
-            // Handle error
             return;
         }
 
         // Map the constant buffer
-        D3D12_RANGE readRange = {}; // We do not intend to read from this resource on the CPU.
+        D3D12_RANGE readRange = {};
         hr = constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pConstantBuffer));
         if (FAILED(hr)) {
-            // Handle error
             return;
         }
 

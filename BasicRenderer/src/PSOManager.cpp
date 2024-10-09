@@ -216,11 +216,11 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     sourceBuffer.Encoding = 0;
 
     std::vector<LPCWSTR> arguments;
-    // -E for the entry point (eg. 'main')
+    // -E for the entry point
     arguments.push_back(L"-E");
     arguments.push_back(entryPoint.c_str());
 
-    // -T for the target profile (eg. 'ps_6_6')
+    // -T for the target profile (eg. ps_6_6)
     arguments.push_back(L"-T");
     arguments.push_back(target.c_str());
 

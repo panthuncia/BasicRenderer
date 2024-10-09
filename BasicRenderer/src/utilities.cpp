@@ -928,13 +928,12 @@ std::vector<std::string> GetFilesInDirectoryMatchingExtension(const std::wstring
 }
 
 bool OpenFileDialog(std::wstring& selectedFile) {
-    // Buffer for the selected file path
     wchar_t fileBuffer[MAX_PATH] = { 0 };
 
     OPENFILENAMEW ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = NULL;  // Handle to owner window (can be NULL for now)
+    ofn.hwndOwner = NULL;
     ofn.lpstrFile = fileBuffer;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrFilter = L"HDR Files\0*.hdr\0All Files\0*.*\0";
@@ -955,7 +954,7 @@ void CopyFileToDirectory(const std::wstring& sourceFile, const std::wstring& des
     try
     {
         std::filesystem::path destinationPath = destinationDirectory;
-        destinationPath /= std::filesystem::path(sourceFile).filename();  // Use the same file name
+        destinationPath /= std::filesystem::path(sourceFile).filename();
 
         // Copy the file to the destination
         std::filesystem::copy_file(sourceFile, destinationPath, std::filesystem::copy_options::overwrite_existing);

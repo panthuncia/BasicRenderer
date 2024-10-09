@@ -14,7 +14,7 @@ enum class InputMode {
     orbital
 };
 
-class InputManager; // Forward declaration
+class InputManager;
 
 class InputContext {
 public:

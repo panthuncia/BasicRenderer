@@ -20,7 +20,6 @@ public:
         return m_index;
     }
 
-    // Get the CPU handle for the sampler from the ResourceManager
     D3D12_CPU_DESCRIPTOR_HANDLE getHandle() const {
         return ResourceManager::GetInstance().getSamplerCPUHandle(m_index);
     }

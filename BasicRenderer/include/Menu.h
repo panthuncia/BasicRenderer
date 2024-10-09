@@ -13,7 +13,7 @@
 
 #include "RenderContext.h"
 #include "utilities.h"
-
+#include "OutputTypes.h"
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 struct FrameContext {
@@ -49,6 +49,7 @@ private:
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
 
     void DrawEnvironmentsDropdown();
+	void DrawOutputTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
 
     
@@ -69,6 +70,7 @@ private:
     bool shadowsEnabled = false;
 	std::function<bool()> getShadowsEnabled;
 	std::function<void(bool)> setShadowsEnabled;
+	std::function<void(unsigned int)> setOutputType;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -107,7 +109,6 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.FontGlobalScale = 1.2f;
 
-    // Setup Dear ImGui style
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
 
@@ -141,6 +142,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
         environmentName = getEnvironmentName();
         });
+
+	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -165,6 +168,7 @@ inline void Menu::Render(const RenderContext& context) {
 		}
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
+		DrawOutputTypeDropdown();
 
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();
@@ -243,6 +247,23 @@ inline void Menu::DrawEnvironmentsDropdown() {
                 ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
+    }
+}
+
+inline void Menu::DrawOutputTypeDropdown() {
+	static int selectedItemIndex = 0;
+    if (ImGui::BeginCombo("Output Type", OutputTypeNames[selectedItemIndex].c_str())) {
+		for (int i = 0; i < OutputTypeNames.size(); ++i) {
+			bool isSelected = (selectedItemIndex == i);
+			if (ImGui::Selectable(OutputTypeNames[i].c_str(), isSelected)) {
+				selectedItemIndex = i;
+				setOutputType(i);
+			}
+			if (isSelected)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+
     }
 }
 

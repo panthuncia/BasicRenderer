@@ -72,7 +72,7 @@ public:
         if (m_needsUpdate) {
             // Map buffer and copy data
             T* pData = nullptr;
-            D3D12_RANGE readRange = { 0, 0 }; // We do not intend to read from this resource on the CPU.
+            D3D12_RANGE readRange = { 0, 0 };
             m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pData));
             memcpy(pData, m_data.data(), sizeof(T) * m_data.size());
             m_uploadBuffer->m_buffer->Unmap(0, nullptr);
@@ -119,10 +119,9 @@ private:
     UINT m_globalResizableBufferID;
 
     std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
-    inline static std::wstring m_name = L"DynamicStructuredBuffer"; //s2ws(std::string(typeid(T).name())) + L">";
+    inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
     void CreateBuffer(UINT capacity) {
-        // Create the buffer
         auto& device = DeviceManager::GetInstance().GetDevice();
         m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true);
         m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false);

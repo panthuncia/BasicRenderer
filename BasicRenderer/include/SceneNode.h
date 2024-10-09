@@ -14,7 +14,7 @@ public:
     std::unordered_map<unsigned int, std::shared_ptr<SceneNode>> children;
     SceneNode* parent = nullptr;
     Transform transform;
-    std::unique_ptr<AnimationController> animationController; // Use unique_ptr to avoid incomplete type issue
+    std::unique_ptr<AnimationController> animationController; // Use unique_ptr to avoid incomplete type
     int localID;
     std::wstring m_name;
 

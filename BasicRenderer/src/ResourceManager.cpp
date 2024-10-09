@@ -35,8 +35,6 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], shadowCascadeSplits[3]);
 	}
 
-	// Map the constant buffer and initialize it
-
 	//InitializeUploadHeap();
 	InitializeCopyCommandQueue();
 	InitializeTransitionCommandList();
@@ -58,24 +56,6 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSRVDescriptorHeap() {
 ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
 	return m_samplerHeap->GetHeap();
 }
-
-//UINT ResourceManager::AllocateDescriptor() {
-//    if (!freeDescriptors.empty()) {
-//        UINT freeIndex = freeDescriptors.front();
-//        freeDescriptors.pop();
-//        return freeIndex;
-//    }
-//    else {
-//        if (numAllocatedDescriptors >= descriptorHeap->GetDesc().NumDescriptors) {
-//            throw std::runtime_error("Out of descriptor heap space!");
-//        }
-//        return numAllocatedDescriptors++;
-//    }
-//}
-//
-//void ResourceManager::ReleaseDescriptor(UINT index) {
-//    freeDescriptors.push(index);
-//}
 
 
 void ResourceManager::UpdatePerFrameBuffer(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
@@ -316,7 +296,7 @@ BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usag
 void ResourceManager::UpdateBuffer(BufferHandle& bufferHandle, void* pData, size_t size) {
 	if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
 		void* mappedData;
-		D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
+		D3D12_RANGE readRange(0, 0);
 		bufferHandle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
 		memcpy(mappedData, pData, size);
 		bufferHandle.uploadBuffer->m_buffer->Unmap(0, nullptr);
@@ -335,12 +315,6 @@ void ResourceManager::ExecuteResourceTransitions() {
 	if (queuedResourceTransitions.size() == 0) {
 		return;
 	}
-
-	// Reset the command allocator
-	//HRESULT hr = commandAllocator->Reset();
-	//if (FAILED(hr)) {
-	//    spdlog::error("Failed to reset command allocator");
-	//}
 
 	auto hr = commandList->Reset(commandAllocator.Get(), nullptr);
 	if (FAILED(hr)) {

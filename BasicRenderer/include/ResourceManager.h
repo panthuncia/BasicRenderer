@@ -71,7 +71,7 @@ public:
     template<typename T>
     void UpdateConstantBuffer(BufferHandle& handle, const T& data) {
         void* mappedData;
-        D3D12_RANGE readRange(0, 0); // We do not intend to read from this resource on the CPU.
+        D3D12_RANGE readRange(0, 0);
         handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
         memcpy(mappedData, &data, sizeof(T));
         handle.uploadBuffer->m_buffer->Unmap(0, nullptr);
@@ -157,7 +157,7 @@ public:
             this->onBufferResized(bufferID, typeSize, capacity, buffer);
             });
 
-        // Create a Shader Resource View (SRV) for the buffer
+        // Create an SRV for the buffer
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -465,6 +465,7 @@ public:
 	void setPrefilteredEnvironmentMapSamplerIndex(int index) { perFrameCBData.environmentPrefilteredSamplerIndex = index; }
 	void setEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
 	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
+	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
 private:
     ResourceManager(){};
     void WaitForCopyQueue();
@@ -472,8 +473,6 @@ private:
     void InitializeCopyCommandQueue();
     void InitializeTransitionCommandList();
 	void SetTransitionCommandQueue(ID3D12CommandQueue* commandQueue);
-    //UINT AllocateDescriptor();
-    //void ReleaseDescriptor(UINT index);
     void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);

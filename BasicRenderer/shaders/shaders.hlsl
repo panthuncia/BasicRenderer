@@ -1,5 +1,22 @@
 #define PI 3.1415926538
 
+// Do enums exist in HLSL?
+// The internet disagrees.
+// My compiler doesn't like them though
+#define OUTPUT_COLOR 0
+#define OUTPUT_NORMAL 1
+#define OUTPUT_ALBEDO 2
+#define OUTPUT_METALLIC 3
+#define OUTPUT_ROUGHNESS 4
+#define OUTPUT_EMISSIVE 5
+#define OUTPUT_AO 6
+#define OUTPUT_DEPTH 7
+#define OUTPUT_METAL_BRDF_IBL 8
+#define OUTPUT_DIELECTRIC_BRDF_IBL 9
+#define OUTPUT_SPECULAR_IBL 10
+#define OUTPUT_METAL_FRESNEL_IBL 11
+#define OUTPUT_DIELECTRIC_FRESNEL_IBL 12
+
 struct PerFrameBuffer {
     row_major matrix view;
     row_major matrix projection;
@@ -18,6 +35,7 @@ struct PerFrameBuffer {
     uint environmentPrefilteredSamplerIndex;
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
+    uint outputType;
 };
 
 cbuffer PerObject : register(b1) {
@@ -87,7 +105,6 @@ struct MaterialInfo {
 struct SingleMatrix {
     row_major matrix value;
 };
-
 
 #if defined(VERTEX_COLORS)
 struct VSInput {
@@ -874,5 +891,39 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif
         
     float opacity = baseColor.a;
-    return float4(lighting, opacity);
+    
+    switch (perFrameBuffer.outputType) {
+        case OUTPUT_COLOR:
+            return float4(lighting, opacity);
+        case OUTPUT_NORMAL: // Normal
+            return float4(normalWS * 0.5 + 0.5, opacity);
+        case OUTPUT_ALBEDO:
+            return float4(baseColor.rgb, opacity);
+        case OUTPUT_METALLIC:
+            return float4(metallic, metallic, metallic, opacity);
+        case OUTPUT_ROUGHNESS:
+            return float4(roughness, roughness, roughness, opacity);
+        case OUTPUT_EMISSIVE:
+            return float4(materialInfo.emissiveFactor.rgb, opacity);
+        case OUTPUT_AO:
+            return float4(ao, ao, ao, opacity);
+        case OUTPUT_DEPTH:{
+                float depth = abs(input.positionViewSpace.z)*0.1;
+                return float4(depth, depth, depth, opacity);
+            }
+#if defined(IMAGE_BASED_LIGHTING)
+        case OUTPUT_METAL_BRDF_IBL:
+            return float4(f_metal_brdf_ibl, opacity);
+        case OUTPUT_DIELECTRIC_BRDF_IBL:
+            return float4(f_dielectric_brdf_ibl, opacity);
+        case OUTPUT_SPECULAR_IBL:
+            return float4(f_specular_metal, opacity);
+        case OUTPUT_METAL_FRESNEL_IBL:
+            return float4(f_metal_fresnel_ibl, opacity);
+        case OUTPUT_DIELECTRIC_FRESNEL_IBL:
+            return float4(f_dielectric_fresnel_ibl, opacity);
+#endif // IMAGE_BASED_LIGHTING
+        default:
+            return float4(1.0, 0.0, 0.0, 1.0);
+    }
 }

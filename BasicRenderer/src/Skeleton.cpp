@@ -52,7 +52,6 @@ void Skeleton::UpdateTransforms() {
             m_nodes[i]->Update();
         }
 
-        // Copy the matrix directly using memcpy
         memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
     }
     auto& resourceManager = ResourceManager::GetInstance();

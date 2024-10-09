@@ -10,7 +10,7 @@ void RenderGraph::Compile() {
     batches.clear();
     auto currentBatch = PassBatch();
     std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
-    std::unordered_map<std::wstring, ResourceState> finalResourceStates; // To track final states
+    std::unordered_map<std::wstring, ResourceState> finalResourceStates;
 
     for (auto& passAndResources : passes) {
         bool needsNewBatch = false;
@@ -145,7 +145,6 @@ void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unorde
                 previousState = resource->GetState();
             }
             else {
-                // Handle error: resource not found
                 throw std::runtime_error(ws2s(L"Resource not found: " + resourceName));
             }
         }

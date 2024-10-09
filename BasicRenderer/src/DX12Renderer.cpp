@@ -51,13 +51,13 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
         DXGI_ADAPTER_DESC1 desc;
         adapter->GetDesc1(&desc);
 
-        // Check if the adapter is a software adapter (we skip these)
+        // Skip software adapters
         if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
         {
             continue;
         }
 
-        // Check if the adapter has more dedicated video memory than the current best
+		// Find adapter with most video memory
         if (desc.DedicatedVideoMemory > maxDedicatedVideoMemory)
         {
             maxDedicatedVideoMemory = desc.DedicatedVideoMemory;
@@ -86,7 +86,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
 void DX12Renderer::CreateGlobalResources() {
     m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
-    setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps
+    setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
 }
 
 void DX12Renderer::SetSettings() {
@@ -109,6 +109,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
+	settingsManager.registerSetting<unsigned int>("outputType", 0);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -126,6 +127,9 @@ void DX12Renderer::SetSettings() {
 	setEnvironment = settingsManager.getSettingSetter<std::string>("environmentName");
 	settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
 		SetEnvironmentInternal(s2ws(newValue));
+		});
+	settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
+		ResourceManager::GetInstance().SetOutputType(newValue);
 		});
 }
 
@@ -160,8 +164,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         D3D_FEATURE_LEVEL_12_1,
         IID_PPV_ARGS(&device)));
 
-    // Initialize device manager
-
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> infoQueue;
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
@@ -178,6 +180,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue)));
 
+    // Initialize device manager and PSO manager
     DeviceManager::GetInstance().Initialize(device, commandQueue);
     PSOManager::getInstance().initialize();
 
@@ -207,7 +210,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     frameIndex = swapChain->GetCurrentBackBufferIndex();
 
-    // Create descriptor heaps
+    // Create RTV descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
     rtvHeapDesc.NumDescriptors = 2;
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -244,7 +247,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Close the command list
     ThrowIfFailed(commandList->Close());
 
-    // Create the fence
+    // Create a fence
     ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
     fenceValue = 1;
 
@@ -341,9 +344,6 @@ void DX12Renderer::Render() {
     m_context.xRes = m_xRes;
     m_context.yRes = m_yRes;
 
-    // Set necessary state
-    auto& psoManager = PSOManager::getInstance();
-
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
@@ -384,7 +384,7 @@ void DX12Renderer::Render() {
 
     WaitForPreviousFrame();
 
-    ProcessReadbackRequests();
+	ProcessReadbackRequests(); // Save images to disk if requested
 
     m_stuffToDelete.clear(); // Deferred deletion
 }

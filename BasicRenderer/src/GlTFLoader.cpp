@@ -138,7 +138,7 @@ std::vector<XMMATRIX> extractDataFromBuffer<XMMATRIX>(const std::vector<uint8_t>
     const Accessor& accessor = accessorData.accessor;
     const BufferView& bufferView = accessorData.bufferView;
 
-    size_t numComponents = numComponentsForType(accessor.type); // This should return 16 for a matrix
+    size_t numComponents = numComponentsForType(accessor.type);
     size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
 
     size_t effectiveByteOffset = bufferView.byteOffset;
@@ -434,7 +434,7 @@ void parseGLTFNodeHierarchy(std::shared_ptr<Scene>& scene, const json& gltfData,
 }
 
 
-// Function to decode base64 data URI (if needed)
+// Function to decode base64 data URI
 std::vector<uint8_t> decodeDataUri(const std::string& uri) {
     const std::string base64Prefix = "data:image/";
     if (uri.find(base64Prefix) != 0) {
@@ -443,8 +443,7 @@ std::vector<uint8_t> decodeDataUri(const std::string& uri) {
 
     std::string base64Data = uri.substr(uri.find(",") + 1);
     std::vector<uint8_t> decodedData(base64Data.size() * 3 / 4);
-    // Decode base64 data (use a base64 decoding library or implement one)
-    // This part is omitted for brevity
+
     return decodedData;
 }
 
@@ -601,6 +600,8 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
     }
 
     // Create materials
+	// TODO: convert sRGB to linear before they're sampled. glTF spec says the filtering 
+    // might not be right otherwise, even if you do gamma corrrection in the shader
     for (const auto& gltfMaterial : gltfData["materials"]) {
         UINT psoFlags = 0;
         std::shared_ptr<Texture> baseColorTexture = nullptr;
@@ -846,7 +847,6 @@ std::shared_ptr<Scene> loadGLB(std::string fileName) {
         std::cout << "GLTF Data:" << std::endl;
         std::cout << gltfData.dump(2) << std::endl;
 
-        // Continue processing GLTF data and binary data...
         auto materials = parseGLTFMaterials(gltfData, "", binaryData);
         std::vector<MeshData> meshes;
         parseMeshes(gltfData, binaryData, materials, &meshes);
