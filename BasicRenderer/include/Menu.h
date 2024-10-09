@@ -188,7 +188,7 @@ inline void Menu::Render(const RenderContext& context) {
 		static float f = 0.0f;
 		static int counter = 0;
 
-		ImGui::Begin("Renderer Configuration");
+		ImGui::Begin("Renderer Configuration", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 
         if (ImGui::Checkbox("Image-Based Lighting", &imageBasedLightingEnabled)) {
 			setImageBasedLightingEnabled(imageBasedLightingEnabled);
@@ -209,7 +209,7 @@ inline void Menu::Render(const RenderContext& context) {
 	}
 
     {
-		ImGui::Begin("Scene Graph");
+		ImGui::Begin("Scene Graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 		DisplaySceneGraph();
 		ImGui::End();
 
@@ -419,8 +419,10 @@ inline void Menu::DisplaySelectedNode() {
             selectedNode->transform.isDirty = true; // Mark as dirty if modified
         }
         ImGui::Text("Scale:");
-        if (ImGui::InputFloat3("Scale", &selectedNode->transform.scale.x)) {
+        if (ImGui::InputFloat("Scale", &selectedNode->transform.scale.x)) {
             selectedNode->transform.isDirty = true; // Mark as dirty if modified
+			selectedNode->transform.scale.y = selectedNode->transform.scale.x;
+			selectedNode->transform.scale.z = selectedNode->transform.scale.x;
         }
 
         // Display rotation (you may want to convert it to Euler angles for readability)
