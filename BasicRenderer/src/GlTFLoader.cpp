@@ -723,7 +723,7 @@ std::shared_ptr<Animation> parseGLTFAnimationToClips(const json& gltfAnimation, 
         std::vector<float> outputs = extractDataFromBuffer<float>(binaryData, outputAccessor); // Value keyframes
 
         std::string path = channel["target"]["path"];
-        int node = nodes[channel["target"]["node"]]->localID;
+        int node = nodes[channel["target"]["node"]]->GetLocalID();
 
         if (animation->nodesMap.find(node) == animation->nodesMap.end()) {
             animation->nodesMap[node] = std::make_shared<AnimationClip>();
@@ -789,7 +789,7 @@ std::vector<std::shared_ptr<Skeleton>> parseGLTFSkins(const json& gltfData, std:
         for (const auto& joint : skin["joints"]) {
             int jointIndex = joint.get<int>();
             for (const auto& animation : animations) {
-                if (animation->nodesMap.find(nodes[jointIndex]->localID) != animation->nodesMap.end() && skeleton->animationsByName.find(animation->name) == skeleton->animationsByName.end()) {
+                if (animation->nodesMap.find(nodes[jointIndex]->GetLocalID()) != animation->nodesMap.end() && skeleton->animationsByName.find(animation->name) == skeleton->animationsByName.end()) {
                     skeleton->AddAnimation(animation);
                 }
             }

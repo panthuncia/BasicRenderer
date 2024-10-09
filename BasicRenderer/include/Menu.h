@@ -14,6 +14,8 @@
 #include "RenderContext.h"
 #include "utilities.h"
 #include "OutputTypes.h"
+#include "SceneNode.h"
+#include "RenderableObject.h"
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 struct FrameContext {
@@ -44,6 +46,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
+
+    SceneNode* selectedNode = nullptr;
+
     FrameContext* WaitForNextFrameResources();
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
@@ -51,6 +56,9 @@ private:
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
+    void DisplaySceneNode(SceneNode* node, bool isOnlyChild);
+    void DisplaySceneGraph();
+    void DisplaySelectedNode();
 
     
     std::filesystem::path environmentsDir;
@@ -71,6 +79,9 @@ private:
 	std::function<bool()> getShadowsEnabled;
 	std::function<void(bool)> setShadowsEnabled;
 	std::function<void(unsigned int)> setOutputType;
+
+	std::function < std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()> getRenderableObjects;
+	std::function<SceneNode& ()> getSceneRoot;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -86,7 +97,6 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     this->device = device;
     this->commandQueue = queue;
 	m_swapChain = swapChain;
-
 
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
@@ -108,6 +118,9 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.FontGlobalScale = 1.2f;
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    io.DisplaySize = ImVec2(static_cast<float>(rect.right - rect.left), static_cast<float>(rect.bottom - rect.top));
 
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
@@ -144,6 +157,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         });
 
 	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
+	getRenderableObjects = settingsManager.getSettingGetter<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()>>("getRenderableObjects")();
+	getSceneRoot = settingsManager.getSettingGetter<std::function<SceneNode&()>>("getSceneRoot")();
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -173,6 +188,15 @@ inline void Menu::Render(const RenderContext& context) {
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();
 	}
+
+    {
+		ImGui::Begin("Scene Graph");
+		DisplaySceneGraph();
+		ImGui::End();
+
+		DisplaySelectedNode();
+
+    }
 
 	// Rendering
 	ImGui::Render();
@@ -283,5 +307,86 @@ inline void Menu::DrawBrowseButton(const std::wstring& targetDirectory) {
         {
             spdlog::warn("No file selected.");
         }
+    }
+}
+
+inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
+    if (!node) return;
+
+    // Set flags for automatically expanding nodes if they are the only child
+    ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+
+    // If the node is currently selected, add the ImGuiTreeNodeFlags_Selected flag
+    if (node == selectedNode) {
+        nodeFlags |= ImGuiTreeNodeFlags_Selected;
+    }
+
+    if (isOnlyChild) {
+        nodeFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+    }
+
+    // Show the node with its name
+    if (ImGui::TreeNodeEx(node, nodeFlags, "%S", node->m_name.c_str())) {
+        // Detect if the node is clicked to select it
+        if (ImGui::IsItemClicked()) {
+            selectedNode = node;
+        }
+
+        // Display information specific to RenderableObject, if the node is of that type.
+        auto renderableObject = dynamic_cast<RenderableObject*>(node);
+        if (renderableObject) {
+            // Display meshes
+            ImGui::Text("Opaque Meshes: %d", renderableObject->GetOpaqueMeshes().size());
+            ImGui::Text("Transparent Meshes: %d", renderableObject->GetTransparentMeshes().size());
+
+            if (renderableObject->GetSkin()) {
+                ImGui::Text("Has Skin: Yes");
+            }
+            else {
+                ImGui::Text("Has Skin: No");
+            }
+        }
+
+        // Recursively display child nodes
+        for (const auto& childPair : node->children) {
+            bool childIsOnly = (node->children.size() == 1);
+            DisplaySceneNode(childPair.second.get(), childIsOnly);
+        }
+
+        ImGui::TreePop();
+    }
+    else {
+        // Allow selection
+        if (ImGui::IsItemClicked()) {
+            selectedNode = node;
+        }
+    }
+}
+
+inline void Menu::DisplaySceneGraph() {
+    auto& root = getSceneRoot();
+    DisplaySceneNode(&root, true);
+}
+
+inline void Menu::DisplaySelectedNode() {
+    if (selectedNode) {
+        ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+        // Display the transform details
+        ImGui::Text("Position:");
+        if (ImGui::InputFloat3("Position", &selectedNode->transform.pos.x)) {
+            selectedNode->transform.isDirty = true; // Mark as dirty if modified
+        }
+        ImGui::Text("Scale:");
+        if (ImGui::InputFloat3("Scale", &selectedNode->transform.scale.x)) {
+            selectedNode->transform.isDirty = true; // Mark as dirty if modified
+        }
+
+        // Display rotation (you may want to convert it to Euler angles for readability)
+        XMFLOAT4 rotation;
+        XMStoreFloat4(&rotation, selectedNode->transform.rot);
+        ImGui::Text("Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)", rotation.x, rotation.y, rotation.z, rotation.w);
+
+        ImGui::End();
     }
 }

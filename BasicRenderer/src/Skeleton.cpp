@@ -39,8 +39,8 @@ void Skeleton::SetAnimation(size_t index) {
 
     auto& animation = animations[index];
     for (auto& node : m_nodes) {
-        if (animation->nodesMap.find(node->localID) != animation->nodesMap.end()) {
-            node->animationController->setAnimationClip(animation->nodesMap[node->localID]);
+        if (animation->nodesMap.find(node->GetLocalID()) != animation->nodesMap.end()) {
+            node->animationController->setAnimationClip(animation->nodesMap[node->GetLocalID()]);
         }
     }
 }

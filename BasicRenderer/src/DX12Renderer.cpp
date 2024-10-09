@@ -110,6 +110,13 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
+	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
+	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
+		return currentScene->GetRenderableObjectIDMap();
+		});
+    settingsManager.registerSetting<std::function<SceneNode&()>>("getSceneRoot", [this]() -> SceneNode& {
+        return currentScene->GetRoot();
+        });
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");

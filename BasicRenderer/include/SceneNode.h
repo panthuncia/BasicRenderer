@@ -15,7 +15,6 @@ public:
     SceneNode* parent = nullptr;
     Transform transform;
     std::unique_ptr<AnimationController> animationController; // Use unique_ptr to avoid incomplete type
-    int localID;
     std::wstring m_name;
 
     SceneNode(const std::wstring& name = L"");
@@ -24,6 +23,8 @@ public:
     void RemoveChild(unsigned int childId);
     void Update();
     void ForceUpdate();
+	void SetLocalID(int id) { localID = id; }
+	int GetLocalID() { return localID; }
 
     void AddObserver(ISceneNodeObserver<SceneNode>* observer);
     void RemoveObserver(ISceneNodeObserver<SceneNode>* observer);
@@ -33,4 +34,5 @@ private:
 protected:
     virtual void OnUpdate() {} // Hook method for derived classes to extend update behavior
     void NotifyObservers();
+    int localID;
 };

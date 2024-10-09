@@ -13,28 +13,28 @@ Scene::Scene(){
 
 UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     numObjects++;
-    object->localID = nextNodeID;
+	object->SetLocalID(nextNodeID);
     objectsByName[object->m_name] = object;
     objectsByID[nextNodeID] = object;
     nextNodeID++;
 
     if (object->HasOpaque()) {
-        opaqueObjectsByID[object->localID] = object;
+        opaqueObjectsByID[object->GetLocalID()] = object;
     }
 
     if (object->HasTransparent()) {
-        transparentObjectsByID[object->localID] = object;
+        transparentObjectsByID[object->GetLocalID()] = object;
     }
 
     if (object->parent == nullptr) {
         sceneRoot.AddChild(object);
     }
 
-    return object->localID;
+    return object->GetLocalID();
 }
 
 UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
-    node->localID = nextNodeID;
+    node->SetLocalID(nextNodeID);
 
     if (node->parent == nullptr) {
         sceneRoot.AddChild(node);
@@ -45,11 +45,11 @@ UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
     if (node->m_name != L"") {
         nodesByName[node->m_name] = node;
     }
-    return node->localID;
+    return node->GetLocalID();
 }
 
 UINT Scene::AddLight(std::shared_ptr<Light> light, bool shadowCasting) {
-    light->localID = nextNodeID;
+    light->SetLocalID(nextNodeID);
     if (light->parent == nullptr) {
         sceneRoot.AddChild(light);
     }
@@ -58,7 +58,7 @@ UINT Scene::AddLight(std::shared_ptr<Light> light, bool shadowCasting) {
     nextNodeID++;
 
     lightManager.AddLight(light.get(), shadowCasting, pCamera.get());
-    return light->localID;
+    return light->GetLocalID();
 }
 
 std::shared_ptr<SceneNode> Scene::CreateNode(std::wstring name) {
@@ -116,10 +116,10 @@ void Scene::RemoveObjectByName(const std::wstring& name) {
             objectsByID.erase(idIt);
         }
         objectsByName.erase(it);
-        opaqueObjectsByID.erase(it->second->localID);
-        transparentObjectsByID.erase(it->second->localID);
+        opaqueObjectsByID.erase(it->second->GetLocalID());
+        transparentObjectsByID.erase(it->second->GetLocalID());
         std::shared_ptr<SceneNode> node = it->second;
-        node->parent->RemoveChild(node->localID);
+        node->parent->RemoveChild(node->GetLocalID());
     }
 }
 
@@ -132,11 +132,11 @@ void Scene::RemoveObjectByID(UINT id) {
             objectsByName.erase(nameIt);
         }
         objectsByID.erase(it);
-        opaqueObjectsByID.erase(it->second->localID);
-        transparentObjectsByID.erase(it->second->localID);
+        opaqueObjectsByID.erase(it->second->GetLocalID());
+        transparentObjectsByID.erase(it->second->GetLocalID());
 
         std::shared_ptr<SceneNode> node = it->second;
-        node->parent->RemoveChild(node->localID);
+        node->parent->RemoveChild(node->GetLocalID());
     }
 }
 
@@ -233,15 +233,16 @@ UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex() {
 
 std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     std::unordered_map<UINT, UINT> idMap;
-    auto& oldRootID = scene.sceneRoot.localID;
+    auto oldRootID = scene.sceneRoot.GetLocalID();
     auto newRootNode = std::make_shared<SceneNode>();
     for (auto& childPair : scene.sceneRoot.children) {
         auto& child = childPair.second;
         auto dummyNode = std::make_shared<SceneNode>();
-        dummyNode->localID = child->localID;
+		dummyNode->SetLocalID(child->GetLocalID());
         newRootNode->AddChild(dummyNode);
     }
     newRootNode->transform = scene.sceneRoot.transform.copy();
+	newRootNode->m_name = scene.sceneRoot.m_name;
     UINT newRootID = AddNode(newRootNode);
     idMap[oldRootID] = newRootID;
 
@@ -250,32 +251,34 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     // Parse lights
     for (auto& lightPair : scene.lightsByID) {
         auto& light = lightPair.second;
-        UINT oldID = light->localID;
+        UINT oldID = light->GetLocalID();
 		auto newLight = Light::CopyLight(light->GetLightInfo());
         for (auto& childPair : light->children) {
             auto& child = childPair.second;
             auto dummyNode = std::make_shared<SceneNode>();
-            dummyNode->localID = child->localID;
+			dummyNode->SetLocalID(child->GetLocalID());
             newLight->AddChild(dummyNode);
         }
         newLight->transform = light->transform.copy();
+		newLight->m_name = light->m_name;
         UINT newID = AddLight(newLight);
-        idMap[oldID] = newLight->localID;
+        idMap[oldID] = newLight->GetLocalID();;
         newEntities.push_back(newLight);
     }
 
     // Parse objects
     for (auto& objectPair : scene.objectsByID) {
         auto& object = objectPair.second;
-        UINT oldID = object->localID;
+        UINT oldID = object->GetLocalID();
         auto newObject = std::make_shared<RenderableObject>(object->m_name, object->GetOpaqueMeshes(), object->GetTransparentMeshes());
         for (auto& childPair : object->children) {
             auto& child = childPair.second;
             auto dummyNode = std::make_shared<SceneNode>();
-            dummyNode->localID = child->localID;
+            dummyNode->SetLocalID(child->GetLocalID());
             newObject->AddChild(dummyNode);
         }
         newObject->transform = object->transform.copy();
+		newObject->m_name = object->m_name;
         UINT newID = AddObject(newObject);
         idMap[oldID] = newID;
         newEntities.push_back(newObject);
@@ -284,15 +287,16 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     // Parse nodes
     for (auto& nodePair : scene.nodesByID) {
         auto& node = nodePair.second;
-        UINT oldID = node->localID;
+        UINT oldID = node->GetLocalID();
         auto newNode = std::make_shared<SceneNode>();
         for (auto& childPair : node->children) {
             auto& child = childPair.second;
             auto dummyNode = std::make_shared<SceneNode>();
-            dummyNode->localID = child->localID;
+            dummyNode->SetLocalID(child->GetLocalID());
             newNode->AddChild(dummyNode);
         }
         newNode->transform = node->transform.copy();
+		newNode->m_name = node->m_name;
         UINT newID = AddNode(newNode);
         idMap[oldID] = newID;
         newEntities.push_back(newNode);
@@ -301,7 +305,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     for (auto& skeleton : scene.skeletons) {
         std::vector<std::shared_ptr<SceneNode>> newJoints;
         for (auto& joint : skeleton->m_nodes) {
-            auto newJoint = GetEntityByID(idMap[joint->localID]);
+            auto newJoint = GetEntityByID(idMap[joint->GetLocalID()]);
             if (newJoint) {
                 newJoints.push_back(newJoint);
             }
@@ -334,8 +338,8 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
 
     for (auto& childPair : oldRootChildren) {
         auto& child = childPair.second;
-        if (idMap.find(child->localID) != idMap.end()) {
-            auto mappedChild = GetEntityByID(idMap[child->localID]);
+        if (idMap.find(child->GetLocalID()) != idMap.end()) {
+            auto mappedChild = GetEntityByID(idMap[child->GetLocalID()]);
             if (mappedChild) {
                 newRootNode->AddChild(mappedChild);
             }
@@ -348,17 +352,17 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
 
         for (auto& childPair : oldChildren) {
             auto& child = childPair.second;
-            if (idMap.find(child->localID) != idMap.end()) {
-                auto mappedChild = GetEntityByID(idMap[child->localID]);
+            if (idMap.find(child->GetLocalID()) != idMap.end()) {
+                auto mappedChild = GetEntityByID(idMap[child->GetLocalID()]);
                 if (mappedChild) {
                     entity->AddChild(mappedChild);
                 }
                 else {
-                    spdlog::error("Node missing from id map: ID {}", child->localID);
+                    spdlog::error("Node missing from id map: ID {}", child->GetLocalID());
                 }
             }
             else {
-                spdlog::error("Node missing from id map: ID {}", child->localID);
+                spdlog::error("Node missing from id map: ID {}", child->GetLocalID());
             }
         }
     }

@@ -93,3 +93,7 @@ void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
     UpdateBuffers();
     skeleton->userIDs.push_back(localID);
 }
+
+std::shared_ptr<Skeleton>& RenderableObject::GetSkin() {
+	return m_skeleton;
+}

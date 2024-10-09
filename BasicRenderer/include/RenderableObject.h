@@ -20,6 +20,7 @@ public:
 	bool HasOpaque() const;
 	BufferHandle& GetConstantBuffer();
 	void SetSkin(std::shared_ptr<Skeleton> skeleton);
+	std::shared_ptr<Skeleton>& GetSkin();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void CreateBuffers();
