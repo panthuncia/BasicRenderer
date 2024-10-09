@@ -29,8 +29,8 @@ extern "C" {
 #pragma comment(lib, "WinPixEventRuntime.lib")
 
 DX12Renderer renderer;
-UINT x_res = 1920;
-UINT y_res = 1080;
+UINT default_x_res = 1920;
+UINT default_y_res = 1080;
 
 
 void ProcessRawInput(LPARAM lParam) {
@@ -119,8 +119,8 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
         0,
         CLASS_NAME,
         L"DirectX 12 Basic Renderer",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, x_res, y_res,
+        WS_POPUP,
+        CW_USEDEFAULT, CW_USEDEFAULT, default_x_res, default_y_res,
         nullptr,
         nullptr,
         hInstance,
@@ -135,6 +135,12 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
     ShowWindow(hwnd, nCmdShow);
 
     RegisterRawInputDevices(hwnd);
+
+    int screen_width = GetSystemMetrics(SM_CXSCREEN);
+    int screen_height = GetSystemMetrics(SM_CYSCREEN);
+
+    // Set window size to screen dimensions
+    SetWindowPos(hwnd, nullptr, 0, 0, screen_width, screen_height, SWP_NOZORDER | SWP_NOACTIVATE);
 
     return hwnd;
 }
@@ -159,6 +165,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     HWND hwnd = InitWindow(hInstance, nShowCmd);
 
     spdlog::info("initializing renderer...");
+    RECT clientRect;
+    GetClientRect(hwnd, &clientRect);
+    UINT x_res = clientRect.right - clientRect.left;
+    UINT y_res = clientRect.bottom - clientRect.top;
     renderer.Initialize(hwnd, x_res, y_res);
     spdlog::info("Renderer initialized.");
     renderer.SetInputMode(InputMode::wasd);
@@ -324,6 +334,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 // Window callback procedure
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 
+    if (toupper(wParam) == VK_ESCAPE) {
+        message = WM_DESTROY;
+    }
+
 	if (Menu::GetInstance().HandleInput(hWnd, message, wParam, lParam)) {
 		return true;
     }
@@ -347,6 +361,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     {
     case WM_INPUT:
         //ProcessRawInput(lParam);
+        break;
+    case WM_SIZE:
+        if (wParam != SIZE_MINIMIZED) {
+            UINT newWidth = LOWORD(lParam);
+            UINT newHeight = HIWORD(lParam);
+            renderer.OnResize(newWidth, newHeight);
+        }
         break;
     case WM_DESTROY:
         PostQuitMessage(0);

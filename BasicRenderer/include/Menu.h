@@ -118,22 +118,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     desc.NumDescriptors = 1;
     desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     if (device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&g_pd3dSrvDescHeap)) != S_OK)
-		throw std::runtime_error("Failed to create descriptor heap");
-
-    IMGUI_CHECKVERSION();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-    io.FontGlobalScale = 1.2f;
-    float dpi = GetDpiForWindow(hwnd) / 96.0f;
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    io.DisplaySize = ImVec2((float)(rect.right - rect.left), (float)(rect.bottom - rect.top));
-
-    io.DisplayFramebufferScale = ImVec2(dpi, dpi);
-
-    ImGui::StyleColorsDark();
-    //ImGui::StyleColorsLight();
+        throw std::runtime_error("Failed to create descriptor heap");
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
@@ -141,6 +126,19 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         DXGI_FORMAT_R8G8B8A8_UNORM, g_pd3dSrvDescHeap.Get(),
         g_pd3dSrvDescHeap->GetCPUDescriptorHandleForHeapStart(),
         g_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart());
+    ImGui_ImplWin32_EnableDpiAwareness();
+
+
+    IMGUI_CHECKVERSION();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    io.FontGlobalScale = 1.2f;
+	io.DisplaySize = ImVec2(3420.0f, 3080.0f);
+
+    ImGui::StyleColorsDark();
+    //ImGui::StyleColorsLight();
+
 
     g_hSwapChainWaitableObject = m_swapChain->GetFrameLatencyWaitableObject();
 
@@ -176,6 +174,14 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 inline void Menu::Render(const RenderContext& context) {
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
+    ImGuiIO& io = ImGui::GetIO();
+    auto displaySize = io.DisplaySize;
+    spdlog::info("Display size: ({}, {})", displaySize.x, displaySize.y);
+	io.DisplaySize = ImVec2(context.xRes, context.yRes);
+    displaySize = io.DisplaySize;
+	spdlog::info("New Display size: ({}, {})", displaySize.x, displaySize.y);
+	io.DisplayFramebufferScale = ImVec2(1.2f, 1.2f);
+
 	ImGui::NewFrame();
 
 	{

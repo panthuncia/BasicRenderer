@@ -27,6 +27,7 @@ using namespace Microsoft::WRL;
 class DX12Renderer {
 public:
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
+    void OnResize(UINT newWidth, UINT newHeight);
     void Update(double elapsedSeconds);
     void Render();
     void Cleanup();
