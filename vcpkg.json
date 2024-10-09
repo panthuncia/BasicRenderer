@@ -6,8 +6,7 @@
     "directxtex",
     {
         "name": "imgui",
-        "features": [ "dx12-binding", "win32-binding", "docking-experimental" ],
-        "version>=": "1.88"
+        "features": [ "dx12-binding", "win32-binding" ]
     }
   ],
   "builtin-baseline": "3508985146f1b1d248c67ead13f8f54be5b4f5da"

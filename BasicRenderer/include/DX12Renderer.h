@@ -44,6 +44,11 @@ public:
     void ToggleWireframe();
     void SubmitReadbackRequest(ReadbackRequest&& request);
     std::vector<ReadbackRequest>& GetPendingReadbackRequests();
+    std::shared_ptr<SceneNode> AppendScene(Scene& scene);
+    template <typename T>
+    void MarkForDelete(const std::shared_ptr<T>& ptr) {
+        m_stuffToDelete.push_back(std::static_pointer_cast<void>(ptr));
+    }
 
 private:
     ComPtr<IDXGIFactory7> factory;
@@ -104,11 +109,6 @@ private:
     void CheckDebugMessages();
 
     void ProcessReadbackRequests();
-
-    template <typename T>
-    void MarkForDelete(const std::shared_ptr<T>& ptr) {
-        m_stuffToDelete.push_back(std::static_pointer_cast<void>(ptr));
-    }
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;

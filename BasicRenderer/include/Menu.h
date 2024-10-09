@@ -16,6 +16,8 @@
 #include "OutputTypes.h"
 #include "SceneNode.h"
 #include "RenderableObject.h"
+#include "GlTFLoader.h"
+
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 struct FrameContext {
@@ -56,6 +58,7 @@ private:
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
+    void DrawLoadModelButton();
     void DisplaySceneNode(SceneNode* node, bool isOnlyChild);
     void DisplaySceneGraph();
     void DisplaySelectedNode();
@@ -82,6 +85,10 @@ private:
 
 	std::function < std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()> getRenderableObjects;
 	std::function<SceneNode& ()> getSceneRoot;
+	std::function < std::shared_ptr<SceneNode>(Scene& scene)> appendScene;
+	std::function<void(std::shared_ptr<void>)> markForDelete;
+
+    std::vector<std::shared_ptr<Scene>> loadedScenes;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -118,9 +125,12 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.FontGlobalScale = 1.2f;
+    float dpi = GetDpiForWindow(hwnd) / 96.0f;
     RECT rect;
     GetClientRect(hwnd, &rect);
-    io.DisplaySize = ImVec2(static_cast<float>(rect.right - rect.left), static_cast<float>(rect.bottom - rect.top));
+    io.DisplaySize = ImVec2((float)(rect.right - rect.left), (float)(rect.bottom - rect.top));
+
+    io.DisplayFramebufferScale = ImVec2(dpi, dpi);
 
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
@@ -159,6 +169,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
 	getRenderableObjects = settingsManager.getSettingGetter<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()>>("getRenderableObjects")();
 	getSceneRoot = settingsManager.getSettingGetter<std::function<SceneNode&()>>("getSceneRoot")();
+	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene")();
+    markForDelete = settingsManager.getSettingGetter<std::function<void(std::shared_ptr<void>)>>("markForDelete")();
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -184,6 +196,7 @@ inline void Menu::Render(const RenderContext& context) {
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();
+        DrawLoadModelButton();
 
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();
@@ -296,12 +309,34 @@ inline void Menu::DrawBrowseButton(const std::wstring& targetDirectory) {
     if (ImGui::Button("Browse"))
     {
         std::wstring selectedFile;
-        if (OpenFileDialog(selectedFile))
+        std::wstring customFilter = L"HDR Files\0*.hdr\0All Files\0*.*\0";
+        if (OpenFileDialog(selectedFile, customFilter))
         {
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 
             CopyFileToDirectory(selectedFile, targetDirectory);
             hdrFiles = GetFilesInDirectoryMatchingExtension(environmentsDir, L".hdr");
+        }
+        else
+        {
+            spdlog::warn("No file selected.");
+        }
+    }
+}
+
+inline void Menu::DrawLoadModelButton() {
+    if (ImGui::Button("Load Model"))
+    {
+        std::wstring selectedFile;
+        std::wstring customFilter = L"GLB Files\0*.glb\0All Files\0*.*\0";
+        if (OpenFileDialog(selectedFile, customFilter))
+        {
+            spdlog::info("Selected file: {}", ws2s(selectedFile));
+			auto scene = loadGLB(ws2s(selectedFile));
+			scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
+			appendScene(*scene);
+			loadedScenes.push_back(scene);
+			//markForDelete(scene);
         }
         else
         {

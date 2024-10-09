@@ -239,6 +239,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
+	renderer.MarkForDelete(carScene);
+
     renderer.SetEnvironment("studio");
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);

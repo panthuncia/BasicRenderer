@@ -927,7 +927,7 @@ std::vector<std::string> GetFilesInDirectoryMatchingExtension(const std::wstring
     return hdrFiles;
 }
 
-bool OpenFileDialog(std::wstring& selectedFile) {
+bool OpenFileDialog(std::wstring& selectedFile, const std::wstring& filter) {
     wchar_t fileBuffer[MAX_PATH] = { 0 };
 
     OPENFILENAMEW ofn;
@@ -936,13 +936,12 @@ bool OpenFileDialog(std::wstring& selectedFile) {
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = fileBuffer;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"HDR Files\0*.hdr\0All Files\0*.*\0";
-    ofn.nFilterIndex = 1;  // Default to .hdr files
+    ofn.lpstrFilter = filter.c_str();  // Use the provided filter
+    ofn.nFilterIndex = 1;  // Default to the first filter
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;  // Prevent directory change
 
     // Show the file dialog
-    if (GetOpenFileNameW(&ofn) == TRUE)
-    {
+    if (GetOpenFileNameW(&ofn) == TRUE) {
         selectedFile = fileBuffer;
         return true;  // File was selected
     }
@@ -976,4 +975,16 @@ std::wstring GetExePath() {
     GetModuleFileName(NULL, buffer, MAX_PATH);
     std::wstring::size_type pos = std::wstring(buffer).find_last_of(L"\\/");
     return std::wstring(buffer).substr(0, pos);
+}
+
+std::wstring getFileNameFromPath(const std::wstring& path) {
+    size_t lastSlash = path.find_last_of(L"\\/");
+    size_t fileNameStart = (lastSlash == std::wstring::npos) ? 0 : lastSlash + 1;
+
+    size_t lastDot = path.find_last_of(L'.');
+    if (lastDot == std::wstring::npos || lastDot < fileNameStart) {
+        lastDot = path.length();
+    }
+
+    return path.substr(fileNameStart, lastDot - fileNameStart);
 }

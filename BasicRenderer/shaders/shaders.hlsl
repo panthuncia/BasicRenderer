@@ -457,7 +457,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     // Approximate microfacet shadowing
     float G = geometrySmith(normal, viewDir, roughness, normDotLight);
     // Approximate specular intensity based on view angle
-    float3 kSpecular = fresnelSchlick(max(dot(halfwayDir, viewDir), 0.0), F0); // F
+    float3 kSpecular = fresnelSchlickRoughness(max(dot(halfwayDir, viewDir), 0.0), F0, roughness); // F
 
     // Preserve energy, diffuse+specular must be at most 1.0
     float3 kDiffuse = float3(1.0, 1.0, 1.0) - kSpecular;
@@ -876,7 +876,8 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #if defined(EMISSIVE_TEXTURE)
     Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];
     SamplerState emissiveSamplerState = SamplerDescriptorHeap[materialInfo.emissiveSamplerIndex];
-    lighting += SRGBToLinear(emissiveTexture.Sample(emissiveSamplerState, uv).rgb)*materialInfo.emissiveFactor.rgb;
+    float3 emissive = SRGBToLinear(emissiveTexture.Sample(emissiveSamplerState, uv).rgb)*materialInfo.emissiveFactor.rgb;
+    lighting += emissive;
 #else
     lighting += materialInfo.emissiveFactor.rgb;
 #endif
@@ -888,7 +889,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #if defined(PBR)
     // Gamma correction
     lighting = LinearToSRGB(lighting);
-#endif
+#endif // PBR
         
     float opacity = baseColor.a;
     
@@ -903,8 +904,14 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
             return float4(metallic, metallic, metallic, opacity);
         case OUTPUT_ROUGHNESS:
             return float4(roughness, roughness, roughness, opacity);
-        case OUTPUT_EMISSIVE:
-            return float4(materialInfo.emissiveFactor.rgb, opacity);
+        case OUTPUT_EMISSIVE:{
+#if defined(EMISSIVE_TEXTURE)
+            float3 srgbEmissive = LinearToSRGB(emissive);
+            return float4(srgbEmissive, opacity);
+#else
+                return float4(materialInfo.emissiveFactor.rgb, opacity);
+#endif // EMISSIVE_TEXTIRE
+            }
         case OUTPUT_AO:
             return float4(ao, ao, ao, opacity);
         case OUTPUT_DEPTH:{

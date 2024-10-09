@@ -117,6 +117,12 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<SceneNode&()>>("getSceneRoot", [this]() -> SceneNode& {
         return currentScene->GetRoot();
         });
+	settingsManager.registerSetting<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene", [this](Scene& scene) -> std::shared_ptr<SceneNode> {
+		return AppendScene(scene);
+		});
+    settingsManager.registerSetting<std::function<void(std::shared_ptr<void>)>>("markForDelete", [this](std::shared_ptr<void> node) {
+		MarkForDelete(node);
+        });
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -775,4 +781,8 @@ void DX12Renderer::SetDebugTexture(Texture* texture) {
     else {
         spdlog::warn("Debug pass does not exist");
     }
+}
+
+std::shared_ptr<SceneNode> DX12Renderer::AppendScene(Scene& scene) {
+	return currentScene->AppendScene(scene);
 }

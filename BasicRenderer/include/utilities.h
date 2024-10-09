@@ -123,8 +123,10 @@ std::string tolower(const std::string& str);
 
 std::vector<std::string> GetFilesInDirectoryMatchingExtension(const std::wstring& directory, const std::wstring& extension);
 
-bool OpenFileDialog(std::wstring& selectedFile);
+bool OpenFileDialog(std::wstring& selectedFile, const std::wstring& filter);
 
 void CopyFileToDirectory(const std::wstring& sourceFile, const std::wstring& destinationDirectory);
 
 std::wstring GetExePath();
+
+std::wstring getFileNameFromPath(const std::wstring& path);
