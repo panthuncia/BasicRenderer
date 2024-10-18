@@ -29,7 +29,10 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     if (object->parent == nullptr) {
         sceneRoot.AddChild(object);
     }
-
+	for (auto& mesh : object->GetOpaqueMeshes()) {
+		
+        meshesByID[mesh->GetGlobalID()] = mesh;
+	}
     return object->GetLocalID();
 }
 

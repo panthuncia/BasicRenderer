@@ -140,7 +140,7 @@ public:
     }
 
     template<typename T>
-    DynamicBufferHandle<T> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
+    DynamicStructuredBufferHandle<T> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -171,11 +171,13 @@ public:
         CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
         device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
-        DynamicBufferHandle<T> handle;
+        DynamicStructuredBufferHandle<T> handle;
         handle.index = index;
         handle.buffer = pDynamicBuffer;
         return handle;
     }
+
+    DynamicBufferHandle CreateIndexedDynamicBuffer(size_t size, ResourceState usage, std::wstring name = L"");
 
     UINT GetNextResizableBufferID() {
         UINT val = numResizableBuffers;
@@ -446,7 +448,7 @@ public:
 	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData);
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 	template<typename T>
-    void QueueDynamicBufferUpdate(DynamicBufferHandle<T>& handle) {
+    void QueueDynamicBufferUpdate(DynamicStructuredBufferHandle<T>& handle) {
         dynamicBuffersToUpdate.push_back(handle.buffer);
     }
 
@@ -503,7 +505,7 @@ private:
     PerFrameCB perFrameCBData;
     UINT currentFrameIndex;
 
-    DynamicBufferHandle<LightInfo> lightBufferHandle;
+    DynamicStructuredBufferHandle<LightInfo> lightBufferHandle;
 
     ComPtr<ID3D12GraphicsCommandList> commandList;
     ComPtr<ID3D12CommandAllocator> commandAllocator;

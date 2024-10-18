@@ -11,17 +11,9 @@
 #include "Buffer.h"
 #include "Resource.h"
 #include "BufferHandle.h"
+#include "DynamicBufferBase.h"
 
 using Microsoft::WRL::ComPtr;
-
-class DynamicBufferBase : public Resource{
-public:
-    DynamicBufferBase() {}
-    std::shared_ptr<Buffer> m_uploadBuffer;
-	std::shared_ptr<Buffer> m_dataBuffer;
-protected:
-    virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {};
-};
 
 template<class T>
 class DynamicStructuredBuffer : public DynamicBufferBase {

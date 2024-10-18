@@ -4,6 +4,7 @@
 #include "DeviceManager.h"
 #include "DynamicStructuredBuffer.h"
 #include "SettingsManager.h"
+#include "DynamicBuffer.h"
 void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
@@ -338,4 +339,39 @@ void ResourceManager::ExecuteResourceTransitions() {
 	transitionCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
 	queuedResourceTransitions.clear();
+}
+
+DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t size, ResourceState usage, std::wstring name) {
+	auto& device = DeviceManager::GetInstance().GetDevice();
+
+	// Create the dynamic structured buffer instance
+	UINT bufferID = GetNextResizableBufferID();
+	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(bufferID, size, name);
+	ResourceTransition transition;
+	transition.resource = pDynamicBuffer.get();
+	transition.beforeState = ResourceState::UNKNOWN;
+	transition.afterState = usage;
+	QueueResourceTransition(transition);
+	pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
+		this->onBufferResized(bufferID, typeSize, capacity, buffer);
+		});
+
+	// Create an SRV for the buffer
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	srvDesc.Buffer.NumElements = size;
+	srvDesc.Buffer.StructureByteStride = 1;
+	srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+	bufferIDDescriptorIndexMap[bufferID] = index;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
+	device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+
+	DynamicBufferHandle handle;
+	handle.index = index;
+	handle.buffer = pDynamicBuffer;
+	return handle;
 }

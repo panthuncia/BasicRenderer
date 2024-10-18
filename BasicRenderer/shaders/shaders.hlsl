@@ -798,7 +798,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         StructuredBuffer<float4> pointShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
         StructuredBuffer<float4> spotShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
         StructuredBuffer<float4> directionalShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
-    
+        
         for (uint i = 0; i < perFrameBuffer.numLights; i++) {
             LightInfo light = lights[i];
             float shadow = 0.0;

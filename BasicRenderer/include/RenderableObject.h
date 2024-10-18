@@ -12,10 +12,10 @@
 class RenderableObject : public SceneNode {
 public:
 	RenderableObject(std::wstring name);
-	RenderableObject(std::wstring name, std::vector<Mesh> meshes);
-	RenderableObject(std::wstring name, std::vector<Mesh>& newOpaqueMeshes, std::vector<Mesh>& newTransparentMeshes);
-	std::vector<Mesh>& GetOpaqueMeshes();
-	std::vector<Mesh>& GetTransparentMeshes();
+	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes);
+	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newTransparentMeshes);
+	std::vector<std::shared_ptr<Mesh>>& GetOpaqueMeshes();
+	std::vector<std::shared_ptr<Mesh>>& GetTransparentMeshes();
 	bool HasTransparent() const;
 	bool HasOpaque() const;
 	BufferHandle& GetConstantBuffer();
@@ -25,8 +25,8 @@ public:
 private:
 	void CreateBuffers();
 	void UpdateBuffers();
-	std::vector<Mesh> opaqueMeshes;
-	std::vector<Mesh> transparentMeshes;
+	std::vector<std::shared_ptr<Mesh>> opaqueMeshes;
+	std::vector<std::shared_ptr<Mesh>> transparentMeshes;
 	BufferHandle perObjectConstantBuffer;
 	UINT8* pPerObjectConstantBuffer;
 	PerObjectCB perObjectCBData;

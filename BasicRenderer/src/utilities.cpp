@@ -31,7 +31,7 @@ void ThrowIfFailed(HRESULT hr) {
 }
 
 std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name) {
-    std::vector<Mesh> meshes;
+    std::vector<std::shared_ptr<Mesh>> meshes;
 
     for (auto geom : meshData.geometries) {
         TangentBitangent tanbit;
@@ -77,7 +77,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
             }
         }
 
-        Mesh mesh = Mesh(vertices, geom.indices, geom.material, hasJoints);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(vertices, geom.indices, geom.material, hasJoints);
         meshes.push_back(std::move(mesh));
     }
 

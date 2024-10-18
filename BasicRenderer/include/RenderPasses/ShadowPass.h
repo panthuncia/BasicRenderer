@@ -56,7 +56,8 @@ public:
 
 				commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
-				for (auto& mesh : meshes) {
+				for (auto& pMesh : meshes) {
+					auto& mesh = *pMesh;
 					auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
@@ -74,7 +75,8 @@ public:
 
 				commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
-				for (auto& mesh : meshes) {
+				for (auto& pMesh : meshes) {
+					auto& mesh = *pMesh;
 					auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | PSOFlags::SHADOW, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());

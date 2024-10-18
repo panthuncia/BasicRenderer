@@ -8,11 +8,17 @@
 #include "DynamicStructuredBuffer.h"
 #include "BufferHandle.h"
 
+class DynamicBuffer;
 
 template<typename T>
-struct DynamicBufferHandle {
+struct DynamicStructuredBufferHandle {
     UINT index; // Index in the descriptor heap
     std::shared_ptr<DynamicStructuredBuffer<T>> buffer; // The actual resource buffer
+};
+
+struct DynamicBufferHandle {
+	UINT index;
+	std::shared_ptr<DynamicBuffer> buffer;
 };
 
 struct ShaderVisibleIndexInfo {
