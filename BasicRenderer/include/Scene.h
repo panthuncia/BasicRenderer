@@ -13,6 +13,7 @@
 #include "MeshData.h"
 #include "Light.h"
 #include "MeshManager.h"
+
 class Scene {
 public:
     Scene();
@@ -44,6 +45,7 @@ public:
     void PostUpdate();
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
     //LightManager& GetLightManager();
+    void Activate();
 
 private:
     std::shared_ptr<Camera> pCamera;
@@ -63,10 +65,12 @@ private:
     std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
     LightManager lightManager;
-    std::unique_ptr<MeshManager> meshManager;
+    std::unique_ptr<MeshManager> meshManager = nullptr;
 
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<float()> getMaxShadowDistance;
 
+    void MakeResident();
+	void MakeNonResident();
 };

@@ -12,6 +12,7 @@
 #include "MeshData.h"
 #include "buffers.h"
 #include "meshoptimizer.h"
+#include "BufferView.h"
 using namespace Microsoft::WRL;
 
 class Material;
@@ -27,7 +28,25 @@ public:
     UINT GetIndexCount() const;
     UINT GetPSOFlags() const;
 	int GetGlobalID() const;
+	std::vector<Vertex>& GetVertices() { return m_vertices; }
+	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
+	std::vector<unsigned int>& GetMeshletVertices() { return m_meshletVertices; }
+	std::vector<unsigned char>& GetMeshletTriangles() { return m_meshletTriangles; }
+
     std::shared_ptr<Material> material;
+
+	void SetVertexBufferView(std::unique_ptr<BufferView> view) {
+		m_vertexBufferView2 = std::move(view);
+	}
+	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
+		m_meshletBufferView = std::move(view);
+	}
+	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
+		m_meshletVerticesBufferView = std::move(view);
+	}
+	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
+		m_meshletTrianglesBufferView = std::move(view);
+	}
 
 private:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, bool skinned);
@@ -41,9 +60,16 @@ private:
     static std::atomic<int> globalMeshCount;
     int m_globalMeshID;
 
+	std::vector<Vertex> m_vertices;
 	std::vector<meshopt_Meshlet> m_meshlets;
 	std::vector<unsigned int> m_meshletVertices;
     std::vector<unsigned char> m_meshletTriangles;
+
+    std::unique_ptr<BufferView> m_vertexBufferView2 = nullptr;
+	std::unique_ptr<BufferView> m_meshletBufferView = nullptr;
+	std::unique_ptr<BufferView> m_meshletVerticesBufferView = nullptr;
+	std::unique_ptr<BufferView> m_meshletTrianglesBufferView = nullptr;
+
     UINT m_psoFlags = 0;
     UINT m_indexCount = 0;
     BufferHandle m_vertexBufferHandle;

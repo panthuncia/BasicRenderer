@@ -12,6 +12,7 @@
 std::atomic<int> Mesh::globalMeshCount = 0;
 
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, bool skinned) {
+    m_vertices = vertices;
     CreateBuffers(vertices, indices);
     this->material = material;
     m_psoFlags = material->m_psoFlags;

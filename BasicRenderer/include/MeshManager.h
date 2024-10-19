@@ -6,12 +6,17 @@
 
 #include "DynamicBuffer.h"
 #include "ResourceHandles.h"
+#include "BufferView.h"
+
+class Mesh;
 
 class MeshManager {
 public:
-	std::unique_ptr<MeshManager> CreateUnique() {
+	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
+	void AddMesh(std::shared_ptr<Mesh>& mesh);
+	void RemoveMesh(std::shared_ptr<BufferView> view);
 private:
 	MeshManager();
 	DynamicBufferHandle m_vertices;

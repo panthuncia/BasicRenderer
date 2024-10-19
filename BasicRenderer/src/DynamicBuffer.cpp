@@ -3,7 +3,7 @@
 #include "DirectX/d3dx12.h"
 #include "BufferView.h"
 
-std::shared_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index type) {
+std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index type) {
     size_t requiredSize = size;
 
     // Search for a free block
@@ -24,7 +24,7 @@ std::shared_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
             }
 
             // Return BufferView
-            return std::make_shared<BufferView>(this, offset, requiredSize, type);
+            return std::move(std::make_unique<BufferView>(this, offset, requiredSize, type));
         }
     }
 
@@ -96,9 +96,10 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     memcpy(newMappedData, m_mappedData, m_capacity);
 	m_mappedData = newMappedData;
 	m_uploadBuffer = newUploadBuffer;
+    size_t oldCapacity = m_capacity;
     size_t sizeDiff = newSize - m_capacity;
     m_capacity = newSize;
     // Update the memory blocks to reflect the new capacity
-    m_memoryBlocks.push_back({ m_capacity / 2, sizeDiff, true });
+    m_memoryBlocks.push_back({ oldCapacity, sizeDiff, true });
     onResized(m_globalResizableBufferID, 1, m_capacity, m_dataBuffer);
 }

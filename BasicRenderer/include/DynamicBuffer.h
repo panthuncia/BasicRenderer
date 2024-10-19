@@ -33,7 +33,7 @@ public:
         return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(id, capacity, name));
     }
 
-    std::shared_ptr<BufferView> Allocate(size_t size, std::type_index type);
+    std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
     void Deallocate(const std::shared_ptr<BufferView>& view);
 
     void SetOnResized(const std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)>& callback) {

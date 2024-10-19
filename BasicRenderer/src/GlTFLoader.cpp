@@ -120,14 +120,14 @@ struct Accessor {
     size_t byteOffset;
 };
 
-struct BufferView {
+struct DataBufferView {
     size_t byteStride;
     size_t byteOffset;
 };
 
 struct AccessorData {
     Accessor accessor;
-    BufferView bufferView;
+    DataBufferView bufferView;
 };
 
 template <typename T>
@@ -136,7 +136,7 @@ std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, con
 template <>
 std::vector<XMMATRIX> extractDataFromBuffer<XMMATRIX>(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
     const Accessor& accessor = accessorData.accessor;
-    const BufferView& bufferView = accessorData.bufferView;
+    const DataBufferView& bufferView = accessorData.bufferView;
 
     size_t numComponents = numComponentsForType(accessor.type);
     size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
@@ -177,7 +177,7 @@ std::vector<XMMATRIX> extractDataFromBuffer<XMMATRIX>(const std::vector<uint8_t>
 template <typename T>
 std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
     const Accessor& accessor = accessorData.accessor;
-    const BufferView& bufferView = accessorData.bufferView;
+    const DataBufferView& bufferView = accessorData.bufferView;
     size_t numComponents = numComponentsForType(accessor.type);
 
     size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
@@ -221,7 +221,7 @@ AccessorData getAccessorData(const json& gltfData, int accessorIndex) {
 
     int bufferViewIndex = accessorJson["bufferView"].get<int>();
     const json& bufferViewJson = gltfData["bufferViews"][bufferViewIndex];
-    BufferView bufferView;
+    DataBufferView bufferView;
     bufferView.byteStride = bufferViewJson.value("byteStride", 0);
     bufferView.byteOffset = bufferViewJson.value("byteOffset", 0);
 
