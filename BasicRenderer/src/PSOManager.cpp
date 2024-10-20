@@ -208,7 +208,13 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
     UINT32 codePage = CP_UTF8;
     pUtils->LoadFile((std::filesystem::path(GetExePath())/filename).c_str(), &codePage, &sourceBlob);
-    //library->CreateIncludeHandler(&includeHandler);
+
+    HRESULT hr = pUtils->CreateDefaultIncludeHandler(&includeHandler);
+    if (FAILED(hr)) {
+        spdlog::error("Failed to create include handler.");
+        ThrowIfFailed(hr);
+        return;
+    }
 
     DxcBuffer sourceBuffer;
     sourceBuffer.Ptr = sourceBlob->GetBufferPointer();
@@ -237,6 +243,10 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
         arguments.push_back(define.Name);
     }
 
+	std::wstring includePath = (std::filesystem::path(GetExePath()) / L"shaders").wstring();
+    arguments.push_back(L"-I");
+    arguments.push_back(includePath.c_str());
+
     print("Compiling with arguments: ");
     for (auto& arg : arguments) {
         std::wcout << arg << " ";
@@ -244,11 +254,11 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     std::wcout << std::endl;
 
     // Compile the shader
-    HRESULT hr = pCompiler->Compile(
+    hr = pCompiler->Compile(
         &sourceBuffer,
         arguments.data(),
         arguments.size(),
-        nullptr,
+        includeHandler.Get(),
         IID_PPV_ARGS(result.GetAddressOf()));
 
     if (FAILED(hr)) {

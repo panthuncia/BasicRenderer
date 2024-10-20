@@ -174,13 +174,6 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 inline void Menu::Render(const RenderContext& context) {
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
-    ImGuiIO& io = ImGui::GetIO();
-    auto displaySize = io.DisplaySize;
-    spdlog::info("Display size: ({}, {})", displaySize.x, displaySize.y);
-	io.DisplaySize = ImVec2(context.xRes, context.yRes);
-    displaySize = io.DisplaySize;
-	spdlog::info("New Display size: ({}, {})", displaySize.x, displaySize.y);
-	io.DisplayFramebufferScale = ImVec2(1.2f, 1.2f);
 
 	ImGui::NewFrame();
 
