@@ -29,14 +29,14 @@ class BufferView;
 class DynamicBuffer : public DynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicBuffer> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"") {
-        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(id, capacity, name));
+    static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"") {
+        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name));
     }
 
     std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
     void Deallocate(const std::shared_ptr<BufferView>& view);
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)>& callback) {
+    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>& buffer)>& callback) {
         onResized = callback;
     }
 
@@ -44,7 +44,7 @@ public:
         return m_dataBuffer;
     }
 
-    UINT Size() {
+    size_t Size() {
         return m_capacity;
     }
 
@@ -58,8 +58,8 @@ protected:
     }
 
 private:
-    DynamicBuffer(UINT id = 0, UINT size = 64*1024, std::wstring name = L"")
-        : m_globalResizableBufferID(id), m_capacity(size), m_needsUpdate(false) {
+    DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"")
+        : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_needsUpdate(false) {
         CreateBuffer(size);
         if (name != L"") {
             m_dataBuffer->SetName((m_name + L": " + name).c_str());
@@ -68,6 +68,9 @@ private:
             m_dataBuffer->SetName(m_name.c_str());
         }
     }
+
+	size_t m_elementSize;
+	bool m_byteAddress;
 
     void* m_mappedData = nullptr;
 
@@ -78,7 +81,7 @@ private:
 
     std::vector<MemoryBlock> m_memoryBlocks;
 
-    std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
+    std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>&)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
     void CreateBuffer(size_t capacity);

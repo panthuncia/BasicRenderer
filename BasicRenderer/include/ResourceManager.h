@@ -154,7 +154,7 @@ public:
 		transition.afterState = usage;
 		QueueResourceTransition(transition);
         pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
-            this->onBufferResized(bufferID, typeSize, capacity, buffer);
+            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
             });
 
         // Create an SRV for the buffer
@@ -177,7 +177,7 @@ public:
         return handle;
     }
 
-    DynamicBufferHandle CreateIndexedDynamicBuffer(size_t size, ResourceState usage, std::wstring name = L"");
+    DynamicBufferHandle CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false);
 
     UINT GetNextResizableBufferID() {
         UINT val = numResizableBuffers;
@@ -185,7 +185,7 @@ public:
         return val;
     }
 
-    void onBufferResized(UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
+    void onDynamicStructuredBufferResized(UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -210,6 +210,33 @@ public:
 			transition.afterState = buffer->GetState();
 			QueueResourceTransition(transition);
 		}
+    }
+
+    void onDynamicBufferResized(UINT bufferID, UINT typeSize, UINT capacity, bool byteAddress, std::shared_ptr<Buffer>& buffer) {
+        UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+        auto& device = DeviceManager::GetInstance().GetDevice();
+
+        // Create a Shader Resource View for the buffer
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.NumElements = capacity;
+        srvDesc.Buffer.StructureByteStride = typeSize;
+        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+        device->CreateShaderResourceView(buffer->m_buffer.Get(), &srvDesc, srvHandle);
+
+        auto bufferState = buffer->GetState();
+        // After resize, internal buffer state will not match the wrapper state
+        if (bufferState != ResourceState::UNKNOWN) {
+            ResourceTransition transition;
+            transition.resource = buffer.get();
+            transition.beforeState = ResourceState::UNKNOWN;
+            transition.afterState = buffer->GetState();
+            QueueResourceTransition(transition);
+        }
     }
 
     template<typename T>

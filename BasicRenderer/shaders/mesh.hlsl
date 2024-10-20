@@ -150,13 +150,13 @@ void MSMain(
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferIndex]; // Base vertex buffer
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferIndex]; // Meshlets, containing vertex & primitive offset & num
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferIndex]; // Meshlet vertices, as indices into base vertex buffer
-    StructuredBuffer<uint> meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
+    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
     
     Meshlet meshlet = meshletBuffer[vGroupID.x];
     SetMeshOutputCounts(meshlet.VertCount, meshlet.TriCount);
     
     uint triOffset = meshlet.TriOffset * 3 + uGroupThreadID * 3;
-    uint3 meshletIndices = uint3(meshletTrianglesBuffer[triOffset], meshletTrianglesBuffer[triOffset + 1], meshletTrianglesBuffer[triOffset + 2]); // Local indices into meshletVerticesBuffer
+    uint3 meshletIndices = uint3(asuint(meshletTrianglesBuffer.Load(triOffset)), asuint(meshletTrianglesBuffer.Load(triOffset + 1)), asuint(meshletTrianglesBuffer.Load(triOffset+2))); // Local indices into meshletVerticesBuffer
     uint3 vertexIndices = uint3(meshletVerticesBuffer[meshlet.VertOffset + meshletIndices.x], meshletVerticesBuffer[meshlet.VertOffset + meshletIndices.y], meshletVerticesBuffer[meshlet.VertOffset + meshletIndices.z]); // Global indices into vertexBuffer
     if (uGroupThreadID < meshlet.VertCount) {
         outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshlet.VertOffset+uGroupThreadID);

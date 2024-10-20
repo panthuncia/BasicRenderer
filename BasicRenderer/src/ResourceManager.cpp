@@ -341,19 +341,24 @@ void ResourceManager::ExecuteResourceTransitions() {
 	queuedResourceTransitions.clear();
 }
 
-DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t size, ResourceState usage, std::wstring name) {
+DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress) {
+#if defined(_DEBUG)
+	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
+#endif
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
+	size_t bufferSize = elementSize * numElements;
+	bufferSize += bufferSize % 4; // Align to 4 bytes
 	// Create the dynamic structured buffer instance
 	UINT bufferID = GetNextResizableBufferID();
-	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(bufferID, size, name);
+	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name);
 	ResourceTransition transition;
 	transition.resource = pDynamicBuffer.get();
 	transition.beforeState = ResourceState::UNKNOWN;
 	transition.afterState = usage;
 	QueueResourceTransition(transition);
-	pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
-		this->onBufferResized(bufferID, typeSize, capacity, buffer);
+	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, std::shared_ptr<Buffer>& buffer) {
+		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer);
 		});
 
 	// Create an SRV for the buffer
@@ -361,9 +366,10 @@ DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t size, Res
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 	srvDesc.Format = DXGI_FORMAT_UNKNOWN;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-	srvDesc.Buffer.NumElements = size;
-	srvDesc.Buffer.StructureByteStride = 1;
-	srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+	srvDesc.Buffer.FirstElement = 0;
+	srvDesc.Buffer.NumElements = numElements;
+	srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
+	srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
 	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
 	bufferIDDescriptorIndexMap[bufferID] = index;

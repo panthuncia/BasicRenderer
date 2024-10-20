@@ -101,5 +101,5 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     m_capacity = newSize;
     // Update the memory blocks to reflect the new capacity
     m_memoryBlocks.push_back({ oldCapacity, sizeDiff, true });
-    onResized(m_globalResizableBufferID, 1, m_capacity, m_dataBuffer);
+    onResized(m_globalResizableBufferID, 1, m_capacity, m_byteAddress, m_dataBuffer);
 }
