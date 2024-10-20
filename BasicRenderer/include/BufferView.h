@@ -28,6 +28,7 @@ public:
 
     size_t GetOffset() const { return m_offset; }
     size_t GetSize() const { return m_size; }
+	DynamicBuffer* GetBuffer() const { return m_buffer; }
 
 private:
     DynamicBuffer* m_buffer;

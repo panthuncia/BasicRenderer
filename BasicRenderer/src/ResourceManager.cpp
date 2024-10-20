@@ -207,9 +207,6 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
 }
 
 void ResourceManager::UpdateGPUBuffers() {
-	if (buffersToUpdate.size() == 0) {
-		return;
-	}
 
 	// Reset the command allocator
 	HRESULT hr = copyCommandAllocator->Reset();
@@ -269,6 +266,41 @@ void ResourceManager::UpdateGPUBuffers() {
 			copyCommandList->ResourceBarrier(1, &barrier);
 		}
 	}
+
+	for (DynamicBuffer* buffer : dynamicBuffersToUpdateViews) {
+
+		const auto& bufferViewsToUpdate = buffer->GetDirtyViews();
+		if (bufferViewsToUpdate.empty()) {
+			continue;
+		}
+
+		auto startState = ResourceStateToD3D12(buffer->m_dataBuffer->GetState());
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			buffer->m_dataBuffer->m_buffer.Get(),
+			startState,
+			D3D12_RESOURCE_STATE_COPY_DEST
+		);
+		copyCommandList->ResourceBarrier(1, &barrier);
+
+		for (const auto& bufferView : bufferViewsToUpdate) {
+			copyCommandList->CopyBufferRegion(
+				buffer->m_dataBuffer->m_buffer.Get(),
+				bufferView->GetOffset(),
+				buffer->m_uploadBuffer->m_buffer.Get(),
+				bufferView->GetOffset(),
+				bufferView->GetSize()
+			);
+		}
+		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			buffer->m_dataBuffer->m_buffer.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			startState
+		);
+		copyCommandList->ResourceBarrier(1, &barrier);
+
+		buffer->ClearDirtyViews();
+	}
+
 	hr = copyCommandList->Close();
 	if (FAILED(hr)) {
 		spdlog::error("Failed to close command list");

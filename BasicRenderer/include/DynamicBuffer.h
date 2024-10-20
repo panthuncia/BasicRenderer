@@ -51,6 +51,17 @@ public:
 	void* GetMappedData() {
 		return m_mappedData;
 	}
+
+	const std::vector<BufferView*>& GetDirtyViews() {
+		return m_dirtyViews;
+	}
+
+    void MarkViewDirty(BufferView* view);
+
+	void ClearDirtyViews() {
+		m_dirtyViews.clear();
+	}
+
 protected:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
         currentState = newState;
@@ -83,6 +94,8 @@ private:
 
     std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>&)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
+
+	std::vector<BufferView*> m_dirtyViews;
 
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);

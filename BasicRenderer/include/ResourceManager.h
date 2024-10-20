@@ -20,6 +20,8 @@
 
 using namespace Microsoft::WRL;
 
+class BufferView;
+
 class ResourceManager {
 public:
     static ResourceManager& GetInstance() {
@@ -480,6 +482,10 @@ public:
         dynamicBuffersToUpdate.push_back(handle.buffer);
     }
 
+	void QueueDynamicBufferViewUpdate(DynamicBuffer* handle) {
+		dynamicBuffersToUpdateViews.push_back(handle);
+	}
+
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
     void UpdateGPUBuffers();
@@ -540,6 +546,7 @@ private:
 
     std::vector<BufferHandle> buffersToUpdate;
     std::vector<std::shared_ptr<DynamicBufferBase>> dynamicBuffersToUpdate;
+	std::vector<DynamicBuffer*> dynamicBuffersToUpdateViews;
 
 	std::vector<ResourceTransition> queuedResourceTransitions;
 
