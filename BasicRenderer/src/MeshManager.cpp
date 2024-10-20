@@ -5,10 +5,10 @@
 #include "Mesh.h"
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_vertices = resourceManager.CreateIndexedDynamicBuffer(4, 1, ResourceState::ALL_SRV, L"vertices", true);
+	m_vertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"vertices", true);
 	m_meshletOffsets = resourceManager.CreateIndexedDynamicBuffer(sizeof(meshopt_Meshlet), 1, ResourceState::ALL_SRV, L"meshletOffsets");
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, ResourceState::ALL_SRV, L"meshletIndices");
-	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 1, ResourceState::ALL_SRV, L"meshletTriangles", true);
+	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"meshletTriangles", true);
 
 }
 

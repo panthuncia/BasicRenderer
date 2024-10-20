@@ -344,6 +344,7 @@ void ResourceManager::ExecuteResourceTransitions() {
 DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress) {
 #if defined(_DEBUG)
 	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
+	assert(byteAddress ? numElements % 4 == 0 : true);
 #endif
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
@@ -364,10 +365,10 @@ DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSi
 	// Create an SRV for the buffer
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+	srvDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
 	srvDesc.Buffer.FirstElement = 0;
-	srvDesc.Buffer.NumElements = numElements;
+	srvDesc.Buffer.NumElements = byteAddress? numElements / 4 : numElements;
 	srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
 	srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
