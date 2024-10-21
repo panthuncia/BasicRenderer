@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <wrl/client.h>
 
 #include "DirectX/d3dx12.h"

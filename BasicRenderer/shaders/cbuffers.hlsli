@@ -21,3 +21,14 @@ cbuffer Settings : register(b5) {
     bool enableShadows;
     bool enablePunctualLights;
 }
+
+cbuffer BufferIndices : register(b6) {
+    uint vertexBufferIndex;
+    uint meshletBufferIndex;
+    uint meshletVerticesBufferIndex;
+    uint meshletTrianglesBufferIndex;
+}
+
+cbuffer BufferOffsets : register(b7) {
+    uint vertexBufferOffset;
+}

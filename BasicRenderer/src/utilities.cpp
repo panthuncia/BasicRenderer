@@ -1,8 +1,6 @@
 #include "utilities.h"
 
 #include <wrl.h>
-#include <d3d12.h>
-#include <d3dcompiler.h>
 #include <stdexcept>
 #include <algorithm>
 #include <codecvt>

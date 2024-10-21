@@ -1,7 +1,7 @@
 #pragma once
 
 #include <wrl.h>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <directxmath.h>
 #include <vector>
 #include <memory>
@@ -46,6 +46,10 @@ public:
 	}
 	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 		m_meshletTrianglesBufferView = std::move(view);
+	}
+
+	unsigned int GetVertexBufferOffset() const {
+		return m_vertexBufferView2->GetOffset();
 	}
 
 private:

@@ -62,3 +62,10 @@ struct MaterialInfo {
 struct SingleMatrix {
     row_major matrix value;
 };
+
+struct Meshlet {
+    uint VertOffset;
+    uint TriOffset;
+    uint VertCount;
+    uint TriCount;
+};

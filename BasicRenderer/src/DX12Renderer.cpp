@@ -18,6 +18,7 @@
 #include "RenderGraph.h"
 #include "RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
+#include "RenderPasses/ForwardRenderPassMS.h"
 #include "RenderPasses/ShadowPass.h"
 #include "SettingsManager.h"
 #include "RenderPasses/DebugRenderPass.h"
@@ -577,7 +578,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 void DX12Renderer::CreateRenderGraph() {
     auto newGraph = std::make_unique<RenderGraph>();
 
-    auto forwardPass = std::make_shared<ForwardRenderPass>(getWireframe());
+    auto forwardPass = std::make_shared<ForwardRenderPassMS>(getWireframe());
     auto forwardPassParameters = PassParameters();
 
     auto debugPassParameters = PassParameters();

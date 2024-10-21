@@ -46,6 +46,7 @@ public:
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
     //LightManager& GetLightManager();
     void Activate();
+    const std::unique_ptr<MeshManager>& GetMeshManager();
 
 private:
     std::shared_ptr<Camera> pCamera;

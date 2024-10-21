@@ -1,7 +1,7 @@
 #pragma once
 #include "wrl.h"
 #include "stb/stb_image.h"
-#include "d3d12.h"
+#include "directx/d3d12.h"
 #include "DirectX/d3dx12.h"
 
 #include "ResourceStates.h"

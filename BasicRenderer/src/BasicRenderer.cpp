@@ -1,7 +1,8 @@
-﻿#include <iostream>
+﻿#include <directx/d3d12.h> // Included here to avoid conflicts with Windows SDK headers
+#include <iostream>
 #include <Windows.h>
 #include <windowsx.h>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <dxgi1_6.h>
 #include <iostream>
 #include <memory>

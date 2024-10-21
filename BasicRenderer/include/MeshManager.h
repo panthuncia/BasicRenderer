@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <wrl/client.h>
 
 #include "DynamicBuffer.h"
@@ -17,6 +17,18 @@ public:
 	}
 	void AddMesh(std::shared_ptr<Mesh>& mesh);
 	void RemoveMesh(std::shared_ptr<BufferView> view);
+	unsigned int GetVertexBufferIndex() const {
+		return m_vertices.index;
+	}
+	unsigned int GetMeshletOffsetBufferIndex() const {
+		return m_meshletOffsets.index;
+	}
+	unsigned int GetMeshletIndexBufferIndex() const {
+		return m_meshletIndices.index;
+	}
+	unsigned int GetMeshletTriangleBufferIndex() const {
+		return m_meshletTriangles.index;
+	}
 private:
 	MeshManager();
 	DynamicBufferHandle m_vertices;

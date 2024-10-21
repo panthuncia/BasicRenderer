@@ -2,20 +2,6 @@
 #include "utilities.hlsli"
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
-struct Meshlet {
-    uint VertOffset;
-    uint TriOffset;
-    uint VertCount;
-    uint TriCount;
-};
-
-cbuffer BufferIndices : register(b5) {
-    uint vertexBufferIndex;
-    uint vertexBufferOffset;
-    uint meshletBufferIndex;
-    uint meshletVerticesBufferIndex;
-    uint meshletTrianglesBufferIndex;
-}
 
 Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer) {
     Vertex vertex;
@@ -70,20 +56,20 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint index) {
     StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
     StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
-    matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.x);
-    matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.y);
-    matrix bone3 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.z);
-    matrix bone4 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.w);
+    matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.x);
+    matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.y);
+    matrix bone3 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.z);
+    matrix bone4 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.w);
     
-    matrix bindMatrix1 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.x);
-    matrix bindMatrix2 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.y);
-    matrix bindMatrix3 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.z);
-    matrix bindMatrix4 = loadMatrixFromBuffer(inverseBindMatricesBuffer, input.joints.w);
+    matrix bindMatrix1 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.x);
+    matrix bindMatrix2 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.y);
+    matrix bindMatrix3 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.z);
+    matrix bindMatrix4 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.w);
 
-    matrix skinMatrix = input.weights.x * mul(bindMatrix1, bone1) +
-                        input.weights.y * mul(bindMatrix2, bone2) +
-                        input.weights.z * mul(bindMatrix3, bone3) +
-                        input.weights.w * mul(bindMatrix4, bone4);
+    matrix skinMatrix = vertex.weights.x * mul(bindMatrix1, bone1) +
+                        vertex.weights.y * mul(bindMatrix2, bone2) +
+                        vertex.weights.z * mul(bindMatrix3, bone3) +
+                        vertex.weights.w * mul(bindMatrix4, bone4);
     
     pos = mul(pos, skinMatrix);
     normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3)skinMatrix);
@@ -122,7 +108,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint index) {
     result.positionViewSpace = viewPosition;
     result.position = mul(viewPosition, perFrameBuffer.projection);
     
-    result.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
+    result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
     
 #if defined(NORMAL_MAP) || defined(PARALLAX)
     result.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));

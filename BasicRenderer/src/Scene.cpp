@@ -399,3 +399,7 @@ void Scene::MakeNonResident() {
 void Scene::Activate() {
 	MakeResident();
 }
+
+const std::unique_ptr<MeshManager>& Scene::GetMeshManager() {
+	return meshManager;
+}

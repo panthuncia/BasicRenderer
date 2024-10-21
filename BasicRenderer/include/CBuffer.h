@@ -1,7 +1,7 @@
 #pragma once
 
 #include <wrl/client.h>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <DirectXMath.h>
 #include "DeviceManager.h"
 using Microsoft::WRL::ComPtr;
