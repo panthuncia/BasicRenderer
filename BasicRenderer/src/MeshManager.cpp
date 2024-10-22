@@ -9,7 +9,11 @@ MeshManager::MeshManager() {
 	m_meshletOffsets = resourceManager.CreateIndexedDynamicBuffer(sizeof(meshopt_Meshlet), 1, ResourceState::ALL_SRV, L"meshletOffsets");
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, ResourceState::ALL_SRV, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"meshletTriangles", true);
-
+	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
+	m_resourceGroup->AddResource(m_vertices.buffer);
+	m_resourceGroup->AddResource(m_meshletOffsets.buffer);
+	m_resourceGroup->AddResource(m_meshletIndices.buffer);
+	m_resourceGroup->AddResource(m_meshletTriangles.buffer);
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {

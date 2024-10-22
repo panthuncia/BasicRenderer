@@ -52,6 +52,10 @@ public:
 		return m_vertexBufferView2->GetOffset();
 	}
 
+	unsigned int GetMeshletCount() {
+		return m_meshlets.size();
+	}
+
 private:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, bool skinned);
     template <typename VertexType>

@@ -495,6 +495,7 @@ std::shared_ptr<Scene>& DX12Renderer::GetCurrentScene() {
 void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
     currentScene = newScene;
     currentScene->Activate();
+	rebuildRenderGraph = true;
 }
 
 InputManager& DX12Renderer::GetInputManager() {
@@ -578,8 +579,12 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 void DX12Renderer::CreateRenderGraph() {
     auto newGraph = std::make_unique<RenderGraph>();
 
+	auto meshResourceGroup = currentScene->GetMeshManager()->GetResourceGroup();
+	newGraph->AddResource(meshResourceGroup);
+
     auto forwardPass = std::make_shared<ForwardRenderPassMS>(getWireframe());
     auto forwardPassParameters = PassParameters();
+	forwardPassParameters.shaderResources.push_back(meshResourceGroup);
 
     auto debugPassParameters = PassParameters();
 
@@ -652,6 +657,7 @@ void DX12Renderer::CreateRenderGraph() {
         auto shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
         auto shadowPassParameters = PassParameters();
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
+		shadowPassParameters.shaderResources.push_back(meshResourceGroup);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
         newGraph->AddPass(shadowPass, shadowPassParameters);

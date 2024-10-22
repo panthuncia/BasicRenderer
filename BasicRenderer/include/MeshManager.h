@@ -7,6 +7,7 @@
 #include "DynamicBuffer.h"
 #include "ResourceHandles.h"
 #include "BufferView.h"
+#include "ResourceGroup.h"
 
 class Mesh;
 
@@ -29,10 +30,14 @@ public:
 	unsigned int GetMeshletTriangleBufferIndex() const {
 		return m_meshletTriangles.index;
 	}
+	std::shared_ptr<ResourceGroup> GetResourceGroup() {
+		return m_resourceGroup;
+	}
 private:
 	MeshManager();
 	DynamicBufferHandle m_vertices;
 	DynamicBufferHandle m_meshletOffsets;
 	DynamicBufferHandle m_meshletIndices;
 	DynamicBufferHandle m_meshletTriangles;
+	std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

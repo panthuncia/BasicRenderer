@@ -72,11 +72,17 @@ private:
     DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"")
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_needsUpdate(false) {
         CreateBuffer(size);
+        SetName(name);
+    }
+
+    void SetName(std::wstring name) {
         if (name != L"") {
-            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+			m_name = name;
+			std::wstring name = m_baseName + L": " + m_name;
+            m_dataBuffer->SetName(name.c_str());
         }
         else {
-            m_dataBuffer->SetName(m_name.c_str());
+            m_dataBuffer->SetName(m_baseName.c_str());
         }
     }
 
@@ -93,7 +99,8 @@ private:
     std::vector<MemoryBlock> m_memoryBlocks;
 
     std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>&)> onResized;
-    inline static std::wstring m_name = L"DynamicStructuredBuffer";
+    inline static std::wstring m_baseName = L"DynamicBuffer";
+	std::wstring m_name = m_baseName;
 
 	std::vector<BufferView*> m_dirtyViews;
 

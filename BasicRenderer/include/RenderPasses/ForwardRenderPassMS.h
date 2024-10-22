@@ -93,7 +93,7 @@ public:
 				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 				commandList->IASetIndexBuffer(&indexBufferView);
 
-				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
 		}
 		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
@@ -114,7 +114,7 @@ public:
 				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 				commandList->IASetIndexBuffer(&indexBufferView);
 
-				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
 		}
 
@@ -127,7 +127,7 @@ public:
 	}
 
 private:
-	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	ComPtr<ID3D12GraphicsCommandList7> m_commandList;
 	ComPtr<ID3D12CommandAllocator> m_allocator;
 	bool m_wireframe;
 	std::function<bool()> getImageBasedLightingEnabled;

@@ -111,18 +111,44 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint index) {
     result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
     
 #if defined(NORMAL_MAP) || defined(PARALLAX)
-    result.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));
-    result.TBN_B = normalize(mul(input.bitangent, normalMatrixSkinnedIfNecessary));
-    result.TBN_N = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
+    result.TBN_T = normalize(mul(vertex.tangent, normalMatrixSkinnedIfNecessary));
+    result.TBN_B = normalize(mul(vertex.bitangent, normalMatrixSkinnedIfNecessary));
+    result.TBN_N = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
 #endif // NORMAL_MAP
     
 #if defined(VERTEX_COLORS)
-    result.color = input.color;
+    result.color = vertex.color;
 #endif
 #if defined(TEXTURED)
-    result.texcoord = input.texcoord;
+    result.texcoord = vertex.texcoord;
 #endif
     return result;
+}
+
+
+Meshlet loadMeshlet(uint4 raw) {
+    Meshlet m;
+    m.VertOffset = raw.x;
+    m.TriOffset = raw.y;
+    m.VertCount = raw.z;
+    m.TriCount = raw.w;
+    return m;
+}
+
+uint LoadByte(ByteAddressBuffer buffer, uint byteIndex) {
+    // Calculate the 4-byte aligned offset to load from the buffer
+    uint alignedOffset = (byteIndex / 4) * 4;
+
+    // Load the full 4-byte word containing the byte we're interested in
+    uint word = buffer.Load(alignedOffset);
+
+    // Calculate which byte within the word we need (0-3)
+    uint byteOffset = byteIndex % 4;
+
+    // Extract the byte by shifting and masking
+    uint byteValue = (word >> (byteOffset * 8)) & 0xFF;
+
+    return byteValue;
 }
 
 [outputtopology("triangle")]
@@ -134,15 +160,15 @@ void MSMain(
     out indices uint3 outputTriangles[64]) {
 
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferIndex]; // Base vertex buffer
-    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferIndex]; // Meshlets, containing vertex & primitive offset & num
+    StructuredBuffer<uint4> meshletBuffer = ResourceDescriptorHeap[meshletBufferIndex]; // Meshlets, containing vertex & primitive offset & num
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferIndex]; // Meshlet vertices, as indices into base vertex buffer
     ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
     
-    Meshlet meshlet = meshletBuffer[vGroupID.x];
+    Meshlet meshlet = loadMeshlet(meshletBuffer[vGroupID.x]);
     SetMeshOutputCounts(meshlet.VertCount, meshlet.TriCount);
     
     uint triOffset = meshlet.TriOffset * 3 + uGroupThreadID * 3;
-    uint3 meshletIndices = uint3(asuint(meshletTrianglesBuffer.Load(triOffset)), asuint(meshletTrianglesBuffer.Load(triOffset + 1)), asuint(meshletTrianglesBuffer.Load(triOffset+2))); // Local indices into meshletVerticesBuffer
+    uint3 meshletIndices = uint3(LoadByte(meshletTrianglesBuffer, triOffset), LoadByte(meshletTrianglesBuffer, triOffset + 1), LoadByte(meshletTrianglesBuffer, triOffset+2))*4; // Local indices into meshletVerticesBuffer
     uint3 vertexIndices = uint3(meshletVerticesBuffer[meshlet.VertOffset + meshletIndices.x], meshletVerticesBuffer[meshlet.VertOffset + meshletIndices.y], meshletVerticesBuffer[meshlet.VertOffset + meshletIndices.z]); // Global indices into vertexBuffer
     if (uGroupThreadID < meshlet.VertCount) {
         outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshlet.VertOffset+uGroupThreadID);
