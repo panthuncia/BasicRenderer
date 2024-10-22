@@ -20,6 +20,7 @@
 #define OUTPUT_SPECULAR_IBL 10
 #define OUTPUT_METAL_FRESNEL_IBL 11
 #define OUTPUT_DIELECTRIC_FRESNEL_IBL 12
+#define OUTPUT_MESHLETS 13
 
 PSInput VSMain(Vertex input) {
     
@@ -788,6 +789,9 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         case OUTPUT_DIELECTRIC_FRESNEL_IBL:
             return float4(f_dielectric_fresnel_ibl, opacity);
 #endif // IMAGE_BASED_LIGHTING
+        case OUTPUT_MESHLETS:{
+                return lightMeshlets(input.meshletIndex, normalWS, viewDir);
+            }
         default:
             return float4(1.0, 0.0, 0.0, 1.0);
     }

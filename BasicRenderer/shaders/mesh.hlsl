@@ -43,7 +43,7 @@ MeshVertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
     return vertex;
 }
 
-PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize) {
+PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID) {
     uint byteOffset = blockByteOffset + index * vertexSize;
     MeshVertex vertex = LoadVertex(byteOffset, buffer, flags);
     
@@ -122,6 +122,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
 #if defined(PSO_TEXTURED)
     result.texcoord = vertex.texcoord;
 #endif
+    result.meshletIndex = vGroupID.x;
     return result;
 }
 
@@ -173,7 +174,7 @@ void MSMain(
     //uint3 vertexIndices = uint3(meshletVerticesBuffer[vertOffset + meshletIndices.x], meshletVerticesBuffer[vertOffset + meshletIndices.y], meshletVerticesBuffer[vertOffset + meshletIndices.z]); // Global indices into vertexBuffer
     if (uGroupThreadID < meshlet.VertCount) {
         uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, vertexBufferOffset, thisVertex, vertexFlags, vertexByteSize);
+        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, vertexBufferOffset, thisVertex, vertexFlags, vertexByteSize, vGroupID);
     }
     if (uGroupThreadID < meshlet.TriCount) {
         outputTriangles[uGroupThreadID] = meshletIndices;

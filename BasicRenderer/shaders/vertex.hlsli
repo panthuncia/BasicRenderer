@@ -41,6 +41,7 @@ struct PSInput {
     float4 positionViewSpace : TEXCOORD4;
     float3 normalWorldSpace : TEXCOORD5;
     float4 color : COLOR;
+    uint meshletIndex : TEXCOORD6;
 };
 #else
 struct PSInput {
@@ -56,6 +57,7 @@ struct PSInput {
     float3 TBN_B : TEXCOORD7;      // Second row of TBN
     float3 TBN_N : TEXCOORD8;      // Third row of TBN
 #endif // NORMAL_MAP
+    uint meshletIndex : TEXCOORD9;
 };
 #endif
 

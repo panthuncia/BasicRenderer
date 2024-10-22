@@ -42,3 +42,27 @@ matrix loadMatrixFromBuffer(StructuredBuffer<float4> matrixBuffer, uint matrixIn
     float4 bone1Row4 = matrixBuffer[matrixIndex * 4 + 3];
     return float4x4(bone1Row1, bone1Row2, bone1Row3, bone1Row4);
 }
+
+// Basic blinn-phong for meshlet visualization
+float4 lightMeshlets(uint meshletIndex, float3 normal, float3 viewDir) {
+    float ambientIntensity = 0.3;
+    float3 lightColor = float3(1, 1, 1);
+    float3 lightDir = -normalize(float3(1, -1, 1));
+
+    float3 diffuseColor = float3(
+            float(meshletIndex & 1),
+            float(meshletIndex & 3) / 4,
+            float(meshletIndex & 7) / 8);
+   float shininess = 16.0;
+    
+    float cosAngle = saturate(dot(normal, lightDir));
+    float3 halfAngle = normalize(lightDir + viewDir);
+
+    float blinnTerm = saturate(dot(normal, halfAngle));
+    blinnTerm = cosAngle != 0.0 ? blinnTerm : 0.0;
+    blinnTerm = pow(blinnTerm, shininess);
+
+    float3 finalColor = (cosAngle + blinnTerm + ambientIntensity) * diffuseColor;
+
+    return float4(finalColor, 1);
+}
