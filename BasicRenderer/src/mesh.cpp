@@ -8,19 +8,25 @@
 #include "PSOFlags.h"
 #include "ResourceManager.h"
 #include "Material.h"
+#include "Vertex.h"
 
 std::atomic<int> Mesh::globalMeshCount = 0;
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, bool skinned) {
+Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
     m_vertices = vertices;
     CreateBuffers(vertices, indices);
     this->material = material;
     m_psoFlags = material->m_psoFlags;
-    if (skinned) {
-        m_psoFlags |= PSOFlags::SKINNED;
+    if (flags & VertexFlags::VERTEX_SKINNED) {
+        m_psoFlags |= PSOFlags::PSO_SKINNED;
     }
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
+	m_perMeshBufferData.vertexFlags = flags;
+	std::visit([&](auto&& vertex) { // Get byte size of vertices
+        using T = std::decay_t<decltype(vertex)>;
+		m_perMeshBufferData.vertexByteSize = sizeof(T);
+		}, vertices.front());
     m_pPerMeshBuffer = resourceManager.CreateConstantBuffer<PerMeshCB>(L"PerMeshCB");
 	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 	m_globalMeshID = GetNextGlobalIndex();

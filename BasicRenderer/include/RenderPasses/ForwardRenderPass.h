@@ -64,7 +64,7 @@ public:
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
-			localPSOFlags |= PSOFlags::IMAGE_BASED_LIGHTING;
+			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
 
 		for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {

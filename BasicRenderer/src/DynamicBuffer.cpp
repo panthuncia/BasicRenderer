@@ -1,5 +1,7 @@
 #include "DynamicBuffer.h"
 
+#include <spdlog/spdlog.h>
+
 #include "DirectX/d3dx12.h"
 #include "BufferView.h"
 
@@ -31,7 +33,8 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
     // No suitable block found, need to grow the buffer
 
     // Delete the last block if it is free
-    size_t growBy = (std::max)(m_capacity, requiredSize);
+    size_t newBlockSize = (std::max)(m_capacity, requiredSize);
+    size_t growBy = newBlockSize;
     if (!m_memoryBlocks.empty() && m_memoryBlocks.back().isFree)
     {
         growBy -= m_memoryBlocks.back().size;
@@ -42,9 +45,10 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
     GrowBuffer(newCapacity);
     MemoryBlock newBlock;
     newBlock.isFree = true;
-	newBlock.offset = m_capacity - requiredSize;
-	newBlock.size = requiredSize;
+	newBlock.offset = m_capacity - newBlockSize;
+	newBlock.size = newBlockSize;
     m_memoryBlocks.push_back(newBlock);
+	spdlog::info("Growing buffer to {} bytes", newCapacity);
     // Try allocating again
     return Allocate(size, type);
 }

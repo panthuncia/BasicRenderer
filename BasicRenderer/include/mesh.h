@@ -19,8 +19,8 @@ class Material;
 
 class Mesh {
 public:
-    static std::shared_ptr<Mesh> CreateShared(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, bool skinned = false) {
-		return std::shared_ptr<Mesh>(new Mesh(vertices, indices, material, skinned));
+    static std::shared_ptr<Mesh> CreateShared(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+		return std::shared_ptr<Mesh>(new Mesh(vertices, indices, material, flags));
     }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
@@ -69,7 +69,7 @@ public:
 	}
 
 private:
-    Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, bool skinned);
+    Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
     template <typename VertexType>
     void CreateVertexBuffer(const std::vector<VertexType>& vertices);
     template <typename VertexType>

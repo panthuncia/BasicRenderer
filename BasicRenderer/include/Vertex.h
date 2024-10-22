@@ -55,3 +55,11 @@ struct VertexNormalMappedSkinned {
 };
 
 using Vertex = std::variant<VertexBasic, VertexColored, VertexTextured, VertexSkinned, VertexNormalMapped, VertexNormalMappedSkinned>;
+
+enum VertexFlags {
+    VERTEX_COLORS = 1 << 0,
+    VERTEX_NORMALS = 1 << 1,
+	VERTEX_TEXCOORDS = 1 << 2,
+	VERTEX_SKINNED = 1 << 3,
+	VERTEX_TANBIT = 1 << 4,
+};

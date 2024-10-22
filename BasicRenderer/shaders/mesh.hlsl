@@ -3,8 +3,8 @@
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
 
-Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer) {
-    Vertex vertex;
+MeshVertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
+    MeshVertex vertex;
 
     // Load position (float3, 12 bytes)
     vertex.position = LoadFloat3(byteOffset, buffer);
@@ -14,45 +14,45 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer) {
     vertex.normal = LoadFloat3(byteOffset, buffer);
     byteOffset += 12;
 
-#if defined(TEXTURED)
-    // Load texcoord (float2, 8 bytes)
-    vertex.texcoord = LoadFloat2(byteOffset, buffer);
-    byteOffset += 8;
-#endif
+    if (flags & VERTEX_TEXCOORDS) {
+        // Load texcoord (float2, 8 bytes)
+        vertex.texcoord = LoadFloat2(byteOffset, buffer);
+        byteOffset += 8;
+    }
 
-#if defined(NORMAL_MAP) || defined(PARALLAX)
-    // Load tangent (float3, 12 bytes)
-    vertex.tangent = LoadFloat3(byteOffset, buffer);
-    byteOffset += 12;
+    if (flags & VERTEX_TANBIT) {
+        // Load tangent (float3, 12 bytes)
+        vertex.tangent = LoadFloat3(byteOffset, buffer);
+        byteOffset += 12;
 
-    // Load bitangent (float3, 12 bytes)
-    vertex.bitangent = LoadFloat3(byteOffset, buffer);
-    byteOffset += 12;
-#endif
+        // Load bitangent (float3, 12 bytes)
+        vertex.bitangent = LoadFloat3(byteOffset, buffer);
+        byteOffset += 12;
+    }
 
-#if defined(SKINNED)
-    // Load joints (uint4, 16 bytes)
-    vertex.joints = LoadUint4(byteOffset, buffer);
-    byteOffset += 16;
+    if (flags & VERTEX_SKINNED) {
+        // Load joints (uint4, 16 bytes)
+        vertex.joints = LoadUint4(byteOffset, buffer);
+        byteOffset += 16;
 
-    // Load weights (float4, 16 bytes)
-    vertex.weights = LoadFloat4(byteOffset, buffer);
-    byteOffset += 16;
-#endif
+        // Load weights (float4, 16 bytes)
+        vertex.weights = LoadFloat4(byteOffset, buffer);
+        byteOffset += 16;
+    }
 
     return vertex;
 }
 
-PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index) {
-    uint byteOffset = blockByteOffset + index * sizeof(Vertex); // 64 bytes per vertex
-    Vertex vertex = LoadVertex(byteOffset, buffer);
+PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize) {
+    uint byteOffset = blockByteOffset + index * vertexSize;
+    MeshVertex vertex = LoadVertex(byteOffset, buffer, flags);
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
 
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3) normalMatrix;
     
-    #if defined(SKINNED)
+    #if defined(PSO_SKINNED)
     StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
     StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
@@ -78,7 +78,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     float4 worldPosition = mul(pos, model);
     PSInput result;
     
-    #if defined(SHADOW)
+    #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
@@ -110,16 +110,16 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     
     result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
     
-#if defined(NORMAL_MAP) || defined(PARALLAX)
+#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
     result.TBN_T = normalize(mul(vertex.tangent, normalMatrixSkinnedIfNecessary));
     result.TBN_B = normalize(mul(vertex.bitangent, normalMatrixSkinnedIfNecessary));
     result.TBN_N = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
 #endif // NORMAL_MAP
     
-#if defined(VERTEX_COLORS)
+#if defined(PSO_VERTEX_COLORS)
     result.color = vertex.color;
 #endif
-#if defined(TEXTURED)
+#if defined(PSO_TEXTURED)
     result.texcoord = vertex.texcoord;
 #endif
     return result;
@@ -173,7 +173,7 @@ void MSMain(
     //uint3 vertexIndices = uint3(meshletVerticesBuffer[vertOffset + meshletIndices.x], meshletVerticesBuffer[vertOffset + meshletIndices.y], meshletVerticesBuffer[vertOffset + meshletIndices.z]); // Global indices into vertexBuffer
     if (uGroupThreadID < meshlet.VertCount) {
         uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, vertexBufferOffset, thisVertex);
+        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, vertexBufferOffset, thisVertex, vertexFlags, vertexByteSize);
     }
     if (uGroupThreadID < meshlet.TriCount) {
         outputTriangles[uGroupThreadID] = meshletIndices;

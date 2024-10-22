@@ -19,6 +19,7 @@
 #include "ReadbackRequest.h"
 #include "Material.h"
 #include "SettingsManager.h"
+#include "Vertex.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -37,7 +38,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
         bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
         bool hasTangents = false;
 
-        if (geom.material->m_psoFlags & PSOFlags::NORMAL_MAP) {
+        if (geom.material->m_psoFlags & PSOFlags::PSO_NORMAL_MAP || geom.material->m_psoFlags & PSOFlags::PSO_PARALLAX) {
             if (!geom.indices.empty()) {
                 std::vector<XMFLOAT3>& xmfloat3Positions = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.positions);
                 std::vector<XMFLOAT3>& xmfloat3Normals = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.normals);
@@ -45,6 +46,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
 
                 tanbit = calculateTangentsBitangentsIndexed(xmfloat3Positions, xmfloat3Normals, xmfloat2Texcoords, geom.indices);
                 hasTangents = true;
+				geom.flags |= VertexFlags::VERTEX_TANBIT;
             }
         }
 
@@ -75,7 +77,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
             }
         }
 
-        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(vertices, geom.indices, geom.material, hasJoints);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(vertices, geom.indices, geom.material, geom.flags);
         meshes.push_back(std::move(mesh));
     }
 

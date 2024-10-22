@@ -7,6 +7,8 @@ cbuffer PerObject : register(b1) {
 
 cbuffer PerMesh : register(b2) {
     uint materialDataIndex;
+    uint vertexFlags;
+    uint vertexByteSize;
 };
 
 cbuffer RootConstants1 : register(b3) {

@@ -51,6 +51,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
 	int size = sizeof(VertexTextured);
 	auto& meshlets = mesh->GetMeshlets();
 	auto test = vertices[0];
+	spdlog::info("Adding {} meshlets, allocating {} bytes", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));
 	auto meshletOffsetsView = m_meshletOffsets.buffer->Allocate(meshlets.size() * sizeof(meshopt_Meshlet), typeid(meshopt_Meshlet));
 	std::memcpy(meshletOffsetsView->Map<meshopt_Meshlet>(), meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet));
 	meshletOffsetsView->GetBuffer()->MarkViewDirty(meshletOffsetsView.get());

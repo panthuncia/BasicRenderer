@@ -244,10 +244,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.SetCurrentScene(baseScene);
     renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //renderer.GetCurrentScene()->AppendScene(*carScene);
-	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
+    renderer.GetCurrentScene()->AppendScene(*carScene);
+	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 	renderer.MarkForDelete(carScene);
@@ -269,7 +269,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto& scene = renderer.GetCurrentScene();
     scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
 
-    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::VERTEX_COLORS);
+    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::PSO_VERTEX_COLORS);
     auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, false);
     std::vector<std::shared_ptr<Mesh>> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>(L"CubeObject", vec);

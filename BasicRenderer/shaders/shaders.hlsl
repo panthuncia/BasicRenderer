@@ -28,7 +28,7 @@ PSInput VSMain(Vertex input) {
     
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;
     
-#if defined(SKINNED)
+#if defined(PSO_SKINNED)
     StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
     StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
@@ -54,7 +54,7 @@ PSInput VSMain(Vertex input) {
     PSInput output;
     float4 worldPosition = mul(pos, model);
     
-#if defined(SHADOW)
+#if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
@@ -85,16 +85,16 @@ PSInput VSMain(Vertex input) {
     
     output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
     
-#if defined(NORMAL_MAP) || defined(PARALLAX)
+#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
     output.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));
     output.TBN_B = normalize(mul(input.bitangent, normalMatrixSkinnedIfNecessary));
     output.TBN_N = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
 #endif // NORMAL_MAP
     
-#if defined(VERTEX_COLORS)
+#if defined(PSO_VERTEX_COLORS)
     output.color = input.color;
 #endif
-#if defined(TEXTURED)
+#if defined(PSO_TEXTURED)
     output.texcoord = input.texcoord;
 #endif
     return output;
@@ -266,7 +266,7 @@ float3 fresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
     return F0 + (max(float3(invRoughness, invRoughness, invRoughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-#if defined(PARALLAX)
+#if defined(PSO_PARALLAX)
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0, float height, Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float heightmapScale) {
 #else
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0) {
@@ -305,7 +305,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     // Unit vector halfway between view dir and light dir. Makes more accurate specular highlights.
     float3 halfwayDir = normalize(lightDir + viewDir);
 
-#if defined(PBR)
+#if defined(PSO_PBR)
     float3 radiance = lightColor * attenuation;
     float normDotLight = max(dot(normal, lightDir), 0.0);
 
@@ -345,7 +345,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
         lighting *= spot;
     }
     
-#if defined(PARALLAX)
+#if defined(PSO_PARALLAX)
     float parallaxShadow = getParallaxShadow(parallaxTexture, parallaxSampler, TBN, uv, lightDir, viewDir, height, heightmapScale);
     lighting *= parallaxShadow;
 #endif
@@ -584,17 +584,17 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
     
     float2 uv = float2(0.0, 0.0);
-#if defined(TEXTURED)
+#if defined(PSO_TEXTURED)
     uv = input.texcoord;
     uv*=materialInfo.textureScale;
 #endif // TEXTURED
     
-#if defined(NORMAL_MAP) || defined(PARALLAX)
+#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
     float3x3 TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
 #endif // NORMAL_MAP || PARALLAX
     float height = 0.0;
     
-#if defined(PARALLAX)
+#if defined(PSO_PARALLAX)
     Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
     SamplerState parallaxSamplerState = SamplerDescriptorHeap[materialInfo.heightSamplerIndex];
     float3 uvh = getContactRefinementParallaxCoordsAndHeight(parallaxTexture, parallaxSamplerState, TBN, uv, viewDir, materialInfo.heightMapScale);
@@ -604,18 +604,18 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
     float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
     
-#if defined(BASE_COLOR_TEXTURE)
+#if defined(PSO_BASE_COLOR_TEXTURE)
     Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
     SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
     baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
     baseColor.rgb = SRGBToLinear(baseColor.rgb);
 #endif //BASE_COLOR_TEXTURE
-#if defined(PBR)
+#if defined(PSO_PBR)
     baseColor = materialInfo.baseColorFactor * baseColor;
 #endif // PBR
     float3 normalWS = input.normalWorldSpace.xyz;
     
-#if defined (NORMAL_MAP)
+#if defined (PSO_NORMAL_MAP)
     Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
     SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
     float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
@@ -623,7 +623,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     normalWS = normalize(mul(tangentSpaceNormal, TBN));
 #endif // NORMAL_MAP
     
-#if defined(DOUBLE_SIDED)
+#if defined(PSO_DOUBLE_SIDED)
     if(!isFrontFace) {
         normalWS = -normalWS;
     }
@@ -633,8 +633,8 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float roughness = 0.0;
     float3 F0 = float3(0.04, 0.04, 0.04); // TODO: this should be specified per-material
     
-#if defined(PBR)
-    #if defined (PBR_MAPS)
+#if defined(PSO_PBR)
+    #if defined (PSO_PBR_MAPS)
         Texture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[materialInfo.metallicRoughnessTextureIndex];
         SamplerState metallicRoughnessSamplerState = SamplerDescriptorHeap[materialInfo.metallicRoughnessSamplerIndex];
         float2 metallicRoughness = metallicRoughnessTexture.Sample(metallicRoughnessSamplerState, uv).gb;
@@ -647,7 +647,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif // PBR
     F0 = lerp(F0, baseColor.xyz, metallic);
     
-#if defined(VERTEX_COLORS)
+#if defined(PSO_VERTEX_COLORS)
     baseColor *= input.color;
 #endif // VERTEX_COLORS
     float3 lighting = float3(0.0, 0.0, 0.0);
@@ -680,7 +680,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                     }
                 }
             }
-#if defined (PARALLAX)
+#if defined (PSO_PARALLAX)
         lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN, materialInfo.heightMapScale);
 #else
             lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
@@ -688,13 +688,13 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         }
     }
     float ao = 1.0;
-#if defined(AO_TEXTURE)
+#if defined(PSO_AO_TEXTURE)
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
     SamplerState aoSamplerState = SamplerDescriptorHeap[materialInfo.aoSamplerIndex];
     ao = aoTexture.Sample(aoSamplerState, uv).r;
 #endif
     
-  #if defined(IMAGE_BASED_LIGHTING)
+  #if defined(PSO_IMAGE_BASED_LIGHTING)
   
     // irradiance
     TextureCube<float4> irradianceMap = ResourceDescriptorHeap[perFrameBuffer.environmentIrradianceMapIndex];
@@ -727,11 +727,11 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif // IMAGE_BASED_LIGHTING
     
     lighting += ambient;
-#if defined(VERTEX_COLORS)
+#if defined(PSO_VERTEX_COLORS)
     lighting = lighting * input.color.xyz;
 #endif // VERTEX_COLORS
     
-#if defined(EMISSIVE_TEXTURE)
+#if defined(PSO_EMISSIVE_TEXTURE)
     Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];
     SamplerState emissiveSamplerState = SamplerDescriptorHeap[materialInfo.emissiveSamplerIndex];
     float3 emissive = SRGBToLinear(emissiveTexture.Sample(emissiveSamplerState, uv).rgb)*materialInfo.emissiveFactor.rgb;
@@ -744,7 +744,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     lighting = reinhardJodie(lighting);
     //lighting = toneMap_KhronosPbrNeutral(lighting);
     //lighting = toneMapACES_Hill(lighting);
-#if defined(PBR)
+#if defined(PSO_PBR)
     // Gamma correction
     lighting = LinearToSRGB(lighting);
 #endif // PBR
@@ -763,7 +763,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         case OUTPUT_ROUGHNESS:
             return float4(roughness, roughness, roughness, opacity);
         case OUTPUT_EMISSIVE:{
-#if defined(EMISSIVE_TEXTURE)
+#if defined(PSO_EMISSIVE_TEXTURE)
             float3 srgbEmissive = LinearToSRGB(emissive);
             return float4(srgbEmissive, opacity);
 #else
@@ -776,7 +776,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                 float depth = abs(input.positionViewSpace.z)*0.1;
                 return float4(depth, depth, depth, opacity);
             }
-#if defined(IMAGE_BASED_LIGHTING)
+#if defined(PSO_IMAGE_BASED_LIGHTING)
         case OUTPUT_METAL_BRDF_IBL:
             return float4(f_metal_brdf_ibl, opacity);
         case OUTPUT_DIELECTRIC_BRDF_IBL:
