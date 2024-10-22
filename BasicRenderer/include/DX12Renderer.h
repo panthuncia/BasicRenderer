@@ -42,7 +42,6 @@ public:
 	void SetIrradiance(std::shared_ptr<Texture> texture);
 	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
     void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
-    void ToggleWireframe();
     void SubmitReadbackRequest(ReadbackRequest&& request);
     std::vector<ReadbackRequest>& GetPendingReadbackRequests();
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
@@ -115,13 +114,14 @@ private:
     std::function<uint16_t()> getShadowResolution;
 	std::function<void(float)> setCameraSpeed;
 	std::function<float()> getCameraSpeed;
-	std::function<void(bool)> setWireframe;
-	std::function<bool()> getWireframe;
+	std::function<void(bool)> setWireframeEnabled;
+	std::function<bool()> getWireframeEnabled;
 	std::function<void(bool)> setShadowsEnabled;
 	std::function<bool()> getShadowsEnabled;
     std::function<uint16_t()> getSkyboxResolution;
 	std::function<void(bool)> setImageBasedLightingEnabled;
 	std::function<void(std::string)> setEnvironment;
+	std::function<bool()> getMeshShadersEnabled;
 };
 
 #endif //DX12RENDERER_H

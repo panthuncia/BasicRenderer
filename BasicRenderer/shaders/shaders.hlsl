@@ -98,6 +98,7 @@ PSInput VSMain(Vertex input) {
 #if defined(PSO_TEXTURED)
     output.texcoord = input.texcoord;
 #endif
+    output.meshletIndex = 0; // Unused for vertex shader
     return output;
 }
 

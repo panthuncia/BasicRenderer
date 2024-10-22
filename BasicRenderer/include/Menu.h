@@ -75,13 +75,24 @@ private:
 	bool imageBasedLightingEnabled = false;
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<void(bool)> setImageBasedLightingEnabled;
+
 	bool punctualLightingEnabled = false;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<void(bool)> setPunctualLightingEnabled;
+
     bool shadowsEnabled = false;
 	std::function<bool()> getShadowsEnabled;
 	std::function<void(bool)> setShadowsEnabled;
+
 	std::function<void(unsigned int)> setOutputType;
+
+    bool meshShaderEnabled = false;
+    std::function<bool()> getMeshShaderEnabled;
+	std::function<void(bool)> setMeshShaderEnabled;
+
+    bool wireframeEnabled = false;
+	std::function<bool()> getWireframeEnabled;
+	std::function<void(bool)> setWireframeEnabled;
 
 	std::function < std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()> getRenderableObjects;
 	std::function<SceneNode& ()> getSceneRoot;
@@ -169,6 +180,14 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getSceneRoot = settingsManager.getSettingGetter<std::function<SceneNode&()>>("getSceneRoot")();
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene")();
     markForDelete = settingsManager.getSettingGetter<std::function<void(std::shared_ptr<void>)>>("markForDelete")();
+
+	setMeshShaderEnabled = settingsManager.getSettingSetter<bool>("enableMeshShader");
+	getMeshShaderEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
+	meshShaderEnabled = getMeshShaderEnabled();
+
+	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
+	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
+	wireframeEnabled = getWireframeEnabled();
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -191,6 +210,12 @@ inline void Menu::Render(const RenderContext& context) {
 		}
 		if (ImGui::Checkbox("Shadows", &shadowsEnabled)) {
 			setShadowsEnabled(shadowsEnabled);
+		}
+		if (ImGui::Checkbox("Use Mesh Shaders", &meshShaderEnabled)) {
+			setMeshShaderEnabled(meshShaderEnabled);
+		}
+		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
+			setWireframeEnabled(wireframeEnabled);
 		}
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());

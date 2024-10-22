@@ -89,10 +89,6 @@ public:
 				// TODO: cache this in mesh class
 				unsigned int offsets[4] = { mesh.GetVertexBufferOffset(), mesh.GetMeshletBufferOffset() / sizeof(meshopt_Meshlet), mesh.GetMeshletVerticesBufferOffset() / 4, mesh.GetMeshletTrianglesBufferOffset()};
 				commandList->SetGraphicsRoot32BitConstants(6, 4, &offsets, 0);
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-				commandList->IASetIndexBuffer(&indexBufferView);
 
 				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
@@ -105,15 +101,11 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
-				auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState);
+				auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 				unsigned int offsets[4] = { mesh.GetVertexBufferOffset(), mesh.GetMeshletBufferOffset() / sizeof(meshopt_Meshlet), mesh.GetMeshletVerticesBufferOffset() / 4, mesh.GetMeshletTrianglesBufferOffset()};
 				commandList->SetGraphicsRoot32BitConstants(6, 4, &offsets, 0);
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-				commandList->IASetIndexBuffer(&indexBufferView);
 
 				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}

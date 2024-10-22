@@ -94,7 +94,7 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState);
+				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();

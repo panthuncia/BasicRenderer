@@ -20,6 +20,7 @@
 #include "RenderPasses/ForwardRenderPass.h"
 #include "RenderPasses/ForwardRenderPassMS.h"
 #include "RenderPasses/ShadowPass.h"
+#include "RenderPasses/ShadowPassMS.h"
 #include "SettingsManager.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
@@ -101,7 +102,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 1.5);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
-	settingsManager.registerSetting<bool>("wireframe", false);
+	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
 	settingsManager.registerSetting<std::function<void(ReadbackRequest&&)>>("readbackRequestHandler", [this](ReadbackRequest&& request) {
@@ -124,26 +125,34 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<void(std::shared_ptr<void>)>>("markForDelete", [this](std::shared_ptr<void> node) {
 		MarkForDelete(node);
         });
+	settingsManager.registerSetting<bool>("enableMeshShader", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");
-	setWireframe = settingsManager.getSettingSetter<bool>("wireframe");
-	getWireframe = settingsManager.getSettingGetter<bool>("wireframe");
+	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
+	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
 	getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-    settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
-            // Trigger recompilation of the render graph when setting changes
-		    rebuildRenderGraph = true;
-        });
 	getSkyboxResolution = settingsManager.getSettingGetter<uint16_t>("skyboxResolution");
 	setImageBasedLightingEnabled = settingsManager.getSettingSetter<bool>("enableImageBasedLighting");
 	setEnvironment = settingsManager.getSettingSetter<std::string>("environmentName");
+	getMeshShadersEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
+    settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
+        // Trigger recompilation of the render graph when setting changes
+        rebuildRenderGraph = true;
+        });
 	settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
 		SetEnvironmentInternal(s2ws(newValue));
 		});
 	settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
+		});
+	settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
+		rebuildRenderGraph = true;
+		});
+	settingsManager.addObserver<bool>("enableWireframe", [this](const bool& newValue) {
+		rebuildRenderGraph = true;
 		});
 }
 
@@ -569,7 +578,6 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 		});
 
     context.SetActionHandler(InputAction::X, [this](float magnitude, const InputData& inputData) {
-		ToggleWireframe();
         });
 
     context.SetActionHandler(InputAction::Z, [this](float magnitude, const InputData& inputData) {
@@ -581,10 +589,19 @@ void DX12Renderer::CreateRenderGraph() {
 
 	auto meshResourceGroup = currentScene->GetMeshManager()->GetResourceGroup();
 	newGraph->AddResource(meshResourceGroup);
-
-    auto forwardPass = std::make_shared<ForwardRenderPassMS>(getWireframe());
+    
+    bool useMeshShaders = getMeshShadersEnabled();
     auto forwardPassParameters = PassParameters();
-	forwardPassParameters.shaderResources.push_back(meshResourceGroup);
+
+    std::shared_ptr<RenderPass> forwardPass = nullptr;
+
+    if (useMeshShaders) {
+        forwardPassParameters.shaderResources.push_back(meshResourceGroup);
+        forwardPass = std::make_shared<ForwardRenderPassMS>(getWireframeEnabled());
+	}
+    else {
+        forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled());
+    }
 
     auto debugPassParameters = PassParameters();
 
@@ -654,10 +671,17 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
         newGraph->AddResource(m_shadowMaps);
 
-        auto shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
+        std::shared_ptr<RenderPass> shadowPass = nullptr;
         auto shadowPassParameters = PassParameters();
+
+        if (useMeshShaders) { 
+            shadowPass = std::make_shared<ShadowPassMS>(m_shadowMaps);
+            shadowPassParameters.shaderResources.push_back(meshResourceGroup);
+		}
+		else {
+			shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
+		}
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
-		shadowPassParameters.shaderResources.push_back(meshResourceGroup);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
         newGraph->AddPass(shadowPass, shadowPassParameters);
@@ -681,11 +705,6 @@ void DX12Renderer::CreateRenderGraph() {
 	currentRenderGraph = std::move(newGraph);
 
 	rebuildRenderGraph = false;
-}
-
-void DX12Renderer::ToggleWireframe() {
-	setWireframe(!getWireframe());
-	rebuildRenderGraph = true;
 }
 
 void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
