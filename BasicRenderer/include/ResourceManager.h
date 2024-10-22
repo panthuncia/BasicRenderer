@@ -214,7 +214,7 @@ public:
 		}
     }
 
-    void onDynamicBufferResized(UINT bufferID, UINT typeSize, UINT capacity, bool byteAddress, std::shared_ptr<Buffer>& buffer) {
+    void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, std::shared_ptr<Buffer>& buffer) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -225,8 +225,8 @@ public:
         srvDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
         srvDesc.Buffer.FirstElement = 0;
-        srvDesc.Buffer.NumElements = byteAddress ? capacity / 4 : capacity;
-        srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : typeSize;
+        srvDesc.Buffer.NumElements = byteAddress ? numElements / 4 : numElements;
+        srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
         srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
         device->CreateShaderResourceView(buffer->m_buffer.Get(), &srvDesc, srvHandle);

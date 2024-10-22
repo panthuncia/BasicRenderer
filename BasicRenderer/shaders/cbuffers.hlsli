@@ -31,4 +31,7 @@ cbuffer BufferIndices : register(b6) {
 
 cbuffer BufferOffsets : register(b7) {
     uint vertexBufferOffset;
+    uint meshletBufferOffset;
+    uint meshletVerticesBufferOffset;
+    uint meshletTrianglesBufferOffset;
 }

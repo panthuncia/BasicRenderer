@@ -16,6 +16,8 @@ MeshManager::MeshManager() {
 	m_resourceGroup->AddResource(m_meshletTriangles.buffer);
 }
 
+
+
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
 	auto& vertices = mesh->GetVertices();
     if (vertices.empty()) {
@@ -28,21 +30,27 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
     // Use std::visit to determine the concrete vertex type
     std::visit([&](auto&& vertexSample) {
         using VertexType = std::decay_t<decltype(vertexSample)>;
-
+		std::vector<VertexType> specificVertices;
+		specificVertices.reserve(vertices.size());
+		for (const auto& v : vertices) {
+			specificVertices.push_back(std::get<VertexType>(v));
+		}
         // Allocate buffer view
         size_t size = vertices.size() * sizeof(VertexType);
 		std::unique_ptr<BufferView> view = m_vertices.buffer->Allocate(size, typeid(VertexType));
 
         // Map and copy data
         VertexType* dataPtr = view->Map<VertexType>();
-        std::memcpy(dataPtr, vertices.data(), size);
+        std::memcpy(dataPtr, specificVertices.data(), size);
 		view->GetBuffer()->MarkViewDirty(view.get());
 		mesh->SetVertexBufferView(std::move(view));
 		manager.QueueDynamicBufferViewUpdate(m_vertices.buffer.get());
 
         }, vertices.front());
 
+	int size = sizeof(VertexTextured);
 	auto& meshlets = mesh->GetMeshlets();
+	auto test = vertices[0];
 	auto meshletOffsetsView = m_meshletOffsets.buffer->Allocate(meshlets.size() * sizeof(meshopt_Meshlet), typeid(meshopt_Meshlet));
 	std::memcpy(meshletOffsetsView->Map<meshopt_Meshlet>(), meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet));
 	meshletOffsetsView->GetBuffer()->MarkViewDirty(meshletOffsetsView.get());

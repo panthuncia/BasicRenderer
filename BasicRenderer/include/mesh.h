@@ -52,6 +52,18 @@ public:
 		return m_vertexBufferView2->GetOffset();
 	}
 
+	unsigned int GetMeshletBufferOffset() const {
+		return m_meshletBufferView->GetOffset();
+	}
+
+	unsigned int GetMeshletVerticesBufferOffset() const {
+		return m_meshletVerticesBufferView->GetOffset();
+	}
+
+	unsigned int GetMeshletTrianglesBufferOffset() const {
+		return m_meshletTrianglesBufferView->GetOffset();
+	}
+
 	unsigned int GetMeshletCount() {
 		return m_meshlets.size();
 	}

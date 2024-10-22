@@ -29,9 +29,22 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
     }
 
     // No suitable block found, need to grow the buffer
-    size_t newCapacity = m_capacity + (std::max)(m_capacity, requiredSize);
-    GrowBuffer(newCapacity);
 
+    // Delete the last block if it is free
+    size_t growBy = (std::max)(m_capacity, requiredSize);
+    if (!m_memoryBlocks.empty() && m_memoryBlocks.back().isFree)
+    {
+        growBy -= m_memoryBlocks.back().size;
+        m_memoryBlocks.pop_back();
+    }
+    size_t newCapacity = m_capacity + growBy;
+
+    GrowBuffer(newCapacity);
+    MemoryBlock newBlock;
+    newBlock.isFree = true;
+	newBlock.offset = m_capacity - requiredSize;
+	newBlock.size = requiredSize;
+    m_memoryBlocks.push_back(newBlock);
     // Try allocating again
     return Allocate(size, type);
 }
@@ -99,9 +112,7 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     size_t oldCapacity = m_capacity;
     size_t sizeDiff = newSize - m_capacity;
     m_capacity = newSize;
-    // Update the memory blocks to reflect the new capacity
-    m_memoryBlocks.push_back({ oldCapacity, sizeDiff, true });
-    onResized(m_globalResizableBufferID, 1, m_capacity, m_byteAddress, m_dataBuffer);
+    onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, m_dataBuffer);
 	SetName(m_name);
 }
 

@@ -436,16 +436,18 @@ void PSOManager::createRootSignature() {
     parameters[4].Constants.Num32BitValues = 2;
     parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+	// Fourth integer root constant, used for global meshlet buffer indices
 	parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[5].Constants.ShaderRegister = 6;
 	parameters[5].Constants.RegisterSpace = 0;
 	parameters[5].Constants.Num32BitValues = 4;
 	parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+	// Fifth integer root constant, used for local meshlet buffer offsets
     parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[6].Constants.ShaderRegister = 7;
     parameters[6].Constants.RegisterSpace = 0;
-    parameters[6].Constants.Num32BitValues = 1;
+    parameters[6].Constants.Num32BitValues = 4;
     parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description
