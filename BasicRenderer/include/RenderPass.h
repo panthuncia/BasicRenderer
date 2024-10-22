@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <wrl/client.h>
 
 #include "Resource.h"

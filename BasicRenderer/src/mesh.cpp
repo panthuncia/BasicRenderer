@@ -1,22 +1,35 @@
 #include "Mesh.h"
+
+#include <meshoptimizer.h>
+
 #include "DirectX/d3dx12.h"
 #include "Utilities.h"
 #include "DeviceManager.h"
 #include "PSOFlags.h"
 #include "ResourceManager.h"
 #include "Material.h"
+#include "Vertex.h"
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, bool skinned) {
+std::atomic<int> Mesh::globalMeshCount = 0;
+
+Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+    m_vertices = vertices;
     CreateBuffers(vertices, indices);
     this->material = material;
     m_psoFlags = material->m_psoFlags;
-    if (skinned) {
-        m_psoFlags |= PSOFlags::SKINNED;
+    if (flags & VertexFlags::VERTEX_SKINNED) {
+        m_psoFlags |= PSOFlags::PSO_SKINNED;
     }
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
+	m_perMeshBufferData.vertexFlags = flags;
+	std::visit([&](auto&& vertex) { // Get byte size of vertices
+        using T = std::decay_t<decltype(vertex)>;
+		m_perMeshBufferData.vertexByteSize = sizeof(T);
+		}, vertices.front());
     m_pPerMeshBuffer = resourceManager.CreateConstantBuffer<PerMeshCB>(L"PerMeshCB");
 	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+	m_globalMeshID = GetNextGlobalIndex();
 }
 
 template <typename VertexType>
@@ -31,6 +44,17 @@ void Mesh::CreateVertexBuffer(const std::vector<VertexType>& vertices) {
     m_vertexBufferView.SizeInBytes = vertexBufferSize;
 }
 
+template <typename VertexType>
+void Mesh::CreateMeshlets(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices) {
+	unsigned int maxVertices = 64;
+	unsigned int maxPrimitives = 64;
+	size_t maxMeshlets = meshopt_buildMeshletsBound(indices.size(), maxVertices, maxPrimitives);
+    m_meshlets = std::vector<meshopt_Meshlet>(maxMeshlets);
+	m_meshletVertices = std::vector<unsigned int>(maxMeshlets*maxVertices);
+	m_meshletTriangles = std::vector<unsigned char>(maxMeshlets * maxPrimitives * 3);
+    meshopt_buildMeshlets(m_meshlets.data(), m_meshletVertices.data(), m_meshletTriangles.data(), indices.data(), indices.size(), (float*)vertices.data(), vertices.size(), sizeof(VertexType), maxVertices, maxPrimitives, 0);
+}
+
 void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices) {
 
     std::visit([&](auto&& vertex) {
@@ -40,6 +64,7 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
         for (const auto& v : vertices) {
             specificVertices.push_back(std::get<T>(v));
         }
+		CreateMeshlets(specificVertices, indices);
         CreateVertexBuffer(specificVertices);
         }, vertices.front());
 
@@ -71,4 +96,12 @@ UINT Mesh::GetIndexCount() const {
 
 UINT Mesh::GetPSOFlags() const {
     return m_psoFlags;
+}
+
+int Mesh::GetNextGlobalIndex() {
+    return globalMeshCount.fetch_add(1, std::memory_order_relaxed);
+}
+
+int Mesh::GetGlobalID() const {
+	return m_globalMeshID;
 }

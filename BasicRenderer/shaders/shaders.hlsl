@@ -1,3 +1,7 @@
+#include "vertex.hlsli"
+#include "utilities.hlsli"
+#include "cbuffers.hlsli"
+#include "structs.hlsli"
 #define PI 3.1415926538
 
 // Do enums exist in HLSL?
@@ -16,161 +20,16 @@
 #define OUTPUT_SPECULAR_IBL 10
 #define OUTPUT_METAL_FRESNEL_IBL 11
 #define OUTPUT_DIELECTRIC_FRESNEL_IBL 12
+#define OUTPUT_MESHLETS 13
 
-struct PerFrameBuffer {
-    row_major matrix view;
-    row_major matrix projection;
-    float4 eyePosWorldSpace;
-    float4 ambientLighting;
-    float4 shadowCascadeSplits;
-    uint lightBufferIndex;
-    uint numLights;
-    uint pointLightCubemapBufferIndex;
-    uint spotLightMatrixBufferIndex;
-    uint directionalLightCascadeBufferIndex;
-    uint numShadowCascades;
-    uint environmentIrradianceMapIndex;
-    uint environmentIrradianceSamplerIndex;
-    uint environmentPrefilteredMapIndex;
-    uint environmentPrefilteredSamplerIndex;
-    uint environmentBRDFLUTIndex;
-    uint environmentBRDFLUTSamplerIndex;
-    uint outputType;
-};
-
-cbuffer PerObject : register(b1) {
-    row_major matrix model;
-    row_major float4x4 normalMatrix;
-    uint boneTransformBufferIndex;
-    uint inverseBindMatricesBufferIndex;
-};
-
-cbuffer PerMesh : register(b2) {
-    uint materialDataIndex;
-};
-
-cbuffer RootConstants1 : register(b3) {
-    int currentLightID; // Used for shadow mapping, global light index
-};
-
-cbuffer RootConstants2 : register(b4) {
-    int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
-}
-
-cbuffer Settings : register(b5) {
-    bool enableShadows;
-    bool enablePunctualLights;
-}
-
-struct LightInfo {
-    uint type;
-    float innerConeAngle;
-    float outerConeAngle;
-    int shadowViewInfoIndex; // -1 if no shadow map
-    float4 posWorldSpace; // Position of the light
-    float4 dirWorldSpace; // Direction of the light
-    float4 attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
-    float4 color; // Color of the light
-    float nearPlane;
-    float farPlane;
-    int shadowMapIndex;
-    int shadowSamplerIndex;
-};
-
-struct MaterialInfo {
-    uint psoFlags;
-    uint baseColorTextureIndex;
-    uint baseColorSamplerIndex;
-    uint normalTextureIndex;
-    uint normalSamplerIndex;
-    uint metallicRoughnessTextureIndex;
-    uint metallicRoughnessSamplerIndex;
-    uint emissiveTextureIndex;
-    uint emissiveSamplerIndex;
-    uint aoMapIndex;
-    uint aoSamplerIndex;
-    uint heightMapIndex;
-    uint heightSamplerIndex;
-    float metallicFactor;
-    float roughnessFactor;
-    float ambientStrength;
-    float specularStrength;
-    float textureScale;
-    float heightMapScale;
-    float pad0;
-    float4 baseColorFactor;
-    float4 emissiveFactor;
-};
-
-struct SingleMatrix {
-    row_major matrix value;
-};
-
-#if defined(VERTEX_COLORS)
-struct VSInput {
-    float3 position : POSITION;
-    float3 normal : NORMAL;
-    float4 color : COLOR;
-};
-#else
-struct VSInput {
-    float3 position : POSITION;
-    float3 normal : NORMAL;
-#if defined(TEXTURED)
-    float2 texcoord : TEXCOORD0;
-#endif
-#if defined(NORMAL_MAP) || defined(PARALLAX)
-    float3 tangent : TANGENT0;
-    float3 bitangent : BINORMAL0;
-#endif // NORMAL_MAP
-#if defined(SKINNED)
-    uint4 joints : TEXCOORD1;
-    float4 weights : TEXCOORD2;
-#endif // SKINNED
-};
-#endif
-
-#if defined(VERTEX_COLORS)
-struct PSInput {
-    float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD3;
-    float4 positionViewSpace : TEXCOORD4;
-    float3 normalWorldSpace : TEXCOORD5;
-    float4 color : COLOR;
-};
-#else
-struct PSInput {
-    float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD3;
-    float4 positionViewSpace : TEXCOORD4;
-    float3 normalWorldSpace : TEXCOORD5;
-#if defined(TEXTURED)
-    float2 texcoord : TEXCOORD0;
-#endif // TEXTURED
-#if defined(NORMAL_MAP) || defined(PARALLAX)
-    float3 TBN_T : TEXCOORD6;      // First row of TBN
-    float3 TBN_B : TEXCOORD7;      // Second row of TBN
-    float3 TBN_N : TEXCOORD8;      // Third row of TBN
-#endif // NORMAL_MAP
-};
-#endif
-
-matrix loadMatrixFromBuffer(StructuredBuffer<float4> matrixBuffer, uint matrixIndex) {
-    float4 bone1Row1 = matrixBuffer[matrixIndex * 4];
-    float4 bone1Row2 = matrixBuffer[matrixIndex * 4 + 1];
-    float4 bone1Row3 = matrixBuffer[matrixIndex * 4 + 2];
-    float4 bone1Row4 = matrixBuffer[matrixIndex * 4 + 3];
-    return float4x4(bone1Row1, bone1Row2, bone1Row3, bone1Row4);
-}
-
-PSInput VSMain(VSInput input) {
+PSInput VSMain(Vertex input) {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(input.position.xyz, 1.0f);
     
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;
     
-#if defined(SKINNED)
+#if defined(PSO_SKINNED)
     StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
     StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
@@ -196,7 +55,7 @@ PSInput VSMain(VSInput input) {
     PSInput output;
     float4 worldPosition = mul(pos, model);
     
-#if defined(SHADOW)
+#if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
@@ -227,18 +86,19 @@ PSInput VSMain(VSInput input) {
     
     output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
     
-#if defined(NORMAL_MAP) || defined(PARALLAX)
+#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
     output.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));
     output.TBN_B = normalize(mul(input.bitangent, normalMatrixSkinnedIfNecessary));
     output.TBN_N = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
 #endif // NORMAL_MAP
     
-#if defined(VERTEX_COLORS)
+#if defined(PSO_VERTEX_COLORS)
     output.color = input.color;
 #endif
-#if defined(TEXTURED)
+#if defined(PSO_TEXTURED)
     output.texcoord = input.texcoord;
 #endif
+    output.meshletIndex = 0; // Unused for vertex shader
     return output;
 }
 
@@ -408,7 +268,7 @@ float3 fresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
     return F0 + (max(float3(invRoughness, invRoughness, invRoughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-#if defined(PARALLAX)
+#if defined(PSO_PARALLAX)
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0, float height, Texture2D<float> parallaxTexture, SamplerState parallaxSampler, float3x3 TBN, float heightmapScale) {
 #else
 float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDir, float3 normal, float2 uv, float3 albedo, float metallic, float roughness, float3 F0) {
@@ -447,7 +307,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
     // Unit vector halfway between view dir and light dir. Makes more accurate specular highlights.
     float3 halfwayDir = normalize(lightDir + viewDir);
 
-#if defined(PBR)
+#if defined(PSO_PBR)
     float3 radiance = lightColor * attenuation;
     float normDotLight = max(dot(normal, lightDir), 0.0);
 
@@ -487,7 +347,7 @@ float3 calculateLightContribution(LightInfo light, float3 fragPos, float3 viewDi
         lighting *= spot;
     }
     
-#if defined(PARALLAX)
+#if defined(PSO_PARALLAX)
     float parallaxShadow = getParallaxShadow(parallaxTexture, parallaxSampler, TBN, uv, lightDir, viewDir, height, heightmapScale);
     lighting *= parallaxShadow;
 #endif
@@ -726,17 +586,17 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
     
     float2 uv = float2(0.0, 0.0);
-#if defined(TEXTURED)
+#if defined(PSO_TEXTURED)
     uv = input.texcoord;
     uv*=materialInfo.textureScale;
 #endif // TEXTURED
     
-#if defined(NORMAL_MAP) || defined(PARALLAX)
+#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
     float3x3 TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
 #endif // NORMAL_MAP || PARALLAX
     float height = 0.0;
     
-#if defined(PARALLAX)
+#if defined(PSO_PARALLAX)
     Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
     SamplerState parallaxSamplerState = SamplerDescriptorHeap[materialInfo.heightSamplerIndex];
     float3 uvh = getContactRefinementParallaxCoordsAndHeight(parallaxTexture, parallaxSamplerState, TBN, uv, viewDir, materialInfo.heightMapScale);
@@ -746,18 +606,18 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
     float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
     
-#if defined(BASE_COLOR_TEXTURE)
+#if defined(PSO_BASE_COLOR_TEXTURE)
     Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
     SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
     baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
     baseColor.rgb = SRGBToLinear(baseColor.rgb);
 #endif //BASE_COLOR_TEXTURE
-#if defined(PBR)
+#if defined(PSO_PBR)
     baseColor = materialInfo.baseColorFactor * baseColor;
 #endif // PBR
     float3 normalWS = input.normalWorldSpace.xyz;
     
-#if defined (NORMAL_MAP)
+#if defined (PSO_NORMAL_MAP)
     Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
     SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
     float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
@@ -765,7 +625,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     normalWS = normalize(mul(tangentSpaceNormal, TBN));
 #endif // NORMAL_MAP
     
-#if defined(DOUBLE_SIDED)
+#if defined(PSO_DOUBLE_SIDED)
     if(!isFrontFace) {
         normalWS = -normalWS;
     }
@@ -775,8 +635,8 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float roughness = 0.0;
     float3 F0 = float3(0.04, 0.04, 0.04); // TODO: this should be specified per-material
     
-#if defined(PBR)
-    #if defined (PBR_MAPS)
+#if defined(PSO_PBR)
+    #if defined (PSO_PBR_MAPS)
         Texture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[materialInfo.metallicRoughnessTextureIndex];
         SamplerState metallicRoughnessSamplerState = SamplerDescriptorHeap[materialInfo.metallicRoughnessSamplerIndex];
         float2 metallicRoughness = metallicRoughnessTexture.Sample(metallicRoughnessSamplerState, uv).gb;
@@ -789,7 +649,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif // PBR
     F0 = lerp(F0, baseColor.xyz, metallic);
     
-#if defined(VERTEX_COLORS)
+#if defined(PSO_VERTEX_COLORS)
     baseColor *= input.color;
 #endif // VERTEX_COLORS
     float3 lighting = float3(0.0, 0.0, 0.0);
@@ -798,7 +658,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         StructuredBuffer<float4> pointShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
         StructuredBuffer<float4> spotShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
         StructuredBuffer<float4> directionalShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
-    
+        
         for (uint i = 0; i < perFrameBuffer.numLights; i++) {
             LightInfo light = lights[i];
             float shadow = 0.0;
@@ -822,7 +682,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                     }
                 }
             }
-#if defined (PARALLAX)
+#if defined (PSO_PARALLAX)
         lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0, height, parallaxTexture, parallaxSamplerState, TBN, materialInfo.heightMapScale);
 #else
             lighting += (1.0 - shadow) * calculateLightContribution(light, input.positionWorldSpace.xyz, viewDir, normalWS, uv, baseColor.xyz, metallic, roughness, F0);
@@ -830,13 +690,13 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         }
     }
     float ao = 1.0;
-#if defined(AO_TEXTURE)
+#if defined(PSO_AO_TEXTURE)
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
     SamplerState aoSamplerState = SamplerDescriptorHeap[materialInfo.aoSamplerIndex];
     ao = aoTexture.Sample(aoSamplerState, uv).r;
 #endif
     
-  #if defined(IMAGE_BASED_LIGHTING)
+  #if defined(PSO_IMAGE_BASED_LIGHTING)
   
     // irradiance
     TextureCube<float4> irradianceMap = ResourceDescriptorHeap[perFrameBuffer.environmentIrradianceMapIndex];
@@ -869,11 +729,11 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif // IMAGE_BASED_LIGHTING
     
     lighting += ambient;
-#if defined(VERTEX_COLORS)
+#if defined(PSO_VERTEX_COLORS)
     lighting = lighting * input.color.xyz;
 #endif // VERTEX_COLORS
     
-#if defined(EMISSIVE_TEXTURE)
+#if defined(PSO_EMISSIVE_TEXTURE)
     Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];
     SamplerState emissiveSamplerState = SamplerDescriptorHeap[materialInfo.emissiveSamplerIndex];
     float3 emissive = SRGBToLinear(emissiveTexture.Sample(emissiveSamplerState, uv).rgb)*materialInfo.emissiveFactor.rgb;
@@ -886,7 +746,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     lighting = reinhardJodie(lighting);
     //lighting = toneMap_KhronosPbrNeutral(lighting);
     //lighting = toneMapACES_Hill(lighting);
-#if defined(PBR)
+#if defined(PSO_PBR)
     // Gamma correction
     lighting = LinearToSRGB(lighting);
 #endif // PBR
@@ -905,7 +765,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         case OUTPUT_ROUGHNESS:
             return float4(roughness, roughness, roughness, opacity);
         case OUTPUT_EMISSIVE:{
-#if defined(EMISSIVE_TEXTURE)
+#if defined(PSO_EMISSIVE_TEXTURE)
             float3 srgbEmissive = LinearToSRGB(emissive);
             return float4(srgbEmissive, opacity);
 #else
@@ -918,7 +778,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                 float depth = abs(input.positionViewSpace.z)*0.1;
                 return float4(depth, depth, depth, opacity);
             }
-#if defined(IMAGE_BASED_LIGHTING)
+#if defined(PSO_IMAGE_BASED_LIGHTING)
         case OUTPUT_METAL_BRDF_IBL:
             return float4(f_metal_brdf_ibl, opacity);
         case OUTPUT_DIELECTRIC_BRDF_IBL:
@@ -930,6 +790,9 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         case OUTPUT_DIELECTRIC_FRESNEL_IBL:
             return float4(f_dielectric_fresnel_ibl, opacity);
 #endif // IMAGE_BASED_LIGHTING
+        case OUTPUT_MESHLETS:{
+                return lightMeshlets(input.meshletIndex, normalWS, viewDir);
+            }
         default:
             return float4(1.0, 0.0, 0.0, 1.0);
     }

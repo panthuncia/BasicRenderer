@@ -2,12 +2,18 @@
 # project specific logic here.
 #
 
+# Ensure project include paths take precedence over system paths.
+set(CMAKE_INCLUDE_DIRECTORIES_BEFORE ON)
+
+
 # Add source to this project's executable.
 add_definitions(-D_UNICODE -DUNICODE)
 
 find_package(spdlog CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(meshoptimizer REQUIRED)
+find_package(DirectX-Headers CONFIG REQUIRED)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (BasicRenderer WIN32  ${SOURCES})
@@ -148,10 +154,7 @@ add_symlink_or_copy_per_config(
 )
 
 
-
-
-# Include directories
-include_directories(include/)
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/)
 
 # Find and link DirectX 12
-target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib")
+target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib")

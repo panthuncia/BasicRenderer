@@ -4,6 +4,7 @@
 #include "DeviceManager.h"
 #include "DynamicStructuredBuffer.h"
 #include "SettingsManager.h"
+#include "DynamicBuffer.h"
 void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
@@ -206,9 +207,6 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
 }
 
 void ResourceManager::UpdateGPUBuffers() {
-	if (buffersToUpdate.size() == 0) {
-		return;
-	}
 
 	// Reset the command allocator
 	HRESULT hr = copyCommandAllocator->Reset();
@@ -268,6 +266,41 @@ void ResourceManager::UpdateGPUBuffers() {
 			copyCommandList->ResourceBarrier(1, &barrier);
 		}
 	}
+
+	for (DynamicBuffer* buffer : dynamicBuffersToUpdateViews) {
+
+		const auto& bufferViewsToUpdate = buffer->GetDirtyViews();
+		if (bufferViewsToUpdate.empty()) {
+			continue;
+		}
+
+		auto startState = ResourceStateToD3D12(buffer->m_dataBuffer->GetState());
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			buffer->m_dataBuffer->m_buffer.Get(),
+			startState,
+			D3D12_RESOURCE_STATE_COPY_DEST
+		);
+		copyCommandList->ResourceBarrier(1, &barrier);
+
+		for (const auto& bufferView : bufferViewsToUpdate) {
+			copyCommandList->CopyBufferRegion(
+				buffer->m_dataBuffer->m_buffer.Get(),
+				bufferView->GetOffset(),
+				buffer->m_uploadBuffer->m_buffer.Get(),
+				bufferView->GetOffset(),
+				bufferView->GetSize()
+			);
+		}
+		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			buffer->m_dataBuffer->m_buffer.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			startState
+		);
+		copyCommandList->ResourceBarrier(1, &barrier);
+
+		buffer->ClearDirtyViews();
+	}
+
 	hr = copyCommandList->Close();
 	if (FAILED(hr)) {
 		spdlog::error("Failed to close command list");
@@ -338,4 +371,46 @@ void ResourceManager::ExecuteResourceTransitions() {
 	transitionCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
 	queuedResourceTransitions.clear();
+}
+
+DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress) {
+#if defined(_DEBUG)
+	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
+	assert(byteAddress ? numElements % 4 == 0 : true);
+#endif
+	auto& device = DeviceManager::GetInstance().GetDevice();
+
+	size_t bufferSize = elementSize * numElements;
+	bufferSize += bufferSize % 4; // Align to 4 bytes
+	// Create the dynamic structured buffer instance
+	UINT bufferID = GetNextResizableBufferID();
+	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name);
+	ResourceTransition transition;
+	transition.resource = pDynamicBuffer.get();
+	transition.beforeState = ResourceState::UNKNOWN;
+	transition.afterState = usage;
+	QueueResourceTransition(transition);
+	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, std::shared_ptr<Buffer>& buffer) {
+		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer);
+		});
+
+	// Create an SRV for the buffer
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	srvDesc.Buffer.FirstElement = 0;
+	srvDesc.Buffer.NumElements = byteAddress? numElements / 4 : numElements;
+	srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
+	srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
+
+	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+	bufferIDDescriptorIndexMap[bufferID] = index;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
+	device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+
+	DynamicBufferHandle handle;
+	handle.index = index;
+	handle.buffer = pDynamicBuffer;
+	return handle;
 }

@@ -1,13 +1,15 @@
 {
   "name": "basic-renderer",
   "version": "0.0.1",
-  "dependencies": [
-    "spdlog",
-    "directxtex",
-    {
-        "name": "imgui",
-        "features": [ "dx12-binding", "win32-binding" ]
-    }
-  ],
+    "dependencies": [
+        "spdlog",
+        "directxtex",
+        "meshoptimizer",
+        {
+            "name": "imgui",
+            "features": [ "dx12-binding", "win32-binding" ]
+        },
+        "directx-headers"
+    ],
   "builtin-baseline": "3508985146f1b1d248c67ead13f8f54be5b4f5da"
 }

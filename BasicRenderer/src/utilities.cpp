@@ -1,8 +1,6 @@
 #include "utilities.h"
 
 #include <wrl.h>
-#include <d3d12.h>
-#include <d3dcompiler.h>
 #include <stdexcept>
 #include <algorithm>
 #include <codecvt>
@@ -21,6 +19,7 @@
 #include "ReadbackRequest.h"
 #include "Material.h"
 #include "SettingsManager.h"
+#include "Vertex.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -31,7 +30,7 @@ void ThrowIfFailed(HRESULT hr) {
 }
 
 std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name) {
-    std::vector<Mesh> meshes;
+    std::vector<std::shared_ptr<Mesh>> meshes;
 
     for (auto geom : meshData.geometries) {
         TangentBitangent tanbit;
@@ -39,7 +38,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
         bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
         bool hasTangents = false;
 
-        if (geom.material->m_psoFlags & PSOFlags::NORMAL_MAP) {
+        if (geom.material->m_psoFlags & PSOFlags::PSO_NORMAL_MAP || geom.material->m_psoFlags & PSOFlags::PSO_PARALLAX) {
             if (!geom.indices.empty()) {
                 std::vector<XMFLOAT3>& xmfloat3Positions = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.positions);
                 std::vector<XMFLOAT3>& xmfloat3Normals = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.normals);
@@ -47,6 +46,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
 
                 tanbit = calculateTangentsBitangentsIndexed(xmfloat3Positions, xmfloat3Normals, xmfloat2Texcoords, geom.indices);
                 hasTangents = true;
+				geom.flags |= VertexFlags::VERTEX_TANBIT;
             }
         }
 
@@ -77,7 +77,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
             }
         }
 
-        Mesh mesh = Mesh(vertices, geom.indices, geom.material, hasJoints);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(vertices, geom.indices, geom.material, geom.flags);
         meshes.push_back(std::move(mesh));
     }
 

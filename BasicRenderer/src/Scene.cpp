@@ -4,7 +4,6 @@
 
 #include "Utilities.h"
 #include "SettingsManager.h"
-
 Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
@@ -29,7 +28,18 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     if (object->parent == nullptr) {
         sceneRoot.AddChild(object);
     }
-
+	for (auto& mesh : object->GetOpaqueMeshes()) {
+        meshesByID[mesh->GetGlobalID()] = mesh;
+		if (meshManager != nullptr) { // If mesh manager exists, this scene is active and we want to add the mesh immediately
+            meshManager->AddMesh(mesh);
+        }
+	}
+    for (auto& mesh : object->GetTransparentMeshes()) {
+        meshesByID[mesh->GetGlobalID()] = mesh;
+        if (meshManager != nullptr) {
+            meshManager->AddMesh(mesh);
+        }
+    }
     return object->GetLocalID();
 }
 
@@ -367,4 +377,29 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         }
     }
     return newRootNode;
+}
+
+void Scene::MakeResident() { // MeshManager manages GPU buffers
+	meshManager = MeshManager::CreateUnique();
+	for (auto& objectPair : objectsByID) {
+		auto& object = objectPair.second;
+		for (auto& mesh : object->GetOpaqueMeshes()) {
+			meshManager->AddMesh(mesh);
+		}
+		for (auto& mesh : object->GetTransparentMeshes()) {
+            meshManager->AddMesh(mesh);
+		}
+	}
+}
+
+void Scene::MakeNonResident() {
+    meshManager = nullptr;
+}
+
+void Scene::Activate() {
+	MakeResident();
+}
+
+const std::unique_ptr<MeshManager>& Scene::GetMeshManager() {
+	return meshManager;
 }

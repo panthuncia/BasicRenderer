@@ -30,10 +30,10 @@ public:
     void UpdateBuffers();
 
 private:
-    DynamicBufferHandle<LightInfo> m_lightBufferHandle;
-    DynamicBufferHandle<DirectX::XMMATRIX> m_spotViewInfoHandle;
-    DynamicBufferHandle<DirectX::XMMATRIX> m_pointViewInfoHandle;
-    DynamicBufferHandle<DirectX::XMMATRIX> m_directionalViewInfoHandle;
+    DynamicStructuredBufferHandle<LightInfo> m_lightBufferHandle;
+    DynamicStructuredBufferHandle<DirectX::XMMATRIX> m_spotViewInfoHandle;
+    DynamicStructuredBufferHandle<DirectX::XMMATRIX> m_pointViewInfoHandle;
+    DynamicStructuredBufferHandle<DirectX::XMMATRIX> m_directionalViewInfoHandle;
     //std::unordered_map<int, unsigned int> lightIndexMap; // Maps localID to buffer index
     std::vector<Light*> m_lights; // Active light IDs
     std::vector<Light*> m_spotLights;

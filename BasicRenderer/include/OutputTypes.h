@@ -13,7 +13,8 @@ enum OutputType {
 	DIELECTRIC_BRDF_IBL = 9,
 	SPECULAR_IBL = 10,
 	METAL_FRESNEL_IBL = 11,
-	DIELECTRIC_FRESNEL_IBL = 12
+	DIELECTRIC_FRESNEL_IBL = 12,
+	MESHLETS = 13
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -26,8 +27,9 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Ambient Occlusion",
 	"Depth",
 	"Metallic BRDF IBL",
-	"Dielectric BRDF IBL"
+	"Dielectric BRDF IBL",
 	"Specular IBL",
 	"Metal Fresnel IBL",
-	"Dielectric Fresnel IBL"
+	"Dielectric Fresnel IBL",
+	"Meshlets",
 };

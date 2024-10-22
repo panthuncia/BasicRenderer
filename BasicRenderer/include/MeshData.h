@@ -1,4 +1,5 @@
 #pragma once
+#include "Vertex.h"
 
 class Material;
 
@@ -10,6 +11,7 @@ struct GeometryData {
     std::vector<UINT> joints;
     std::vector<float> weights;
     std::shared_ptr<Material> material;
+	unsigned int flags = 0;
 };
 
 struct MeshData {

@@ -11,9 +11,9 @@
 #include "Scene.h"
 #include "Material.h"
 
-class ForwardRenderPass : public RenderPass {
+class ForwardRenderPassMS : public RenderPass {
 public:
-	ForwardRenderPass(bool wireframe) {
+	ForwardRenderPassMS(bool wireframe) {
 		m_wireframe = wireframe;
 
 		auto& settingsManager = SettingsManager::GetInstance();
@@ -58,9 +58,17 @@ public:
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-		unsigned int settings[2] = {getShadowsEnabled(), getPunctualLightingEnabled()}; // HLSL bools are 32 bits
+		unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() }; // HLSL bools are 32 bits
 		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
 		commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
+
+		unsigned int meshletBufferIndices[4] = {};
+		auto& meshManager = context.currentScene->GetMeshManager();
+		meshletBufferIndices[0] = meshManager->GetVertexBufferIndex();
+		meshletBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
+		meshletBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
+		meshletBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
+		commandList->SetGraphicsRoot32BitConstants(5, 4, &meshletBufferIndices, 0);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
@@ -75,15 +83,14 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
+				auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-				commandList->IASetIndexBuffer(&indexBufferView);
+				// TODO: cache this in mesh class
+				unsigned int offsets[4] = { mesh.GetVertexBufferOffset(), mesh.GetMeshletBufferOffset() / sizeof(meshopt_Meshlet), mesh.GetMeshletVerticesBufferOffset() / 4, mesh.GetMeshletTrianglesBufferOffset()};
+				commandList->SetGraphicsRoot32BitConstants(6, 4, &offsets, 0);
 
-				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
 		}
 		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
@@ -94,15 +101,13 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
-				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
+				auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
-				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
-				commandList->IASetIndexBuffer(&indexBufferView);
+				unsigned int offsets[4] = { mesh.GetVertexBufferOffset(), mesh.GetMeshletBufferOffset() / sizeof(meshopt_Meshlet), mesh.GetMeshletVerticesBufferOffset() / 4, mesh.GetMeshletTrianglesBufferOffset()};
+				commandList->SetGraphicsRoot32BitConstants(6, 4, &offsets, 0);
 
-				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
 		}
 
@@ -115,7 +120,7 @@ public:
 	}
 
 private:
-	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	ComPtr<ID3D12GraphicsCommandList7> m_commandList;
 	ComPtr<ID3D12CommandAllocator> m_allocator;
 	bool m_wireframe;
 	std::function<bool()> getImageBasedLightingEnabled;

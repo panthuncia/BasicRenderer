@@ -15,6 +15,7 @@
 #include "Animation.h"
 #include "Skeleton.h"
 #include "utilities.h"
+#include "Vertex.h"
 
 using nlohmann::json;
 
@@ -120,14 +121,14 @@ struct Accessor {
     size_t byteOffset;
 };
 
-struct BufferView {
+struct DataBufferView {
     size_t byteStride;
     size_t byteOffset;
 };
 
 struct AccessorData {
     Accessor accessor;
-    BufferView bufferView;
+    DataBufferView bufferView;
 };
 
 template <typename T>
@@ -136,7 +137,7 @@ std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, con
 template <>
 std::vector<XMMATRIX> extractDataFromBuffer<XMMATRIX>(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
     const Accessor& accessor = accessorData.accessor;
-    const BufferView& bufferView = accessorData.bufferView;
+    const DataBufferView& bufferView = accessorData.bufferView;
 
     size_t numComponents = numComponentsForType(accessor.type);
     size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
@@ -177,7 +178,7 @@ std::vector<XMMATRIX> extractDataFromBuffer<XMMATRIX>(const std::vector<uint8_t>
 template <typename T>
 std::vector<T> extractDataFromBuffer(const std::vector<uint8_t>& binaryData, const AccessorData& accessorData) {
     const Accessor& accessor = accessorData.accessor;
-    const BufferView& bufferView = accessorData.bufferView;
+    const DataBufferView& bufferView = accessorData.bufferView;
     size_t numComponents = numComponentsForType(accessor.type);
 
     size_t byteStride = bufferView.byteStride ? bufferView.byteStride : numComponents * bytesPerComponent(accessor.componentType);
@@ -221,7 +222,7 @@ AccessorData getAccessorData(const json& gltfData, int accessorIndex) {
 
     int bufferViewIndex = accessorJson["bufferView"].get<int>();
     const json& bufferViewJson = gltfData["bufferViews"][bufferViewIndex];
-    BufferView bufferView;
+    DataBufferView bufferView;
     bufferView.byteStride = bufferViewJson.value("byteStride", 0);
     bufferView.byteOffset = bufferViewJson.value("byteOffset", 0);
 
@@ -324,6 +325,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, c
             //    normals[i + 2] = -normals[i + 2]; // Flip Z-component of normals
             //}
             geometryData.normals = normals;
+			geometryData.flags |= VertexFlags::VERTEX_NORMALS;
 
             accessor = getAccessorData(gltfData, primitive["indices"]);
             auto indices = extractIndexDataAsUint32(binaryData, accessor);
@@ -337,6 +339,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, c
             if (primitive["attributes"].contains("TEXCOORD_0")) {
                 accessor = getAccessorData(gltfData, primitive["attributes"]["TEXCOORD_0"]);
                 geometryData.texcoords = extractDataFromBuffer<float>(binaryData, accessor);
+				geometryData.flags |= VertexFlags::VERTEX_TEXCOORDS;
             }
 
             if (primitive["attributes"].contains("JOINTS_0")) {
@@ -345,6 +348,7 @@ void parseMeshes(const json& gltfData, const std::vector<uint8_t>& binaryData, c
 
                 accessor = getAccessorData(gltfData, primitive["attributes"]["WEIGHTS_0"]);
                 geometryData.weights = extractDataFromBuffer<float>(binaryData, accessor);
+				geometryData.flags |= VertexFlags::VERTEX_SKINNED;
             }
 
             meshData.geometries.push_back(geometryData);
@@ -513,11 +517,13 @@ std::vector<std::shared_ptr<Texture>> loadTexturesFromImages(const json& gltfDat
 
     // Associate buffers and samplers into textures
     std::vector<std::shared_ptr<Texture>> textures;
-    for (const auto& gltfTexture : gltfData["textures"]) {
-        const uint32_t imageIndex = gltfTexture["source"].get<uint32_t>();
-        const uint32_t samplerIndex = gltfTexture["sampler"].get<uint32_t>();
-        auto pTexture = std::make_shared<Texture>(pixelBuffers[imageIndex], samplers[samplerIndex]);
-        textures.push_back(std::move(pTexture));
+    if (gltfData.contains("textures")) {
+        for (const auto& gltfTexture : gltfData["textures"]) {
+            const uint32_t imageIndex = gltfTexture["source"].get<uint32_t>();
+            const uint32_t samplerIndex = gltfTexture["sampler"].get<uint32_t>();
+            auto pTexture = std::make_shared<Texture>(pixelBuffers[imageIndex], samplers[samplerIndex]);
+            textures.push_back(std::move(pTexture));
+        }
     }
 
     return textures;
@@ -617,21 +623,21 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
 
         if (gltfMaterial.contains("doubleSided")) {
             if (gltfMaterial["doubleSided"].get<bool>()) {
-                psoFlags |= PSOFlags::DOUBLE_SIDED;
+                psoFlags |= PSOFlags::PSO_DOUBLE_SIDED;
             }
         }
 
         if (gltfMaterial.contains("pbrMetallicRoughness")) {
-            psoFlags |= PSOFlags::PBR;
+            psoFlags |= PSOFlags::PSO_PBR;
             const auto& pbr = gltfMaterial["pbrMetallicRoughness"];
             if (pbr.contains("baseColorTexture")) {
-                psoFlags |= PSOFlags::BASE_COLOR_TEXTURE;
+                psoFlags |= PSOFlags::PSO_BASE_COLOR_TEXTURE;
                 int textureIndex = pbr["baseColorTexture"]["index"];
                 baseColorTexture = srgbTextures[textureIndex];
                 //linearTextures[textureIndex]->textureResource.Reset();
             }
             if (pbr.contains("metallicRoughnessTexture")) {
-                psoFlags |= PSOFlags::PBR_MAPS;
+                psoFlags |= PSOFlags::PSO_PBR_MAPS;
                 int textureIndex = pbr["metallicRoughnessTexture"]["index"];
                 metallicRoughnessTexture = linearTextures[textureIndex];
                 //srgbTextures[textureIndex]->textureResource.Reset();
@@ -648,19 +654,19 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
         }
 
         if (gltfMaterial.contains("normalTexture")) {
-            psoFlags |= PSOFlags::NORMAL_MAP;
+            psoFlags |= PSOFlags::PSO_NORMAL_MAP;
             int textureIndex = gltfMaterial["normalTexture"]["index"];
             normalTexture = linearTextures[textureIndex];
             //srgbTextures[textureIndex]->textureResource.Reset();
         }
         if (gltfMaterial.contains("occlusionTexture")) {
-            psoFlags |= PSOFlags::AO_TEXTURE;
+            psoFlags |= PSOFlags::PSO_AO_TEXTURE;
             int textureIndex = gltfMaterial["occlusionTexture"]["index"];
             aoMap = linearTextures[textureIndex];
             //srgbTextures[textureIndex]->textureResource.Reset();
         }
         if (gltfMaterial.contains("emissiveTexture")) {
-            psoFlags |= PSOFlags::EMISSIVE_TEXTURE;
+            psoFlags |= PSOFlags::PSO_EMISSIVE_TEXTURE;
             int textureIndex = gltfMaterial["emissiveTexture"]["index"];
             emissiveTexture = srgbTextures[textureIndex];
             //linearTextures[textureIndex]->textureResource.Reset();

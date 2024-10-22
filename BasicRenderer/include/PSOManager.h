@@ -1,6 +1,6 @@
 #pragma once
 
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <wrl.h>
 #include <unordered_map>
 #include <string>
@@ -48,6 +48,7 @@ public:
     void initialize();
 
     ComPtr<ID3D12PipelineState> GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    ComPtr<ID3D12PipelineState> GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
     ComPtr<ID3D12RootSignature> GetRootSignature();
     void ReloadShaders();
@@ -59,12 +60,16 @@ private:
     ComPtr<ID3D12RootSignature> debugRootSignature;
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_psoCache;
+    std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshPSOCache;
+
     ComPtr<IDxcUtils> pUtils;
     ComPtr<IDxcCompiler3> pCompiler;
 	ComPtr<ID3D12PipelineState> debugPSO;
     ComPtr<ID3D12PipelineState> environmentConversionPSO;
 
     ComPtr<ID3D12PipelineState> CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    ComPtr<ID3D12PipelineState> CreateMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
     void createRootSignature();
     D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);

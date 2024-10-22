@@ -1,7 +1,8 @@
-﻿#include <iostream>
+﻿#include <directx/d3dx12.h> // Included here to avoid conflicts with Windows SDK headers
+#include <iostream>
 #include <Windows.h>
 #include <windowsx.h>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <dxgi1_6.h>
 #include <iostream>
 #include <memory>
@@ -209,7 +210,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
     //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
-    auto carScene = loadGLB("models/datsun.glb");
+    auto carScene = loadGLB("models/porche.glb");
     carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
     carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 	carScene->GetRoot().m_name = L"carRoot";
@@ -268,9 +269,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto& scene = renderer.GetCurrentScene();
     scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
 
-    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::VERTEX_COLORS);
-    auto cubeMesh = Mesh(vertices, indices, cubeMaterial, false);
-    std::vector<Mesh> vec = { cubeMesh };
+    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::PSO_VERTEX_COLORS);
+    auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, false);
+    std::vector<std::shared_ptr<Mesh>> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>(L"CubeObject", vec);
     auto cubeScaleNode = std::make_shared<SceneNode>();
     cubeScaleNode->transform.setLocalScale({ 0.1, 0.1, 0.1 });

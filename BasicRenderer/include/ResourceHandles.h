@@ -1,18 +1,24 @@
 #pragma once
 
 #include <memory>
-#include <d3d12.h>
+#include <directx/d3d12.h>
 #include <wrl/client.h>
 
 #include "DirectX/d3dx12.h"
 #include "DynamicStructuredBuffer.h"
 #include "BufferHandle.h"
 
+class DynamicBuffer;
 
 template<typename T>
-struct DynamicBufferHandle {
+struct DynamicStructuredBufferHandle {
     UINT index; // Index in the descriptor heap
     std::shared_ptr<DynamicStructuredBuffer<T>> buffer; // The actual resource buffer
+};
+
+struct DynamicBufferHandle {
+	UINT index;
+	std::shared_ptr<DynamicBuffer> buffer;
 };
 
 struct ShaderVisibleIndexInfo {

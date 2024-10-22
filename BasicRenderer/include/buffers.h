@@ -31,6 +31,8 @@ struct PerObjectCB {
 
 struct PerMeshCB {
     unsigned int materialDataIndex;
+    unsigned int vertexFlags;
+	unsigned int vertexByteSize;
 };
 
 struct PerMaterialCB {

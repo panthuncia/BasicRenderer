@@ -127,7 +127,7 @@ UINT Material::GetMaterialBufferIndex() {
 }
 
 void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
-    m_psoFlags |= PSOFlags::PARALLAX;
+    m_psoFlags |= PSOFlags::PSO_PARALLAX;
 	m_heightMap = heightmap;
 	heightmap->GetBuffer()->SetName(L"HeightMap");
 	m_materialData.heightMapIndex = heightmap->GetBufferDescriptorIndex();
