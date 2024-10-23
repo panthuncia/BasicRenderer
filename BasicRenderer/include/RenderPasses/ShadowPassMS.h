@@ -69,8 +69,6 @@ public:
 					auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | PSOFlags::PSO_SHADOW, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-					unsigned int offsets[4] = { mesh.GetVertexBufferOffset(), mesh.GetMeshletBufferOffset() / sizeof(meshopt_Meshlet), mesh.GetMeshletVerticesBufferOffset() / 4, mesh.GetMeshletTrianglesBufferOffset() };
-					commandList->SetGraphicsRoot32BitConstants(6, 4, &offsets, 0);
 
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
@@ -86,8 +84,6 @@ public:
 					auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | PSOFlags::PSO_SHADOW, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-					unsigned int offsets[4] = { mesh.GetVertexBufferOffset(), mesh.GetMeshletBufferOffset() / sizeof(meshopt_Meshlet), mesh.GetMeshletVerticesBufferOffset() / 4, mesh.GetMeshletTrianglesBufferOffset() };
-					commandList->SetGraphicsRoot32BitConstants(6, 4, &offsets, 0);
 
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}

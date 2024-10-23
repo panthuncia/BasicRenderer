@@ -1,3 +1,6 @@
+#ifndef __CBUFFERS_HLSL__
+#define __CBUFFERS_HLSL__
+
 cbuffer PerObject : register(b1) {
     row_major matrix model;
     row_major float4x4 normalMatrix;
@@ -9,6 +12,10 @@ cbuffer PerMesh : register(b2) {
     uint materialDataIndex;
     uint vertexFlags;
     uint vertexByteSize;
+    uint vertexBufferOffset;
+    uint meshletBufferOffset;
+    uint meshletVerticesBufferOffset;
+    uint meshletTrianglesBufferOffset;
 };
 
 cbuffer RootConstants1 : register(b3) {
@@ -31,9 +38,4 @@ cbuffer BufferIndices : register(b6) {
     uint meshletTrianglesBufferIndex;
 }
 
-cbuffer BufferOffsets : register(b7) {
-    uint vertexBufferOffset;
-    uint meshletBufferOffset;
-    uint meshletVerticesBufferOffset;
-    uint meshletTrianglesBufferOffset;
-}
+#endif // __CBUFFERS_HLSL__

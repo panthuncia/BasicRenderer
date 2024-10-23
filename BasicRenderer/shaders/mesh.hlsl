@@ -3,49 +3,9 @@
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
 
-MeshVertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
-    MeshVertex vertex;
-
-    // Load position (float3, 12 bytes)
-    vertex.position = LoadFloat3(byteOffset, buffer);
-    byteOffset += 12;
-
-    // Load normal (float3, 12 bytes)
-    vertex.normal = LoadFloat3(byteOffset, buffer);
-    byteOffset += 12;
-
-    if (flags & VERTEX_TEXCOORDS) {
-        // Load texcoord (float2, 8 bytes)
-        vertex.texcoord = LoadFloat2(byteOffset, buffer);
-        byteOffset += 8;
-    }
-
-    if (flags & VERTEX_TANBIT) {
-        // Load tangent (float3, 12 bytes)
-        vertex.tangent = LoadFloat3(byteOffset, buffer);
-        byteOffset += 12;
-
-        // Load bitangent (float3, 12 bytes)
-        vertex.bitangent = LoadFloat3(byteOffset, buffer);
-        byteOffset += 12;
-    }
-
-    if (flags & VERTEX_SKINNED) {
-        // Load joints (uint4, 16 bytes)
-        vertex.joints = LoadUint4(byteOffset, buffer);
-        byteOffset += 16;
-
-        // Load weights (float4, 16 bytes)
-        vertex.weights = LoadFloat4(byteOffset, buffer);
-        byteOffset += 16;
-    }
-
-    return vertex;
-}
-
 PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID) {
     uint byteOffset = blockByteOffset + index * vertexSize;
-    MeshVertex vertex = LoadVertex(byteOffset, buffer, flags);
+    Vertex vertex = LoadVertex(byteOffset, buffer, flags);
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
@@ -165,7 +125,8 @@ void MSMain(
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferIndex]; // Meshlet vertices, as indices into base vertex buffer
     ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
     
-    Meshlet meshlet = meshletBuffer[meshletBufferOffset+vGroupID.x];
+    uint meshletOffset = meshletBufferOffset;
+    Meshlet meshlet = meshletBuffer[meshletOffset+vGroupID.x];
     SetMeshOutputCounts(meshlet.VertCount, meshlet.TriCount);
     
     uint triOffset = meshletTrianglesBufferOffset+meshlet.TriOffset + uGroupThreadID * 3;

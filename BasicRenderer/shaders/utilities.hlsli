@@ -1,3 +1,6 @@
+#ifndef __UTILITY_HLSL__
+#define __UTILITY_HLSL__
+
 // Helper function to load a float3 from a ByteAddressBuffer
 float3 LoadFloat3(uint offset, ByteAddressBuffer buffer) {
     float3 result;
@@ -66,3 +69,5 @@ float4 lightMeshlets(uint meshletIndex, float3 normal, float3 viewDir) {
 
     return float4(finalColor, 1);
 }
+
+#endif // __UTILITY_HLSL__

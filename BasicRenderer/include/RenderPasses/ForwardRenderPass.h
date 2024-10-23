@@ -62,6 +62,14 @@ public:
 		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
 		commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
 
+		unsigned int meshletBufferIndices[4] = {};
+		auto& meshManager = context.currentScene->GetMeshManager();
+		meshletBufferIndices[0] = meshManager->GetVertexBufferIndex();
+		meshletBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
+		meshletBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
+		meshletBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
+		commandList->SetGraphicsRoot32BitConstants(5, 4, &meshletBufferIndices, 0);
+
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
@@ -78,9 +86,7 @@ public:
 				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
 				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 				commandList->IASetIndexBuffer(&indexBufferView);
 
 				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
@@ -97,9 +103,7 @@ public:
 				auto pso = psoManager.GetPSO(mesh.GetPSOFlags() | mesh.material->m_psoFlags | localPSOFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-				D3D12_VERTEX_BUFFER_VIEW vertexBufferView = mesh.GetVertexBufferView();
 				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 				commandList->IASetIndexBuffer(&indexBufferView);
 
 				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);

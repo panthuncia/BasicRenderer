@@ -22,9 +22,14 @@
 #define OUTPUT_DIELECTRIC_FRESNEL_IBL 12
 #define OUTPUT_MESHLETS 13
 
-PSInput VSMain(Vertex input) {
+PSInput VSMain(uint vertexID : SV_VertexID) {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferIndex];
+    
+    uint byteOffset = vertexBufferOffset + vertexID * vertexByteSize;
+    Vertex input = LoadVertex(byteOffset, vertexBuffer, vertexFlags);
+    
     float4 pos = float4(input.position.xyz, 1.0f);
     
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;

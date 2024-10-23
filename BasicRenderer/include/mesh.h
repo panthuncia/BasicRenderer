@@ -35,18 +35,12 @@ public:
 
     std::shared_ptr<Material> material;
 
-	void SetVertexBufferView(std::unique_ptr<BufferView> view) {
-		m_vertexBufferView2 = std::move(view);
-	}
-	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
-		m_meshletBufferView = std::move(view);
-	}
-	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
-		m_meshletVerticesBufferView = std::move(view);
-	}
-	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
-		m_meshletTrianglesBufferView = std::move(view);
-	}
+	void SetVertexBufferView(std::unique_ptr<BufferView> view);
+	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view);
+	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view);
+	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view);
+
+	void SetBufferViews(std::unique_ptr<BufferView> vertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
 
 	unsigned int GetVertexBufferOffset() const {
 		return m_vertexBufferView2->GetOffset();

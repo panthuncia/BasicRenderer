@@ -399,7 +399,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[7] = {};
+    D3D12_ROOT_PARAMETER1 parameters[6] = {};
 
     // PerMesh buffer as a direct root CBV
 
@@ -442,13 +442,6 @@ void PSOManager::createRootSignature() {
 	parameters[5].Constants.RegisterSpace = 0;
 	parameters[5].Constants.Num32BitValues = 4;
 	parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-	// Fifth integer root constant, used for local meshlet buffer offsets
-    parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[6].Constants.ShaderRegister = 7;
-    parameters[6].Constants.RegisterSpace = 0;
-    parameters[6].Constants.Num32BitValues = 4;
-    parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};

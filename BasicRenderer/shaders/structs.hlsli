@@ -1,3 +1,6 @@
+#ifndef __STRUCTS_HLSL__
+#define __STRUCTS_HLSL__
+
 struct PerFrameBuffer {
     row_major matrix view;
     row_major matrix projection;
@@ -69,3 +72,5 @@ struct Meshlet {
     uint VertCount;
     uint TriCount;
 };
+
+#endif // __STRUCTS_HLSL__
