@@ -20,6 +20,7 @@
 #include "Material.h"
 #include "SettingsManager.h"
 #include "Vertex.h"
+#include "MaterialFlags.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -37,8 +38,8 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
         bool hasTexcoords = !geom.texcoords.empty();
         bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
         bool hasTangents = false;
-
-        if (geom.material->m_psoFlags & PSOFlags::PSO_NORMAL_MAP || geom.material->m_psoFlags & PSOFlags::PSO_PARALLAX) {
+        unsigned int materialFlags = geom.material->m_materialData.materialFlags;
+        if (materialFlags & MaterialFlags::MATERIAL_NORMAL_MAP || materialFlags & MaterialFlags::MATERIAL_PARALLAX) {
             if (!geom.indices.empty()) {
                 std::vector<XMFLOAT3>& xmfloat3Positions = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.positions);
                 std::vector<XMFLOAT3>& xmfloat3Normals = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.normals);

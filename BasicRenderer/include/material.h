@@ -13,7 +13,6 @@ using Microsoft::WRL::ComPtr;
 class Material {
 public:
     std::string m_name;
-    UINT m_psoFlags;
     std::shared_ptr<Texture> m_baseColorTexture;
     std::shared_ptr<Texture> m_normalTexture;
     std::shared_ptr<Texture> m_aoMap;
@@ -26,12 +25,13 @@ public:
     DirectX::XMFLOAT4 m_emissiveFactor;
     BlendState m_blendState;
     PerMaterialCB m_materialData = {0};
+    UINT m_psoFlags;
 
     Material(const std::string& name,
-        UINT psoFlags);
+        UINT materialFlags, UINT psoFlags);
 
     Material(const std::string& name,
-        UINT psoFlags,
+		UINT materialFlags, UINT psoFlags,
         std::shared_ptr<Texture> baseColorTexture,
         std::shared_ptr<Texture> normalTexture,
         std::shared_ptr<Texture> aoMap,

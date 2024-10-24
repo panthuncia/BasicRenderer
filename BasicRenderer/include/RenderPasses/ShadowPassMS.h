@@ -66,7 +66,7 @@ public:
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
-					auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | PSOFlags::PSO_SHADOW, mesh.material->m_blendState);
+					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 
@@ -81,7 +81,7 @@ public:
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
-					auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | PSOFlags::PSO_SHADOW, mesh.material->m_blendState);
+					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
 

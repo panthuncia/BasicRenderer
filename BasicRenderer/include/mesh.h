@@ -26,7 +26,6 @@ public:
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
     BufferHandle& GetPerMeshBuffer();
     UINT GetIndexCount() const;
-    UINT GetPSOFlags() const;
 	int GetGlobalID() const;
 	std::vector<Vertex>& GetVertices() { return m_vertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
@@ -84,8 +83,7 @@ private:
 	std::unique_ptr<BufferView> m_meshletVerticesBufferView = nullptr;
 	std::unique_ptr<BufferView> m_meshletTrianglesBufferView = nullptr;
 
-    UINT m_psoFlags = 0;
-    UINT m_indexCount = 0;
+	UINT m_indexCount = 0;
     BufferHandle m_vertexBufferHandle;
 	BufferHandle m_indexBufferHandle;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;

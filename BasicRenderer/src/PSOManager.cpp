@@ -59,38 +59,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
     CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
 
-    // Define the vertex input layout
-    UINT byte = 0;
-    std::vector<D3D12_INPUT_ELEMENT_DESC> inputElementDescs = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    };
-    byte += 24;
-    if (psoFlags & PSOFlags::PSO_VERTEX_COLORS) {
-        inputElementDescs.push_back({ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-        byte += 16;
-    } // TODO: Vertex colors are not yet supported with more complex vertex types
-    else {
-        if (psoFlags & PSOFlags::PSO_BASE_COLOR_TEXTURE || psoFlags & PSOFlags::PSO_NORMAL_MAP || psoFlags & PSOFlags::PSO_PBR_MAPS || psoFlags & PSOFlags::PSO_AO_TEXTURE || psoFlags & PSOFlags::PSO_EMISSIVE_TEXTURE) {
-            inputElementDescs.push_back({ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-            byte += 8;
-        }
-        if (psoFlags & PSOFlags::PSO_NORMAL_MAP) {
-            inputElementDescs.push_back({ "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-            byte += 12;
-            inputElementDescs.push_back({ "BINORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-            byte += 12;
-        }
-        if (psoFlags & PSOFlags::PSO_SKINNED) {
-            inputElementDescs.push_back({ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_UINT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-            byte += 16;
-            inputElementDescs.push_back({ "TEXCOORD", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, byte, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-            byte += 16;
-        }
-    }
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { inputElementDescs.data(), static_cast<unsigned int>(inputElementDescs.size()) };
+    psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
     psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
     if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
@@ -208,71 +179,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
 
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
     std::vector<DxcDefine> defines = {};
-    if (psoFlags & PSOFlags::PSO_VERTEX_COLORS) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_VERTEX_COLORS";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_BASE_COLOR_TEXTURE || psoFlags & PSOFlags::PSO_NORMAL_MAP || psoFlags & PSOFlags::PSO_PBR_MAPS || psoFlags & PSOFlags::PSO_AO_TEXTURE || psoFlags & PSOFlags::PSO_EMISSIVE_TEXTURE) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_TEXTURED";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_BASE_COLOR_TEXTURE) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_BASE_COLOR_TEXTURE";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_NORMAL_MAP) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_NORMAL_MAP";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_AO_TEXTURE) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_AO_TEXTURE";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_EMISSIVE_TEXTURE) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_EMISSIVE_TEXTURE";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_PBR) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_PBR";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_PBR_MAPS) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_PBR_MAPS";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_SKINNED) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_SKINNED";
-        defines.insert(defines.begin(), macro);
-    }
     if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_DOUBLE_SIDED";
-        defines.insert(defines.begin(), macro);
-    }
-    if (psoFlags & PSOFlags::PSO_PARALLAX) {
-        DxcDefine macro;
-        macro.Value = L"1";
-        macro.Name = L"PSO_PARALLAX";
-        defines.insert(defines.begin(), macro);
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_DOUBLE_SIDED";
+		defines.insert(defines.begin(), macro);
     }
     if (psoFlags & PSOFlags::PSO_SHADOW) {
         DxcDefine macro;

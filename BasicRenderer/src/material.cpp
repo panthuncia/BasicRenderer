@@ -4,18 +4,19 @@
 #include "Sampler.h"
 #include "utilities.h"
 #include "TextureDescription.h"
+#include "MaterialFlags.h"
 
 Material::Material(const std::string& name,
-    UINT psoFlags)
-    : m_name(name),
-    m_psoFlags(psoFlags) {
+    UINT materialFlags, UINT psoFlags)
+    : m_name(name), m_psoFlags(psoFlags) {
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
+	m_materialData.materialFlags = materialFlags;
     resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
 }
 
 Material::Material(const std::string& name,
-    UINT psoFlags,
+	UINT materialFlags, UINT psoFlags,
     std::shared_ptr<Texture> baseColorTexture,
     std::shared_ptr<Texture> normalTexture,
     std::shared_ptr<Texture> aoMap,
@@ -27,7 +28,7 @@ Material::Material(const std::string& name,
     DirectX::XMFLOAT4 baseColorFactor,
     DirectX::XMFLOAT4 emissiveFactor,
     BlendState blendState)
-    : m_name(name),
+	: m_name(name),
     m_psoFlags(psoFlags),
     m_baseColorTexture(baseColorTexture),
     m_normalTexture(normalTexture),
@@ -41,7 +42,7 @@ Material::Material(const std::string& name,
     m_emissiveFactor(emissiveFactor),
     m_blendState(blendState) {
 
-    m_materialData.psoFlags = psoFlags;
+    m_materialData.materialFlags = materialFlags;
     m_materialData.ambientStrength = 0.5;
     m_materialData.specularStrength = 2.0;
     m_materialData.heightMapScale = 0.05;
@@ -127,7 +128,7 @@ UINT Material::GetMaterialBufferIndex() {
 }
 
 void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
-    m_psoFlags |= PSOFlags::PSO_PARALLAX;
+    m_materialData.materialFlags |= MaterialFlags::MATERIAL_PARALLAX;
 	m_heightMap = heightmap;
 	heightmap->GetBuffer()->SetName(L"HeightMap");
 	m_materialData.heightMapIndex = heightmap->GetBufferDescriptorIndex();

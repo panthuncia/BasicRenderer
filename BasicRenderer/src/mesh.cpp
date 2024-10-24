@@ -16,10 +16,6 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indic
     m_vertices = vertices;
     CreateBuffers(vertices, indices);
     this->material = material;
-    m_psoFlags = material->m_psoFlags;
-    if (flags & VertexFlags::VERTEX_SKINNED) {
-        m_psoFlags |= PSOFlags::PSO_SKINNED;
-    }
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
@@ -92,10 +88,6 @@ BufferHandle& Mesh::GetPerMeshBuffer() {
 
 UINT Mesh::GetIndexCount() const {
     return m_indexCount;
-}
-
-UINT Mesh::GetPSOFlags() const {
-    return m_psoFlags;
 }
 
 int Mesh::GetNextGlobalIndex() {

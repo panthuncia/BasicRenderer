@@ -38,7 +38,7 @@ struct LightInfo {
 };
 
 struct MaterialInfo {
-    uint psoFlags;
+    uint materialFlags;
     uint baseColorTextureIndex;
     uint baseColorSamplerIndex;
     uint normalTextureIndex;

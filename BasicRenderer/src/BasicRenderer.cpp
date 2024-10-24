@@ -20,6 +20,8 @@
 #include "Light.h"
 #include "Material.h"
 #include "Menu.h"
+#include "MaterialFlags.h"
+#include "PSOFlags.h"
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
@@ -269,8 +271,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto& scene = renderer.GetCurrentScene();
     scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
 
-    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", PSOFlags::PSO_VERTEX_COLORS);
-    auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, false);
+    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", MaterialFlags::MATERIAL_FLAGS_NONE, PSOFlags::PSO_FLAGS_NONE);
+    auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, VertexFlags::VERTEX_COLORS);
     std::vector<std::shared_ptr<Mesh>> vec = { cubeMesh };
     std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>(L"CubeObject", vec);
     auto cubeScaleNode = std::make_shared<SceneNode>();

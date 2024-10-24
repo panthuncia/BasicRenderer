@@ -12,29 +12,28 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
 
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3) normalMatrix;
     
-    #if defined(PSO_SKINNED)
-    StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
-    StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
+    if (vertexFlags & VERTEX_SKINNED) {
+        StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
+        StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
-    matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.x);
-    matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.y);
-    matrix bone3 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.z);
-    matrix bone4 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.w);
+        matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.x);
+        matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.y);
+        matrix bone3 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.z);
+        matrix bone4 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.w);
     
-    matrix bindMatrix1 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.x);
-    matrix bindMatrix2 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.y);
-    matrix bindMatrix3 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.z);
-    matrix bindMatrix4 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.w);
+        matrix bindMatrix1 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.x);
+        matrix bindMatrix2 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.y);
+        matrix bindMatrix3 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.z);
+        matrix bindMatrix4 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.w);
 
-    matrix skinMatrix = vertex.weights.x * mul(bindMatrix1, bone1) +
+        matrix skinMatrix = vertex.weights.x * mul(bindMatrix1, bone1) +
                         vertex.weights.y * mul(bindMatrix2, bone2) +
                         vertex.weights.z * mul(bindMatrix3, bone3) +
                         vertex.weights.w * mul(bindMatrix4, bone4);
     
-    pos = mul(pos, skinMatrix);
-    normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3)skinMatrix);
-#endif // SKINNED
-    
+        pos = mul(pos, skinMatrix);
+        normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3) skinMatrix);
+    }
     float4 worldPosition = mul(pos, model);
     PSInput result;
     
@@ -70,18 +69,18 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     
     result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
     
-#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
-    result.TBN_T = normalize(mul(vertex.tangent, normalMatrixSkinnedIfNecessary));
-    result.TBN_B = normalize(mul(vertex.bitangent, normalMatrixSkinnedIfNecessary));
-    result.TBN_N = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
-#endif // NORMAL_MAP
+    if (vertexFlags & VERTEX_TANBIT) {
+        result.TBN_T = normalize(mul(vertex.tangent, normalMatrixSkinnedIfNecessary));
+        result.TBN_B = normalize(mul(vertex.bitangent, normalMatrixSkinnedIfNecessary));
+        result.TBN_N = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
+    }
     
-#if defined(PSO_VERTEX_COLORS)
-    result.color = vertex.color;
-#endif
-#if defined(PSO_TEXTURED)
-    result.texcoord = vertex.texcoord;
-#endif
+    if (vertexFlags & VERTEX_COLORS) {
+        result.color = vertex.color;
+    };
+    if (vertexFlags & VERTEX_TEXCOORDS) {
+        result.texcoord = vertex.texcoord;
+    }
     result.meshletIndex = vGroupID.x;
     return result;
 }

@@ -40,7 +40,7 @@ struct PerMeshCB {
 };
 
 struct PerMaterialCB {
-    unsigned int psoFlags;
+    unsigned int materialFlags;
     unsigned int baseColorTextureIndex;
     unsigned int baseColorSamplerIndex;
     unsigned int normalTextureIndex;
