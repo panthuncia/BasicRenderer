@@ -123,7 +123,7 @@ void Light::CreateProjectionMatrix(float nearPlane, float farPlane) {
 
 	switch ((LightType)m_lightInfo.type) {
 	case LightType::Spot:
-		m_lightProjection = XMMatrixPerspectiveFovRH(this->m_lightInfo.outerConeAngle * 2, aspect, nearPlane, farPlane);
+		m_lightProjection = XMMatrixPerspectiveFovRH(acos(this->m_lightInfo.outerConeAngle) * 2, aspect, nearPlane, farPlane);
 		break;
 	case LightType::Point:
 		m_lightProjection = XMMatrixPerspectiveFovRH(XM_PI / 2, aspect, nearPlane, farPlane);
