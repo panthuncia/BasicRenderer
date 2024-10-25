@@ -28,10 +28,8 @@ template <HasIsValid T>  // Enforce the concept at the template parameter level
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 
-    static inline constexpr size_t m_elementSize = sizeof(T);
-
-	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"") {
-		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(id, capacity, name));
+	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1) {
+		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(id, capacity, name, alignment));
 	}
 
     std::unique_ptr<BufferView> Add() {
@@ -64,9 +62,9 @@ public:
         }
     }
 
-    void UpdateAt(std::unique_ptr<BufferView>& view, const T& element) {
+    void UpdateAt(std::unique_ptr<BufferView>& view, const T& data) {
         T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
-		*element = element;
+		*element = data;
 		MarkViewDirty(view.get());
     }
 
@@ -98,8 +96,9 @@ protected:
     }
 
 private:
-    LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"")
+    LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_needsUpdate(false) {
+		m_elementSize = (sizeof(T)/alignment + 1) * alignment;
         CreateBuffer(capacity);
         if (name != L"") {
             m_dataBuffer->SetName((m_name + L": " + name).c_str());
@@ -115,6 +114,7 @@ private:
 	std::vector<unsigned int> m_freeIndices;
     void* m_mappedData = nullptr;
     UINT m_globalResizableBufferID;
+    size_t m_elementSize = 0;
 
     std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";

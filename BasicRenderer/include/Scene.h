@@ -48,6 +48,7 @@ public:
     //LightManager& GetLightManager();
     void Activate();
     const std::unique_ptr<MeshManager>& GetMeshManager();
+	const std::unique_ptr<ObjectManager>& GetObjectManager();
 
 private:
     std::shared_ptr<Camera> pCamera;

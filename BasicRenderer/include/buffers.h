@@ -20,6 +20,7 @@ struct PerFrameCB {
 	unsigned int environmentBRDFLUTIndex;
 	unsigned int environmentBRDFLUTSamplerIndex;
     unsigned int outputType;
+    unsigned int perObjectBufferIndex;
 };
 
 struct PerObjectCB {
@@ -27,7 +28,8 @@ struct PerObjectCB {
     DirectX::XMMATRIX normalMatrix;
     unsigned int boneTransformBufferIndex;
     unsigned int inverseBindMatricesBufferIndex;
-    unsigned int isValid;
+    unsigned int isValid = 1;
+    unsigned int pad0;
 };
 
 struct PerMeshCB {

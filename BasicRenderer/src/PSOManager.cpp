@@ -379,6 +379,7 @@ ComPtr<ID3D12RootSignature> PSOManager::GetRootSignature() {
 
 void PSOManager::ReloadShaders() {
     m_psoCache.clear();
+	m_meshPSOCache.clear();
 }
 
 D3D12_BLEND_DESC PSOManager::GetBlendDesc(BlendState blendState) {

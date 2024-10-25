@@ -27,6 +27,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferIndex];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perFrameBuffer.perObjectBufferIndex];
     
     uint byteOffset = vertexBufferOffset + vertexID * vertexByteSize;
     Vertex input = LoadVertex(byteOffset, vertexBuffer, vertexFlags);

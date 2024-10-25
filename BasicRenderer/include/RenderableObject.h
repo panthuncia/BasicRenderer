@@ -11,6 +11,8 @@
 #include "Skeleton.h"
 #include "BufferView.h"
 
+class ObjectManager;
+
 class RenderableObject : public SceneNode {
 public:
 	RenderableObject(std::wstring name);
@@ -20,25 +22,23 @@ public:
 	std::vector<std::shared_ptr<Mesh>>& GetTransparentMeshes();
 	bool HasTransparent() const;
 	bool HasOpaque() const;
-	BufferHandle& GetConstantBuffer();
 	void SetSkin(std::shared_ptr<Skeleton> skeleton);
 	std::shared_ptr<Skeleton>& GetSkin();
 	PerObjectCB& GetPerObjectCBData();
 	void SetCurrentPerObjectCBView(std::unique_ptr<BufferView> view);
 	std::unique_ptr<BufferView>& GetCurrentPerObjectCBView();
+	void SetCurrentManager(ObjectManager* manager);
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
-	void CreateBuffers();
 	void UpdateBuffers();
 	std::vector<std::shared_ptr<Mesh>> opaqueMeshes;
 	std::vector<std::shared_ptr<Mesh>> transparentMeshes;
-	BufferHandle perObjectConstantBuffer;
-	UINT8* pPerObjectConstantBuffer;
 	PerObjectCB perObjectCBData;
 	bool m_hasTransparent = false;
 	bool m_hasOpaque = false;
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
 	std::unique_ptr<BufferView> m_perObjectCBView;
+	ObjectManager* m_currentManager = nullptr;
 protected:
 	void OnUpdate() override;
 };

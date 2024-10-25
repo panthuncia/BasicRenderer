@@ -181,14 +181,14 @@ public:
     }
 
     template<typename T>
-    LazyDynamicStructuredBufferHandle<T> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
+    LazyDynamicStructuredBufferHandle<T> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", size_t alignment = 1) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
-        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name);
+        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, alignment);
         ResourceTransition transition;
         transition.resource = pDynamicBuffer.get();
         transition.beforeState = ResourceState::UNKNOWN;
@@ -545,6 +545,7 @@ public:
 	void setEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
 	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
+    void SetPerObjectBufferIndex(unsigned int index) { perFrameCBData.perObjectBufferIndex = index; }
 private:
     ResourceManager(){};
     void WaitForCopyQueue();

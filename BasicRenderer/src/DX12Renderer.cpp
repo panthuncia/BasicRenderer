@@ -504,6 +504,7 @@ std::shared_ptr<Scene>& DX12Renderer::GetCurrentScene() {
 void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
     currentScene = newScene;
     currentScene->Activate();
+	ResourceManager::GetInstance().SetPerObjectBufferIndex(currentScene->GetObjectManager()->GetPerObjectBufferIndex());
 	rebuildRenderGraph = true;
 }
 

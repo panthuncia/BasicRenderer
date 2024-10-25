@@ -20,6 +20,7 @@ struct PerFrameBuffer {
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
     uint outputType;
+    uint perObjectBufferIndex;
 };
 
 struct LightInfo {
@@ -71,6 +72,15 @@ struct Meshlet {
     uint TriOffset;
     uint VertCount;
     uint TriCount;
+};
+
+struct PerObjectBuffer {
+    row_major matrix model;
+    row_major float4x4 normalMatrix;
+    uint boneTransformBufferIndex;
+    uint inverseBindMatricesBufferIndex;
+    uint isValid;
+    uint pad0;
 };
 
 #endif // __STRUCTS_HLSL__

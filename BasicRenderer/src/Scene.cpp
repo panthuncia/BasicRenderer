@@ -415,3 +415,7 @@ void Scene::Activate() {
 const std::unique_ptr<MeshManager>& Scene::GetMeshManager() {
 	return meshManager;
 }
+
+const std::unique_ptr<ObjectManager>& Scene::GetObjectManager() {
+	return objectManager;
+}

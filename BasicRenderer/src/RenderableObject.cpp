@@ -5,8 +5,8 @@
 #include "Utilities.h"
 #include "DeviceManager.h"
 #include "Material.h"
+#include "ObjectManager.h"
 RenderableObject::RenderableObject(std::wstring name) : SceneNode(name) {
-    CreateBuffers();
 }
 
 RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes) : SceneNode(name) {
@@ -20,7 +20,6 @@ RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_pt
             m_hasOpaque = true;
         }
     }
-    CreateBuffers();
 }
 
 RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newTransparentMeshes) : SceneNode(name) {
@@ -36,7 +35,6 @@ RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_pt
             transparentMeshes.push_back(mesh);
         }
     }
-    CreateBuffers();
 }
 
 std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetOpaqueMeshes() {
@@ -55,13 +53,6 @@ bool RenderableObject::HasTransparent() const {
     return m_hasTransparent;
 }
 
-void RenderableObject::CreateBuffers() {
-    // Create PerMesh buffer
-	auto& resourceManager = ResourceManager::GetInstance();
-    perObjectConstantBuffer = resourceManager.CreateConstantBuffer<PerObjectCB>();
-	resourceManager.UpdateConstantBuffer(perObjectConstantBuffer, perObjectCBData);
-}
-
 void RenderableObject::UpdateBuffers() {
     perObjectCBData.modelMatrix = transform.modelMatrix;
 
@@ -73,13 +64,7 @@ void RenderableObject::UpdateBuffers() {
     );
 
     perObjectCBData.normalMatrix = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
-
-    auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdateConstantBuffer(perObjectConstantBuffer, perObjectCBData);
-}
-
-BufferHandle& RenderableObject::GetConstantBuffer() {
-    return perObjectConstantBuffer;
+    m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView, perObjectCBData);
 }
 
 void RenderableObject::OnUpdate() {
@@ -90,7 +75,9 @@ void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
     m_skeleton = skeleton;
     perObjectCBData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
     perObjectCBData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
-    UpdateBuffers();
+    if (m_currentManager != nullptr) {
+        m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView, perObjectCBData);
+    }
     skeleton->userIDs.push_back(localID);
 }
 
@@ -108,4 +95,8 @@ void RenderableObject::SetCurrentPerObjectCBView(std::unique_ptr<BufferView> vie
 
 std::unique_ptr<BufferView>& RenderableObject::GetCurrentPerObjectCBView() {
 	return m_perObjectCBView;
+}
+
+void RenderableObject::SetCurrentManager(ObjectManager* manager) {
+	m_currentManager = manager;
 }

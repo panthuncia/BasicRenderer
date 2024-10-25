@@ -70,6 +70,8 @@ public:
 		meshletBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
 		commandList->SetGraphicsRoot32BitConstants(5, 4, &meshletBufferIndices, 0);
 
+		D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers().buffer->GetBuffer()->m_buffer->GetGPUVirtualAddress();
+
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
@@ -79,7 +81,8 @@ public:
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetOpaqueMeshes();
 
-			commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+			size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
+			commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
@@ -96,7 +99,8 @@ public:
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetTransparentMeshes();
 
-			commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+			size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
+			commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress+offset);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
