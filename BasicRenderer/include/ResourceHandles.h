@@ -6,7 +6,9 @@
 
 #include "DirectX/d3dx12.h"
 #include "DynamicStructuredBuffer.h"
+#include "LazyDynamicStructuredBuffer.h"
 #include "BufferHandle.h"
+#include "Concepts/HasIsValid.h"
 
 class DynamicBuffer;
 
@@ -14,6 +16,12 @@ template<typename T>
 struct DynamicStructuredBufferHandle {
     UINT index; // Index in the descriptor heap
     std::shared_ptr<DynamicStructuredBuffer<T>> buffer; // The actual resource buffer
+};
+
+template<HasIsValid T>
+struct LazyDynamicStructuredBufferHandle {
+    UINT index; // Index in the descriptor heap
+    std::shared_ptr<LazyDynamicStructuredBuffer<T>> buffer; // The actual resource buffer
 };
 
 struct DynamicBufferHandle {

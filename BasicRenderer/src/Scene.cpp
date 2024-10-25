@@ -40,6 +40,9 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
             meshManager->AddMesh(mesh);
         }
     }
+	if (objectManager != nullptr) {
+		objectManager->AddObject(object);
+	}
     return object->GetLocalID();
 }
 
@@ -116,7 +119,6 @@ std::shared_ptr<SceneNode> Scene::GetEntityByID(UINT id) {
     return nullptr;
 }
 
-
 void Scene::RemoveObjectByName(const std::wstring& name) {
     auto it = objectsByName.find(name);
     if (it != objectsByName.end()) {
@@ -130,6 +132,9 @@ void Scene::RemoveObjectByName(const std::wstring& name) {
         transparentObjectsByID.erase(it->second->GetLocalID());
         std::shared_ptr<SceneNode> node = it->second;
         node->parent->RemoveChild(node->GetLocalID());
+        if (objectManager != nullptr) {
+            objectManager->RemoveObject(it->second);
+        }
     }
 }
 
@@ -147,10 +152,11 @@ void Scene::RemoveObjectByID(UINT id) {
 
         std::shared_ptr<SceneNode> node = it->second;
         node->parent->RemoveChild(node->GetLocalID());
+		if (objectManager != nullptr) {
+			objectManager->RemoveObject(it->second);
+		}
     }
 }
-
-
 
 void Scene::RemoveLightByID(UINT id) {
     auto it = lightsByID.find(id);
@@ -390,10 +396,16 @@ void Scene::MakeResident() { // MeshManager manages GPU buffers
             meshManager->AddMesh(mesh);
 		}
 	}
+	objectManager = ObjectManager::CreateUnique();
+	for (auto& objectPair : objectsByID) {
+		auto& object = objectPair.second;
+		objectManager->AddObject(object);
+	}
 }
 
 void Scene::MakeNonResident() {
     meshManager = nullptr;
+	objectManager = nullptr;
 }
 
 void Scene::Activate() {

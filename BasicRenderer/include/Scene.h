@@ -13,6 +13,7 @@
 #include "MeshData.h"
 #include "Light.h"
 #include "MeshManager.h"
+#include "ObjectManager.h"
 
 class Scene {
 public:
@@ -67,6 +68,7 @@ private:
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
     LightManager lightManager;
     std::unique_ptr<MeshManager> meshManager = nullptr;
+	std::unique_ptr<ObjectManager> objectManager = nullptr;
 
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;

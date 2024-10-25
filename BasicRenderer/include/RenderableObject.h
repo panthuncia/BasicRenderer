@@ -2,12 +2,14 @@
 
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "SceneNode.h"
 #include "Mesh.h"
 #include "Buffers.h"
 #include "ResourceHandles.h"
 #include "Skeleton.h"
+#include "BufferView.h"
 
 class RenderableObject : public SceneNode {
 public:
@@ -21,6 +23,9 @@ public:
 	BufferHandle& GetConstantBuffer();
 	void SetSkin(std::shared_ptr<Skeleton> skeleton);
 	std::shared_ptr<Skeleton>& GetSkin();
+	PerObjectCB& GetPerObjectCBData();
+	void SetCurrentPerObjectCBView(std::unique_ptr<BufferView> view);
+	std::unique_ptr<BufferView>& GetCurrentPerObjectCBView();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void CreateBuffers();
@@ -33,6 +38,7 @@ private:
 	bool m_hasTransparent = false;
 	bool m_hasOpaque = false;
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
+	std::unique_ptr<BufferView> m_perObjectCBView;
 protected:
 	void OnUpdate() override;
 };

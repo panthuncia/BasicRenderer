@@ -26,7 +26,7 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
             }
 
             // Return BufferView
-            return std::move(std::make_unique<BufferView>(this, offset, requiredSize, type));
+            return std::move(BufferView::CreateUnique(this, offset, requiredSize, type));
         }
     }
 
@@ -118,8 +118,4 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     m_capacity = newSize;
     onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, m_dataBuffer);
 	SetName(m_name);
-}
-
-void DynamicBuffer::MarkViewDirty(BufferView* view) {
-	m_dirtyViews.push_back(view);
 }

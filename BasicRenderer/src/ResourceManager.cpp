@@ -242,7 +242,7 @@ void ResourceManager::UpdateGPUBuffers() {
 			copyCommandList->ResourceBarrier(1, &barrier);
 		}
 	}
-	for (std::shared_ptr<DynamicBufferBase> dynamicBufferHandle : dynamicBuffersToUpdate) {
+	for (DynamicBufferBase* dynamicBufferHandle : dynamicBuffersToUpdate) {
 		// Ensure both buffers are valid
 		if (dynamicBufferHandle->m_uploadBuffer && dynamicBufferHandle->m_dataBuffer) {
 			auto startState = ResourceStateToD3D12(dynamicBufferHandle->m_dataBuffer->GetState());
@@ -267,7 +267,7 @@ void ResourceManager::UpdateGPUBuffers() {
 		}
 	}
 
-	for (DynamicBuffer* buffer : dynamicBuffersToUpdateViews) {
+	for (ViewedDynamicBufferBase* buffer : dynamicBuffersToUpdateViews) {
 
 		const auto& bufferViewsToUpdate = buffer->GetDirtyViews();
 		if (bufferViewsToUpdate.empty()) {

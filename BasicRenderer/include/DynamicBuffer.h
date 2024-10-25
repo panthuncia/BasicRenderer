@@ -26,7 +26,7 @@ struct MemoryBlock {
 
 class BufferView;
 
-class DynamicBuffer : public DynamicBufferBase {
+class DynamicBuffer : public ViewedDynamicBufferBase {
 public:
 
     static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"") {
@@ -50,16 +50,6 @@ public:
 
 	void* GetMappedData() {
 		return m_mappedData;
-	}
-
-	const std::vector<BufferView*>& GetDirtyViews() {
-		return m_dirtyViews;
-	}
-
-    void MarkViewDirty(BufferView* view);
-
-	void ClearDirtyViews() {
-		m_dirtyViews.clear();
 	}
 
 protected:
@@ -101,8 +91,6 @@ private:
     std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>&)> onResized;
     inline static std::wstring m_baseName = L"DynamicBuffer";
 	std::wstring m_name = m_baseName;
-
-	std::vector<BufferView*> m_dirtyViews;
 
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);

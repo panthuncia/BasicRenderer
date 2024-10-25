@@ -17,6 +17,7 @@
 #include "RenderContext.h"
 #include "utilities.h"
 #include "TextureDescription.h"
+#include "LazyDynamicStructuredBuffer.h"
 
 using namespace Microsoft::WRL;
 
@@ -174,6 +175,44 @@ public:
         device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
         DynamicStructuredBufferHandle<T> handle;
+        handle.index = index;
+        handle.buffer = pDynamicBuffer;
+        return handle;
+    }
+
+    template<typename T>
+    LazyDynamicStructuredBufferHandle<T> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
+        static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
+
+        auto& device = DeviceManager::GetInstance().GetDevice();
+
+        // Create the dynamic structured buffer instance
+        UINT bufferID = GetNextResizableBufferID();
+        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name);
+        ResourceTransition transition;
+        transition.resource = pDynamicBuffer.get();
+        transition.beforeState = ResourceState::UNKNOWN;
+        transition.afterState = usage;
+        QueueResourceTransition(transition);
+        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
+            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
+            });
+
+        // Create an SRV for the buffer
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.NumElements = capacity;
+        srvDesc.Buffer.StructureByteStride = sizeof(T);
+        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+        bufferIDDescriptorIndexMap[bufferID] = index;
+        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
+        device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+
+        LazyDynamicStructuredBufferHandle<T> handle;
         handle.index = index;
         handle.buffer = pDynamicBuffer;
         return handle;
@@ -479,11 +518,15 @@ public:
 	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 	template<typename T>
     void QueueDynamicBufferUpdate(DynamicStructuredBufferHandle<T>& handle) {
-        dynamicBuffersToUpdate.push_back(handle.buffer);
+        dynamicBuffersToUpdate.push_back(handle.buffer.get());
     }
 
-	void QueueDynamicBufferViewUpdate(DynamicBuffer* handle) {
+	void QueueViewedDynamicBufferViewUpdate(ViewedDynamicBufferBase* handle) {
 		dynamicBuffersToUpdateViews.push_back(handle);
+	}
+
+	void QueueLazyDynamicBufferUpdate(LazyDynamicStructuredBufferBase* handle) {
+		dynamicBuffersToUpdate.push_back(handle);
 	}
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
@@ -545,8 +588,8 @@ private:
     ComPtr<ID3D12CommandAllocator> commandAllocator;
 
     std::vector<BufferHandle> buffersToUpdate;
-    std::vector<std::shared_ptr<DynamicBufferBase>> dynamicBuffersToUpdate;
-	std::vector<DynamicBuffer*> dynamicBuffersToUpdateViews;
+    std::vector<DynamicBufferBase*> dynamicBuffersToUpdate;
+	std::vector<ViewedDynamicBufferBase*> dynamicBuffersToUpdateViews;
 
 	std::vector<ResourceTransition> queuedResourceTransitions;
 

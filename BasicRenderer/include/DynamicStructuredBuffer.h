@@ -19,9 +19,9 @@ template<class T>
 class DynamicStructuredBuffer : public DynamicBufferBase {
 public:
 
-	static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"") {
-		return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name));
-	}
+    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"") {
+        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name));
+    }
 
     void Add(const T& element) {
         if (m_data.size() >= m_capacity) {
@@ -52,7 +52,7 @@ public:
             CreateBuffer(newCapacity);
             m_capacity = newCapacity;
         }
-        
+
     }
 
     void UpdateAt(UINT index, const T& element) {
@@ -88,7 +88,7 @@ public:
     }
 protected:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
-		currentState = newState;
+        currentState = newState;
         m_dataBuffer->Transition(commandList, prevState, newState);
     }
 

@@ -97,3 +97,15 @@ void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
 std::shared_ptr<Skeleton>& RenderableObject::GetSkin() {
 	return m_skeleton;
 }
+
+PerObjectCB& RenderableObject::GetPerObjectCBData() {
+	return perObjectCBData;
+}
+
+void RenderableObject::SetCurrentPerObjectCBView(std::unique_ptr<BufferView> view) {
+    m_perObjectCBView = std::move(view);
+}
+
+std::unique_ptr<BufferView>& RenderableObject::GetCurrentPerObjectCBView() {
+	return m_perObjectCBView;
+}

@@ -27,6 +27,7 @@ struct PerObjectCB {
     DirectX::XMMATRIX normalMatrix;
     unsigned int boneTransformBufferIndex;
     unsigned int inverseBindMatricesBufferIndex;
+    unsigned int isValid;
 };
 
 struct PerMeshCB {
@@ -81,4 +82,5 @@ struct LightInfo {
     float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
+    unsigned int isValid;
 };
