@@ -7,6 +7,7 @@
 #include "buffers.h"
 #include "ResourceHandles.h"
 #include "Interfaces/ISceneNodeObserver.h"
+#include "DynamicResource.h"
 
 class Camera;
 class Light;
@@ -28,6 +29,7 @@ public:
     void OnNodeUpdated(SceneNode* camera) override;
     void OnNodeUpdated(Light* light) override;
     void UpdateBuffers();
+    void UpdateNumObjectsInScene(unsigned int numObjects);
 
 private:
     DynamicStructuredBufferHandle<LightInfo> m_lightBufferHandle;
@@ -40,11 +42,17 @@ private:
 	std::vector<Light*> m_pointLights;
 	std::vector<Light*> m_directionalLights;
 
+	std::unordered_map<int, DynamicGloballyIndexedResource> m_lightDrawSetBufferMap;
+    unsigned int m_commandBufferSize;
+	bool m_resizeCommandBuffers = false;
+	static constexpr unsigned int m_commandBufferIncrementSize = 1000;
+
     // Settings funcs
 	std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
     std::function<uint16_t()> getShadowResolution;
     std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
+    std::function<void(std::shared_ptr<void>)> markForDelete;
 
     Camera* m_currentCamera = nullptr;
 
@@ -52,4 +60,5 @@ private:
     unsigned int CreateLightViewInfo(Light* node, Camera* camera = nullptr);
     void UpdateLightViewInfo(Light* node);
 	void RemoveLightViewInfo(Light* node);
+    void CreateIndirectCommandBuffer(Light* light);
 };

@@ -100,3 +100,11 @@ std::unique_ptr<BufferView>& RenderableObject::GetCurrentPerObjectCBView() {
 void RenderableObject::SetCurrentManager(ObjectManager* manager) {
 	m_currentManager = manager;
 }
+
+void RenderableObject::SetDrawSetIndex(int index) {
+	drawSetIndex = index;
+}
+
+int RenderableObject::GetDrawSetIndex() {
+	return drawSetIndex;
+}

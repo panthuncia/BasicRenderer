@@ -23,13 +23,14 @@ public:
         return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name));
     }
 
-    void Add(const T& element) {
+    unsigned int Add(const T& element) {
         if (m_data.size() >= m_capacity) {
             Resize(m_capacity * 2);
             onResized(m_globalResizableBufferID, sizeof(T), m_capacity, m_dataBuffer);
         }
         m_data.push_back(element);
         m_needsUpdate = true;
+		return m_data.size() - 1;
     }
 
     void RemoveAt(UINT index) {

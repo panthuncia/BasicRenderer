@@ -11,6 +11,7 @@
 #include "ShadowMaps.h"
 #include "ResourceManager.h"
 #include "SettingsManager.h"
+#include "DynamicResource.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -76,6 +77,8 @@ void LightManager::RemoveLight(Light* light) {
 
     m_lightBufferHandle.buffer->RemoveAt(index);
 	light->RemoveLightObserver(this);
+	light->SetLightBufferIndex(-1);
+	RemoveLightViewInfo(light);
 }
 
 unsigned int LightManager::GetLightBufferDescriptorIndex() {
@@ -96,6 +99,12 @@ unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
 
 unsigned int LightManager::GetNumLights() {
     return m_lights.size();
+}
+
+void LightManager::CreateIndirectCommandBuffer(Light* light) {
+	auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_commandBufferSize, ResourceState::UNORDERED_ACCESS, false);
+	DynamicGloballyIndexedResource dynamicResource(resource.dataBuffer, resource.index);
+	m_lightDrawSetBufferMap[light->GetLocalID()] = dynamicResource;
 }
 
 unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
@@ -238,4 +247,16 @@ void LightManager::UpdateBuffers() {
 		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfoHandle);
 	if (m_directionalViewInfoHandle.buffer->UpdateUploadBuffer())
 		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfoHandle);
+}
+
+void LightManager::UpdateNumObjectsInScene(unsigned int numObjects) {
+	unsigned int newSize = ((numObjects + m_commandBufferIncrementSize) / m_commandBufferIncrementSize) * m_commandBufferIncrementSize; 
+	if (m_commandBufferSize != newSize) {
+		m_commandBufferSize = newSize;
+		for (auto& pair : m_lightDrawSetBufferMap) {
+			markForDelete(pair.second.GetResource()); // Delay deletion until after the current frame
+			auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_commandBufferSize, ResourceState::UNORDERED_ACCESS, false);
+			pair.second.SetResource(resource.dataBuffer, resource.index);
+		}
+	}
 }

@@ -81,15 +81,19 @@ public:
 
         buffersToUpdate.push_back(handle);
     }
-
     template<typename T>
-    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType) {
+    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = true) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
 
         BufferHandle handle;
-        handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
+		if (hasUploadBuffer) {
+			handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
+		}
+		else {
+			handle.uploadBuffer = nullptr;
+		}
         handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
         
         ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };

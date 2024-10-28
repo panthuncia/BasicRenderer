@@ -127,6 +127,12 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
             break;
         }
     }
+    for (auto& resource : passAndResources.resources.constantBuffers) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::CONSTANT)) {
+            return true;
+            break;
+        }
+    }
     return false;
 }
 
@@ -164,6 +170,9 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
     }
     for (auto& resource : passAndResources.resources.depthTextures) {
         batch.resourceStates[resource->GetName()] = ResourceState::DEPTH_WRITE;
+    }
+    for (auto& resource : passAndResources.resources.constantBuffers) {
+        batch.resourceStates[resource->GetName()] = ResourceState::CONSTANT;
     }
 }
 

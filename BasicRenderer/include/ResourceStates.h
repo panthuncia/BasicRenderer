@@ -19,6 +19,7 @@ enum class ResourceState {
 	UPLOAD,
 	COPY_SOURCE,
 	COPY_DEST,
+	UNORDERED_ACCESS,
 };
 
 inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
@@ -49,6 +50,8 @@ inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 		return D3D12_RESOURCE_STATE_COPY_SOURCE;
 	case ResourceState::COPY_DEST:
 		return D3D12_RESOURCE_STATE_COPY_DEST;
+	case ResourceState::UNORDERED_ACCESS:
+		return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 	}
 	throw std::runtime_error("Invalid Resource State");
 }

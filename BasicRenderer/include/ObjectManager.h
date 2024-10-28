@@ -8,6 +8,10 @@
 class RenderableObject;
 class BufferView;
 
+struct IndirectCommand {
+	D3D12_GPU_VIRTUAL_ADDRESS cbv;
+};
+
 class ObjectManager {
 public:
 	static std::unique_ptr<ObjectManager> CreateUnique() {
@@ -24,5 +28,7 @@ public:
 	}
 private:
 	ObjectManager();
+	std::vector<std::shared_ptr<RenderableObject>> m_objects;
 	LazyDynamicStructuredBufferHandle<PerObjectCB> m_perObjectBuffers;
+	DynamicStructuredBufferHandle<IndirectCommand> m_drawSetCommandsBuffer;
 };

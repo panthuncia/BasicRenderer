@@ -28,6 +28,8 @@ public:
 	void SetCurrentPerObjectCBView(std::unique_ptr<BufferView> view);
 	std::unique_ptr<BufferView>& GetCurrentPerObjectCBView();
 	void SetCurrentManager(ObjectManager* manager);
+	void SetDrawSetIndex(int index);
+	int GetDrawSetIndex();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
@@ -39,6 +41,7 @@ private:
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
 	std::unique_ptr<BufferView> m_perObjectCBView;
 	ObjectManager* m_currentManager = nullptr;
+	int drawSetIndex = -1;
 protected:
 	void OnUpdate() override;
 };
