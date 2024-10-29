@@ -124,7 +124,7 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
 }
 
 UINT Material::GetMaterialBufferIndex() {
-    return m_perMaterialHandle.dataBuffer->GetSRVInfo().index;
+    return m_perMaterialHandle.dataBuffer->GetCBVInfo().index;
 }
 
 void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
