@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include "Resource.h"
+#include "GloballyIndexedResource.h"
 
 class DynamicResource : public Resource {
 public:
@@ -50,10 +51,10 @@ private:
     std::shared_ptr<Resource> resource; // T actual resource
 };
 
-class DynamicGloballyIndexedResource : public GloballyIndexedResource {
+class DynamicGloballyIndexedResource : public GloballyIndexedResourceBase {
 public:
-    DynamicGloballyIndexedResource(std::shared_ptr<Resource> initialResource, int index)
-        : m_resource(std::move(initialResource)), m_index(index) {
+    DynamicGloballyIndexedResource(std::shared_ptr<GloballyIndexedResource> initialResource)
+        : m_resource(std::move(initialResource)) {
         if (m_resource) {
             currentState = m_resource->GetState();
             name = m_resource->GetName();
@@ -61,11 +62,10 @@ public:
     }
 
     // Allow swapping the underlying resource dynamically
-    void SetResource(std::shared_ptr<Resource> newResource, int index) {
+    void SetResource(std::shared_ptr<GloballyIndexedResource> newResource) {
         if (!newResource) {
             throw std::runtime_error("Cannot set a null resource.");
         }
-		m_index = index;
         m_resource = std::move(newResource);
         currentState = m_resource->GetState();
         name = m_resource->GetName();
@@ -91,6 +91,5 @@ protected:
     }
 
 private:
-    std::shared_ptr<Resource> m_resource; // T actual resource
-	int m_index;
+    std::shared_ptr<GloballyIndexedResource> m_resource; // T actual resource
 };

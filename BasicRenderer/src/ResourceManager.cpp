@@ -409,8 +409,15 @@ DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSi
 	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
 	device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
+	CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+	ShaderVisibleIndexInfo srvInfo;
+	srvInfo.index = index;
+	srvInfo.gpuHandle = gpuHandle;
+	srvInfo.cpuHandle = cpuHandle;
+
+	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
+
 	DynamicBufferHandle handle;
-	handle.index = index;
 	handle.buffer = pDynamicBuffer;
 	return handle;
 }

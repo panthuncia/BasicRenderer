@@ -623,7 +623,7 @@ void DX12Renderer::CreateRenderGraph() {
 		m_lutTexture = std::make_shared<Texture>(lutBuffer, sampler);
 		m_lutTexture->SetName(L"LUTTexture");
 
-        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetSRVDescriptorIndex());
+        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo().index);
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
 		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
@@ -823,7 +823,7 @@ void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
 	m_environmentIrradiance = texture;
     m_environmentIrradiance->SetName(L"EnvironmentRadiance");
     auto& manager = ResourceManager::GetInstance();
-	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetSRVDescriptorIndex());
+	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetBuffer()->GetSRVInfo().index);
 	manager.setEnvironmentIrradianceMapSamplerIndex(m_environmentIrradiance->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }
@@ -835,7 +835,7 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	m_prefilteredEnvironment = texture;
 	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");
 	auto& manager = ResourceManager::GetInstance();
-	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetSRVDescriptorIndex());
+	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo().index);
 	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }

@@ -16,11 +16,12 @@ public:
     static std::shared_ptr<PixelBuffer> Create(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {}) {
 		return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData));
     }
-    UINT GetSRVDescriptorIndex() const;
-	TextureHandle<PixelBuffer>& GetHandle() { return handle; }
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
+    ComPtr<ID3D12Resource> GetTexture() const {
+		return handle.texture;
+    }
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState);
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 

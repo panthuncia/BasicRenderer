@@ -19,16 +19,16 @@ public:
 	void AddMesh(std::shared_ptr<Mesh>& mesh);
 	void RemoveMesh(std::shared_ptr<BufferView> view);
 	unsigned int GetVertexBufferIndex() const {
-		return m_vertices.index;
+		return m_vertices.buffer->GetSRVInfo().index;
 	}
 	unsigned int GetMeshletOffsetBufferIndex() const {
-		return m_meshletOffsets.index;
+		return m_meshletOffsets.buffer->GetSRVInfo().index;
 	}
 	unsigned int GetMeshletIndexBufferIndex() const {
-		return m_meshletIndices.index;
+		return m_meshletIndices.buffer->GetSRVInfo().index;
 	}
 	unsigned int GetMeshletTriangleBufferIndex() const {
-		return m_meshletTriangles.index;
+		return m_meshletTriangles.buffer->GetSRVInfo().index;
 	}
 	std::shared_ptr<ResourceGroup> GetResourceGroup() {
 		return m_resourceGroup;

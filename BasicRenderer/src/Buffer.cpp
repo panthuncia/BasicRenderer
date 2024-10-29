@@ -22,7 +22,12 @@ D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType) {
 	}
 }
 
-Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t bufferSize, bool upload = false) {
+Buffer::Buffer(
+	ID3D12Device* device, 
+	ResourceCPUAccessType accessType, 
+	uint32_t bufferSize, 
+	bool upload = false) : 
+	GloballyIndexedResource(){
 	m_accessType = accessType;
 	D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(TranslateAccessType(accessType));
 	D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);

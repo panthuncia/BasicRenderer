@@ -54,7 +54,7 @@ public:
     }
 
 	void RemoveMap(Light* light) {
-		int index = light->getShadowMap()->GetBufferDescriptorIndex();
+		int index = light->getShadowMap()->GetBuffer()->GetSRVInfo().index;
 		if (index != -1) {
 			RemoveGloballyIndexedResource(index);
 		}

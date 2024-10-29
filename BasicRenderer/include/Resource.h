@@ -4,7 +4,6 @@
 #include <vector>
 #include <directx/d3d12.h>
 #include "ResourceStates.h"
-//#include "RenderPass.h"
 
 class RenderContext;
 
@@ -23,6 +22,7 @@ protected:
     ResourceState currentState;
     std::wstring name;
 private:
+
 	void SetState(ResourceState state) { currentState = state; }
     friend class RenderGraph;
     friend class ResourceGroup;

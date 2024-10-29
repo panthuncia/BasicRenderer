@@ -64,7 +64,12 @@ public:
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        bufferHandle.index = index;
+
+        ShaderVisibleIndexInfo cbvInfo;
+        cbvInfo.index = index;
+        cbvInfo.cpuHandle = handle;
+        cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+        bufferHandle.dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap.get(), cbvInfo);
 
         device->CreateConstantBufferView(&cbvDesc, handle);
 
@@ -99,7 +104,7 @@ public:
         ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
         QueueResourceTransition(transition);
 
-        handle.index = m_cbvSrvUavHeap->AllocateDescriptor();
+        unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -109,8 +114,14 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(handle.index);
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
         device->CreateShaderResourceView(handle.dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
+
+        ShaderVisibleIndexInfo srvInfo;
+		srvInfo.index = index;
+		srvInfo.cpuHandle = srvHandle;
+		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+		handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
 
         return handle;
     }
@@ -178,8 +189,13 @@ public:
         CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
         device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
+        ShaderVisibleIndexInfo srvInfo;
+        srvInfo.index = index;
+        srvInfo.cpuHandle = cpuHandle;
+        srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+        pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
+
         DynamicStructuredBufferHandle<T> handle;
-        handle.index = index;
         handle.buffer = pDynamicBuffer;
         return handle;
     }
@@ -216,8 +232,13 @@ public:
         CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
         device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
+		ShaderVisibleIndexInfo srvInfo;
+		srvInfo.index = index;
+		srvInfo.cpuHandle = cpuHandle;
+		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+		pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
+
         LazyDynamicStructuredBufferHandle<T> handle;
-        handle.index = index;
         handle.buffer = pDynamicBuffer;
         return handle;
     }
@@ -514,6 +535,9 @@ public:
         handle.SRVInfo = srvInfo;
         handle.RTVInfo = rtvInfos;
         handle.DSVInfo = dsvInfos;
+		handle.srvHeap = m_cbvSrvUavHeap.get();
+		handle.rtvHeap = m_rtvHeap.get();
+		handle.dsvHeap = m_dsvHeap.get();
 
         return handle;
     }

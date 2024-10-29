@@ -4,14 +4,14 @@
 
 #include "RenderContext.h"
 #include "ResourceStates.h"
-#include "Resource.h"
+#include "GloballyIndexedResource.h"
 
 class Buffer;
 class BufferView;
 
 class Buffer;
 
-class DynamicBufferBase : public Resource {
+class DynamicBufferBase : public GloballyIndexedResource {
 public:
     DynamicBufferBase() {}
     std::shared_ptr<Buffer> m_uploadBuffer;

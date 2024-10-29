@@ -82,19 +82,19 @@ void LightManager::RemoveLight(Light* light) {
 }
 
 unsigned int LightManager::GetLightBufferDescriptorIndex() {
-    return m_lightBufferHandle.index;
+    return m_lightBufferHandle.buffer->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
-	return m_pointViewInfoHandle.index;
+	return m_pointViewInfoHandle.buffer->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
-	return m_spotViewInfoHandle.index;
+	return m_spotViewInfoHandle.buffer->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return m_directionalViewInfoHandle.index;
+	return m_directionalViewInfoHandle.buffer->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetNumLights() {
@@ -103,8 +103,10 @@ unsigned int LightManager::GetNumLights() {
 
 void LightManager::CreateIndirectCommandBuffer(Light* light) {
 	auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_commandBufferSize, ResourceState::UNORDERED_ACCESS, false);
-	DynamicGloballyIndexedResource dynamicResource(resource.dataBuffer, resource.index);
-	m_lightDrawSetBufferMap[light->GetLocalID()] = dynamicResource;
+	//m_lightDrawSetBufferMap.emplace(
+	//	light->GetLocalID(),
+	//	DynamicGloballyIndexedResource(resource.dataBuffer, resource.index)
+	//);
 }
 
 unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
@@ -256,7 +258,7 @@ void LightManager::UpdateNumObjectsInScene(unsigned int numObjects) {
 		for (auto& pair : m_lightDrawSetBufferMap) {
 			markForDelete(pair.second.GetResource()); // Delay deletion until after the current frame
 			auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_commandBufferSize, ResourceState::UNORDERED_ACCESS, false);
-			pair.second.SetResource(resource.dataBuffer, resource.index);
+			pair.second.SetResource(resource.dataBuffer);
 		}
 	}
 }

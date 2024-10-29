@@ -13,16 +13,14 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
     ResourceManager& resourceManager = ResourceManager::GetInstance();
 
     handle = resourceManager.CreateTexture(desc, initialData);
-    SetIndex(GetSRVDescriptorIndex());
+    SetSRVDescriptor(handle.srvHeap, handle.SRVInfo);
+	SetRTVDescriptors(handle.rtvHeap, handle.RTVInfo);
+	SetDSVDescriptors(handle.dsvHeap, handle.DSVInfo);
     currentState = ResourceState::UNKNOWN;
 	m_width = desc.width;
 	m_height = desc.height;
 	m_channels = desc.channels;
 	m_format = desc.format;
-}
-
-UINT PixelBuffer::GetSRVDescriptorIndex() const {
-    return handle.SRVInfo.index;
 }
 
 void PixelBuffer::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState) {
@@ -35,7 +33,7 @@ void PixelBuffer::Transition(ID3D12GraphicsCommandList* commandList, ResourceSta
     D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-    barrier.Transition.pResource = GetHandle().texture.Get();
+    barrier.Transition.pResource = handle.texture.Get();
     barrier.Transition.StateBefore = d3dFromState;
     barrier.Transition.StateAfter = d3dToState;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;

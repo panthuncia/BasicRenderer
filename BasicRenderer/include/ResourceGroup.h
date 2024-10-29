@@ -14,7 +14,7 @@ public:
     }
 
     void AddGloballyIndexedResource(std::shared_ptr<GloballyIndexedResource> resource) {
-        resourcesByIndex[resource->GetIndex()] = resource;
+        resourcesBySRVIndex[resource->GetSRVInfo().index] = resource;
     }
 
 	void AddResource(std::shared_ptr<Resource> resource) {
@@ -22,16 +22,16 @@ public:
 	}
 
     virtual void RemoveGloballyIndexedResource(uint32_t index) {
-        auto iter = resourcesByIndex.find(index);
-        if (iter != resourcesByIndex.end()) {
-            resourcesByIndex.erase(iter);
+        auto iter = resourcesBySRVIndex.find(index);
+        if (iter != resourcesBySRVIndex.end()) {
+            resourcesBySRVIndex.erase(iter);
         }
     }
 
 protected:
     // Override the base Resource method to transition all resources in the group
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) {
-        for (auto& pair : resourcesByIndex) {
+        for (auto& pair : resourcesBySRVIndex) {
             pair.second->Transition(commandList, prevState, newState);
         }
 		for (auto& resource : resources) {
@@ -40,6 +40,6 @@ protected:
         currentState = newState; // Set the state for the group as a whole
     }
 protected:
-    std::unordered_map<uint32_t, std::shared_ptr<Resource>> resourcesByIndex;
+    std::unordered_map<uint32_t, std::shared_ptr<Resource>> resourcesBySRVIndex;
 	std::vector<std::shared_ptr<Resource>> resources;
 };

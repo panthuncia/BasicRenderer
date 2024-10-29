@@ -59,11 +59,11 @@ void Skeleton::UpdateTransforms() {
 }
 
 UINT Skeleton::GetTransformsBufferIndex() {
-    return m_transformsHandle.index;
+    return m_transformsHandle.dataBuffer->GetSRVInfo().index;
 }
 
 UINT Skeleton::GetInverseBindMatricesBufferIndex() {
-    return m_inverseBindMatricesHandle.index;
+    return m_inverseBindMatricesHandle.dataBuffer->GetSRVInfo().index;
 }
 
 BufferHandle Skeleton::GetInverseBindMatricesHandle() {

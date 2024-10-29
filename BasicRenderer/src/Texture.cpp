@@ -8,20 +8,8 @@ Texture::Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sa
 	m_sampler = sampler;
 }
 
-UINT Texture::GetBufferDescriptorIndex() {
-	return m_image->GetSRVDescriptorIndex();
-}
-
 UINT Texture::GetSamplerDescriptorIndex() {
 	return m_sampler->GetDescriptorIndex();
-}
-
-TextureHandle<PixelBuffer>& Texture::GetHandle() {
-	return m_image->GetHandle();
-}
-
-UINT Texture::GetSRVDescriptorIndex() const {
-	return m_image->GetSRVDescriptorIndex();
 }
 
 void Texture::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState) {

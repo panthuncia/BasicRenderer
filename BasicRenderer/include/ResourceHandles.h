@@ -9,35 +9,25 @@
 #include "LazyDynamicStructuredBuffer.h"
 #include "BufferHandle.h"
 #include "Concepts/HasIsValid.h"
+#include "HeapIndexInfo.h"
 
 class DynamicBuffer;
+class DescriptorHeap;
+
+// TODO: old, mostly not needed
 
 template<typename T>
 struct DynamicStructuredBufferHandle {
-    UINT index; // Index in the descriptor heap
     std::shared_ptr<DynamicStructuredBuffer<T>> buffer; // The actual resource buffer
 };
 
 template<HasIsValid T>
 struct LazyDynamicStructuredBufferHandle {
-    UINT index; // Index in the descriptor heap
     std::shared_ptr<LazyDynamicStructuredBuffer<T>> buffer; // The actual resource buffer
 };
 
 struct DynamicBufferHandle {
-	UINT index;
 	std::shared_ptr<DynamicBuffer> buffer;
-};
-
-struct ShaderVisibleIndexInfo {
-    int index = -1; // Index in the descriptor heap
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle; // CPU descriptor handle
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle; // GPU descriptor handle
-};
-
-struct NonShaderVisibleIndexInfo {
-    int index = -1; // Index in the descriptor heap
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle; // CPU descriptor handle
 };
 
 template<typename T>
@@ -46,4 +36,7 @@ struct TextureHandle {
     ShaderVisibleIndexInfo SRVInfo;
     std::vector<NonShaderVisibleIndexInfo> RTVInfo;
     std::vector<NonShaderVisibleIndexInfo> DSVInfo;
+	DescriptorHeap* srvHeap;
+	DescriptorHeap* rtvHeap;
+	DescriptorHeap* dsvHeap;
 };

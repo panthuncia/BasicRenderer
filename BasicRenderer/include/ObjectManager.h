@@ -20,7 +20,7 @@ public:
 	void AddObject(std::shared_ptr<RenderableObject>& object);
 	void RemoveObject(std::shared_ptr<RenderableObject>& object);
 	unsigned int GetPerObjectBufferIndex() const {
-		return m_perObjectBuffers.index;
+		return m_perObjectBuffers.buffer->GetSRVInfo().index;
 	}
 	void UpdatePerObjectBuffer(std::unique_ptr<BufferView>&, PerObjectCB& data);
 	LazyDynamicStructuredBufferHandle<PerObjectCB>& GetPerObjectBuffers() {
