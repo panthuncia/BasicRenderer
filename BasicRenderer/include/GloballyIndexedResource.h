@@ -21,27 +21,27 @@ public:
 		}
 	};
 
-	void SetSRVDescriptor(DescriptorHeap* pSRVHeap, ShaderVisibleIndexInfo srvInfo) {
+	void SetSRVDescriptor(std::shared_ptr<DescriptorHeap> pSRVHeap, ShaderVisibleIndexInfo srvInfo) {
 		m_pSRVHeap = pSRVHeap;
 		m_SRVInfo = srvInfo;
 	}
 
-	void SetUAVDescriptor(DescriptorHeap* pUAVHeap, ShaderVisibleIndexInfo uavInfo) {
+	void SetUAVDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, ShaderVisibleIndexInfo uavInfo) {
 		m_pUAVHeap = pUAVHeap;
 		m_UAVInfo = uavInfo;
 	}
 
-	void SetCBVDescriptor(DescriptorHeap* pCBVHeap, ShaderVisibleIndexInfo cbvInfo) {
+	void SetCBVDescriptor(std::shared_ptr<DescriptorHeap> pCBVHeap, ShaderVisibleIndexInfo cbvInfo) {
 		m_pCBVHeap = pCBVHeap;
 		m_CBVInfo = cbvInfo;
 	}
 
-	void SetRTVDescriptors(DescriptorHeap* pRTVHeap, std::vector<NonShaderVisibleIndexInfo>& rtvInfos) {
+	void SetRTVDescriptors(std::shared_ptr<DescriptorHeap> pRTVHeap, std::vector<NonShaderVisibleIndexInfo>& rtvInfos) {
 		m_pRTVHeap = pRTVHeap;
 		m_RTVInfos = rtvInfos;
 	}
 
-	void SetDSVDescriptors(DescriptorHeap* pDSVHeap, std::vector<NonShaderVisibleIndexInfo>& dsvInfos) {
+	void SetDSVDescriptors(std::shared_ptr<DescriptorHeap> pDSVHeap, std::vector<NonShaderVisibleIndexInfo>& dsvInfos) {
 		m_pDSVHeap = pDSVHeap;
 		m_DSVInfos = dsvInfos;
 	}
@@ -95,15 +95,15 @@ protected:
 	virtual void OnSetName() override {}
 private:
 	ShaderVisibleIndexInfo m_SRVInfo;
-	DescriptorHeap* m_pSRVHeap = nullptr;
+	std::shared_ptr<DescriptorHeap> m_pSRVHeap = nullptr;
 	ShaderVisibleIndexInfo m_UAVInfo;
-	DescriptorHeap* m_pUAVHeap = nullptr;
+	std::shared_ptr<DescriptorHeap> m_pUAVHeap = nullptr;
 	ShaderVisibleIndexInfo m_CBVInfo;
-	DescriptorHeap* m_pCBVHeap = nullptr;
+	std::shared_ptr<DescriptorHeap> m_pCBVHeap = nullptr;
 	std::vector<NonShaderVisibleIndexInfo> m_RTVInfos;
-	DescriptorHeap* m_pRTVHeap = nullptr;
+	std::shared_ptr<DescriptorHeap> m_pRTVHeap = nullptr;
 	std::vector<NonShaderVisibleIndexInfo> m_DSVInfos;
-	DescriptorHeap* m_pDSVHeap = nullptr;
+	std::shared_ptr<DescriptorHeap> m_pDSVHeap = nullptr;
 
 	friend class DynamicGloballyIndexedResource;
 };

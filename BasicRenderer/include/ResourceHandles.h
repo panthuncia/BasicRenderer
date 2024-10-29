@@ -36,7 +36,7 @@ struct TextureHandle {
     ShaderVisibleIndexInfo SRVInfo;
     std::vector<NonShaderVisibleIndexInfo> RTVInfo;
     std::vector<NonShaderVisibleIndexInfo> DSVInfo;
-	DescriptorHeap* srvHeap;
-	DescriptorHeap* rtvHeap;
-	DescriptorHeap* dsvHeap;
+    std::shared_ptr<DescriptorHeap> srvHeap;
+    std::shared_ptr<DescriptorHeap> rtvHeap;
+    std::shared_ptr<DescriptorHeap> dsvHeap;
 };

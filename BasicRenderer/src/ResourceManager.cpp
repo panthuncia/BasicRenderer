@@ -12,10 +12,10 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//}
 
 	auto& device = DeviceManager::GetInstance().GetDevice();
-	m_cbvSrvUavHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1, true);
-	m_samplerHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, true);
-	m_rtvHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 10000, false);
-	m_dsvHeap = std::make_unique<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 10000, false);
+	m_cbvSrvUavHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1, true);
+	m_samplerHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, true);
+	m_rtvHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 10000, false);
+	m_dsvHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 10000, false);
 
 	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
@@ -415,7 +415,7 @@ DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSi
 	srvInfo.gpuHandle = gpuHandle;
 	srvInfo.cpuHandle = cpuHandle;
 
-	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
+	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
 	DynamicBufferHandle handle;
 	handle.buffer = pDynamicBuffer;

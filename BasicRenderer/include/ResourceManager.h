@@ -69,7 +69,7 @@ public:
         cbvInfo.index = index;
         cbvInfo.cpuHandle = handle;
         cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        bufferHandle.dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap.get(), cbvInfo);
+        bufferHandle.dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
         device->CreateConstantBufferView(&cbvDesc, handle);
 
@@ -121,7 +121,7 @@ public:
 		srvInfo.index = index;
 		srvInfo.cpuHandle = srvHandle;
 		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-		handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
+		handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
         return handle;
     }
@@ -193,7 +193,7 @@ public:
         srvInfo.index = index;
         srvInfo.cpuHandle = cpuHandle;
         srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
+        pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
         DynamicStructuredBufferHandle<T> handle;
         handle.buffer = pDynamicBuffer;
@@ -236,7 +236,7 @@ public:
 		srvInfo.index = index;
 		srvInfo.cpuHandle = cpuHandle;
 		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-		pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap.get(), srvInfo);
+		pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
         LazyDynamicStructuredBufferHandle<T> handle;
         handle.buffer = pDynamicBuffer;
@@ -535,9 +535,9 @@ public:
         handle.SRVInfo = srvInfo;
         handle.RTVInfo = rtvInfos;
         handle.DSVInfo = dsvInfos;
-		handle.srvHeap = m_cbvSrvUavHeap.get();
-		handle.rtvHeap = m_rtvHeap.get();
-		handle.dsvHeap = m_dsvHeap.get();
+		handle.srvHeap = m_cbvSrvUavHeap;
+		handle.rtvHeap = m_rtvHeap;
+		handle.dsvHeap = m_dsvHeap;
 
         return handle;
     }
@@ -585,10 +585,10 @@ private:
     void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
     void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
 
-    std::unique_ptr<DescriptorHeap> m_cbvSrvUavHeap;
-    std::unique_ptr<DescriptorHeap> m_samplerHeap;
-    std::unique_ptr<DescriptorHeap> m_rtvHeap;
-    std::unique_ptr<DescriptorHeap> m_dsvHeap;
+    std::shared_ptr<DescriptorHeap> m_cbvSrvUavHeap;
+    std::shared_ptr<DescriptorHeap> m_samplerHeap;
+    std::shared_ptr<DescriptorHeap> m_rtvHeap;
+    std::shared_ptr<DescriptorHeap> m_dsvHeap;
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 
