@@ -29,13 +29,13 @@ public:
     void OnNodeUpdated(SceneNode* camera) override;
     void OnNodeUpdated(Light* light) override;
     void UpdateBuffers();
-    void UpdateNumObjectsInScene(unsigned int numObjects);
+    void UpdateNumDrawsInScene(unsigned int numDraws);
 
 private:
-    DynamicStructuredBufferHandle<LightInfo> m_lightBufferHandle;
-    DynamicStructuredBufferHandle<DirectX::XMMATRIX> m_spotViewInfoHandle;
-    DynamicStructuredBufferHandle<DirectX::XMMATRIX> m_pointViewInfoHandle;
-    DynamicStructuredBufferHandle<DirectX::XMMATRIX> m_directionalViewInfoHandle;
+    std::shared_ptr<DynamicStructuredBuffer<LightInfo>> m_lightBuffer;
+    std::shared_ptr<DynamicStructuredBuffer<DirectX::XMMATRIX>> m_spotViewInfo;
+    std::shared_ptr<DynamicStructuredBuffer<DirectX::XMMATRIX>> m_pointViewInfo;
+    std::shared_ptr<DynamicStructuredBuffer<DirectX::XMMATRIX>> m_directionalViewInfo;
     //std::unordered_map<int, unsigned int> lightIndexMap; // Maps localID to buffer index
     std::vector<Light*> m_lights; // Active light IDs
     std::vector<Light*> m_spotLights;
@@ -43,9 +43,10 @@ private:
 	std::vector<Light*> m_directionalLights;
 
 	std::unordered_map<int, DynamicGloballyIndexedResource> m_lightDrawSetBufferMap;
-    unsigned int m_commandBufferSize;
+    // TODO: The buffer size and increment size are low for testing.
+    unsigned int m_commandBufferSize = 1;
 	bool m_resizeCommandBuffers = false;
-	static constexpr unsigned int m_commandBufferIncrementSize = 1000;
+	static constexpr unsigned int m_commandBufferIncrementSize = 1;
 
     // Settings funcs
 	std::function<uint8_t()> getNumDirectionalLightCascades;

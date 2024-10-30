@@ -5,6 +5,7 @@
 #include "DynamicStructuredBuffer.h"
 #include "SettingsManager.h"
 #include "DynamicBuffer.h"
+#include "SortedUnsignedIntBuffer.h"
 void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
@@ -313,11 +314,11 @@ void ResourceManager::UpdateGPUBuffers() {
 	dynamicBuffersToUpdate.clear();
 }
 
-BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData) {
+BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData, bool UAV) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	BufferHandle handle;
-	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
-	handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
+	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+	handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
 	if (pInitialData) {
 		UpdateBuffer(handle, pInitialData, bufferSize);
 	}
@@ -373,7 +374,7 @@ void ResourceManager::ExecuteResourceTransitions() {
 	queuedResourceTransitions.clear();
 }
 
-DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress) {
+std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress) {
 #if defined(_DEBUG)
 	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
 	assert(byteAddress ? numElements % 4 == 0 : true);
@@ -417,7 +418,45 @@ DynamicBufferHandle ResourceManager::CreateIndexedDynamicBuffer(size_t elementSi
 
 	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
-	DynamicBufferHandle handle;
-	handle.buffer = pDynamicBuffer;
-	return handle;
+	return pDynamicBuffer;
+}
+
+std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, std::wstring name) {
+	auto& device = DeviceManager::GetInstance().GetDevice();
+
+	UINT bufferID = GetNextResizableBufferID();
+	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(bufferID, capacity, name);
+	ResourceTransition transition;
+	transition.resource = pBuffer.get();
+	transition.beforeState = ResourceState::UNKNOWN;
+	transition.afterState = usage;
+	QueueResourceTransition(transition);
+	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, std::shared_ptr<Buffer>& buffer) {
+		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer);
+		});
+
+	// Create an SRV for the buffer
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	srvDesc.Buffer.FirstElement = 0;
+	srvDesc.Buffer.NumElements = capacity;
+	srvDesc.Buffer.StructureByteStride = 4;
+	srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+	bufferIDDescriptorIndexMap[bufferID] = index;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
+	device->CreateShaderResourceView(pBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+
+	CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+	ShaderVisibleIndexInfo srvInfo;
+	srvInfo.index = index;
+	srvInfo.gpuHandle = gpuHandle;
+	srvInfo.cpuHandle = cpuHandle;
+
+	pBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+
+	return pBuffer;
 }

@@ -1,0 +1,155 @@
+#pragma once
+
+#include <directx/d3d12.h>
+#include <wrl.h>
+#include <vector>
+#include <functional>
+#include <string>
+#include <algorithm> // For std::lower_bound, std::upper_bound
+
+#include "DeviceManager.h"
+#include "Buffer.h"
+#include "Resource.h"
+#include "BufferHandle.h"
+#include "DynamicBufferBase.h"
+
+using Microsoft::WRL::ComPtr;
+
+class SortedUnsignedIntBuffer : public DynamicBufferBase {
+public:
+    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(id, capacity, name, UAV));
+    }
+
+    // Insert an element while maintaining sorted order
+    void Insert(unsigned int element) {
+        // Find the insertion point
+        auto it = std::lower_bound(m_data.begin(), m_data.end(), element);
+        size_t index = std::distance(m_data.begin(), it);
+
+        // Insert the element
+        m_data.insert(it, element);
+
+        // Update the earliest modified index
+        if (index < m_earliestModifiedIndex) {
+            m_earliestModifiedIndex = index;
+        }
+
+        // Resize the buffer if necessary
+        if (m_data.size() > m_capacity) {
+            Resize(m_capacity * 2);
+            if (onResized) {
+                onResized(m_globalResizableBufferID, sizeof(unsigned int), m_capacity, m_dataBuffer);
+            }
+        }
+    }
+
+    // Remove an element
+    void Remove(unsigned int element) {
+        // Find the element
+        auto it = std::lower_bound(m_data.begin(), m_data.end(), element);
+
+        if (it != m_data.end() && *it == element) {
+            size_t index = std::distance(m_data.begin(), it);
+
+            // Remove the element
+            m_data.erase(it);
+
+            // Update the earliest modified index
+            if (index < m_earliestModifiedIndex) {
+                m_earliestModifiedIndex = index;
+            }
+        }
+    }
+
+    // Get element at index
+    unsigned int& operator[](UINT index) {
+        return m_data[index];
+    }
+
+    const unsigned int& operator[](UINT index) const {
+        return m_data[index];
+    }
+
+    void Resize(UINT newCapacity) {
+        if (newCapacity > m_capacity) {
+            CreateBuffer(newCapacity);
+            m_capacity = newCapacity;
+        }
+    }
+
+    // Update only the modified portion of the buffer
+    bool UpdateUploadBuffer() {
+        if (m_earliestModifiedIndex < m_data.size()) {
+            // Calculate the byte offset and size to update
+            size_t offset = m_earliestModifiedIndex * sizeof(unsigned int);
+            size_t dataSize = (m_data.size() - m_earliestModifiedIndex) * sizeof(unsigned int);
+
+            // Map the buffer
+            unsigned int* pData = nullptr;
+            D3D12_RANGE readRange = { 0, 0 };
+            m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pData));
+
+            // Copy the modified data
+            memcpy(reinterpret_cast<unsigned char*>(pData) + offset, m_data.data() + m_earliestModifiedIndex, dataSize);
+
+            // Unmap the buffer
+            m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+
+            // Reset the earliest modified index
+            //m_earliestModifiedIndex = m_data.size();
+
+            return true;
+        }
+        return false;
+    }
+
+    void SetOnResized(const std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)>& callback) {
+        onResized = callback;
+    }
+
+    std::shared_ptr<Buffer>& GetBuffer() {
+        return m_dataBuffer;
+    }
+
+    UINT Size() const {
+        return static_cast<UINT>(m_data.size());
+    }
+
+protected:
+    void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
+        currentState = newState;
+        m_dataBuffer->Transition(commandList, prevState, newState);
+    }
+
+private:
+    SortedUnsignedIntBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
+        : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
+        CreateBuffer(capacity);
+        if (!name.empty()) {
+            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+        } else {
+            m_dataBuffer->SetName(m_name.c_str());
+        }
+    }
+
+    // Sorted list of unsigned integers
+    std::vector<unsigned int> m_data;
+
+    UINT m_capacity;
+    size_t m_earliestModifiedIndex; // Tracks the earliest modified index
+
+    UINT m_globalResizableBufferID;
+
+    std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
+    inline static std::wstring m_name = L"SortedUnsignedIntBuffer";
+
+	bool m_UAV = false;
+
+    // Create the GPU buffers
+    void CreateBuffer(UINT capacity) {
+        auto& device = DeviceManager::GetInstance().GetDevice();
+        m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(unsigned int) * capacity, true, m_UAV);
+        m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(unsigned int) * capacity, false, m_UAV);
+    }
+};

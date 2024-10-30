@@ -25,15 +25,17 @@ public:
 		ID3D12Device* device,
 		ResourceCPUAccessType accessType, 
 		uint32_t bufferSize, 
-		bool upload) {
-		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload));
+		bool upload,
+		bool unorderedAccess) {
+		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
 	}
 	static std::unique_ptr<Buffer> CreateUnique(
 		ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
 		uint32_t bufferSize,
-		bool upload) {
-		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload));
+		bool upload,
+		bool unorderedAccess) {
+		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
 	}
 
 	~Buffer() = default;
@@ -46,5 +48,5 @@ private:
 	Buffer(ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
 		uint32_t bufferSize, 
-		bool upload);
+		bool upload = false, bool unorderedAccess = false);
 };

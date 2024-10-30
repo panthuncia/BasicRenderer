@@ -101,10 +101,10 @@ void RenderableObject::SetCurrentManager(ObjectManager* manager) {
 	m_currentManager = manager;
 }
 
-void RenderableObject::SetDrawSetIndex(int index) {
-	drawSetIndex = index;
+void RenderableObject::SetCurrentDrawSetIndices(const std::vector<unsigned int>& indices) {
+	m_drawSetIndices = indices;
 }
 
-int RenderableObject::GetDrawSetIndex() {
-	return drawSetIndex;
+std::vector<unsigned int>& RenderableObject::GetCurrentDrawSetIndices() {
+	return m_drawSetIndices;
 }

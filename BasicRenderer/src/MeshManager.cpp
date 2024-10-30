@@ -10,10 +10,10 @@ MeshManager::MeshManager() {
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, ResourceState::ALL_SRV, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"meshletTriangles", true);
 	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
-	m_resourceGroup->AddResource(m_vertices.buffer);
-	m_resourceGroup->AddResource(m_meshletOffsets.buffer);
-	m_resourceGroup->AddResource(m_meshletIndices.buffer);
-	m_resourceGroup->AddResource(m_meshletTriangles.buffer);
+	m_resourceGroup->AddResource(m_vertices);
+	m_resourceGroup->AddResource(m_meshletOffsets);
+	m_resourceGroup->AddResource(m_meshletIndices);
+	m_resourceGroup->AddResource(m_meshletTriangles);
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
@@ -35,14 +35,14 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
 		}
         // Allocate buffer view
         size_t size = vertices.size() * sizeof(VertexType);
-		view = m_vertices.buffer->Allocate(size, typeid(VertexType));
+		view = m_vertices->Allocate(size, typeid(VertexType));
 
         // Map and copy data
         VertexType* dataPtr = view->Map<VertexType>();
         std::memcpy(dataPtr, specificVertices.data(), size);
 		view->GetBuffer()->MarkViewDirty(view.get());
 		//mesh->SetVertexBufferView(std::move(view));
-		manager.QueueViewedDynamicBufferViewUpdate(m_vertices.buffer.get());
+		manager.QueueViewedDynamicBufferViewUpdate(m_vertices.get());
 
         }, vertices.front());
 
@@ -50,29 +50,29 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
 	auto& meshlets = mesh->GetMeshlets();
 	auto test = vertices[0];
 	spdlog::info("Adding {} meshlets, allocating {} bytes", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));
-	auto meshletOffsetsView = m_meshletOffsets.buffer->Allocate(meshlets.size() * sizeof(meshopt_Meshlet), typeid(meshopt_Meshlet));
+	auto meshletOffsetsView = m_meshletOffsets->Allocate(meshlets.size() * sizeof(meshopt_Meshlet), typeid(meshopt_Meshlet));
 	std::memcpy(meshletOffsetsView->Map<meshopt_Meshlet>(), meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet));
 	meshletOffsetsView->GetBuffer()->MarkViewDirty(meshletOffsetsView.get());
 	//mesh->SetMeshletOffsetsBufferView(std::move(meshletOffsetsView));
-	manager.QueueViewedDynamicBufferViewUpdate(m_meshletOffsets.buffer.get());
+	manager.QueueViewedDynamicBufferViewUpdate(m_meshletOffsets.get());
 
 	auto& meshletVertices = mesh->GetMeshletVertices();
-	auto meshletIndicesView = m_meshletIndices.buffer->Allocate(meshletVertices.size() * sizeof(unsigned int), typeid(unsigned int));
+	auto meshletIndicesView = m_meshletIndices->Allocate(meshletVertices.size() * sizeof(unsigned int), typeid(unsigned int));
 	std::memcpy(meshletIndicesView->Map<unsigned int>(), meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int));
 	meshletIndicesView->GetBuffer()->MarkViewDirty(meshletIndicesView.get());
 	//mesh->SetMeshletVerticesBufferView(std::move(meshletIndicesView));
-	manager.QueueViewedDynamicBufferViewUpdate(m_meshletIndices.buffer.get());
+	manager.QueueViewedDynamicBufferViewUpdate(m_meshletIndices.get());
 
 	auto& meshletTriangles = mesh->GetMeshletTriangles();
-	auto meshletTrianglesView = m_meshletTriangles.buffer->Allocate(meshletTriangles.size() * sizeof(unsigned char), typeid(unsigned char));
+	auto meshletTrianglesView = m_meshletTriangles->Allocate(meshletTriangles.size() * sizeof(unsigned char), typeid(unsigned char));
 	std::memcpy(meshletTrianglesView->Map<unsigned char>(), meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char));
 	meshletTrianglesView->GetBuffer()->MarkViewDirty(meshletTrianglesView.get());
 	//mesh->SetMeshletTrianglesBufferView(std::move(meshletTrianglesView));
-	manager.QueueViewedDynamicBufferViewUpdate(m_meshletTriangles.buffer.get());
+	manager.QueueViewedDynamicBufferViewUpdate(m_meshletTriangles.get());
 
 	mesh->SetBufferViews(std::move(view), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
 }
 
 void MeshManager::RemoveMesh(std::shared_ptr<BufferView> view) {
-	m_vertices.buffer->Deallocate(view);
+	m_vertices->Deallocate(view);
 }

@@ -10,6 +10,7 @@
 #include "ResourceGroup.h"
 
 class Mesh;
+class DynamicBuffer;
 
 class MeshManager {
 public:
@@ -19,25 +20,26 @@ public:
 	void AddMesh(std::shared_ptr<Mesh>& mesh);
 	void RemoveMesh(std::shared_ptr<BufferView> view);
 	unsigned int GetVertexBufferIndex() const {
-		return m_vertices.buffer->GetSRVInfo().index;
+		return m_vertices->GetSRVInfo().index;
 	}
 	unsigned int GetMeshletOffsetBufferIndex() const {
-		return m_meshletOffsets.buffer->GetSRVInfo().index;
+		return m_meshletOffsets->GetSRVInfo().index;
 	}
 	unsigned int GetMeshletIndexBufferIndex() const {
-		return m_meshletIndices.buffer->GetSRVInfo().index;
+		return m_meshletIndices->GetSRVInfo().index;
 	}
 	unsigned int GetMeshletTriangleBufferIndex() const {
-		return m_meshletTriangles.buffer->GetSRVInfo().index;
+		return m_meshletTriangles->GetSRVInfo().index;
 	}
 	std::shared_ptr<ResourceGroup> GetResourceGroup() {
 		return m_resourceGroup;
 	}
 private:
 	MeshManager();
-	DynamicBufferHandle m_vertices;
-	DynamicBufferHandle m_meshletOffsets;
-	DynamicBufferHandle m_meshletIndices;
-	DynamicBufferHandle m_meshletTriangles;
+	std::shared_ptr<DynamicBuffer> m_vertices;
+	std::shared_ptr<DynamicBuffer> m_meshletOffsets;
+	std::shared_ptr<DynamicBuffer> m_meshletIndices;
+	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
+
 	std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

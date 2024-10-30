@@ -19,8 +19,8 @@ template<class T>
 class DynamicStructuredBuffer : public DynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"") {
-        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name));
+    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name, UAV));
     }
 
     unsigned int Add(const T& element) {
@@ -94,8 +94,8 @@ protected:
     }
 
 private:
-    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"")
-        : m_globalResizableBufferID(id), m_capacity(capacity), m_needsUpdate(false) {
+    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
+        : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(capacity);
         if (name != L"") {
             m_dataBuffer->SetName((m_name + L": " + name).c_str());
@@ -114,9 +114,11 @@ private:
     std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
+    bool m_UAV = false;
+
     void CreateBuffer(UINT capacity) {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true);
-        m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false);
+        m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true, false);
+        m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false, m_UAV);
     }
 };

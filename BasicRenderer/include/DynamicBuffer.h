@@ -29,7 +29,7 @@ class BufferView;
 class DynamicBuffer : public ViewedDynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"") {
+    static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"", bool UAV = false) {
         return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name));
     }
 
@@ -59,8 +59,8 @@ protected:
     }
 
 private:
-    DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"")
-        : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_needsUpdate(false) {
+    DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"", bool UAV = false)
+        : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(size);
         SetName(name);
     }
@@ -91,6 +91,8 @@ private:
     std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>&)> onResized;
     inline static std::wstring m_baseName = L"DynamicBuffer";
 	std::wstring m_name = m_baseName;
+
+    bool m_UAV = false;
 
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);

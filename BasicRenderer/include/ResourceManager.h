@@ -22,6 +22,7 @@
 using namespace Microsoft::WRL;
 
 class BufferView;
+class SortedUnsignedIntBuffer;
 
 class ResourceManager {
 public:
@@ -49,8 +50,8 @@ public:
 
         BufferHandle bufferHandle;
         // Create the buffer
-        bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
-        bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
+        bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+        bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
 		bufferHandle.dataBuffer->SetName(name);
         ResourceTransition transition;
 		transition.resource = bufferHandle.dataBuffer.get();
@@ -87,19 +88,19 @@ public:
         buffersToUpdate.push_back(handle);
     }
     template<typename T>
-    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = true) {
+    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
 
         BufferHandle handle;
 		if (hasUploadBuffer) {
-			handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
+			handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
 		}
 		else {
 			handle.uploadBuffer = nullptr;
 		}
-        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
+        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
         
         ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
         QueueResourceTransition(transition);
@@ -118,10 +119,29 @@ public:
         device->CreateShaderResourceView(handle.dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
 
         ShaderVisibleIndexInfo srvInfo;
-		srvInfo.index = index;
-		srvInfo.cpuHandle = srvHandle;
-		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-		handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+        srvInfo.index = index;
+        srvInfo.cpuHandle = srvHandle;
+        srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+        handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+
+        if (UAV) {
+			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+			uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+			uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+			uavDesc.Buffer.NumElements = numElements;
+			uavDesc.Buffer.StructureByteStride = sizeof(T);
+			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+
+			unsigned int uavIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+			D3D12_CPU_DESCRIPTOR_HANDLE uavHandle = m_cbvSrvUavHeap->GetCPUHandle(uavIndex);
+			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavDesc, uavHandle);
+
+			ShaderVisibleIndexInfo uavInfo;
+			uavInfo.index = uavIndex;
+			uavInfo.cpuHandle = uavHandle;
+			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavIndex);
+			handle.dataBuffer->SetUAVDescriptor(m_cbvSrvUavHeap, uavInfo);
+        }
 
         return handle;
     }
@@ -158,7 +178,7 @@ public:
     }
 
     template<typename T>
-    DynamicStructuredBufferHandle<T> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
+    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -195,9 +215,7 @@ public:
         srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
         pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
-        DynamicStructuredBufferHandle<T> handle;
-        handle.buffer = pDynamicBuffer;
-        return handle;
+        return pDynamicBuffer;
     }
 
     template<typename T>
@@ -243,7 +261,8 @@ public:
         return handle;
     }
 
-    DynamicBufferHandle CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false);
+    std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false);
+	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, std::wstring name = L"");
 
     UINT GetNextResizableBufferID() {
         UINT val = numResizableBuffers;
@@ -318,8 +337,8 @@ public:
         BufferHandle handle;
 
 		// Create the upload and data buffers
-        handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true);
-        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false);
+        handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
 		handle.dataBuffer->SetName(name);
         ResourceTransition transition;
         transition.resource = handle.dataBuffer.get();
@@ -542,11 +561,11 @@ public:
         return handle;
     }
 
-	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData);
-	void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
-	template<typename T>
-    void QueueDynamicBufferUpdate(DynamicStructuredBufferHandle<T>& handle) {
-        dynamicBuffersToUpdate.push_back(handle.buffer.get());
+	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData, bool UAV = false);
+    void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
+
+    void QueueDynamicBufferUpdate(DynamicBufferBase* ptr) {
+        dynamicBuffersToUpdate.push_back(ptr);
     }
 
 	void QueueViewedDynamicBufferViewUpdate(ViewedDynamicBufferBase* handle) {
@@ -611,7 +630,7 @@ private:
     PerFrameCB perFrameCBData;
     UINT currentFrameIndex;
 
-    DynamicStructuredBufferHandle<LightInfo> lightBufferHandle;
+    std::shared_ptr<DynamicStructuredBuffer<LightInfo>> lightBufferPtr;
 
     ComPtr<ID3D12GraphicsCommandList> commandList;
     ComPtr<ID3D12CommandAllocator> commandAllocator;

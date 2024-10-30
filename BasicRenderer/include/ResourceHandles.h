@@ -15,19 +15,9 @@ class DynamicBuffer;
 class DescriptorHeap;
 
 // TODO: old, mostly not needed
-
-template<typename T>
-struct DynamicStructuredBufferHandle {
-    std::shared_ptr<DynamicStructuredBuffer<T>> buffer; // The actual resource buffer
-};
-
 template<HasIsValid T>
 struct LazyDynamicStructuredBufferHandle {
     std::shared_ptr<LazyDynamicStructuredBuffer<T>> buffer; // The actual resource buffer
-};
-
-struct DynamicBufferHandle {
-	std::shared_ptr<DynamicBuffer> buffer;
 };
 
 template<typename T>

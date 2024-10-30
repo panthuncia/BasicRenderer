@@ -5,11 +5,15 @@
 #include "ResourceHandles.h"
 #include "buffers.h"
 
+
 class RenderableObject;
 class BufferView;
+class DynamicBuffer;
+class SortedUnsignedIntBuffer;
 
 struct IndirectCommand {
-	D3D12_GPU_VIRTUAL_ADDRESS cbv;
+	D3D12_GPU_VIRTUAL_ADDRESS perMeshCBV;
+	D3D12_GPU_VIRTUAL_ADDRESS perObjectCBV;
 };
 
 class ObjectManager {
@@ -30,5 +34,6 @@ private:
 	ObjectManager();
 	std::vector<std::shared_ptr<RenderableObject>> m_objects;
 	LazyDynamicStructuredBufferHandle<PerObjectCB> m_perObjectBuffers;
-	DynamicStructuredBufferHandle<IndirectCommand> m_drawSetCommandsBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<IndirectCommand>> m_drawSetCommandsBuffer;
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeDrawSetIndices;
 };
