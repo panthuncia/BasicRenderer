@@ -504,7 +504,7 @@ std::shared_ptr<Scene>& DX12Renderer::GetCurrentScene() {
 void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
     currentScene = newScene;
     currentScene->Activate();
-	ResourceManager::GetInstance().SetPerObjectBufferIndex(currentScene->GetObjectManager()->GetPerObjectBufferIndex());
+	ResourceManager::GetInstance().SetPerObjectBufferIndex(currentScene->GetObjectManager()->GetPerObjectBufferSRVIndex());
 	rebuildRenderGraph = true;
 }
 
@@ -591,7 +591,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto meshResourceGroup = currentScene->GetMeshManager()->GetResourceGroup();
 	newGraph->AddResource(meshResourceGroup);
 
-    auto& perObjectBuffer = currentScene->GetObjectManager()->GetPerObjectBuffers().buffer;
+    auto& perObjectBuffer = currentScene->GetObjectManager()->GetPerObjectBuffers();
 	newGraph->AddResource(perObjectBuffer);
     
     bool useMeshShaders = getMeshShadersEnabled();

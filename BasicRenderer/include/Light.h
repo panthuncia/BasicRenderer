@@ -9,7 +9,7 @@
 #include "Texture.h"
 #include "SceneNode.h"
 #include "buffers.h"
-#include "ResourceHandles.h"
+#include "BufferHandle.h"
 #include "PixelBuffer.h"
 
 enum LightType {

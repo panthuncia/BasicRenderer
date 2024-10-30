@@ -3,6 +3,9 @@
 #include "ResourceManager.h"
 #include "ResourceStates.h"
 #include "Mesh.h"
+#include "ResourceGroup.h"
+#include "BufferView.h"
+
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_vertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"vertices", true);
@@ -14,6 +17,8 @@ MeshManager::MeshManager() {
 	m_resourceGroup->AddResource(m_meshletOffsets);
 	m_resourceGroup->AddResource(m_meshletIndices);
 	m_resourceGroup->AddResource(m_meshletTriangles);
+
+	m_perMeshBuffers = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 256);
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
@@ -71,8 +76,20 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh) {
 	manager.QueueViewedDynamicBufferViewUpdate(m_meshletTriangles.get());
 
 	mesh->SetBufferViews(std::move(view), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
+
+	// Per mesh buffer
+	auto perMeshBufferView = m_perMeshBuffers->Add();
+	m_perMeshBuffers->UpdateAt(perMeshBufferView, mesh->GetPerMeshCBData());
+	mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
+	manager.QueueViewedDynamicBufferViewUpdate(m_perMeshBuffers.get());
 }
 
+// TODO: finish
 void MeshManager::RemoveMesh(std::shared_ptr<BufferView> view) {
 	m_vertices->Deallocate(view);
+}
+
+void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {
+	m_perMeshBuffers->UpdateAt(view, data);
+	ResourceManager::GetInstance().QueueViewedDynamicBufferViewUpdate(m_perMeshBuffers.get());
 }

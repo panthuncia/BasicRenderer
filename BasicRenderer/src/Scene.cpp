@@ -30,16 +30,19 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     }
 	for (auto& mesh : object->GetOpaqueMeshes()) {
         meshesByID[mesh->GetGlobalID()] = mesh;
+        m_numDrawsInScene++;
 		if (meshManager != nullptr) { // If mesh manager exists, this scene is active and we want to add the mesh immediately
             meshManager->AddMesh(mesh);
         }
 	}
     for (auto& mesh : object->GetTransparentMeshes()) {
         meshesByID[mesh->GetGlobalID()] = mesh;
+		m_numDrawsInScene++;
         if (meshManager != nullptr) {
             meshManager->AddMesh(mesh);
         }
     }
+    lightManager.UpdateNumDrawsInScene(m_numDrawsInScene);
 	if (objectManager != nullptr) {
 		objectManager->AddObject(object);
 	}
@@ -135,6 +138,14 @@ void Scene::RemoveObjectByName(const std::wstring& name) {
         if (objectManager != nullptr) {
             objectManager->RemoveObject(it->second);
         }
+        for (auto& mesh : it->second->GetOpaqueMeshes()) {
+			// TODO: Remove mesh from mesh manager, handling the case where the mesh is used by multiple objects
+			m_numDrawsInScene--;
+        }
+        for (auto& mesh : it->second->GetTransparentMeshes()) {
+            m_numDrawsInScene--;
+        }
+        lightManager.UpdateNumDrawsInScene(m_numDrawsInScene);
     }
 }
 
@@ -155,6 +166,14 @@ void Scene::RemoveObjectByID(UINT id) {
 		if (objectManager != nullptr) {
 			objectManager->RemoveObject(it->second);
 		}
+        for (auto& mesh : it->second->GetOpaqueMeshes()) {
+            // TODO: Remove mesh from mesh manager, handling the case where the mesh is used by multiple objects
+            m_numDrawsInScene--;
+        }
+        for (auto& mesh : it->second->GetTransparentMeshes()) {
+            m_numDrawsInScene--;
+        }
+		lightManager.UpdateNumDrawsInScene(m_numDrawsInScene);
     }
 }
 

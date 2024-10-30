@@ -57,7 +57,8 @@ public:
 		meshletBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
 		commandList->SetGraphicsRoot32BitConstants(5, 4, &meshletBufferIndices, 0);
 
-		D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers().buffer->GetBuffer()->m_buffer->GetGPUVirtualAddress();
+		D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
+		D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 
 		auto drawObjects = [&]() {
 			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
@@ -71,8 +72,8 @@ public:
 					auto& mesh = *pMesh;
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-
+					auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+					commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}
@@ -87,8 +88,8 @@ public:
 					auto& mesh = *pMesh;
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-
+					auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+					commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}

@@ -191,7 +191,7 @@ public:
 		transition.beforeState = ResourceState::UNKNOWN;
 		transition.afterState = usage;
 		QueueResourceTransition(transition);
-        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
+        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
             });
 
@@ -219,7 +219,7 @@ public:
     }
 
     template<typename T>
-    LazyDynamicStructuredBufferHandle<T> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", size_t alignment = 1) {
+    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", size_t alignment = 1) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -232,7 +232,7 @@ public:
         transition.beforeState = ResourceState::UNKNOWN;
         transition.afterState = usage;
         QueueResourceTransition(transition);
-        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
+        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
             });
 
@@ -256,9 +256,7 @@ public:
 		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
 		pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
-        LazyDynamicStructuredBufferHandle<T> handle;
-        handle.buffer = pDynamicBuffer;
-        return handle;
+        return pDynamicBuffer;
     }
 
     std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false);
@@ -270,7 +268,7 @@ public:
         return val;
     }
 
-    void onDynamicStructuredBufferResized(UINT bufferID, UINT typeSize, UINT capacity, std::shared_ptr<Buffer>& buffer) {
+    void onDynamicStructuredBufferResized(UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -284,17 +282,18 @@ public:
         srvDesc.Buffer.StructureByteStride = typeSize;
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        device->CreateShaderResourceView(buffer->m_buffer.Get(), &srvDesc, srvHandle);
+        device->CreateShaderResourceView(buffer->m_dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
         
 		auto bufferState = buffer->GetState();
 		// After resize, internal buffer state will not match the wrapper state
 		if (bufferState != ResourceState::UNKNOWN) {
 			ResourceTransition transition;
-			transition.resource = buffer.get();
+			transition.resource = buffer->m_dataBuffer.get();
 			transition.beforeState = ResourceState::UNKNOWN;
 			transition.afterState = buffer->GetState();
 			QueueResourceTransition(transition);
 		}
+		QueueDynamicBufferUpdate(buffer);
     }
 
     void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, std::shared_ptr<Buffer>& buffer) {

@@ -14,8 +14,8 @@ class Buffer;
 class DynamicBufferBase : public GloballyIndexedResource {
 public:
     DynamicBufferBase() {}
-    std::shared_ptr<Buffer> m_uploadBuffer;
-    std::shared_ptr<Buffer> m_dataBuffer;
+    std::shared_ptr<Buffer> m_uploadBuffer = nullptr;
+    std::shared_ptr<Buffer> m_dataBuffer = nullptr;
 protected:
     virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {};
 };

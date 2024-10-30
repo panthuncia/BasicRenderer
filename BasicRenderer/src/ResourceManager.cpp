@@ -431,7 +431,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	transition.beforeState = ResourceState::UNKNOWN;
 	transition.afterState = usage;
 	QueueResourceTransition(transition);
-	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, std::shared_ptr<Buffer>& buffer) {
+	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
 		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer);
 		});
 

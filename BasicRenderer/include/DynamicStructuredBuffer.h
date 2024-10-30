@@ -26,7 +26,7 @@ public:
     unsigned int Add(const T& element) {
         if (m_data.size() >= m_capacity) {
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, m_dataBuffer);
+            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
         }
         m_data.push_back(element);
         m_needsUpdate = true;
@@ -76,7 +76,7 @@ public:
         return false;
     }
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)>& callback) {
+    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
         onResized = callback;
     }
 
@@ -111,7 +111,7 @@ private:
 
     UINT m_globalResizableBufferID;
 
-    std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
+    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
     bool m_UAV = false;

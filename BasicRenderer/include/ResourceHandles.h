@@ -5,20 +5,9 @@
 #include <wrl/client.h>
 
 #include "DirectX/d3dx12.h"
-#include "DynamicStructuredBuffer.h"
-#include "LazyDynamicStructuredBuffer.h"
-#include "BufferHandle.h"
-#include "Concepts/HasIsValid.h"
 #include "HeapIndexInfo.h"
 
-class DynamicBuffer;
 class DescriptorHeap;
-
-// TODO: old, mostly not needed
-template<HasIsValid T>
-struct LazyDynamicStructuredBufferHandle {
-    std::shared_ptr<LazyDynamicStructuredBuffer<T>> buffer; // The actual resource buffer
-};
 
 template<typename T>
 struct TextureHandle {

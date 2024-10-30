@@ -75,8 +75,8 @@ public:
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
 
-		D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers().buffer->GetBuffer()->m_buffer->GetGPUVirtualAddress();
-
+		D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
+		D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 		for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetOpaqueMeshes();
@@ -89,7 +89,8 @@ public:
 				auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 
-				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+				auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+				commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 
 				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
@@ -105,7 +106,9 @@ public:
 				auto& mesh = *pMesh;
 				auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
-				commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+
+				auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+				commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 
 				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}

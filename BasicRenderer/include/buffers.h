@@ -40,6 +40,7 @@ struct PerMeshCB {
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
     unsigned int meshletTrianglesBufferOffset;
+    unsigned int isValid = 1;
 };
 
 struct PerMaterialCB {

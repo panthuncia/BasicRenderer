@@ -71,6 +71,8 @@ private:
     std::unique_ptr<MeshManager> meshManager = nullptr;
 	std::unique_ptr<ObjectManager> objectManager = nullptr;
 
+	unsigned int m_numDrawsInScene = 0;
+
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<float()> getMaxShadowDistance;

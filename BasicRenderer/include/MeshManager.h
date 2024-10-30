@@ -4,13 +4,13 @@
 #include <directx/d3d12.h>
 #include <wrl/client.h>
 
-#include "DynamicBuffer.h"
-#include "ResourceHandles.h"
-#include "BufferView.h"
-#include "ResourceGroup.h"
+#include "buffers.h"
+#include "LazyDynamicStructuredBuffer.h"
 
 class Mesh;
 class DynamicBuffer;
+class ResourceGroup;
+class BufferView;
 
 class MeshManager {
 public:
@@ -34,12 +34,21 @@ public:
 	std::shared_ptr<ResourceGroup> GetResourceGroup() {
 		return m_resourceGroup;
 	}
+	unsigned int GetPerMeshBufferSRVIndex() const {
+		return m_perMeshBuffers->GetSRVInfo().index;
+	}
+	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshCB>>& GetPerMeshBuffers() {
+		return m_perMeshBuffers;
+	}
+	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 private:
 	MeshManager();
 	std::shared_ptr<DynamicBuffer> m_vertices;
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets;
 	std::shared_ptr<DynamicBuffer> m_meshletIndices;
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
+
+	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshCB>> m_perMeshBuffers;
 
 	std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

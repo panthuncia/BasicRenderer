@@ -28,14 +28,17 @@ public:
 	void SetCurrentPerObjectCBView(std::unique_ptr<BufferView> view);
 	std::unique_ptr<BufferView>& GetCurrentPerObjectCBView();
 	void SetCurrentManager(ObjectManager* manager);
-	void SetCurrentDrawSetIndices(const std::vector<unsigned int>& indices);
-	std::vector<unsigned int>& GetCurrentDrawSetIndices();
+	void SetCurrentOpaqueDrawSetIndices(const std::vector<unsigned int>& indices);
+	void SetCurrentTransparentDrawSetIndices(const std::vector<unsigned int>& indices);
+	std::vector<unsigned int>& GetCurrentOpaqueDrawSetIndices();
+	std::vector<unsigned int>& GetCurrentTransparentDrawSetIndices();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
 	std::vector<std::shared_ptr<Mesh>> opaqueMeshes;
 	std::vector<std::shared_ptr<Mesh>> transparentMeshes;
-	std::vector<unsigned int> m_drawSetIndices;
+	std::vector<unsigned int> m_opaqueDrawSetIndices;
+	std::vector<unsigned int> m_transparentDrawSetIndices;
 	PerObjectCB perObjectCBData;
 	bool m_hasTransparent = false;
 	bool m_hasOpaque = false;

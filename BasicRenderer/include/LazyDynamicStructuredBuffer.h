@@ -41,7 +41,7 @@ public:
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, m_elementSize, m_capacity, m_dataBuffer);
+            onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this);
         }
 		unsigned int index = m_usedCapacity - 1;
         return std::move(BufferView::CreateUnique(this, index * m_elementSize, m_elementSize, typeid(T)));
@@ -69,7 +69,7 @@ public:
     }
 
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)>& callback) {
+    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
         onResized = callback;
     }
 
@@ -100,6 +100,9 @@ private:
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
 		m_elementSize = (sizeof(T)/alignment + 1) * alignment;
         CreateBuffer(capacity);
+		SetName(name);
+    }
+    void OnSetName() override {
         if (name != L"") {
             m_dataBuffer->SetName((m_name + L": " + name).c_str());
         }
@@ -116,15 +119,24 @@ private:
     UINT m_globalResizableBufferID;
     size_t m_elementSize = 0;
 
-    std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
+    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;
 
     void CreateBuffer(UINT capacity) {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, m_elementSize * capacity, true, false);
+        auto newUploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, m_elementSize * capacity, true, false);
+        if (m_uploadBuffer != nullptr) {
+            void* newMappedData = nullptr;
+			newUploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&newMappedData));
+			std::memcpy(newMappedData, m_mappedData, m_elementSize * m_capacity);
+			m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+        }
+		m_uploadBuffer = newUploadBuffer;
+
         m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, m_elementSize * capacity, false, m_UAV);
+        SetName(name);
         CD3DX12_RANGE readRange(0, 0);
         m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&m_mappedData));
     }

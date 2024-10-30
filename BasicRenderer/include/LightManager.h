@@ -5,9 +5,9 @@
 #include <algorithm>
 #include <functional>
 #include "buffers.h"
-#include "ResourceHandles.h"
 #include "Interfaces/ISceneNodeObserver.h"
 #include "DynamicResource.h"
+#include "DynamicStructuredBuffer.h"
 
 class Camera;
 class Light;

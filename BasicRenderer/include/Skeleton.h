@@ -6,7 +6,7 @@
 
 #include "Animation.h"
 #include "SceneNode.h"
-#include "ResourceHandles.h"
+#include "BufferHandle.h"
 
 class Skeleton {
 public:
