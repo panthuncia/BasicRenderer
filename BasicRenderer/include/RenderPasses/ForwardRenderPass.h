@@ -62,22 +62,26 @@ public:
 		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
 		commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
 
-		unsigned int meshletBufferIndices[4] = {};
+		unsigned int staticBufferIndices[5] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
-		meshletBufferIndices[0] = meshManager->GetVertexBufferIndex();
-		meshletBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
-		meshletBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
-		meshletBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
-		commandList->SetGraphicsRoot32BitConstants(5, 4, &meshletBufferIndices, 0);
+		auto& objectManager = context.currentScene->GetObjectManager();
+		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
+		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
+		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
+		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
+		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
+
+		commandList->SetGraphicsRoot32BitConstants(5, 5, &staticBufferIndices, 0);
 
 		D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
-		D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
+		//D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
-
+		unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
+		commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
 		for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetOpaqueMeshes();
@@ -89,14 +93,20 @@ public:
 				auto& mesh = *pMesh;
 				auto pso = psoManager.GetPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
-				auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-				commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
+
+				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+				//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+				//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
+
 				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 				commandList->IASetIndexBuffer(&indexBufferView);
 
 				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 			}
 		}
+		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetTransparentMeshes();
@@ -108,8 +118,12 @@ public:
 				auto& mesh = *pMesh;
 				auto pso = psoManager.GetPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
-				auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-				commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
+
+				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+				//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+				//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
+
 				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 				commandList->IASetIndexBuffer(&indexBufferView);
 

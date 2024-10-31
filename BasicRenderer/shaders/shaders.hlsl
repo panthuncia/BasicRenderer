@@ -24,19 +24,20 @@
 #define OUTPUT_MESHLETS 13
 
 PSInput VSMain(uint vertexID : SV_VertexID) {
-    
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferIndex];
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferDescriptorIndex];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perFrameBuffer.perObjectBufferIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
     
-    uint byteOffset = vertexBufferOffset + vertexID * vertexByteSize;
-    Vertex input = LoadVertex(byteOffset, vertexBuffer, vertexFlags);
+    uint byteOffset = meshBuffer.vertexBufferOffset + vertexID * meshBuffer.vertexByteSize;
+    Vertex input = LoadVertex(byteOffset, vertexBuffer, meshBuffer.vertexFlags);
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;
     
-    if (vertexFlags & VERTEX_SKINNED) {
+    if (meshBuffer.vertexFlags & VERTEX_SKINNED) {
         StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
         StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
     
@@ -93,7 +94,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
     
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
     if (materialFlags & MATERIAL_NORMAL_MAP || materialFlags & MATERIAL_PARALLAX) {
         output.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));
@@ -625,7 +626,9 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
     
     float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
@@ -804,7 +807,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif // IMAGE_BASED_LIGHTING
     
     lighting += ambient;
-    if (vertexFlags & VERTEX_COLORS) { // TODO: This only makes sense for forward rendering
+    if (meshBuffer.vertexFlags & VERTEX_COLORS) { // TODO: This only makes sense for forward rendering
         lighting = lighting * input.color.xyz;
     }
     

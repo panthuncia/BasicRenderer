@@ -32,14 +32,14 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
         meshesByID[mesh->GetGlobalID()] = mesh;
         m_numDrawsInScene++;
 		if (meshManager != nullptr) { // If mesh manager exists, this scene is active and we want to add the mesh immediately
-            meshManager->AddMesh(mesh);
+            meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
         }
 	}
     for (auto& mesh : object->GetTransparentMeshes()) {
         meshesByID[mesh->GetGlobalID()] = mesh;
 		m_numDrawsInScene++;
         if (meshManager != nullptr) {
-            meshManager->AddMesh(mesh);
+            meshManager->AddMesh(mesh, MaterialBuckets::Transparent);
         }
     }
     lightManager.UpdateNumDrawsInScene(m_numDrawsInScene);
@@ -409,10 +409,10 @@ void Scene::MakeResident() { // MeshManager manages GPU buffers
 	for (auto& objectPair : objectsByID) {
 		auto& object = objectPair.second;
 		for (auto& mesh : object->GetOpaqueMeshes()) {
-			meshManager->AddMesh(mesh);
+			meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
 		}
 		for (auto& mesh : object->GetTransparentMeshes()) {
-            meshManager->AddMesh(mesh);
+            meshManager->AddMesh(mesh, MaterialBuckets::Transparent);
 		}
 	}
 	objectManager = ObjectManager::CreateUnique();

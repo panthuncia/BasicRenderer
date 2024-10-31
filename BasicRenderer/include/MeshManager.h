@@ -6,6 +6,7 @@
 
 #include "buffers.h"
 #include "LazyDynamicStructuredBuffer.h"
+#include "MaterialBuckets.h"
 
 class Mesh;
 class DynamicBuffer;
@@ -17,7 +18,7 @@ public:
 	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
-	void AddMesh(std::shared_ptr<Mesh>& mesh);
+	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket);
 	void RemoveMesh(std::shared_ptr<BufferView> view);
 	unsigned int GetVertexBufferIndex() const {
 		return m_vertices->GetSRVInfo().index;
@@ -34,12 +35,20 @@ public:
 	std::shared_ptr<ResourceGroup> GetResourceGroup() {
 		return m_resourceGroup;
 	}
-	unsigned int GetPerMeshBufferSRVIndex() const {
-		return m_perMeshBuffers->GetSRVInfo().index;
+	unsigned int GetOpaquePerMeshBufferSRVIndex() const {
+		return m_opaquePerMeshBuffers->GetSRVInfo().index;
 	}
-	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshCB>>& GetPerMeshBuffers() {
-		return m_perMeshBuffers;
+	std::shared_ptr<DynamicBuffer>& GetOpaquePerMeshBuffers() {
+		return m_opaquePerMeshBuffers;
 	}
+
+	unsigned int GetTransparentPerMeshBufferSRVIndex() const {
+		return m_transparentPerMeshBuffers->GetSRVInfo().index;
+	}
+	std::shared_ptr<DynamicBuffer>& GetTransparentPerMeshBuffers() {
+		return m_transparentPerMeshBuffers;
+	}
+
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 private:
 	MeshManager();
@@ -48,7 +57,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletIndices;
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
 
-	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshCB>> m_perMeshBuffers;
+	std::shared_ptr<DynamicBuffer> m_opaquePerMeshBuffers;
+	std::shared_ptr<DynamicBuffer> m_transparentPerMeshBuffers;
 
 	std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

@@ -83,4 +83,15 @@ struct PerObjectBuffer {
     uint pad0;
 };
 
+struct PerMeshBuffer {
+    uint materialDataIndex;
+    uint vertexFlags;
+    uint vertexByteSize;
+    uint vertexBufferOffset;
+    uint meshletBufferOffset;
+    uint meshletVerticesBufferOffset;
+    uint meshletTrianglesBufferOffset;
+    uint isValid;
+};
+
 #endif // __STRUCTS_HLSL__

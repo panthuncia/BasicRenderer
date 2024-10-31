@@ -11,13 +11,7 @@ cbuffer PerObject : register(b1) {
 };
 
 cbuffer PerMesh : register(b2) {
-    uint materialDataIndex;
-    uint vertexFlags;
-    uint vertexByteSize;
-    uint vertexBufferOffset;
-    uint meshletBufferOffset;
-    uint meshletVerticesBufferOffset;
-    uint meshletTrianglesBufferOffset;
+    uint perMeshBufferIndex;
 };
 
 cbuffer RootConstants1 : register(b3) {
@@ -33,11 +27,16 @@ cbuffer Settings : register(b5) {
     bool enablePunctualLights;
 }
 
-cbuffer BufferIndices : register(b6) {
-    uint vertexBufferIndex;
-    uint meshletBufferIndex;
-    uint meshletVerticesBufferIndex;
-    uint meshletTrianglesBufferIndex;
+cbuffer StaticBufferIndices : register(b6) {
+    uint vertexBufferDescriptorIndex;
+    uint meshletBufferDescriptorIndex;
+    uint meshletVerticesBufferDescriptorIndex;
+    uint meshletTrianglesBufferDescriptorIndex;
+    uint perObjectBufferDescriptorIndex;
+}
+
+cbuffer variableBufferIndices : register(b7) {
+    uint perMeshBufferDescriptorIndex; // Variable between opaque vs. transparent
 }
 
 #endif // __CBUFFERS_HLSL__

@@ -58,19 +58,19 @@ public:
 			m_pSRVHeap->ReleaseDescriptor(m_SRVInfo.index);
 		}
 		else {
-			spdlog::info("GloballyIndexedResource::Destructor: No SRV heap set.");
+			//spdlog::info("GloballyIndexedResource::Destructor: No SRV heap set.");
 		}
 		if (m_pUAVHeap) {
 			m_pUAVHeap->ReleaseDescriptor(m_UAVInfo.index);
 		}
 		else {
-			spdlog::info("GloballyIndexedResource::Destructor: No UAV heap set.");
+			//spdlog::info("GloballyIndexedResource::Destructor: No UAV heap set.");
 		}
 		if (m_pCBVHeap) {
 			m_pCBVHeap->ReleaseDescriptor(m_CBVInfo.index);
 		}
 		else {
-			spdlog::info("GloballyIndexedResource::Destructor: No CBV heap set.");
+			//spdlog::info("GloballyIndexedResource::Destructor: No CBV heap set.");
 		}
 
 		// Release RTVs and DSVs
@@ -80,7 +80,7 @@ public:
 			}
 		}
 		else {
-			spdlog::info("GloballyIndexedResource::Destructor: No RTV heap set.");
+			//spdlog::info("GloballyIndexedResource::Destructor: No RTV heap set.");
 		}
 
 		if (m_pDSVHeap) {
@@ -89,7 +89,7 @@ public:
 			}
 		}
 		else {
-			spdlog::info("GloballyIndexedResource::Destructor: No DSV heap set.");
+			//spdlog::info("GloballyIndexedResource::Destructor: No DSV heap set.");
 		}
 	};
 protected:

@@ -593,10 +593,17 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto& perObjectBuffer = currentScene->GetObjectManager()->GetPerObjectBuffers();
 	newGraph->AddResource(perObjectBuffer);
+    auto& opaquePerMeshBuffer = currentScene->GetMeshManager()->GetOpaquePerMeshBuffers();
+	auto& transparentPerMeshBuffer = currentScene->GetMeshManager()->GetTransparentPerMeshBuffers();
+	newGraph->AddResource(opaquePerMeshBuffer);
+	newGraph->AddResource(transparentPerMeshBuffer);
+
     
     bool useMeshShaders = getMeshShadersEnabled();
     auto forwardPassParameters = PassParameters();
 	forwardPassParameters.constantBuffers.push_back(perObjectBuffer);
+	forwardPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+	forwardPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
 
     std::shared_ptr<RenderPass> forwardPass = nullptr;
 
@@ -687,6 +694,8 @@ void DX12Renderer::CreateRenderGraph() {
 			shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
 		}
 		shadowPassParameters.constantBuffers.push_back(perObjectBuffer);
+		shadowPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+		shadowPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);

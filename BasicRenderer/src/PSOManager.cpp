@@ -310,7 +310,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[6] = {};
+    D3D12_ROOT_PARAMETER1 parameters[7] = {};
 
     // PerMesh buffer as a direct root CBV
 
@@ -320,10 +320,11 @@ void PSOManager::createRootSignature() {
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
 
-    // PerMesh buffer as a direct root CBV
-    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameters[1].Descriptor.ShaderRegister = 2; // b2 for PerMesh
-    parameters[1].Descriptor.RegisterSpace = 0;
+    // PerMesh buffer index
+    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[1].Constants.ShaderRegister = 2;
+    parameters[1].Constants.RegisterSpace = 0;
+    parameters[1].Constants.Num32BitValues = 1;
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // First integer root constant, used for shadow light ID
@@ -347,12 +348,19 @@ void PSOManager::createRootSignature() {
     parameters[4].Constants.Num32BitValues = 2;
     parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-	// Fourth integer root constant, used for global meshlet buffer indices
+	// Fourth integer root constant, used for global buffer indices
 	parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[5].Constants.ShaderRegister = 6;
 	parameters[5].Constants.RegisterSpace = 0;
-	parameters[5].Constants.Num32BitValues = 4;
+	parameters[5].Constants.Num32BitValues = 5;
 	parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Variable buffer indices
+    parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[6].Constants.ShaderRegister = 7;
+    parameters[6].Constants.RegisterSpace = 0;
+    parameters[6].Constants.Num32BitValues = 1;
+    parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
