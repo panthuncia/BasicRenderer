@@ -13,25 +13,25 @@ public:
 		name = groupName;
     }
 
-    void AddGloballyIndexedResource(std::shared_ptr<GloballyIndexedResource> resource) {
-        resourcesBySRVIndex[resource->GetSRVInfo().index] = resource;
+	void AddIndexedResource(std::shared_ptr<Resource> resource, uint64_t index) { // uint64_t to allow Cantor pairing
+        resourcesByID[index] = resource;
     }
 
 	void AddResource(std::shared_ptr<Resource> resource) {
 		resources.push_back(resource);
 	}
 
-    virtual void RemoveGloballyIndexedResource(uint32_t index) {
-        auto iter = resourcesBySRVIndex.find(index);
-        if (iter != resourcesBySRVIndex.end()) {
-            resourcesBySRVIndex.erase(iter);
+    virtual void RemoveIndexedResource(uint32_t index) {
+        auto iter = resourcesByID.find(index);
+        if (iter != resourcesByID.end()) {
+            resourcesByID.erase(iter);
         }
     }
 
 protected:
     // Override the base Resource method to transition all resources in the group
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) {
-        for (auto& pair : resourcesBySRVIndex) {
+        for (auto& pair : resourcesByID) {
             pair.second->Transition(commandList, prevState, newState);
         }
 		for (auto& resource : resources) {
@@ -40,6 +40,6 @@ protected:
         currentState = newState; // Set the state for the group as a whole
     }
 protected:
-    std::unordered_map<uint32_t, std::shared_ptr<Resource>> resourcesBySRVIndex;
+    std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
 	std::vector<std::shared_ptr<Resource>> resources;
 };

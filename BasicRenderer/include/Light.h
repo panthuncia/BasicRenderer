@@ -12,6 +12,8 @@
 #include "BufferHandle.h"
 #include "PixelBuffer.h"
 
+class DynamicGloballyIndexedResource;
+
 enum LightType {
 	Point = 0,
 	Spot = 1,
@@ -80,6 +82,9 @@ public:
 	DirectX::XMVECTOR GetLightDir();
 	void SetShadowMap(std::shared_ptr<Texture> shadowMap);
 	std::shared_ptr<Texture>& getShadowMap();
+	void AddPerViewIndirectCommandBuffer(std::shared_ptr<DynamicGloballyIndexedResource> buffer) {
+		m_perViewIndirectCommandBuffers.push_back(buffer);
+	}
 
 private:
 
@@ -93,6 +98,7 @@ private:
 	std::vector<ISceneNodeObserver<Light>*> lightObservers;
 	XMMATRIX m_lightProjection;
 	std::shared_ptr<Texture> m_shadowMap;
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewIndirectCommandBuffers;
 
 	void NotifyLightObservers();
 	void UpdateLightInfo();

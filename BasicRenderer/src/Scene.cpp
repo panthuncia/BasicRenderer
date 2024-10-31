@@ -8,6 +8,10 @@ Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
+
+    // TODO: refactor indirect buffer manager and light manager so that GPU resources are destroyed on MakeNonResident
+	indirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
+	lightManager.SetCommandBufferManager(indirectCommandBufferManager.get());
 }
 
 UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
@@ -42,7 +46,7 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
             meshManager->AddMesh(mesh, MaterialBuckets::Transparent);
         }
     }
-    lightManager.UpdateNumDrawsInScene(m_numDrawsInScene);
+	indirectCommandBufferManager->UpdateAllBuffers(m_numDrawsInScene);
 	if (objectManager != nullptr) {
 		objectManager->AddObject(object);
 	}
@@ -145,7 +149,7 @@ void Scene::RemoveObjectByName(const std::wstring& name) {
         for (auto& mesh : it->second->GetTransparentMeshes()) {
             m_numDrawsInScene--;
         }
-        lightManager.UpdateNumDrawsInScene(m_numDrawsInScene);
+        indirectCommandBufferManager->UpdateAllBuffers(m_numDrawsInScene);
     }
 }
 
@@ -173,7 +177,7 @@ void Scene::RemoveObjectByID(UINT id) {
         for (auto& mesh : it->second->GetTransparentMeshes()) {
             m_numDrawsInScene--;
         }
-		lightManager.UpdateNumDrawsInScene(m_numDrawsInScene);
+        indirectCommandBufferManager->UpdateAllBuffers(m_numDrawsInScene);
     }
 }
 

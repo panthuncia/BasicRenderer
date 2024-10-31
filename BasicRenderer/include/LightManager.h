@@ -13,6 +13,7 @@ class Camera;
 class Light;
 class ShadowMaps;
 class SceneNode;
+class IndirectCommandBufferManager;
 
 class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
 public:
@@ -29,7 +30,7 @@ public:
     void OnNodeUpdated(SceneNode* camera) override;
     void OnNodeUpdated(Light* light) override;
     void UpdateBuffers();
-    void UpdateNumDrawsInScene(unsigned int numDraws);
+	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 
 private:
     std::shared_ptr<DynamicStructuredBuffer<LightInfo>> m_lightBuffer;
@@ -54,6 +55,7 @@ private:
     std::function<uint16_t()> getShadowResolution;
     std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
     std::function<void(std::shared_ptr<void>)> markForDelete;
+	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
 
     Camera* m_currentCamera = nullptr;
 

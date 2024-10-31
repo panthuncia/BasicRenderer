@@ -16,10 +16,18 @@ ObjectManager::ObjectManager() {
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
 	m_activeTransparentDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeTransparentDrawSetIndices");
 
-	D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[2] = {};
-	argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW;
-	argumentDescs[0].ConstantBufferView.RootParameterIndex = 0;
-	argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
+	D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[3] = {};
+	argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+	argumentDescs[0].Constant.RootParameterIndex = 0;
+	argumentDescs[0].Constant.DestOffsetIn32BitValues = 0;
+	argumentDescs[0].Constant.Num32BitValuesToSet = 1;
+
+	argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+	argumentDescs[1].Constant.RootParameterIndex = 1;
+	argumentDescs[1].Constant.DestOffsetIn32BitValues = 0;
+	argumentDescs[1].Constant.Num32BitValuesToSet = 1;
+
+	argumentDescs[2].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
 
 	D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
 	commandSignatureDesc.pArgumentDescs = argumentDescs;
@@ -39,13 +47,18 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	if (object->HasOpaque()) {
 		std::vector<unsigned int> indices;
 		// For each mesh, add an indirect command to the draw set buffer
-		for (int i = 0; i < object->GetOpaqueMeshes().size(); i++) {
+		for (auto& mesh : object->GetOpaqueMeshes()) {
 			IndirectCommand command = {};
-			command.perObjectCBV = m_perObjectBuffers->m_dataBuffer->m_buffer->GetGPUVirtualAddress() + object->GetCurrentPerObjectCBView()->GetOffset();
+			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
+			command.dispatchMeshArguments.ThreadGroupCountY = 1;
+			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			unsigned int index = m_opaqueDrawSetCommandsBuffer->Add(command);
 			indices.push_back(index);
 			m_activeOpaqueDrawSetIndices->Insert(index);
 		}
+
 		object->SetCurrentOpaqueDrawSetIndices(indices);
 
 		// TODO: Instead of inserting one update for every object, insert one update for all objects
@@ -55,12 +68,16 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 
 	if (object->HasTransparent()) {
 		std::vector<unsigned int> indices;
-		for (int i = 0; i < object->GetTransparentMeshes().size(); i++) {
+		for (auto& mesh : object->GetTransparentMeshes()) {
 			IndirectCommand command = {};
-			command.perObjectCBV = m_perObjectBuffers->m_dataBuffer->m_buffer->GetGPUVirtualAddress() + object->GetCurrentPerObjectCBView()->GetOffset();
+			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
+			command.dispatchMeshArguments.ThreadGroupCountY = 1;
+			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			unsigned int index = m_transparentDrawSetCommandsBuffer->Add(command);
 			indices.push_back(index);
-			m_activeTransparentDrawSetIndices->Insert(index);
+			m_activeOpaqueDrawSetIndices->Insert(index);
 		}
 		object->SetCurrentTransparentDrawSetIndices(indices);
 		manager.QueueDynamicBufferUpdate(m_transparentDrawSetCommandsBuffer.get());

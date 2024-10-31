@@ -5,16 +5,16 @@
 #include "LazyDynamicStructuredBuffer.h"
 #include "DynamicStructuredBuffer.h"
 #include "buffers.h"
-
+#include "SortedUnsignedIntBuffer.h"
 
 class RenderableObject;
 class BufferView;
 class DynamicBuffer;
-class SortedUnsignedIntBuffer;
 
 struct IndirectCommand {
-	D3D12_GPU_VIRTUAL_ADDRESS perMeshCBV;
-	D3D12_GPU_VIRTUAL_ADDRESS perObjectCBV;
+	unsigned int perObjectBufferIndex;
+	unsigned int perMeshBufferIndex;
+	D3D12_DISPATCH_MESH_ARGUMENTS dispatchMeshArguments;
 };
 
 class ObjectManager {
@@ -31,6 +31,39 @@ public:
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerObjectCB>>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}
+
+	unsigned int GetOpaqueDrawSetCommandsBufferSRVIndex() const {
+		return m_opaqueDrawSetCommandsBuffer->GetSRVInfo().index;
+	}
+	
+	unsigned int GetTransparentDrawSetCommandsBufferSRVIndex() const {
+		return m_transparentDrawSetCommandsBuffer->GetSRVInfo().index;
+	}
+
+	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const {
+		return m_activeOpaqueDrawSetIndices->GetSRVInfo().index;
+	}
+
+	unsigned int GetActiveTransparentDrawSetIndicesBufferSRVIndex() const {
+		return m_activeTransparentDrawSetIndices->GetSRVInfo().index;
+	}
+
+	std::shared_ptr<DynamicStructuredBuffer<IndirectCommand>>& GetOpaqueDrawSetCommandsBuffer() {
+		return m_opaqueDrawSetCommandsBuffer;
+	}
+
+	std::shared_ptr<DynamicStructuredBuffer<IndirectCommand>>& GetTransparentDrawSetCommandsBuffer() {
+		return m_transparentDrawSetCommandsBuffer;
+	}
+
+	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveOpaqueDrawSetIndices() {
+		return m_activeOpaqueDrawSetIndices;
+	}
+
+	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveTransparentDrawSetIndices() {
+		return m_activeTransparentDrawSetIndices;
+	}
+
 private:
 	ObjectManager();
 	std::vector<std::shared_ptr<RenderableObject>> m_objects;

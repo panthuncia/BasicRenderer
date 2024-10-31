@@ -50,13 +50,13 @@ public:
 		}
 		std::shared_ptr<Texture> map = std::make_shared<Texture>(shadowMap, shadowSampler);
 		light->SetShadowMap(map);
-        AddGloballyIndexedResource(map->GetBuffer());
+        AddIndexedResource(map->GetBuffer(), map->GetBuffer()->GetSRVInfo().index);
     }
 
 	void RemoveMap(Light* light) {
 		int index = light->getShadowMap()->GetBuffer()->GetSRVInfo().index;
 		if (index != -1) {
-			RemoveGloballyIndexedResource(index);
+			RemoveIndexedResource(index);
 		}
 
 	}

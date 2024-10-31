@@ -12,6 +12,7 @@
 #include "ResourceManager.h"
 #include "SettingsManager.h"
 #include "DynamicResource.h"
+#include "IndirectCommandBufferManager.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -48,7 +49,6 @@ void LightManager::AddLight(Light* lightNode, bool shadowCasting, Camera* curren
     }
     lightNode->SetLightBufferIndex(index);
 	if (shadowCasting) {
-		CreateIndirectCommandBuffer(lightNode);
 		CreateLightViewInfo(lightNode, currentCamera);
 		auto shadowMap = getCurrentShadowMapResourceGroup();
 		if (shadowMap != nullptr) {
@@ -105,11 +105,7 @@ unsigned int LightManager::GetNumLights() {
 }
 
 void LightManager::CreateIndirectCommandBuffer(Light* light) {
-	auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true);
-	m_lightDrawSetBufferMap.emplace(
-		light->GetLocalID(),
-		DynamicGloballyIndexedResource(resource.dataBuffer)
-	);
+	m_pCommandBufferManager->CreateBuffer(light->GetLocalID());
 }
 
 unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
@@ -121,12 +117,14 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 		auto cubemapMatrices = GetCubemapViewMatrices(node->transform.getGlobalPosition());
 		for (int i = 0; i < 6; i++) {
 			m_pointViewInfo->Add(XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
+			CreateIndirectCommandBuffer(node);
 		}
 		break;
 	}
 	case LightType::Spot: {
 		node->SetLightViewInfoIndex(m_spotViewInfo->Size());
 		m_spotViewInfo->Add(XMMatrixMultiply(node->GetLightViewMatrix(), projectionMatrix));
+		CreateIndirectCommandBuffer(node);
 		break;
 	}
 	case LightType::Directional: {
@@ -139,6 +137,7 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 		auto cascades = setupCascades(numCascades, *node, *camera, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			m_directionalViewInfo->Add(XMMatrixMultiply(cascades[i].orthoMatrix, cascades[i].viewMatrix));
+			CreateIndirectCommandBuffer(node);
 		}
 		break;
 	}
@@ -181,6 +180,10 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 
 void LightManager::RemoveLightViewInfo(Light* node) {
 	int viewInfoIndex = node->GetCurrentviewInfoIndex();
+	if (viewInfoIndex < 0) { // Not a shadow caster
+		return;
+	}
+	m_pCommandBufferManager->UnregisterBuffers(node->GetLocalID()); // Remove indirect command buffers
 	switch (node->GetLightType()) {
 	case LightType::Point:
 		// Erase light in point lights
@@ -254,14 +257,6 @@ void LightManager::UpdateBuffers() {
 		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfo.get());
 }
 
-void LightManager::UpdateNumDrawsInScene(unsigned int numDraws) {
-	unsigned int newSize = ((numDraws + m_commandBufferIncrementSize) / m_commandBufferIncrementSize) * m_commandBufferIncrementSize;
-	if (m_commandBufferSize != newSize) {
-		m_commandBufferSize = newSize;
-		for (auto& pair : m_lightDrawSetBufferMap) {
-			markForDelete(pair.second.GetResource()); // Delay deletion until after the current frame
-			auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true);
-			pair.second.SetResource(resource.dataBuffer);
-		}
-	}
+void LightManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {
+	m_pCommandBufferManager = commandBufferManager;
 }

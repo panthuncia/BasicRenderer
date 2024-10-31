@@ -14,6 +14,7 @@
 #include "Light.h"
 #include "MeshManager.h"
 #include "ObjectManager.h"
+#include "IndirectCommandBufferManager.h"
 
 class Scene {
 public:
@@ -70,6 +71,7 @@ private:
     LightManager lightManager;
     std::unique_ptr<MeshManager> meshManager = nullptr;
 	std::unique_ptr<ObjectManager> objectManager = nullptr;
+	std::unique_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
 
 	unsigned int m_numDrawsInScene = 0;
 

@@ -29,6 +29,7 @@
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
+#include "DeletionManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 
@@ -466,6 +467,7 @@ void DX12Renderer::Render() {
 	ProcessReadbackRequests(); // Save images to disk if requested
 
     m_stuffToDelete.clear(); // Deferred deletion
+    DeletionManager::GetInstance().ProcessDeletions();
 }
 
 void DX12Renderer::Cleanup() {

@@ -365,10 +365,6 @@ public:
             arraySize = 1;
         }
 
-        if (desc.isCubemap) {
-            print("hello");
-        }
-
         // Create the texture resource description
         auto textureDesc = CreateTextureResourceDesc(
             desc.format,

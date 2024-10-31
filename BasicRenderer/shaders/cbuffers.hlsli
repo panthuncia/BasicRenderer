@@ -32,6 +32,9 @@ cbuffer StaticBufferIndices : register(b6) {
 
 cbuffer variableBufferIndices : register(b7) {
     uint perMeshBufferDescriptorIndex; // Variable between opaque vs. transparent
+    uint drawSetCommandBufferDescriptorIndex;
+    uint activeDrawSetIndicesBufferDescriptorIndex;
+    uint indirectCommandBufferDescriptorIndex;
 }
 
 #endif // __CBUFFERS_HLSL__
