@@ -2,12 +2,7 @@
 #define __CBUFFERS_HLSL__
 
 cbuffer PerObject : register(b1) {
-    row_major matrix model;
-    row_major float4x4 normalMatrix;
-    uint boneTransformBufferIndex;
-    uint inverseBindMatricesBufferIndex;
-    uint isValid;
-    uint pad0;
+    uint perObjectBufferIndex;
 };
 
 cbuffer PerMesh : register(b2) {

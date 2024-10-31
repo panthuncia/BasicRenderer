@@ -26,20 +26,23 @@
 PSInput VSMain(uint vertexID : SV_VertexID) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferDescriptorIndex];
-    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perFrameBuffer.perObjectBufferIndex];
+    
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
     
     uint byteOffset = meshBuffer.vertexBufferOffset + vertexID * meshBuffer.vertexByteSize;
     Vertex input = LoadVertex(byteOffset, vertexBuffer, meshBuffer.vertexFlags);
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
-    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)normalMatrix;
+    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)objectBuffer.normalMatrix;
     
     if (meshBuffer.vertexFlags & VERTEX_SKINNED) {
-        StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
-        StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
+        StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
+        StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
     
         matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.x);
         matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, input.joints.y);
@@ -61,7 +64,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     }
     
     PSInput output;
-    float4 worldPosition = mul(pos, model);
+    float4 worldPosition = mul(pos, objectBuffer.model);
     
 #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];

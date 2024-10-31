@@ -592,7 +592,6 @@ public:
 	void setEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
 	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
-    void SetPerObjectBufferIndex(unsigned int index) { perFrameCBData.perObjectBufferIndex = index; }
 private:
     ResourceManager(){};
     void WaitForCopyQueue();

@@ -20,7 +20,6 @@ struct PerFrameBuffer {
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
     uint outputType;
-    uint perObjectBufferIndex;
 };
 
 struct LightInfo {

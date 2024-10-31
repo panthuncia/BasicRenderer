@@ -312,13 +312,12 @@ void PSOManager::createRootSignature() {
     // Root parameters
     D3D12_ROOT_PARAMETER1 parameters[7] = {};
 
-    // PerMesh buffer as a direct root CBV
-
-    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameters[0].Descriptor.ShaderRegister = 1; // b1 for PerObject
-    parameters[0].Descriptor.RegisterSpace = 0;
+    // PerObject buffer index
+    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[0].Constants.ShaderRegister = 1;
+    parameters[0].Constants.RegisterSpace = 0;
+    parameters[0].Constants.Num32BitValues = 1;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
 
     // PerMesh buffer index
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
