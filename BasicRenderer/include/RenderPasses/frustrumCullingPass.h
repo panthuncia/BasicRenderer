@@ -10,14 +10,14 @@
 
 class FrustrumCullingPass : public RenderPass {
 public:
-	FrustrumCullingPass(std::shared_ptr<PSOManager> psoManager) : psoManager(psoManager) {}
+	FrustrumCullingPass() {}
 
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
 
-		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&m_commandAllocator)));
-		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
+		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 		m_commandList->Close();
 
 		CreatePSO();
@@ -28,7 +28,7 @@ public:
 		ThrowIfFailed(m_commandAllocator->Reset());
 		ThrowIfFailed(commandList->Reset(m_commandAllocator.Get(), nullptr));
 
-		auto rootSignature = psoManager->GetRootSignature();
+		auto rootSignature = PSOManager::getInstance().GetRootSignature();
 		commandList->SetComputeRootSignature(rootSignature.Get());
 
 		// Set the descriptor heaps
@@ -43,16 +43,18 @@ public:
 		commandList->SetPipelineState(m_PSO.Get());
 
 		auto& objectManager = context.currentScene->GetObjectManager();
-		
+		auto& meshManager = context.currentScene->GetMeshManager();
 		// opaque buffer
-		unsigned int[2] bufferIndices;
-		bufferIndices[0] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
-		bufferIndices[1] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
+		unsigned int bufferIndices[4] = {};
+		bufferIndices[0] = meshManager->GetOpaquePerMeshBufferSRVIndex();
+		bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
+		bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
+		bufferIndices[3] = context.currentScene->GetPrimaryCameraIndirectCommandBuffer()->GetResource()->GetUAVInfo().index;
 
-		commandList->SetComputeRoot32BitConstants(6, 2, bufferIndices, 1);
+		commandList->SetComputeRoot32BitConstants(6, 4, bufferIndices, 0);
 
 		// Dispatch the compute shader
-		commandList->Dispatch(1, 1, 1);
+		commandList->Dispatch(context.currentScene->GetNumDrawsInScene(), 1, 1);
 
 		// Close the command list
 		ThrowIfFailed(commandList->Close());
@@ -60,34 +62,40 @@ public:
 		return { commandList };
 	}
 
+	void Cleanup(RenderContext& context) override {
+
+	}
+
 private:
 
 	void CreatePSO() {
-        // Compile the compute shader
-        Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-        CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", nullptr, computeShader);
+		// Compile the compute shader
+		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
+		PSOManager::getInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
 
-        // Define the pipeline state stream subobjects for compute
-        struct PipelineStateStream {
-            CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-            CD3DX12_PIPELINE_STATE_STREAM_CS CS;
-        };
+		// Define the pipeline state stream subobjects for compute
+		struct PipelineStateStream {
+			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
+			CD3DX12_PIPELINE_STATE_STREAM_CS CS;
+		};
 
-        PipelineStateStream pipelineStateStream = {};
-        pipelineStateStream.RootSignature = PSOManager::getInstance().GetRootSignature().Get();
-        pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
+		PipelineStateStream pipelineStateStream = {};
+		pipelineStateStream.RootSignature = PSOManager::getInstance().GetRootSignature().Get();
+		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 
-        // Create the pipeline state stream descriptor
-        D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-        streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-        streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
+		// Create the pipeline state stream descriptor
+		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
+		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
+		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
 
-        // Create the pipeline state
-        auto& device = DeviceManager::GetInstance().GetDevice();
-        ThrowIfFailed(device->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
+		// Create the pipeline state
+		auto& device = DeviceManager::GetInstance().GetDevice();
+		ID3D12Device2* device2 = nullptr;
+		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
+		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
 	ComPtr<ID3D12PipelineState> m_PSO;
-}
+};

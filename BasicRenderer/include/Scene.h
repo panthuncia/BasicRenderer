@@ -16,6 +16,8 @@
 #include "ObjectManager.h"
 #include "IndirectCommandBufferManager.h"
 
+class DynamicGloballyIndexedResource;
+
 class Scene {
 public:
     Scene();
@@ -50,6 +52,9 @@ public:
     void Activate();
     const std::unique_ptr<MeshManager>& GetMeshManager();
 	const std::unique_ptr<ObjectManager>& GetObjectManager();
+	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraIndirectCommandBuffer();
+	unsigned int GetNumDrawsInScene();
+	const std::unique_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
 
 private:
     std::shared_ptr<Camera> pCamera;
@@ -72,6 +77,7 @@ private:
     std::unique_ptr<MeshManager> meshManager = nullptr;
 	std::unique_ptr<ObjectManager> objectManager = nullptr;
 	std::unique_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
+    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraIndirectCommandBuffer;
 
 	unsigned int m_numDrawsInScene = 0;
 

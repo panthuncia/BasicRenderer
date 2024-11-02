@@ -105,7 +105,7 @@ unsigned int LightManager::GetNumLights() {
 }
 
 void LightManager::CreateIndirectCommandBuffer(Light* light) {
-	m_pCommandBufferManager->CreateBuffer(light->GetLocalID());
+	light->AddPerViewIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(light->GetLocalID()));
 }
 
 unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
@@ -184,6 +184,7 @@ void LightManager::RemoveLightViewInfo(Light* node) {
 		return;
 	}
 	m_pCommandBufferManager->UnregisterBuffers(node->GetLocalID()); // Remove indirect command buffers
+	node->DeleteAllIndirectCommandBuffers();
 	switch (node->GetLightType()) {
 	case LightType::Point:
 		// Erase light in point lights

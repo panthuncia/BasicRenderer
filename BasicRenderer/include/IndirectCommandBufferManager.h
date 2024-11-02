@@ -22,6 +22,8 @@ public:
 
     void SetIncrementSize(unsigned int incrementSize);
 
+	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_resourceGroup; }
+
 private:
     IndirectCommandBufferManager();
     std::unordered_map<int, std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>> m_buffers;

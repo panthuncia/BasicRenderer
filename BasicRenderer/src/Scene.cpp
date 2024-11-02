@@ -228,10 +228,17 @@ void Scene::Update() {
 }
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
+
+    if (pCamera != nullptr) {
+        indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
+        m_pPrimaryCameraIndirectCommandBuffer = nullptr;
+    }
+
     pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
     lightManager.SetCurrentCamera(pCamera.get());
     AddNode(pCamera);
+    m_pPrimaryCameraIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID());
 }
 
 std::shared_ptr<Camera> Scene::GetCamera() {
@@ -408,7 +415,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     return newRootNode;
 }
 
-void Scene::MakeResident() { // MeshManager manages GPU buffers
+void Scene::MakeResident() {
 	meshManager = MeshManager::CreateUnique();
 	for (auto& objectPair : objectsByID) {
 		auto& object = objectPair.second;
@@ -424,11 +431,19 @@ void Scene::MakeResident() { // MeshManager manages GPU buffers
 		auto& object = objectPair.second;
 		objectManager->AddObject(object);
 	}
+	if (GetCamera() != nullptr) {
+        m_pPrimaryCameraIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID());
+    }
 }
 
 void Scene::MakeNonResident() {
     meshManager = nullptr;
 	objectManager = nullptr;
+
+    if (GetCamera() != nullptr) {
+        indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
+        m_pPrimaryCameraIndirectCommandBuffer = nullptr;
+    }
 }
 
 void Scene::Activate() {
@@ -441,4 +456,16 @@ const std::unique_ptr<MeshManager>& Scene::GetMeshManager() {
 
 const std::unique_ptr<ObjectManager>& Scene::GetObjectManager() {
 	return objectManager;
+}
+
+std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraIndirectCommandBuffer() {
+	return m_pPrimaryCameraIndirectCommandBuffer;
+}
+
+unsigned int Scene::GetNumDrawsInScene() {
+	return m_numDrawsInScene;
+}
+
+const std::unique_ptr<IndirectCommandBufferManager>& Scene::GetIndirectCommandBufferManager() {
+	return indirectCommandBufferManager;
 }

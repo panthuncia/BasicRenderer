@@ -9,7 +9,7 @@ static bool mapHasResourceNotInState(std::unordered_map<std::wstring, ResourceSt
 void RenderGraph::Compile() {
     batches.clear();
     auto currentBatch = PassBatch();
-    std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
+    //std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
     std::unordered_map<std::wstring, ResourceState> finalResourceStates;
 
     for (auto& passAndResources : passes) {
@@ -18,10 +18,16 @@ void RenderGraph::Compile() {
         // Determine if a new batch is needed based on resource state conflicts
         if (IsNewBatchNeeded(currentBatch, passAndResources)) {
             // Compute transitions for the current batch
-            ComputeTransitionsForBatch(currentBatch, previousBatchResourceStates);
+            // During execution, finalResourceStates contains the state of
+            // each resource before the current batch, if it has been used
+            ComputeTransitionsForBatch(currentBatch, finalResourceStates);
+            for (const auto& [resourceName, state] : currentBatch.resourceStates) {
+                finalResourceStates[resourceName] = state;
+            }
             batches.push_back(std::move(currentBatch));
             currentBatch = PassBatch();
-            previousBatchResourceStates = batches.back().resourceStates;
+            //previousBatchResourceStates = batches.back().resourceStates;
+            // Update final resource states
         }
 
         currentBatch.passes.push_back(passAndResources);
@@ -29,14 +35,13 @@ void RenderGraph::Compile() {
         // Update desired resource states
         UpdateDesiredResourceStates(currentBatch, passAndResources);
 
-        // Update final resource states
-        for (const auto& [resourceName, state] : currentBatch.resourceStates) {
-            finalResourceStates[resourceName] = state;
-        }
     }
 
     // Handle the last batch
-    ComputeTransitionsForBatch(currentBatch, previousBatchResourceStates);
+    ComputeTransitionsForBatch(currentBatch, finalResourceStates);
+    for (const auto& [resourceName, state] : currentBatch.resourceStates) {
+        finalResourceStates[resourceName] = state;
+    }
     batches.push_back(std::move(currentBatch));
 
     // Insert transitions to loop resources back to their initial states
@@ -133,6 +138,12 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
             break;
         }
     }
+	for (auto& resource : passAndResources.resources.unorderedAccessViews) {
+		if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::UNORDERED_ACCESS)) {
+			return true;
+			break;
+		}
+	}
     return false;
 }
 
@@ -173,6 +184,9 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
     }
     for (auto& resource : passAndResources.resources.constantBuffers) {
         batch.resourceStates[resource->GetName()] = ResourceState::CONSTANT;
+    }
+    for (auto& resource : passAndResources.resources.unorderedAccessViews) {
+		batch.resourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
     }
 }
 

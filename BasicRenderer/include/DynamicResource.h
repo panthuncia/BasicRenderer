@@ -71,7 +71,7 @@ public:
         name = m_resource->GetName();
     }
 
-    std::shared_ptr<Resource> GetResource() const {
+    std::shared_ptr<GloballyIndexedResource> GetResource() const {
         return m_resource;
     }
 

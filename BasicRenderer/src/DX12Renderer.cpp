@@ -27,6 +27,7 @@
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/BRDFIntegrationPass.h"
+#include "RenderPasses/frustrumCullingPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -598,6 +599,17 @@ void DX12Renderer::CreateRenderGraph() {
 	auto& transparentPerMeshBuffer = currentScene->GetMeshManager()->GetTransparentPerMeshBuffers();
 	newGraph->AddResource(opaquePerMeshBuffer);
 	newGraph->AddResource(transparentPerMeshBuffer);
+
+    // Compute pass
+    auto indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
+	newGraph->AddResource(indirectCommandBufferResourceGroup);
+	auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
+	PassParameters frustrumCullingPassParameters;
+	frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
+	frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+	frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+	frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
+	newGraph->AddPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
 
     
     bool useMeshShaders = getMeshShadersEnabled();
