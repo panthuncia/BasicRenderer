@@ -87,10 +87,33 @@ public:
         buffersToUpdate.push_back(handle);
     }
     template<typename T>
-    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false) {
+    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
+        unsigned int counterOffset = 0;
+		if (UAVCounter) {
+            UINT requiredSize = (numElements * elementSize) + sizeof(UINT); // Add space for the counter
+            UINT alignment = sizeof(T); // Buffer should be a multiple of sizeof(T)
+
+            // Ensure bufferSize is a multiple of typeSize and meets requiredSize
+            bufferSize = ((requiredSize + alignment - 1) / alignment) * alignment;
+
+            // Find the next 4096-aligned address after requiredSize
+            UINT potentialCounterOffset = (requiredSize + 4095) & ~4095; // Round up to nearest multiple of 4096
+
+            // If the 4096-aligned address is within the buffer, we can use it
+            if (potentialCounterOffset + sizeof(UINT) <= bufferSize) {
+                counterOffset = potentialCounterOffset;
+            }
+            else {
+                // Otherwise, expand the buffer to fit the 4096-aligned counter offset
+                bufferSize = ((potentialCounterOffset + sizeof(UINT) + alignment - 1) / alignment) * alignment;
+                counterOffset = potentialCounterOffset;
+            }
+
+            assert(counterOffset % 4096 == 0);
+		}
 
         BufferHandle handle;
 		if (hasUploadBuffer) {
@@ -126,14 +149,17 @@ public:
 			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 			uavDesc.Format = DXGI_FORMAT_UNKNOWN;
 			uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-			uavDesc.Buffer.NumElements = numElements;
+			uavDesc.Buffer.NumElements = bufferSize / sizeof(T); // We will have some wasted elements to allow the counter to be 4096-aligned
 			uavDesc.Buffer.StructureByteStride = sizeof(T);
 			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+            if (UAVCounter) {
+                uavDesc.Buffer.CounterOffsetInBytes = counterOffset;
+            }
 
 			// Shader visible UAV
 			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
 			D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavDesc, uavShaderVisibleHandle);
+			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), handle.dataBuffer->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
 
 			// Non-shader visible UAV
             D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
@@ -149,7 +175,7 @@ public:
 			ShaderVisibleIndexInfo uavInfo;
 			uavInfo.index = uavShaderVisibleIndex;
 			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-            handle.dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo);
+            handle.dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, counterOffset);
 
 			NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
 			uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
@@ -600,6 +626,7 @@ public:
 	void setEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
 	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
+	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
 private:
     ResourceManager(){};
     void WaitForCopyQueue();
@@ -648,6 +675,8 @@ private:
 	std::vector<ViewedDynamicBufferBase*> dynamicBuffersToUpdateViews;
 
 	std::vector<ResourceTransition> queuedResourceTransitions;
+
+    ComPtr<ID3D12Resource> m_uavCounterReset;
 
 	int defaultShadowSamplerIndex = -1;
 };

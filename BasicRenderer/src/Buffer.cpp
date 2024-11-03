@@ -53,8 +53,8 @@ void Buffer::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fr
 	D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
 	D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);
 
-	if (toState == ResourceState::NON_PIXEL_SRV) {
-		printf("What?");
+	if (d3dToState == D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+		printf("hello");
 	}
 
 	D3D12_RESOURCE_BARRIER barrier = {};

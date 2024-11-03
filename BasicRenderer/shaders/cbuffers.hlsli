@@ -35,6 +35,7 @@ cbuffer variableBufferIndices : register(b7) {
     uint drawSetCommandBufferDescriptorIndex;
     uint activeDrawSetIndicesBufferDescriptorIndex;
     uint indirectCommandBufferDescriptorIndex;
+    uint numActiveDraws;
 }
 
 #endif // __CBUFFERS_HLSL__

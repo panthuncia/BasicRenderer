@@ -49,15 +49,16 @@ public:
 		auto apiResource = resource->GetAPIResource();
 		auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 		auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
-		unsigned int bufferIndices[4] = {};
+		unsigned int bufferIndices[5] = {};
 		bufferIndices[0] = meshManager->GetOpaquePerMeshBufferSRVIndex();
 		bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
 		bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
 		bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+		bufferIndices[4] = context.currentScene->GetNumOpaqueDraws();
 
-		commandList->SetComputeRoot32BitConstants(6, 4, bufferIndices, 0);
+		commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
 
-		commandList->Dispatch(context.currentScene->GetNumOpaqueDraws(), 1, 1);
+		commandList->Dispatch(std::ceil(context.currentScene->GetNumOpaqueDraws()/64.0), 1, 1);
 
 		// transparent buffer
 		resource = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
@@ -68,10 +69,11 @@ public:
 		bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex();
 		bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex();
 		bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+		bufferIndices[4] = context.currentScene->GetNumTransparentDraws();
 
-		commandList->SetComputeRoot32BitConstants(6, 4, bufferIndices, 0);
+		commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
 
-		commandList->Dispatch(context.currentScene->GetNumTransparentDraws(), 1, 1);
+		commandList->Dispatch(std::ceil(context.currentScene->GetNumTransparentDraws() / 64.0), 1, 1);
 
 		// Close the command list
 		ThrowIfFailed(commandList->Close());

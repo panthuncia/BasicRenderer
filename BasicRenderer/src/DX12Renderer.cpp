@@ -29,6 +29,7 @@
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
+#include "RenderPasses/ForwardRenderPassMSIndirect.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -629,7 +630,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     if (useMeshShaders) {
         forwardPassParameters.shaderResources.push_back(meshResourceGroup);
-        forwardPass = std::make_shared<ForwardRenderPassMS>(getWireframeEnabled());
+        forwardPass = std::make_shared<ForwardRenderPassMSIndirect>(getWireframeEnabled());
 	}
     else {
         forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled());

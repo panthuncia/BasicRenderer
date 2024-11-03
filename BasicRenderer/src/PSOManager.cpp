@@ -358,7 +358,7 @@ void PSOManager::createRootSignature() {
     parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[6].Constants.ShaderRegister = 7;
     parameters[6].Constants.RegisterSpace = 0;
-    parameters[6].Constants.Num32BitValues = 4;
+    parameters[6].Constants.Num32BitValues = 5;
     parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description

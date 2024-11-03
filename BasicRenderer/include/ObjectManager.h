@@ -6,16 +6,11 @@
 #include "DynamicStructuredBuffer.h"
 #include "buffers.h"
 #include "SortedUnsignedIntBuffer.h"
+#include "IndirectCommand.h"
 
 class RenderableObject;
 class BufferView;
 class DynamicBuffer;
-
-struct IndirectCommand {
-	unsigned int perObjectBufferIndex;
-	unsigned int perMeshBufferIndex;
-	D3D12_DISPATCH_MESH_ARGUMENTS dispatchMeshArguments;
-};
 
 class ObjectManager {
 public:

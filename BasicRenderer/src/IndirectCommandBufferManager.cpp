@@ -4,13 +4,40 @@
 #include "DeletionManager.h"
 #include "ResourceGroup.h"
 #include "GloballyIndexedResource.h"
+#include "IndirectCommand.h"
+#include "PSOManager.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
-    m_resourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+    m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+	m_opaqueResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+	m_transparentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+	m_parentResourceGroup->AddResource(m_opaqueResourceGroup);
+	m_parentResourceGroup->AddResource(m_transparentResourceGroup);
     for (auto type : MaterialBucketTypes) {
 		m_buffers[type] = std::unordered_map<int, std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>>();
-
     }
+
+    D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[3] = {};
+    argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+    argumentDescs[0].Constant.RootParameterIndex = 0;
+    argumentDescs[0].Constant.DestOffsetIn32BitValues = 0;
+    argumentDescs[0].Constant.Num32BitValuesToSet = 1;
+
+    argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+    argumentDescs[1].Constant.RootParameterIndex = 1;
+    argumentDescs[1].Constant.DestOffsetIn32BitValues = 0;
+    argumentDescs[1].Constant.Num32BitValuesToSet = 1;
+
+    argumentDescs[2].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
+
+    D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
+    commandSignatureDesc.pArgumentDescs = argumentDescs;
+    commandSignatureDesc.NumArgumentDescs = _countof(argumentDescs);
+    commandSignatureDesc.ByteStride = sizeof(IndirectCommand);
+
+	auto device = DeviceManager::GetInstance().GetDevice();
+    auto rootSignature = PSOManager::getInstance().GetRootSignature();
+	ThrowIfFailed(device->CreateCommandSignature(&commandSignatureDesc, rootSignature.Get(), IID_PPV_ARGS(&m_commandSignature)));
 }
 
 // Add a single buffer to an existing ID
@@ -28,14 +55,22 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 		commandBufferSize = m_transparentCommandBufferSize;
 		break;
 	}
-    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true);
+    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true, true);
+	resource.dataBuffer->SetName(L"IndirectCommandBuffer ("+std::to_wstring(entityID)+L")");
     std::shared_ptr<DynamicGloballyIndexedResource> pResource = std::make_shared<DynamicGloballyIndexedResource>(resource.dataBuffer);
     m_buffers[bucket][entityID].push_back(pResource);
 
     uint64_t naturalEntityID = entityID + 1; // 0 is not a natural number, might not work in Cantor pairing function
     uint64_t bufferIndex = m_buffers[bucket][entityID].size(); // 1-indexed
     uint64_t uniqueID = ((uint64_t)(naturalEntityID + bufferIndex) * (naturalEntityID + bufferIndex + 1)) / 2 + bufferIndex; // Cantor pairing function
-    m_resourceGroup->AddIndexedResource(pResource, uniqueID);
+    switch (bucket) {
+	case MaterialBuckets::Opaque:
+		m_opaqueResourceGroup->AddIndexedResource(pResource, uniqueID);
+		break;
+    case MaterialBuckets::Transparent:
+		m_transparentResourceGroup->AddIndexedResource(pResource, uniqueID);
+		break;
+    }
     return pResource;
 }
 
@@ -49,7 +84,13 @@ void IndirectCommandBufferManager::UnregisterBuffers(const int entityID) {
             bufferIndex++;
             DeletionManager::GetInstance().MarkForDelete(buffer); // Delay deletion until after the current frame
             uint64_t uniqueID = ((uint64_t)(naturalEntityID + bufferIndex) * (naturalEntityID + bufferIndex + 1)) / 2 + bufferIndex; // Cantor pairing function
-            m_resourceGroup->RemoveIndexedResource(uniqueID);
+            switch (type) {
+			case MaterialBuckets::Opaque:
+				m_opaqueResourceGroup->RemoveIndexedResource(uniqueID);
+				break;
+			case MaterialBuckets::Transparent:
+                m_transparentResourceGroup->RemoveIndexedResource(uniqueID);
+            }
         }
         m_buffers[type].erase(entityID);
     }
@@ -64,7 +105,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             return;
         }
         m_opaqueCommandBufferSize = newSize;
-        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_opaqueCommandBufferSize, ResourceState::ALL_SRV, false, true);
+        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_opaqueCommandBufferSize, ResourceState::ALL_SRV, false, true, true);
 		DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
         m_clearBufferOpaque = resource.dataBuffer;
 		m_clearBufferOpaque->SetName(L"ClearBufferOpaque");
@@ -76,7 +117,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             return;
         }
         m_transparentCommandBufferSize = newSize;
-        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_transparentCommandBufferSize, ResourceState::COPY_SOURCE, false, true);
+        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_transparentCommandBufferSize, ResourceState::COPY_SOURCE, false, true, true);
 		m_clearBufferTransparent = resource.dataBuffer;
         DeletionManager::GetInstance().MarkForDelete(m_clearBufferTransparent); // Delay deletion until after the current frame
 		m_clearBufferTransparent->SetName(L"ClearBufferTransparent");
@@ -97,7 +138,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 				commandBufferSize = m_transparentCommandBufferSize;
 				break;
 			}
-            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true);
+            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true, true);
             buffer->SetResource(resource.dataBuffer);
         }
     }

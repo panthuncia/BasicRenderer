@@ -7,6 +7,7 @@
 #include "RenderContext.h"
 #include "DeviceManager.h"
 #include "utilities.h"
+#include "IndirectCommand.h"
 
 class ClearUAVsPass : public RenderPass {
 public:
@@ -38,7 +39,17 @@ public:
 		auto clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetOpaqueClearBuffer();
 		auto clearBufferAPIResource = clearBuffer->GetAPIResource();
 
+		commandList->CopyResource(apiResource, clearBufferAPIResource); // Copy zeroes
+		//commandList->CopyBufferRegion(apiResource, resource->GetUAVCounterOffset(), ResourceManager::GetInstance().GetUAVCounterReset(), 0, sizeof(UINT));
+		// Transparent buffer
+		resource = currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
+		apiResource = resource->GetAPIResource();
+
+		clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetTransparentClearBuffer();
+		clearBufferAPIResource = clearBuffer->GetAPIResource();
+
 		commandList->CopyResource(apiResource, clearBufferAPIResource);
+		//commandList->CopyBufferRegion(apiResource, resource->GetUAVCounterOffset(), ResourceManager::GetInstance().GetUAVCounterReset(), 0, sizeof(UINT));
 
 		// Close the command list
 		ThrowIfFailed(commandList->Close());

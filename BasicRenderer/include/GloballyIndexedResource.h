@@ -27,9 +27,10 @@ public:
 		m_SRVInfo = srvInfo;
 	}
 
-	void SetUAVGPUDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, ShaderVisibleIndexInfo uavInfo) {
+	void SetUAVGPUDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, ShaderVisibleIndexInfo uavInfo, unsigned int counterOffset = 0) {
 		m_pUAVShaderVisibleHeap = pUAVHeap;
 		m_UAVShaderVisibleInfo = uavInfo;
+		m_counterOffset = counterOffset;
 	}
 
 	void SetUAVCPUDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, NonShaderVisibleIndexInfo uavInfo) {
@@ -54,6 +55,7 @@ public:
 
 	ShaderVisibleIndexInfo& GetSRVInfo() { return m_SRVInfo; }
 	ShaderVisibleIndexInfo& GetUAVShaderVisibleInfo() { return m_UAVShaderVisibleInfo; }
+	unsigned int GetUAVCounterOffset() { return m_counterOffset; }
 	NonShaderVisibleIndexInfo& GetUAVNonShaderVisibleInfo() { return m_UAVNonShaderVisibleInfo; }
 	ShaderVisibleIndexInfo& GetCBVInfo() { return m_CBVInfo; }
 	std::vector<NonShaderVisibleIndexInfo>& GetRTVInfos() { return m_RTVInfos; }
@@ -101,6 +103,7 @@ private:
 	std::shared_ptr<DescriptorHeap> m_pRTVHeap = nullptr;
 	std::vector<NonShaderVisibleIndexInfo> m_DSVInfos;
 	std::shared_ptr<DescriptorHeap> m_pDSVHeap = nullptr;
+	unsigned int m_counterOffset = 0;
 
 	friend class DynamicGloballyIndexedResource;
 };

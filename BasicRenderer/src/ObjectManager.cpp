@@ -15,24 +15,6 @@ ObjectManager::ObjectManager() {
 	m_transparentDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<IndirectCommand>(ResourceState::ALL_SRV, 1, L"drawSetCommandsBuffer<IndirectCommand>");
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
 	m_activeTransparentDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeTransparentDrawSetIndices");
-
-	D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[3] = {};
-	argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-	argumentDescs[0].Constant.RootParameterIndex = 0;
-	argumentDescs[0].Constant.DestOffsetIn32BitValues = 0;
-	argumentDescs[0].Constant.Num32BitValuesToSet = 1;
-
-	argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-	argumentDescs[1].Constant.RootParameterIndex = 1;
-	argumentDescs[1].Constant.DestOffsetIn32BitValues = 0;
-	argumentDescs[1].Constant.Num32BitValuesToSet = 1;
-
-	argumentDescs[2].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
-
-	D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
-	commandSignatureDesc.pArgumentDescs = argumentDescs;
-	commandSignatureDesc.NumArgumentDescs = _countof(argumentDescs);
-	commandSignatureDesc.ByteStride = sizeof(IndirectCommand);
 }
 void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	object->SetCurrentManager(this);

@@ -42,6 +42,22 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	InitializeCopyCommandQueue();
 	InitializeTransitionCommandList();
 	SetTransitionCommandQueue(commandQueue);
+
+	auto clearDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT));
+	auto clearHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	ThrowIfFailed(device->CreateCommittedResource(
+		&clearHeapProps,
+		D3D12_HEAP_FLAG_NONE,
+		&clearDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_uavCounterReset)));
+
+	UINT8* pMappedCounterReset = nullptr;
+	CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+	ThrowIfFailed(m_uavCounterReset->Map(0, &readRange, reinterpret_cast<void**>(&pMappedCounterReset)));
+	ZeroMemory(pMappedCounterReset, sizeof(UINT));
+	m_uavCounterReset->Unmap(0, nullptr);
 }
 
 CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetSRVCPUHandle(UINT index) {
@@ -359,6 +375,9 @@ void ResourceManager::ExecuteResourceTransitions() {
 		if (transition.resource == nullptr) {
 			spdlog::error("Resource is null in transition");
 			throw std::runtime_error("Resource is null");
+		}
+		if (transition.afterState == ResourceState::UNORDERED_ACCESS){
+			print("hello");
 		}
 		transition.resource->Transition(transitionCommandList.Get(), transition.beforeState, transition.afterState);
 		transition.resource->SetState(transition.afterState);

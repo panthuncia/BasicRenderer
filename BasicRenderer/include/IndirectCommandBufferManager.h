@@ -2,6 +2,8 @@
 #include <vector>
 #include <unordered_map>
 #include <spdlog/spdlog.h>
+#include <d3d12.h>
+#include <wrl/client.h>
 
 #include "MaterialBuckets.h"
 
@@ -25,10 +27,12 @@ public:
 
     void SetIncrementSize(unsigned int incrementSize);
 
-	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_resourceGroup; }
+	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_parentResourceGroup; }
 
 	std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
 	std::shared_ptr<Buffer>& GetTransparentClearBuffer() { return m_clearBufferTransparent; }
+
+	Microsoft::WRL::ComPtr<ID3D12CommandSignature> GetCommandSignature() { return m_commandSignature; }
 
 private:
     IndirectCommandBufferManager();
@@ -36,7 +40,10 @@ private:
 	unsigned int m_opaqueCommandBufferSize = 1; // TODO: Values are small for testing
 	unsigned int m_transparentCommandBufferSize = 1;
     unsigned int m_incrementSize = 1;
-	std::shared_ptr<ResourceGroup> m_resourceGroup;
+	std::shared_ptr<ResourceGroup> m_transparentResourceGroup;
+	std::shared_ptr<ResourceGroup> m_opaqueResourceGroup;
+	std::shared_ptr<ResourceGroup> m_parentResourceGroup;
 	std::shared_ptr<Buffer> m_clearBufferOpaque;
 	std::shared_ptr<Buffer> m_clearBufferTransparent;
+	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_commandSignature;
 };
