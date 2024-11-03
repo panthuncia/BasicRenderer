@@ -248,7 +248,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(*dragonScene);
     renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    renderer.GetCurrentScene()->AppendScene(*carScene);
+    //renderer.GetCurrentScene()->AppendScene(*carScene);
 	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 

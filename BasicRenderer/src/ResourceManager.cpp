@@ -260,7 +260,7 @@ void ResourceManager::UpdateGPUBuffers() {
 			copyCommandList->ResourceBarrier(1, &barrier);
 		}
 	}
-	for (DynamicBufferBase* dynamicBufferHandle : dynamicBuffersToUpdate) {
+	for (DynamicBufferBase* dynamicBufferHandle : dynamicBuffersToUpdate) { // Update full buffers
 		// Ensure both buffers are valid
 		if (dynamicBufferHandle->m_uploadBuffer && dynamicBufferHandle->m_dataBuffer) {
 			auto startState = ResourceStateToD3D12(dynamicBufferHandle->m_dataBuffer->GetState());
@@ -285,7 +285,7 @@ void ResourceManager::UpdateGPUBuffers() {
 		}
 	}
 
-	for (ViewedDynamicBufferBase* buffer : dynamicBuffersToUpdateViews) {
+	for (ViewedDynamicBufferBase* buffer : dynamicBuffersToUpdateViews) { // Update partial buffers
 
 		const auto& bufferViewsToUpdate = buffer->GetDirtyViews();
 		if (bufferViewsToUpdate.empty()) {
@@ -340,7 +340,11 @@ BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usag
 		UpdateBuffer(handle, pInitialData, bufferSize);
 	}
 
-	QueueResourceTransition({ handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType });
+	ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
+#if defined(_DEBUG)
+		transition.name = L"Buffer";
+#endif
+	QueueResourceTransition(transition);
 	return handle;
 }
 
@@ -410,8 +414,11 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	transition.resource = pDynamicBuffer.get();
 	transition.beforeState = ResourceState::UNKNOWN;
 	transition.afterState = usage;
+#if defined(_DEBUG)
+	transition.name = name;
+#endif
 	QueueResourceTransition(transition);
-	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, std::shared_ptr<Buffer>& buffer) {
+	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer) {
 		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer);
 		});
 
@@ -449,6 +456,9 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	transition.resource = pBuffer.get();
 	transition.beforeState = ResourceState::UNKNOWN;
 	transition.afterState = usage;
+#if defined(_DEBUG)
+	transition.name = name;
+#endif
 	QueueResourceTransition(transition);
 	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
 		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer);

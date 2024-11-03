@@ -359,7 +359,7 @@ inline void Menu::DrawLoadModelButton() {
 			auto scene = loadGLB(ws2s(selectedFile));
 			scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
 			appendScene(*scene);
-			loadedScenes.push_back(scene);
+			//loadedScenes.push_back(scene);
 			//markForDelete(scene);
         }
         else

@@ -19,6 +19,7 @@ public:
 
     Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices);
     Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle inverseBindMatricesHandle); // For copying, since bind matrices never change between instances
+    ~Skeleton();
     void AddAnimation(const std::shared_ptr<Animation>& animation);
     void SetAnimation(size_t index);
     void UpdateTransforms();

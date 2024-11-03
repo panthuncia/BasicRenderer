@@ -95,7 +95,7 @@ public:
 
 		// Transparent objects
 		indirectCommandBuffer = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer();
-		pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_MASK, m_wireframe);
+		pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_BLEND, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
 		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), indirectCommandBuffer->GetAPIResource(), 0, nullptr, 0);
 

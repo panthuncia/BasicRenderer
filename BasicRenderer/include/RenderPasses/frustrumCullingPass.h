@@ -45,35 +45,43 @@ public:
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& meshManager = context.currentScene->GetMeshManager();
 		// opaque buffer
-		auto resource = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
-		auto apiResource = resource->GetAPIResource();
-		auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
-		auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
-		unsigned int bufferIndices[5] = {};
-		bufferIndices[0] = meshManager->GetOpaquePerMeshBufferSRVIndex();
-		bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
-		bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
-		bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-		bufferIndices[4] = context.currentScene->GetNumOpaqueDraws();
+		auto numOpaqueDraws = context.currentScene->GetNumOpaqueDraws();
+		if (numOpaqueDraws > 0) {
 
-		commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+			auto resource = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
+			auto apiResource = resource->GetAPIResource();
+			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
+			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
+			unsigned int bufferIndices[5] = {};
+			bufferIndices[0] = meshManager->GetOpaquePerMeshBufferSRVIndex();
+			bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
+			bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
+			bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[4] = context.currentScene->GetNumOpaqueDraws();
 
-		commandList->Dispatch(std::ceil(context.currentScene->GetNumOpaqueDraws()/64.0), 1, 1);
+			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+
+			commandList->Dispatch(std::ceil(context.currentScene->GetNumOpaqueDraws() / 64.0), 1, 1);
+		}
 
 		// transparent buffer
-		resource = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
-		apiResource = resource->GetAPIResource();
-		uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
-		uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
-		bufferIndices[0] = meshManager->GetTransparentPerMeshBufferSRVIndex();
-		bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex();
-		bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex();
-		bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-		bufferIndices[4] = context.currentScene->GetNumTransparentDraws();
+		auto numTransparentDraws = context.currentScene->GetNumTransparentDraws();
+		if (numTransparentDraws > 0) {
+			auto resource = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
+			auto apiResource = resource->GetAPIResource();
+			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
+			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
+			unsigned int bufferIndices[5] = {};
+			bufferIndices[0] = meshManager->GetTransparentPerMeshBufferSRVIndex();
+			bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex();
+			bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex();
+			bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[4] = context.currentScene->GetNumTransparentDraws();
 
-		commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
-
-		commandList->Dispatch(std::ceil(context.currentScene->GetNumTransparentDraws() / 64.0), 1, 1);
+			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+		
+			commandList->Dispatch(std::ceil(numTransparentDraws / 64.0), 1, 1);
+		}
 
 		// Close the command list
 		ThrowIfFailed(commandList->Close());

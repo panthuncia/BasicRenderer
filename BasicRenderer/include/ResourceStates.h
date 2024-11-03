@@ -2,6 +2,10 @@
 
 #include <directx/d3d12.h>
 #include <stdexcept>
+#if defined(_DEBUG)
+#include <string>
+#endif // _DEBUG
+
 
 class Resource;
 
@@ -60,4 +64,7 @@ struct ResourceTransition {
 	Resource* resource = nullptr;
 	ResourceState beforeState;
 	ResourceState afterState;
+#if defined(_DEBUG)
+	std::wstring name;
+#endif // DEBUG
 };

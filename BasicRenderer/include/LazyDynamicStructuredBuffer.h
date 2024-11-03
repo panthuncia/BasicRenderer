@@ -16,6 +16,7 @@
 #include "DynamicBufferBase.h"
 #include "Concepts/HasIsValid.h"
 #include "BufferView.h"
+#include "DeletionManager.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -137,6 +138,9 @@ private:
         }
 		m_uploadBuffer = newUploadBuffer;
 
+        if (m_dataBuffer != nullptr) {
+			DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+        }
         m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, m_elementSize * capacity, false, m_UAV);
         SetName(name);
         CD3DX12_RANGE readRange(0, 0);

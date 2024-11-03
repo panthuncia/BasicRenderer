@@ -38,6 +38,25 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 	auto device = DeviceManager::GetInstance().GetDevice();
     auto rootSignature = PSOManager::getInstance().GetRootSignature();
 	ThrowIfFailed(device->CreateCommandSignature(&commandSignatureDesc, rootSignature.Get(), IID_PPV_ARGS(&m_commandSignature)));
+
+    // Initialize with one dummy draw
+	UpdateBuffersForBucket(MaterialBuckets::Opaque, 1);
+	UpdateBuffersForBucket(MaterialBuckets::Transparent, 1);
+}
+
+IndirectCommandBufferManager::~IndirectCommandBufferManager() {
+	for (auto type : MaterialBucketTypes) {
+		for (auto& pair : m_buffers[type]) {
+			for (auto& buffer : pair.second) {
+				DeletionManager::GetInstance().MarkForDelete(buffer->GetResource()); // Delay deletion until after the current frame
+			}
+		}
+	}
+	DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
+	DeletionManager::GetInstance().MarkForDelete(m_clearBufferTransparent); // Delay deletion until after the current frame
+	DeletionManager::GetInstance().MarkForDelete(m_opaqueResourceGroup); // Delay deletion until after the current frame
+	DeletionManager::GetInstance().MarkForDelete(m_transparentResourceGroup); // Delay deletion until after the current frame
+	DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup); // Delay deletion until after the current frame
 }
 
 // Add a single buffer to an existing ID
@@ -98,6 +117,8 @@ void IndirectCommandBufferManager::UnregisterBuffers(const int entityID) {
 
 // Update all buffers when the number of draws changes
 void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket, unsigned int numDraws) {
+
+    // Update clear buffers
     switch (bucket) {
     case MaterialBuckets::Opaque: {
         unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
@@ -118,17 +139,18 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
         }
         m_transparentCommandBufferSize = newSize;
         auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_transparentCommandBufferSize, ResourceState::COPY_SOURCE, false, true, true);
-		m_clearBufferTransparent = resource.dataBuffer;
         DeletionManager::GetInstance().MarkForDelete(m_clearBufferTransparent); // Delay deletion until after the current frame
+        m_clearBufferTransparent = resource.dataBuffer;
 		m_clearBufferTransparent->SetName(L"ClearBufferTransparent");
         break;
     }
     }
     
+    // Update per-view buffers
     auto& deletionManager = DeletionManager::GetInstance();
     for (auto& pair : m_buffers[bucket]) {
         for (auto& buffer : pair.second) {
-            deletionManager.MarkForDelete(buffer); // Delay deletion until after the current frame
+            deletionManager.MarkForDelete(buffer->GetResource()); // Delay deletion until after the current frame
             unsigned int commandBufferSize = 0;
 			switch (bucket) {
 			case MaterialBuckets::Opaque:

@@ -36,7 +36,7 @@ public:
     std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
     void Deallocate(const std::shared_ptr<BufferView>& view);
 
-    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>& buffer)>& callback) {
+    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*)>& callback) {
         onResized = callback;
     }
 
@@ -90,7 +90,7 @@ private:
 
     std::vector<MemoryBlock> m_memoryBlocks;
 
-    std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>&)> onResized;
+    std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_baseName = L"DynamicBuffer";
 	std::wstring m_name = m_baseName;
 

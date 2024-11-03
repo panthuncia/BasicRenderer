@@ -13,6 +13,7 @@ class Buffer;
 
 class IndirectCommandBufferManager {
 public:
+	~IndirectCommandBufferManager();
 	static std::unique_ptr<IndirectCommandBufferManager> CreateUnique() {
 		return std::unique_ptr<IndirectCommandBufferManager>(new IndirectCommandBufferManager());
 	}
@@ -37,9 +38,9 @@ public:
 private:
     IndirectCommandBufferManager();
     std::unordered_map<MaterialBuckets, std::unordered_map<int, std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>>> m_buffers;
-	unsigned int m_opaqueCommandBufferSize = 1; // TODO: Values are small for testing
-	unsigned int m_transparentCommandBufferSize = 1;
-    unsigned int m_incrementSize = 1;
+	unsigned int m_opaqueCommandBufferSize = 0;
+	unsigned int m_transparentCommandBufferSize = 0;
+    unsigned int m_incrementSize = 1; // TODO: Values are small for testing
 	std::shared_ptr<ResourceGroup> m_transparentResourceGroup;
 	std::shared_ptr<ResourceGroup> m_opaqueResourceGroup;
 	std::shared_ptr<ResourceGroup> m_parentResourceGroup;

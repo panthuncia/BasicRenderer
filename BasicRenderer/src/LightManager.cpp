@@ -14,6 +14,7 @@
 #include "DynamicResource.h"
 #include "IndirectCommandBufferManager.h"
 #include "MaterialBuckets.h"
+#include "DeletionManager.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -25,6 +26,14 @@ LightManager::LightManager() {
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	getCurrentShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<ShadowMaps*>("currentShadowMapsResourceGroup");
+}
+
+LightManager::~LightManager() {
+	auto& deletionManager = DeletionManager::GetInstance();
+	deletionManager.MarkForDelete(m_lightBuffer);
+	deletionManager.MarkForDelete(m_spotViewInfo);
+	deletionManager.MarkForDelete(m_pointViewInfo);
+	deletionManager.MarkForDelete(m_directionalViewInfo);
 }
 
 void LightManager::Initialize() {

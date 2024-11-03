@@ -57,6 +57,9 @@ public:
 		transition.resource = bufferHandle.dataBuffer.get();
 		transition.beforeState = ResourceState::UNKNOWN;
 		transition.afterState = ResourceState::CONSTANT;
+#if defined(_DEBUG)
+		transition.name = name;
+#endif
 		QueueResourceTransition(transition);
         // Create a descriptor for the buffer
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
@@ -125,6 +128,9 @@ public:
         handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
         
         ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
+#if defined(_DEBUG)
+        transition.name = L"IndexedStructuredBuffer";
+#endif
         QueueResourceTransition(transition);
 
         unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
@@ -230,6 +236,9 @@ public:
         transition.resource = pDynamicBuffer.get();
 		transition.beforeState = ResourceState::UNKNOWN;
 		transition.afterState = usage;
+#if defined(_DEBUG)
+        transition.name = name;
+#endif
 		QueueResourceTransition(transition);
         pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
@@ -270,6 +279,9 @@ public:
         transition.resource = pDynamicBuffer.get();
         transition.beforeState = ResourceState::UNKNOWN;
         transition.afterState = usage;
+#if defined(_DEBUG)
+        transition.name = L"LazyDynamicStructuredBuffer";
+#endif
         QueueResourceTransition(transition);
         pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
@@ -330,12 +342,15 @@ public:
 			transition.resource = buffer->m_dataBuffer.get();
 			transition.beforeState = ResourceState::UNKNOWN;
 			transition.afterState = buffer->GetState();
+#if defined(_DEBUG)
+            transition.name = buffer->GetName()+L": Resize";
+#endif
 			QueueResourceTransition(transition);
 		}
 		QueueDynamicBufferUpdate(buffer);
     }
 
-    void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, std::shared_ptr<Buffer>& buffer) {
+    void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -350,17 +365,21 @@ public:
         srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
         srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
-        device->CreateShaderResourceView(buffer->m_buffer.Get(), &srvDesc, srvHandle);
+        device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
 
         auto bufferState = buffer->GetState();
         // After resize, internal buffer state will not match the wrapper state
         if (bufferState != ResourceState::UNKNOWN) {
             ResourceTransition transition;
-            transition.resource = buffer.get();
+            transition.resource = buffer;
             transition.beforeState = ResourceState::UNKNOWN;
             transition.afterState = buffer->GetState();
+#if defined(_DEBUG)
+            transition.name = buffer->GetName()+L": Resize";
+#endif
             QueueResourceTransition(transition);
         }
+        QueueDynamicBufferUpdate(buffer);
     }
 
     template<typename T>
@@ -382,6 +401,9 @@ public:
         transition.resource = handle.dataBuffer.get();
         transition.beforeState = ResourceState::UNKNOWN;
         transition.afterState = ResourceState::CONSTANT;
+#if defined(_DEBUG)
+        transition.name = name;
+#endif
         QueueResourceTransition(transition);
 
 

@@ -12,6 +12,7 @@
 #include "Resource.h"
 #include "BufferHandle.h"
 #include "DynamicBufferBase.h"
+#include "DeletionManager.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -152,6 +153,9 @@ private:
         }
         m_uploadBuffer = newUploadBuffer;
 
+        if (m_dataBuffer != nullptr) {
+            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+        }
         m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false, m_UAV);
     }
 };

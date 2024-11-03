@@ -18,6 +18,7 @@ class IndirectCommandBufferManager;
 class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
 public:
     LightManager();
+    ~LightManager();
     void Initialize();
     void AddLight(Light* lightNode, bool shadowCasting = false, Camera* currentCamera = nullptr);
     void RemoveLight(Light* light);
