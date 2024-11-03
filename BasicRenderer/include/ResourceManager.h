@@ -68,7 +68,6 @@ public:
 
         ShaderVisibleIndexInfo cbvInfo;
         cbvInfo.index = index;
-        cbvInfo.cpuHandle = handle;
         cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
         bufferHandle.dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
@@ -120,7 +119,6 @@ public:
 
         ShaderVisibleIndexInfo srvInfo;
         srvInfo.index = index;
-        srvInfo.cpuHandle = srvHandle;
         srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
         handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
@@ -132,15 +130,31 @@ public:
 			uavDesc.Buffer.StructureByteStride = sizeof(T);
 			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
 
-			unsigned int uavIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-			D3D12_CPU_DESCRIPTOR_HANDLE uavHandle = m_cbvSrvUavHeap->GetCPUHandle(uavIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavDesc, uavHandle);
+			// Shader visible UAV
+			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+			D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
+			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavDesc, uavShaderVisibleHandle);
+
+			// Non-shader visible UAV
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
+            uavUintDesc.Format = DXGI_FORMAT_R32_UINT;
+            uavUintDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            uavUintDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+			uavUintDesc.Buffer.NumElements = (numElements*sizeof(T))/sizeof(unsigned int);
+			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
+			D3D12_CPU_DESCRIPTOR_HANDLE uavNonShaderVisibleHandle = m_nonShaderVisibleHeap->GetCPUHandle(uavNonShaderVisibleIndex);
+			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavUintDesc, uavNonShaderVisibleHandle);
+
 
 			ShaderVisibleIndexInfo uavInfo;
-			uavInfo.index = uavIndex;
-			uavInfo.cpuHandle = uavHandle;
-			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavIndex);
-			handle.dataBuffer->SetUAVDescriptor(m_cbvSrvUavHeap, uavInfo);
+			uavInfo.index = uavShaderVisibleIndex;
+			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
+            handle.dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo);
+
+			NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
+			uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
+			uavNonShaderVisibleInfo.cpuHandle = uavNonShaderVisibleHandle;
+			handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
         }
 
         return handle;
@@ -211,7 +225,6 @@ public:
 
         ShaderVisibleIndexInfo srvInfo;
         srvInfo.index = index;
-        srvInfo.cpuHandle = cpuHandle;
         srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
         pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
@@ -252,7 +265,6 @@ public:
 
 		ShaderVisibleIndexInfo srvInfo;
 		srvInfo.index = index;
-		srvInfo.cpuHandle = cpuHandle;
 		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
 		pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
@@ -603,6 +615,7 @@ private:
     std::shared_ptr<DescriptorHeap> m_samplerHeap;
     std::shared_ptr<DescriptorHeap> m_rtvHeap;
     std::shared_ptr<DescriptorHeap> m_dsvHeap;
+    std::shared_ptr<DescriptorHeap> m_nonShaderVisibleHeap;
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 

@@ -144,6 +144,18 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
 			break;
 		}
 	}
+	for (auto& resource : passAndResources.resources.copySources) {
+		if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::COPY_SOURCE)) {
+			return true;
+			break;
+		}
+	}
+    for (auto& resource : passAndResources.resources.copyTargets) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::COPY_DEST)) {
+            return true;
+            break;
+        }
+    }
     return false;
 }
 
@@ -188,6 +200,12 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
     for (auto& resource : passAndResources.resources.unorderedAccessViews) {
 		batch.resourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
     }
+	for (auto& resource : passAndResources.resources.copySources) {
+		batch.resourceStates[resource->GetName()] = ResourceState::COPY_SOURCE;
+	}
+	for (auto& resource : passAndResources.resources.copyTargets) {
+		batch.resourceStates[resource->GetName()] = ResourceState::COPY_DEST;
+	}
 }
 
 void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates) {

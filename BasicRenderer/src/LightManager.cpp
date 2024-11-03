@@ -13,6 +13,7 @@
 #include "SettingsManager.h"
 #include "DynamicResource.h"
 #include "IndirectCommandBufferManager.h"
+#include "MaterialBuckets.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -104,10 +105,6 @@ unsigned int LightManager::GetNumLights() {
     return m_lights.size();
 }
 
-void LightManager::CreateIndirectCommandBuffer(Light* light) {
-	light->AddPerViewIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(light->GetLocalID()));
-}
-
 unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
     auto projectionMatrix = node->GetLightProjectionMatrix();
 	switch (node->GetLightType()) {
@@ -117,14 +114,16 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 		auto cubemapMatrices = GetCubemapViewMatrices(node->transform.getGlobalPosition());
 		for (int i = 0; i < 6; i++) {
 			m_pointViewInfo->Add(XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
-			CreateIndirectCommandBuffer(node);
+			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
+			node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
 		}
 		break;
 	}
 	case LightType::Spot: {
 		node->SetLightViewInfoIndex(m_spotViewInfo->Size());
 		m_spotViewInfo->Add(XMMatrixMultiply(node->GetLightViewMatrix(), projectionMatrix));
-		CreateIndirectCommandBuffer(node);
+		node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
+		node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
 		break;
 	}
 	case LightType::Directional: {
@@ -137,7 +136,8 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 		auto cascades = setupCascades(numCascades, *node, *camera, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			m_directionalViewInfo->Add(XMMatrixMultiply(cascades[i].orthoMatrix, cascades[i].viewMatrix));
-			CreateIndirectCommandBuffer(node);
+			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
+			node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
 		}
 		break;
 	}

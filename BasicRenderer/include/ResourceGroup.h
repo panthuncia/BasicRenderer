@@ -28,6 +28,11 @@ public:
         }
     }
 
+	ID3D12Resource* GetAPIResource() const override {
+		spdlog::error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
+		return nullptr;
+	}
+
 protected:
     // Override the base Resource method to transition all resources in the group
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) {

@@ -7,7 +7,6 @@ DescriptorHeap::DescriptorHeap(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE 
     heapDesc.NumDescriptors = numDescriptors;
     heapDesc.Type = type;
     heapDesc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-
     ThrowIfFailed(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_heap)));
     m_descriptorSize = device->GetDescriptorHandleIncrementSize(type);
 }

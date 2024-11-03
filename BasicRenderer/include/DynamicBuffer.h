@@ -52,6 +52,8 @@ public:
 		return m_mappedData;
 	}
 
+	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+
 protected:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
         currentState = newState;

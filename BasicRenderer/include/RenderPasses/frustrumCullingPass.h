@@ -45,16 +45,33 @@ public:
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& meshManager = context.currentScene->GetMeshManager();
 		// opaque buffer
+		auto resource = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
+		auto apiResource = resource->GetAPIResource();
+		auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
+		auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
 		unsigned int bufferIndices[4] = {};
 		bufferIndices[0] = meshManager->GetOpaquePerMeshBufferSRVIndex();
 		bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
 		bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
-		bufferIndices[3] = context.currentScene->GetPrimaryCameraIndirectCommandBuffer()->GetResource()->GetUAVInfo().index;
+		bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
 
 		commandList->SetComputeRoot32BitConstants(6, 4, bufferIndices, 0);
 
-		// Dispatch the compute shader
-		commandList->Dispatch(context.currentScene->GetNumDrawsInScene(), 1, 1);
+		commandList->Dispatch(context.currentScene->GetNumOpaqueDraws(), 1, 1);
+
+		// transparent buffer
+		resource = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
+		apiResource = resource->GetAPIResource();
+		uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
+		uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
+		bufferIndices[0] = meshManager->GetTransparentPerMeshBufferSRVIndex();
+		bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex();
+		bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex();
+		bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+
+		commandList->SetComputeRoot32BitConstants(6, 4, bufferIndices, 0);
+
+		commandList->Dispatch(context.currentScene->GetNumTransparentDraws(), 1, 1);
 
 		// Close the command list
 		ThrowIfFailed(commandList->Close());

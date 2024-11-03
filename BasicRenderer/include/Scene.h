@@ -52,8 +52,11 @@ public:
     void Activate();
     const std::unique_ptr<MeshManager>& GetMeshManager();
 	const std::unique_ptr<ObjectManager>& GetObjectManager();
-	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraIndirectCommandBuffer();
+	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
+    std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraTransparentIndirectCommandBuffer();
 	unsigned int GetNumDrawsInScene();
+	unsigned int GetNumOpaqueDraws();
+	unsigned int GetNumTransparentDraws();
 	const std::unique_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
 
 private:
@@ -77,9 +80,12 @@ private:
     std::unique_ptr<MeshManager> meshManager = nullptr;
 	std::unique_ptr<ObjectManager> objectManager = nullptr;
 	std::unique_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraIndirectCommandBuffer;
+    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraTransparentIndirectCommandBuffer;
 
 	unsigned int m_numDrawsInScene = 0;
+	unsigned int m_numOpaqueDraws = 0;
+	unsigned int m_numTransparentDraws = 0;
 
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;

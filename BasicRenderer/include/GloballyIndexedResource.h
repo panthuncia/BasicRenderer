@@ -27,9 +27,14 @@ public:
 		m_SRVInfo = srvInfo;
 	}
 
-	void SetUAVDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, ShaderVisibleIndexInfo uavInfo) {
-		m_pUAVHeap = pUAVHeap;
-		m_UAVInfo = uavInfo;
+	void SetUAVGPUDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, ShaderVisibleIndexInfo uavInfo) {
+		m_pUAVShaderVisibleHeap = pUAVHeap;
+		m_UAVShaderVisibleInfo = uavInfo;
+	}
+
+	void SetUAVCPUDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, NonShaderVisibleIndexInfo uavInfo) {
+		m_pUAVNonShaderVisibleHeap = pUAVHeap;
+		m_UAVNonShaderVisibleInfo = uavInfo;
 	}
 
 	void SetCBVDescriptor(std::shared_ptr<DescriptorHeap> pCBVHeap, ShaderVisibleIndexInfo cbvInfo) {
@@ -48,7 +53,8 @@ public:
 	}
 
 	ShaderVisibleIndexInfo& GetSRVInfo() { return m_SRVInfo; }
-	ShaderVisibleIndexInfo& GetUAVInfo() { return m_UAVInfo; }
+	ShaderVisibleIndexInfo& GetUAVShaderVisibleInfo() { return m_UAVShaderVisibleInfo; }
+	NonShaderVisibleIndexInfo& GetUAVNonShaderVisibleInfo() { return m_UAVNonShaderVisibleInfo; }
 	ShaderVisibleIndexInfo& GetCBVInfo() { return m_CBVInfo; }
 	std::vector<NonShaderVisibleIndexInfo>& GetRTVInfos() { return m_RTVInfos; }
 	std::vector<NonShaderVisibleIndexInfo>& GetDSVInfos() { return m_DSVInfos; }
@@ -57,20 +63,14 @@ public:
 		if (m_pSRVHeap) {
 			m_pSRVHeap->ReleaseDescriptor(m_SRVInfo.index);
 		}
-		else {
-			//spdlog::info("GloballyIndexedResource::Destructor: No SRV heap set.");
+		if (m_pUAVShaderVisibleHeap) {
+			m_pUAVShaderVisibleHeap->ReleaseDescriptor(m_UAVShaderVisibleInfo.index);
 		}
-		if (m_pUAVHeap) {
-			m_pUAVHeap->ReleaseDescriptor(m_UAVInfo.index);
-		}
-		else {
-			//spdlog::info("GloballyIndexedResource::Destructor: No UAV heap set.");
+		if (m_pUAVNonShaderVisibleHeap) {
+			m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(m_UAVNonShaderVisibleInfo.index);
 		}
 		if (m_pCBVHeap) {
 			m_pCBVHeap->ReleaseDescriptor(m_CBVInfo.index);
-		}
-		else {
-			//spdlog::info("GloballyIndexedResource::Destructor: No CBV heap set.");
 		}
 
 		// Release RTVs and DSVs
@@ -79,17 +79,11 @@ public:
 				m_pRTVHeap->ReleaseDescriptor(rtvInfo.index);
 			}
 		}
-		else {
-			//spdlog::info("GloballyIndexedResource::Destructor: No RTV heap set.");
-		}
 
 		if (m_pDSVHeap) {
 			for (auto& dsvInfo : m_DSVInfos) {
 				m_pDSVHeap->ReleaseDescriptor(dsvInfo.index);
 			}
-		}
-		else {
-			//spdlog::info("GloballyIndexedResource::Destructor: No DSV heap set.");
 		}
 	};
 protected:
@@ -97,8 +91,10 @@ protected:
 private:
 	ShaderVisibleIndexInfo m_SRVInfo;
 	std::shared_ptr<DescriptorHeap> m_pSRVHeap = nullptr;
-	ShaderVisibleIndexInfo m_UAVInfo;
-	std::shared_ptr<DescriptorHeap> m_pUAVHeap = nullptr;
+	ShaderVisibleIndexInfo m_UAVShaderVisibleInfo;
+	NonShaderVisibleIndexInfo m_UAVNonShaderVisibleInfo;
+	std::shared_ptr<DescriptorHeap> m_pUAVShaderVisibleHeap = nullptr;
+	std::shared_ptr<DescriptorHeap> m_pUAVNonShaderVisibleHeap = nullptr;
 	ShaderVisibleIndexInfo m_CBVInfo;
 	std::shared_ptr<DescriptorHeap> m_pCBVHeap = nullptr;
 	std::vector<NonShaderVisibleIndexInfo> m_RTVInfos;

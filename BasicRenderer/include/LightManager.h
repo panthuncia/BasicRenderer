@@ -63,5 +63,4 @@ private:
     unsigned int CreateLightViewInfo(Light* node, Camera* camera = nullptr);
     void UpdateLightViewInfo(Light* node);
 	void RemoveLightViewInfo(Light* node);
-    void CreateIndirectCommandBuffer(Light* light);
 };

@@ -15,6 +15,7 @@ public:
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& name) { this->name = name; OnSetName(); }
+	virtual ID3D12Resource* GetAPIResource() const = 0;
 
 protected:
     virtual void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) = 0;

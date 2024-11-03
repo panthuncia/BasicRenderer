@@ -77,7 +77,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			unsigned int index = m_transparentDrawSetCommandsBuffer->Add(command);
 			indices.push_back(index);
-			m_activeOpaqueDrawSetIndices->Insert(index);
+			m_activeTransparentDrawSetIndices->Insert(index);
 		}
 		object->SetCurrentTransparentDrawSetIndices(indices);
 		manager.QueueDynamicBufferUpdate(m_transparentDrawSetCommandsBuffer.get());

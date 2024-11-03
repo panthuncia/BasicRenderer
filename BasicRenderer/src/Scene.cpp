@@ -21,20 +21,13 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     objectsByID[nextNodeID] = object;
     nextNodeID++;
 
-    if (object->HasOpaque()) {
-        opaqueObjectsByID[object->GetLocalID()] = object;
-    }
-
-    if (object->HasTransparent()) {
-        transparentObjectsByID[object->GetLocalID()] = object;
-    }
-
     if (object->parent == nullptr) {
         sceneRoot.AddChild(object);
     }
 	for (auto& mesh : object->GetOpaqueMeshes()) {
         meshesByID[mesh->GetGlobalID()] = mesh;
         m_numDrawsInScene++;
+		m_numOpaqueDraws++;
 		if (meshManager != nullptr) { // If mesh manager exists, this scene is active and we want to add the mesh immediately
             meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
         }
@@ -42,11 +35,22 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     for (auto& mesh : object->GetTransparentMeshes()) {
         meshesByID[mesh->GetGlobalID()] = mesh;
 		m_numDrawsInScene++;
+		m_numTransparentDraws++;
         if (meshManager != nullptr) {
             meshManager->AddMesh(mesh, MaterialBuckets::Transparent);
         }
     }
-	indirectCommandBufferManager->UpdateAllBuffers(m_numDrawsInScene);
+
+    if (object->HasOpaque()) {
+        opaqueObjectsByID[object->GetLocalID()] = object;
+		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
+    }
+
+    if (object->HasTransparent()) {
+        transparentObjectsByID[object->GetLocalID()] = object;
+		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Transparent, m_numTransparentDraws);
+    }
+
 	if (objectManager != nullptr) {
 		objectManager->AddObject(object);
 	}
@@ -145,11 +149,14 @@ void Scene::RemoveObjectByName(const std::wstring& name) {
         for (auto& mesh : it->second->GetOpaqueMeshes()) {
 			// TODO: Remove mesh from mesh manager, handling the case where the mesh is used by multiple objects
 			m_numDrawsInScene--;
+			m_numOpaqueDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
         }
         for (auto& mesh : it->second->GetTransparentMeshes()) {
             m_numDrawsInScene--;
+			m_numTransparentDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Transparent, m_numTransparentDraws);
         }
-        indirectCommandBufferManager->UpdateAllBuffers(m_numDrawsInScene);
     }
 }
 
@@ -173,11 +180,14 @@ void Scene::RemoveObjectByID(UINT id) {
         for (auto& mesh : it->second->GetOpaqueMeshes()) {
             // TODO: Remove mesh from mesh manager, handling the case where the mesh is used by multiple objects
             m_numDrawsInScene--;
+			m_numOpaqueDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
         }
         for (auto& mesh : it->second->GetTransparentMeshes()) {
             m_numDrawsInScene--;
+			m_numTransparentDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Transparent, m_numTransparentDraws);
         }
-        indirectCommandBufferManager->UpdateAllBuffers(m_numDrawsInScene);
     }
 }
 
@@ -231,14 +241,16 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 
     if (pCamera != nullptr) {
         indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
-        m_pPrimaryCameraIndirectCommandBuffer = nullptr;
+        m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraTransparentIndirectCommandBuffer = nullptr;
     }
 
     pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
     lightManager.SetCurrentCamera(pCamera.get());
     AddNode(pCamera);
-    m_pPrimaryCameraIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID());
+    m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Opaque);
+	m_pPrimaryCameraTransparentIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Transparent);
 }
 
 std::shared_ptr<Camera> Scene::GetCamera() {
@@ -432,7 +444,8 @@ void Scene::MakeResident() {
 		objectManager->AddObject(object);
 	}
 	if (GetCamera() != nullptr) {
-        m_pPrimaryCameraIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID());
+        m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Opaque);
+		m_pPrimaryCameraTransparentIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Transparent);
     }
 }
 
@@ -442,7 +455,8 @@ void Scene::MakeNonResident() {
 
     if (GetCamera() != nullptr) {
         indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
-        m_pPrimaryCameraIndirectCommandBuffer = nullptr;
+        m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraTransparentIndirectCommandBuffer = nullptr;
     }
 }
 
@@ -458,12 +472,24 @@ const std::unique_ptr<ObjectManager>& Scene::GetObjectManager() {
 	return objectManager;
 }
 
-std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraIndirectCommandBuffer() {
-	return m_pPrimaryCameraIndirectCommandBuffer;
+std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() {
+	return m_pPrimaryCameraOpaqueIndirectCommandBuffer;
+}
+
+std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraTransparentIndirectCommandBuffer() {
+	return m_pPrimaryCameraTransparentIndirectCommandBuffer;
 }
 
 unsigned int Scene::GetNumDrawsInScene() {
 	return m_numDrawsInScene;
+}
+
+unsigned int Scene::GetNumOpaqueDraws() {
+	return m_numOpaqueDraws;
+}
+
+unsigned int Scene::GetNumTransparentDraws() {
+	return m_numTransparentDraws;
 }
 
 const std::unique_ptr<IndirectCommandBufferManager>& Scene::GetIndirectCommandBufferManager() {

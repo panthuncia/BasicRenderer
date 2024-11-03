@@ -448,7 +448,6 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
 
     ShaderVisibleIndexInfo srvInfo;
     srvInfo.index = descriptorIndex;
-    srvInfo.cpuHandle = cpuHandle;
     srvInfo.gpuHandle = gpuHandle;
 
     return srvInfo;

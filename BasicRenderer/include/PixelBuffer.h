@@ -25,6 +25,8 @@ public:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState);
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 
+	ID3D12Resource* GetAPIResource() const override { return handle.texture.Get(); }
+
 private:
     PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB);
     PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB);

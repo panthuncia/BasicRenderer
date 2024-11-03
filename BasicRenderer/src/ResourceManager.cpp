@@ -17,6 +17,7 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	m_samplerHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, true);
 	m_rtvHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 10000, false);
 	m_dsvHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 10000, false);
+	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2000000, false);
 
 	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
@@ -414,7 +415,6 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	ShaderVisibleIndexInfo srvInfo;
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
-	srvInfo.cpuHandle = cpuHandle;
 
 	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
@@ -454,7 +454,6 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	ShaderVisibleIndexInfo srvInfo;
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
-	srvInfo.cpuHandle = cpuHandle;
 
 	pBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 

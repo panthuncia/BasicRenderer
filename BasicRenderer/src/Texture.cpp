@@ -21,3 +21,5 @@ void Texture::SetName(const std::wstring& name) {
 	Resource::SetName(name);
 	m_image->SetName(name);
 }
+
+ID3D12Resource* Texture::GetAPIResource() const { return m_image->GetAPIResource(); }

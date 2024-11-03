@@ -89,6 +89,8 @@ public:
 		return m_mappedData;
 	}
 
+	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+
 protected:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
 		currentState = newState;
@@ -131,7 +133,7 @@ private:
             void* newMappedData = nullptr;
 			newUploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&newMappedData));
 			std::memcpy(newMappedData, m_mappedData, m_elementSize * m_capacity);
-			m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+            newUploadBuffer->m_buffer->Unmap(0, nullptr);
         }
 		m_uploadBuffer = newUploadBuffer;
 

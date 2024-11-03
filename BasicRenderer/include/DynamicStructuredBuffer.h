@@ -30,7 +30,16 @@ public:
         }
         m_data.push_back(element);
         m_needsUpdate = true;
-		return m_data.size() - 1;
+
+        unsigned int index = m_data.size() - 1;
+
+        // Update upload buffer
+        void* uploadData = nullptr;
+        m_uploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&uploadData));
+        std::memcpy(reinterpret_cast<unsigned char*>(uploadData) + index * sizeof(T), &m_data[index], sizeof(T));
+        m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+
+        return index;
     }
 
     void RemoveAt(UINT index) {
@@ -87,6 +96,9 @@ public:
     UINT Size() {
         return m_data.size();
     }
+
+	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+
 protected:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
         currentState = newState;
@@ -97,6 +109,15 @@ private:
     DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(capacity);
+        if (name != L"") {
+            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+        }
+        else {
+            m_dataBuffer->SetName(m_name.c_str());
+        }
+    }
+
+    void OnSetName() override {
         if (name != L"") {
             m_dataBuffer->SetName((m_name + L": " + name).c_str());
         }
@@ -118,7 +139,19 @@ private:
 
     void CreateBuffer(UINT capacity) {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true, false);
+        auto newUploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true, m_UAV);
+
+        void* mappedData;
+        if (m_uploadBuffer != nullptr) {
+            m_uploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+            void* newMappedData = nullptr;
+            newUploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&newMappedData));
+            std::memcpy(newMappedData, mappedData, sizeof(T) * m_capacity);
+            newUploadBuffer->m_buffer->Unmap(0, nullptr);
+            m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+        }
+        m_uploadBuffer = newUploadBuffer;
+
         m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false, m_UAV);
     }
 };

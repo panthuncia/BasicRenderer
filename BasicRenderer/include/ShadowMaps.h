@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <spdlog/spdlog.h>
 
 #include "SettingsManager.h"
 #include "ResourceGroup.h"

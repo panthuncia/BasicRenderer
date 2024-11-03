@@ -27,6 +27,7 @@
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/BRDFIntegrationPass.h"
+#include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
@@ -600,9 +601,15 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(opaquePerMeshBuffer);
 	newGraph->AddResource(transparentPerMeshBuffer);
 
-    // Compute pass
+    // Clear UAVs
     auto indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
-	newGraph->AddResource(indirectCommandBufferResourceGroup);
+    newGraph->AddResource(indirectCommandBufferResourceGroup);
+	auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
+	PassParameters clearUAVsPassParameters;
+	clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
+	newGraph->AddPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
+    
+    // Compute pass
 	auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
 	PassParameters frustrumCullingPassParameters;
 	frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);

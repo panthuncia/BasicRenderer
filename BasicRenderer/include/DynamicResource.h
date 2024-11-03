@@ -40,6 +40,13 @@ public:
         }
     }
 
+	ID3D12Resource* GetAPIResource() const override {
+		if (resource) {
+			return resource->GetAPIResource();
+		}
+		return nullptr;
+	}
+
 protected:
     void OnSetName() override {
         if (resource) {
@@ -81,6 +88,13 @@ public:
             m_resource->Transition(commandList, prevState, newState);
             SetState(newState); // Keep the wrapper's state in sync
         }
+    }
+
+    ID3D12Resource* GetAPIResource() const override {
+        if (m_resource) {
+            return m_resource->GetAPIResource();
+        }
+        return nullptr;
     }
 
 protected:
