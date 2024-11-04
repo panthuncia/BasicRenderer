@@ -19,8 +19,10 @@
 #include "RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
 #include "RenderPasses/ForwardRenderPassMS.h"
+#include "RenderPasses/ForwardRenderPassMSIndirect.h"
 #include "RenderPasses/ShadowPass.h"
 #include "RenderPasses/ShadowPassMS.h"
+#include "RenderPasses/ShadowPassMSIndirect.h"
 #include "SettingsManager.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
@@ -29,12 +31,38 @@
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
-#include "RenderPasses/ForwardRenderPassMSIndirect.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
+void D3D12DebugCallback(
+    D3D12_MESSAGE_CATEGORY Category,
+    D3D12_MESSAGE_SEVERITY Severity,
+    D3D12_MESSAGE_ID ID,
+    LPCSTR pDescription,
+    void* pContext) {
+    std::string message(pDescription);
+
+    // Redirect messages to spdlog based on severity
+    switch (Severity) {
+    case D3D12_MESSAGE_SEVERITY_CORRUPTION:
+        spdlog::critical("D3D12 CORRUPTION: {}", message);
+        break;
+    case D3D12_MESSAGE_SEVERITY_ERROR:
+        spdlog::error("D3D12 ERROR: {}", message);
+        break;
+    case D3D12_MESSAGE_SEVERITY_WARNING:
+        spdlog::warn("D3D12 WARNING: {}", message);
+        break;
+    case D3D12_MESSAGE_SEVERITY_INFO:
+        spdlog::info("D3D12 INFO: {}", message);
+        break;
+    case D3D12_MESSAGE_SEVERITY_MESSAGE:
+        spdlog::debug("D3D12 MESSAGE: {}", message);
+        break;
+    }
+}
 
 ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
 {
@@ -130,6 +158,7 @@ void DX12Renderer::SetSettings() {
 		MarkForDelete(node);
         });
 	settingsManager.registerSetting<bool>("enableMeshShader", true);
+	settingsManager.registerSetting<bool>("enableIndirectDraws", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -142,6 +171,8 @@ void DX12Renderer::SetSettings() {
 	setImageBasedLightingEnabled = settingsManager.getSettingSetter<bool>("enableImageBasedLighting");
 	setEnvironment = settingsManager.getSettingSetter<std::string>("environmentName");
 	getMeshShadersEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
+	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
+
     settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
         rebuildRenderGraph = true;
@@ -156,6 +187,9 @@ void DX12Renderer::SetSettings() {
 		rebuildRenderGraph = true;
 		});
 	settingsManager.addObserver<bool>("enableWireframe", [this](const bool& newValue) {
+		rebuildRenderGraph = true;
+		});
+	settingsManager.addObserver<bool>("enableIndirectDraws", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
 		});
 }
@@ -192,11 +226,17 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         IID_PPV_ARGS(&device)));
 
 #if defined(_DEBUG)
-    ComPtr<ID3D12InfoQueue> infoQueue;
+    ComPtr<ID3D12InfoQueue1> infoQueue;
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+        //DWORD callbackCookie = 0;
+        //infoQueue->RegisterMessageCallback(
+        //    D3D12DebugCallback,
+        //    D3D12_MESSAGE_CALLBACK_FLAG_NONE,
+        //    nullptr,
+        //    &callbackCookie);
     }
 #endif
 
@@ -604,22 +644,26 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(opaquePerMeshBuffer);
 	newGraph->AddResource(transparentPerMeshBuffer);
 
-    // Clear UAVs
-    auto indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
-    newGraph->AddResource(indirectCommandBufferResourceGroup);
-	auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
-	PassParameters clearUAVsPassParameters;
-	clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
-	newGraph->AddPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
-    
-    // Compute pass
-	auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
-	PassParameters frustrumCullingPassParameters;
-	frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
-	frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
-	frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
-	frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
-	newGraph->AddPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
+	bool indirect = getIndirectDrawsEnabled();
+	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
+    if (indirect) {
+        // Clear UAVs
+        indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
+        newGraph->AddResource(indirectCommandBufferResourceGroup);
+        auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
+        PassParameters clearUAVsPassParameters;
+        clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
+        newGraph->AddPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
+
+        // Compute pass
+        auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
+        PassParameters frustrumCullingPassParameters;
+        frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
+        frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+        frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+        frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
+        newGraph->AddPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
+    }
 
     
     bool useMeshShaders = getMeshShadersEnabled();
@@ -632,7 +676,13 @@ void DX12Renderer::CreateRenderGraph() {
 
     if (useMeshShaders) {
         forwardPassParameters.shaderResources.push_back(meshResourceGroup);
-        forwardPass = std::make_shared<ForwardRenderPassMSIndirect>(getWireframeEnabled());
+		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
+            forwardPass = std::make_shared<ForwardRenderPassMSIndirect>(getWireframeEnabled());
+            forwardPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+        }
+        else {
+            forwardPass = std::make_shared<ForwardRenderPassMS>(getWireframeEnabled());
+        }
 	}
     else {
         forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled());
@@ -710,8 +760,11 @@ void DX12Renderer::CreateRenderGraph() {
         auto shadowPassParameters = PassParameters();
 
         if (useMeshShaders) { 
-            shadowPass = std::make_shared<ShadowPassMS>(m_shadowMaps);
+            shadowPass = std::make_shared<ShadowPassMSIndirect>(m_shadowMaps);
             shadowPassParameters.shaderResources.push_back(meshResourceGroup);
+            if (indirect) {
+                shadowPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+            }
 		}
 		else {
 			shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);

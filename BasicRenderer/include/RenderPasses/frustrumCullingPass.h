@@ -47,7 +47,8 @@ public:
 		// opaque buffer
 		auto numOpaqueDraws = context.currentScene->GetNumOpaqueDraws();
 		if (numOpaqueDraws > 0) {
-
+			unsigned int numThreadGroups = std::ceil(context.currentScene->GetNumOpaqueDraws() / 64.0);
+			// First, process buffer for main camera
 			auto resource = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
 			auto apiResource = resource->GetAPIResource();
 			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
@@ -61,12 +62,23 @@ public:
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
 
-			commandList->Dispatch(std::ceil(context.currentScene->GetNumOpaqueDraws() / 64.0), 1, 1);
+			commandList->Dispatch(numThreadGroups, 1, 1);
+
+			//  Then, process buffer for each light
+			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
+				auto& light = lightPair.second;
+				for (auto& buffer : light->GetPerViewOpaqueIndirectCommandBuffers()) {
+					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					commandList->Dispatch(numThreadGroups, 1, 1);
+				}
+			}
 		}
 
 		// transparent buffer
 		auto numTransparentDraws = context.currentScene->GetNumTransparentDraws();
 		if (numTransparentDraws > 0) {
+			unsigned int numThreadGroups = std::ceil(context.currentScene->GetNumTransparentDraws() / 64.0);
 			auto resource = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
 			auto apiResource = resource->GetAPIResource();
 			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
@@ -80,11 +92,22 @@ public:
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
 		
-			commandList->Dispatch(std::ceil(numTransparentDraws / 64.0), 1, 1);
+			commandList->Dispatch(numThreadGroups, 1, 1);
+
+			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
+				auto& light = lightPair.second;
+				for (auto& buffer : light->GetPerViewTransparentIndirectCommandBuffers()) {
+					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					commandList->Dispatch(numThreadGroups, 1, 1);
+				}
+			}
 		}
 
 		// Close the command list
 		ThrowIfFailed(commandList->Close());
+
+		//invalidated = false;
 
 		return { commandList };
 	}

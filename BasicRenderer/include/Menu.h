@@ -87,8 +87,13 @@ private:
 	std::function<void(unsigned int)> setOutputType;
 
     bool meshShaderEnabled = false;
+    bool indirectDrawsWereEnabled = false;
     std::function<bool()> getMeshShaderEnabled;
 	std::function<void(bool)> setMeshShaderEnabled;
+
+	bool indirectDrawsEnabled = false;
+	std::function<bool()> getIndirectDrawsEnabled;
+	std::function<void(bool)> setIndirectDrawsEnabled;
 
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
@@ -97,9 +102,6 @@ private:
 	std::function < std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()> getRenderableObjects;
 	std::function<SceneNode& ()> getSceneRoot;
 	std::function < std::shared_ptr<SceneNode>(Scene& scene)> appendScene;
-	std::function<void(std::shared_ptr<void>)> markForDelete;
-
-    std::vector<std::shared_ptr<Scene>> loadedScenes;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -179,11 +181,14 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getRenderableObjects = settingsManager.getSettingGetter<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()>>("getRenderableObjects")();
 	getSceneRoot = settingsManager.getSettingGetter<std::function<SceneNode&()>>("getSceneRoot")();
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene")();
-    markForDelete = settingsManager.getSettingGetter<std::function<void(std::shared_ptr<void>)>>("markForDelete")();
 
 	setMeshShaderEnabled = settingsManager.getSettingSetter<bool>("enableMeshShader");
 	getMeshShaderEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
 	meshShaderEnabled = getMeshShaderEnabled();
+
+	setIndirectDrawsEnabled = settingsManager.getSettingSetter<bool>("enableIndirectDraws");
+	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
+	indirectDrawsEnabled = getIndirectDrawsEnabled();
 
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
@@ -212,8 +217,26 @@ inline void Menu::Render(const RenderContext& context) {
 			setShadowsEnabled(shadowsEnabled);
 		}
 		if (ImGui::Checkbox("Use Mesh Shaders", &meshShaderEnabled)) {
+            if (!meshShaderEnabled) {
+				if (indirectDrawsEnabled) {
+                    setIndirectDrawsEnabled(false);
+				}
+            }
+            else {
+                if (indirectDrawsEnabled) {
+                    setIndirectDrawsEnabled(true);
+                }
+            }
 			setMeshShaderEnabled(meshShaderEnabled);
 		}
+		if (!meshShaderEnabled) {
+			ImGui::Text("Mesh Shaders must be enabled to use Indirect Draws.");
+		}
+        else {
+            if (ImGui::Checkbox("Use Indirect Draws", &indirectDrawsEnabled)) {
+                setIndirectDrawsEnabled(indirectDrawsEnabled);
+            }
+        }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
 		}
@@ -359,8 +382,6 @@ inline void Menu::DrawLoadModelButton() {
 			auto scene = loadGLB(ws2s(selectedFile));
 			scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
 			appendScene(*scene);
-			//loadedScenes.push_back(scene);
-			//markForDelete(scene);
         }
         else
         {

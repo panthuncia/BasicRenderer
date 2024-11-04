@@ -32,27 +32,49 @@ public:
 
 		auto& objectManager = currentScene->GetObjectManager();
 		auto& meshManager = currentScene->GetMeshManager();
+		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 		// opaque buffer
 		auto resource = currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
+		auto counterOffset = resource->GetUAVCounterOffset();
 		auto apiResource = resource->GetAPIResource();
 		
 		auto clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetOpaqueClearBuffer();
 		auto clearBufferAPIResource = clearBuffer->GetAPIResource();
 
-		commandList->CopyResource(apiResource, clearBufferAPIResource); // Copy zeroes
-		//commandList->CopyBufferRegion(apiResource, resource->GetUAVCounterOffset(), ResourceManager::GetInstance().GetUAVCounterReset(), 0, sizeof(UINT));
+		//commandList->CopyResource(apiResource, clearBufferAPIResource); // Copy zeroes
+		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+
+		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
+			auto& light = lightPair.second;
+			for (auto& buffer : light->GetPerViewOpaqueIndirectCommandBuffers()) {
+				apiResource = buffer->GetAPIResource();
+				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+			}
+		}
+
 		// Transparent buffer
 		resource = currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
+		counterOffset = resource->GetUAVCounterOffset();
 		apiResource = resource->GetAPIResource();
 
 		clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetTransparentClearBuffer();
 		clearBufferAPIResource = clearBuffer->GetAPIResource();
 
-		commandList->CopyResource(apiResource, clearBufferAPIResource);
-		//commandList->CopyBufferRegion(apiResource, resource->GetUAVCounterOffset(), ResourceManager::GetInstance().GetUAVCounterReset(), 0, sizeof(UINT));
+		//commandList->CopyResource(apiResource, clearBufferAPIResource);
+		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+
+		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
+			auto& light = lightPair.second;
+			for (auto& buffer : light->GetPerViewTransparentIndirectCommandBuffers()) {
+				apiResource = buffer->GetAPIResource();
+				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+			}
+		}
 
 		// Close the command list
 		ThrowIfFailed(commandList->Close());
+
+		//invalidated = false;
 
 		return { commandList };
 	}

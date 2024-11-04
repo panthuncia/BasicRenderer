@@ -156,6 +156,12 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
             break;
         }
     }
+	for (auto& resource : passAndResources.resources.indirectArgumentBuffers) {
+		if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::INDIRECT_ARGUMENT)) {
+			return true;
+			break;
+		}
+	}
     return false;
 }
 
@@ -205,6 +211,9 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
 	}
 	for (auto& resource : passAndResources.resources.copyTargets) {
 		batch.resourceStates[resource->GetName()] = ResourceState::COPY_DEST;
+	}
+	for (auto& resource : passAndResources.resources.indirectArgumentBuffers) {
+		batch.resourceStates[resource->GetName()] = ResourceState::INDIRECT_ARGUMENT;
 	}
 }
 

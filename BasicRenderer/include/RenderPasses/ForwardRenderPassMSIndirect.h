@@ -10,6 +10,7 @@
 #include "mesh.h"
 #include "Scene.h"
 #include "Material.h"
+#include "SettingsManager.h"
 
 class ForwardRenderPassMSIndirect : public RenderPass {
 public:
