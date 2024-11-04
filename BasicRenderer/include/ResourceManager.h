@@ -377,7 +377,7 @@ public:
 #if defined(_DEBUG)
             transition.name = buffer->GetName()+L": Resize";
 #endif
-            QueueResourceTransition(transition);
+            //QueueResourceTransition(transition);
         }
         QueueDynamicBufferUpdate(buffer);
     }

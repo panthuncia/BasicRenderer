@@ -8,7 +8,7 @@ struct IndirectCommand {
 
 [numthreads(64, 1, 1)]
 void CSMain(uint dispatchID : SV_DispatchThreadID) {
-    if (dispatchID > numActiveDraws) {
+    if (dispatchID > maxDrawIndex) {
         return;
     }
     StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];

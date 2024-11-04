@@ -57,7 +57,7 @@ public:
 			bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
 			bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
 			bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[4] = context.currentScene->GetNumOpaqueDraws();
+			bufferIndices[4] = context.currentScene->GetNumOpaqueDraws()-1;
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
 
@@ -76,7 +76,7 @@ public:
 			bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex();
 			bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex();
 			bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[4] = context.currentScene->GetNumTransparentDraws();
+			bufferIndices[4] = context.currentScene->GetNumTransparentDraws()-1;
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
 		

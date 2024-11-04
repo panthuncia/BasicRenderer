@@ -177,6 +177,9 @@ private:
         }
         m_uploadBuffer = newUploadBuffer;
 
+        if (m_dataBuffer != nullptr) {
+            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+        }
         m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(unsigned int) * capacity, false, m_UAV);
 		SetName(name);
     }
