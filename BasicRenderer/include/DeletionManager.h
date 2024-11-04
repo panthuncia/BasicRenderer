@@ -19,6 +19,11 @@ public:
         m_deferredDeletion.clear();
 	}
 
+    void Cleanup() {
+		m_deferredDeletion.clear();
+		m_stuffToDelete.clear();
+    }
+
 private:
     DeletionManager() = default;
     // TODO: Currently, resource transitions for the initial states of resources of new objects are handled at the start of each frame.

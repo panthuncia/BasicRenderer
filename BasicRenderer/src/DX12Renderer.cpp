@@ -476,6 +476,8 @@ void DX12Renderer::Render() {
 void DX12Renderer::Cleanup() {
     WaitForPreviousFrame();
     CloseHandle(fenceEvent);
+	currentScene = nullptr;
+    DeletionManager::GetInstance().Cleanup();
 }
 
 void DX12Renderer::CheckDebugMessages() {

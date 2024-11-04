@@ -253,6 +253,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 	renderer.MarkForDelete(carScene);
+	renderer.MarkForDelete(dragonScene);
+	renderer.MarkForDelete(tigerScene);
+	renderer.MarkForDelete(mountainScene);
+	carScene.reset();
+	dragonScene.reset();
+	tigerScene.reset();
+	mountainScene.reset();
 
     renderer.SetEnvironment("studio");
 

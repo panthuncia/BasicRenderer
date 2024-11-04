@@ -54,8 +54,8 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 	}
 	DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(m_clearBufferTransparent); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(m_opaqueResourceGroup); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(m_transparentResourceGroup); // Delay deletion until after the current frame
+	//DeletionManager::GetInstance().MarkForDelete(m_opaqueResourceGroup); // Delay deletion until after the current frame
+	//DeletionManager::GetInstance().MarkForDelete(m_transparentResourceGroup); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup); // Delay deletion until after the current frame
 }
 
