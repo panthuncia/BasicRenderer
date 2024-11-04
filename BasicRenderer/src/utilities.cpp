@@ -20,6 +20,7 @@
 #include "Material.h"
 #include "SettingsManager.h"
 #include "Vertex.h"
+#include "MaterialFlags.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -37,8 +38,8 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
         bool hasTexcoords = !geom.texcoords.empty();
         bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
         bool hasTangents = false;
-
-        if (geom.material->m_psoFlags & PSOFlags::PSO_NORMAL_MAP || geom.material->m_psoFlags & PSOFlags::PSO_PARALLAX) {
+        unsigned int materialFlags = geom.material->m_materialData.materialFlags;
+        if (materialFlags & MaterialFlags::MATERIAL_NORMAL_MAP || materialFlags & MaterialFlags::MATERIAL_PARALLAX) {
             if (!geom.indices.empty()) {
                 std::vector<XMFLOAT3>& xmfloat3Positions = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.positions);
                 std::vector<XMFLOAT3>& xmfloat3Normals = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.normals);
@@ -447,7 +448,6 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
 
     ShaderVisibleIndexInfo srvInfo;
     srvInfo.index = descriptorIndex;
-    srvInfo.cpuHandle = cpuHandle;
     srvInfo.gpuHandle = gpuHandle;
 
     return srvInfo;
@@ -587,7 +587,7 @@ void AsyncSaveToDDS(DirectX::ScratchImage scratchImage, const std::wstring& outp
 
 
 void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* cubemap, const std::wstring& outputFile) {
-    D3D12_RESOURCE_DESC resourceDesc = cubemap->GetHandle().texture->GetDesc();
+    D3D12_RESOURCE_DESC resourceDesc = cubemap->GetBuffer()->GetTexture()->GetDesc();
 
     // Get the number of mip levels and subresources
     UINT numMipLevels = resourceDesc.MipLevels;
@@ -645,7 +645,7 @@ void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
     readbackBuffer->SetName(L"Readback");
 
     auto initialState = ResourceStateToD3D12(cubemap->GetState());
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetHandle().texture.Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetBuffer()->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
     commandList->ResourceBarrier(1, &barrier);
 
     // Issue copy commands for each mip level of each face
@@ -654,7 +654,7 @@ void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
             UINT subresourceIndex = D3D12CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, 6);
 
             D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
-            srcLocation.pResource = cubemap->GetHandle().texture.Get();
+            srcLocation.pResource = cubemap->GetBuffer()->GetTexture().Get();
             srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
             srcLocation.SubresourceIndex = subresourceIndex;
 
@@ -667,7 +667,7 @@ void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
         }
     }
 
-    barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetHandle().texture.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetBuffer()->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
     commandList->ResourceBarrier(1, &barrier);
 
     ReadbackRequest readbackRequest;
@@ -741,7 +741,7 @@ void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
 }
 
 void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile) {
-    D3D12_RESOURCE_DESC resourceDesc = texture->GetHandle().texture->GetDesc();
+    D3D12_RESOURCE_DESC resourceDesc = texture->GetBuffer()->GetTexture()->GetDesc();
 
     // Get the number of mip levels and subresources
     UINT numMipLevels = resourceDesc.MipLevels;
@@ -799,7 +799,7 @@ void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
     readbackBuffer->SetName(L"Readback");
 
     auto initialState = ResourceStateToD3D12(texture->GetState());
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetHandle().texture.Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetBuffer()->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
     commandList->ResourceBarrier(1, &barrier);
 
     // Issue copy commands for each mip level of each face
@@ -807,7 +807,7 @@ void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
         UINT subresourceIndex = D3D12CalcSubresource(mipLevel, 0, 0, numMipLevels, 1);
 
         D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
-        srcLocation.pResource = texture->GetHandle().texture.Get();
+        srcLocation.pResource = texture->GetBuffer()->GetTexture().Get();
         srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         srcLocation.SubresourceIndex = subresourceIndex;
 
@@ -820,7 +820,7 @@ void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandLi
 
     }
 
-    barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetHandle().texture.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetBuffer()->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
     commandList->ResourceBarrier(1, &barrier);
 
     ReadbackRequest readbackRequest;

@@ -22,10 +22,16 @@ D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType) {
 	}
 }
 
-Buffer::Buffer(ID3D12Device* device, ResourceCPUAccessType accessType, uint32_t bufferSize, bool upload = false) {
+Buffer::Buffer(
+	ID3D12Device* device, 
+	ResourceCPUAccessType accessType, 
+	uint32_t bufferSize, 
+	bool upload, bool unorderedAccess) : 
+	GloballyIndexedResource(){
 	m_accessType = accessType;
 	D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(TranslateAccessType(accessType));
 	D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+	unorderedAccess ? bufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
 	auto hr = device->CreateCommittedResource(
 		&heapProps,
@@ -47,8 +53,8 @@ void Buffer::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fr
 	D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
 	D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);
 
-	if (toState == ResourceState::NON_PIXEL_SRV) {
-		printf("What?");
+	if (d3dToState == D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+		printf("hello");
 	}
 
 	D3D12_RESOURCE_BARRIER barrier = {};

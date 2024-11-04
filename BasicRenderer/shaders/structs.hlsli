@@ -38,7 +38,7 @@ struct LightInfo {
 };
 
 struct MaterialInfo {
-    uint psoFlags;
+    uint materialFlags;
     uint baseColorTextureIndex;
     uint baseColorSamplerIndex;
     uint normalTextureIndex;
@@ -71,6 +71,26 @@ struct Meshlet {
     uint TriOffset;
     uint VertCount;
     uint TriCount;
+};
+
+struct PerObjectBuffer {
+    row_major matrix model;
+    row_major float4x4 normalMatrix;
+    uint boneTransformBufferIndex;
+    uint inverseBindMatricesBufferIndex;
+    uint isValid;
+    uint pad0;
+};
+
+struct PerMeshBuffer {
+    uint materialDataIndex;
+    uint vertexFlags;
+    uint vertexByteSize;
+    uint vertexBufferOffset;
+    uint meshletBufferOffset;
+    uint meshletVerticesBufferOffset;
+    uint meshletTrianglesBufferOffset;
+    uint isValid;
 };
 
 #endif // __STRUCTS_HLSL__

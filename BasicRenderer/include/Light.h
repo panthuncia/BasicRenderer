@@ -9,8 +9,10 @@
 #include "Texture.h"
 #include "SceneNode.h"
 #include "buffers.h"
-#include "ResourceHandles.h"
+#include "BufferHandle.h"
 #include "PixelBuffer.h"
+
+class DynamicGloballyIndexedResource;
 
 enum LightType {
 	Point = 0,
@@ -80,6 +82,26 @@ public:
 	DirectX::XMVECTOR GetLightDir();
 	void SetShadowMap(std::shared_ptr<Texture> shadowMap);
 	std::shared_ptr<Texture>& getShadowMap();
+	void AddPerViewOpaqueIndirectCommandBuffer(std::shared_ptr<DynamicGloballyIndexedResource> buffer) {
+		m_perViewOpaqueIndirectCommandBuffers.push_back(buffer);
+	}
+
+	void AddPerViewTransparentIndirectCommandBuffer(std::shared_ptr<DynamicGloballyIndexedResource> buffer) {
+		m_perViewTransparentIndirectCommandBuffers.push_back(buffer);
+	}
+
+	void DeleteAllIndirectCommandBuffers() {
+		m_perViewOpaqueIndirectCommandBuffers.clear();
+		m_perViewTransparentIndirectCommandBuffers.clear();
+	}
+
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>& GetPerViewOpaqueIndirectCommandBuffers() {
+		return m_perViewOpaqueIndirectCommandBuffers;
+	}
+
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>& GetPerViewTransparentIndirectCommandBuffers() {
+		return m_perViewTransparentIndirectCommandBuffers;
+	}
 
 private:
 
@@ -93,6 +115,8 @@ private:
 	std::vector<ISceneNodeObserver<Light>*> lightObservers;
 	XMMATRIX m_lightProjection;
 	std::shared_ptr<Texture> m_shadowMap;
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewOpaqueIndirectCommandBuffers;
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewTransparentIndirectCommandBuffers;
 
 	void NotifyLightObservers();
 	void UpdateLightInfo();

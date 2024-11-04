@@ -4,6 +4,7 @@
 
 #include "DirectX/d3dx12.h"
 #include "BufferView.h"
+#include "DeletionManager.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index type) {
     size_t requiredSize = size;
@@ -26,7 +27,7 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
             }
 
             // Return BufferView
-            return std::move(std::make_unique<BufferView>(this, offset, requiredSize, type));
+            return std::move(BufferView::CreateUnique(this, offset, requiredSize, type));
         }
     }
 
@@ -95,8 +96,11 @@ void DynamicBuffer::Deallocate(const std::shared_ptr<BufferView>& view) {
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto& device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, capacity, true);
-    m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity, false);
+    m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, capacity, true, false);
+    if (m_dataBuffer != nullptr) {
+        DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+    }
+    m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity, false, m_UAV);
     CD3DX12_RANGE readRange(0, 0);
     m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&m_mappedData));
     m_memoryBlocks.push_back({ 0, capacity, true });
@@ -104,8 +108,11 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
 
 void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto& device = DeviceManager::GetInstance().GetDevice();
-    auto newUploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, newSize, true);
-    m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize, false);
+    auto newUploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, newSize, true, false);
+    if (m_dataBuffer != nullptr) {
+        DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+    }
+    m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize, false, m_UAV);
 
     void* newMappedData = nullptr;
     CD3DX12_RANGE readRange(0, 0);
@@ -116,10 +123,6 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     size_t oldCapacity = m_capacity;
     size_t sizeDiff = newSize - m_capacity;
     m_capacity = newSize;
-    onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, m_dataBuffer);
+    onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, this);
 	SetName(m_name);
-}
-
-void DynamicBuffer::MarkViewDirty(BufferView* view) {
-	m_dirtyViews.push_back(view);
 }

@@ -26,17 +26,17 @@ struct MemoryBlock {
 
 class BufferView;
 
-class DynamicBuffer : public DynamicBufferBase {
+class DynamicBuffer : public ViewedDynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"") {
+    static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"", bool UAV = false) {
         return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name));
     }
 
     std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
     void Deallocate(const std::shared_ptr<BufferView>& view);
 
-    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>& buffer)>& callback) {
+    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*)>& callback) {
         onResized = callback;
     }
 
@@ -52,15 +52,7 @@ public:
 		return m_mappedData;
 	}
 
-	const std::vector<BufferView*>& GetDirtyViews() {
-		return m_dirtyViews;
-	}
-
-    void MarkViewDirty(BufferView* view);
-
-	void ClearDirtyViews() {
-		m_dirtyViews.clear();
-	}
+	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
 
 protected:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
@@ -69,8 +61,8 @@ protected:
     }
 
 private:
-    DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"")
-        : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_needsUpdate(false) {
+    DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"", bool UAV = false)
+        : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(size);
         SetName(name);
     }
@@ -98,11 +90,11 @@ private:
 
     std::vector<MemoryBlock> m_memoryBlocks;
 
-    std::function<void(UINT, size_t, size_t, bool, std::shared_ptr<Buffer>&)> onResized;
+    std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_baseName = L"DynamicBuffer";
 	std::wstring m_name = m_baseName;
 
-	std::vector<BufferView*> m_dirtyViews;
+    bool m_UAV = false;
 
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);

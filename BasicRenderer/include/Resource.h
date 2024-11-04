@@ -4,7 +4,6 @@
 #include <vector>
 #include <directx/d3d12.h>
 #include "ResourceStates.h"
-//#include "RenderPass.h"
 
 class RenderContext;
 
@@ -16,6 +15,7 @@ public:
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& name) { this->name = name; OnSetName(); }
+	virtual ID3D12Resource* GetAPIResource() const = 0;
 
 protected:
     virtual void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) = 0;
@@ -23,8 +23,11 @@ protected:
     ResourceState currentState;
     std::wstring name;
 private:
+
 	void SetState(ResourceState state) { currentState = state; }
     friend class RenderGraph;
     friend class ResourceGroup;
     friend class ResourceManager;
+    friend class DynamicResource;
+    friend class DynamicGloballyIndexedResource;
 };

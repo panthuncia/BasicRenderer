@@ -2,6 +2,10 @@
 
 #include <directx/d3d12.h>
 #include <stdexcept>
+#if defined(_DEBUG)
+#include <string>
+#endif // _DEBUG
+
 
 class Resource;
 
@@ -19,6 +23,8 @@ enum class ResourceState {
 	UPLOAD,
 	COPY_SOURCE,
 	COPY_DEST,
+	UNORDERED_ACCESS,
+	INDIRECT_ARGUMENT,
 };
 
 inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
@@ -49,6 +55,10 @@ inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 		return D3D12_RESOURCE_STATE_COPY_SOURCE;
 	case ResourceState::COPY_DEST:
 		return D3D12_RESOURCE_STATE_COPY_DEST;
+	case ResourceState::UNORDERED_ACCESS:
+		return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+	case ResourceState::INDIRECT_ARGUMENT:
+		return D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
 	}
 	throw std::runtime_error("Invalid Resource State");
 }
@@ -57,4 +67,7 @@ struct ResourceTransition {
 	Resource* resource = nullptr;
 	ResourceState beforeState;
 	ResourceState afterState;
+#if defined(_DEBUG)
+	std::wstring name;
+#endif // DEBUG
 };

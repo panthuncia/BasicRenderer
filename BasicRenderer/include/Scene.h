@@ -13,6 +13,10 @@
 #include "MeshData.h"
 #include "Light.h"
 #include "MeshManager.h"
+#include "ObjectManager.h"
+#include "IndirectCommandBufferManager.h"
+
+class DynamicGloballyIndexedResource;
 
 class Scene {
 public:
@@ -47,6 +51,13 @@ public:
     //LightManager& GetLightManager();
     void Activate();
     const std::unique_ptr<MeshManager>& GetMeshManager();
+	const std::unique_ptr<ObjectManager>& GetObjectManager();
+	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
+    std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraTransparentIndirectCommandBuffer();
+	unsigned int GetNumDrawsInScene();
+	unsigned int GetNumOpaqueDraws();
+	unsigned int GetNumTransparentDraws();
+	const std::unique_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
 
 private:
     std::shared_ptr<Camera> pCamera;
@@ -67,6 +78,14 @@ private:
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
     LightManager lightManager;
     std::unique_ptr<MeshManager> meshManager = nullptr;
+	std::unique_ptr<ObjectManager> objectManager = nullptr;
+	std::unique_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
+    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraTransparentIndirectCommandBuffer;
+
+	unsigned int m_numDrawsInScene = 0;
+	unsigned int m_numOpaqueDraws = 0;
+	unsigned int m_numTransparentDraws = 0;
 
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;

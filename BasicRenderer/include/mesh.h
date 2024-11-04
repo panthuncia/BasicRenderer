@@ -16,6 +16,7 @@
 using namespace Microsoft::WRL;
 
 class Material;
+class MeshManager;
 
 class Mesh {
 public:
@@ -24,9 +25,9 @@ public:
     }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
-    BufferHandle& GetPerMeshBuffer();
+    //BufferHandle& GetPerMeshBuffer();
+	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
-    UINT GetPSOFlags() const;
 	int GetGlobalID() const;
 	std::vector<Vertex>& GetVertices() { return m_vertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
@@ -62,6 +63,18 @@ public:
 		return m_meshlets.size();
 	}
 
+	void SetPerMeshBufferView(std::unique_ptr<BufferView> view) {
+		m_perMeshBufferView = std::move(view);
+	}
+
+	std::unique_ptr<BufferView>& GetPerMeshBufferView() {
+		return m_perMeshBufferView;
+	}
+
+	void SetCurrentMeshManager(MeshManager* manager) {
+		m_pCurrentMeshManager = manager;
+	}
+
 private:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
     template <typename VertexType>
@@ -84,12 +97,13 @@ private:
 	std::unique_ptr<BufferView> m_meshletVerticesBufferView = nullptr;
 	std::unique_ptr<BufferView> m_meshletTrianglesBufferView = nullptr;
 
-    UINT m_psoFlags = 0;
-    UINT m_indexCount = 0;
+	UINT m_indexCount = 0;
     BufferHandle m_vertexBufferHandle;
 	BufferHandle m_indexBufferHandle;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
-    BufferHandle m_pPerMeshBuffer;
+    //BufferHandle m_pPerMeshBuffer;
     PerMeshCB m_perMeshBufferData = { 0 };
+	std::unique_ptr<BufferView> m_perMeshBufferView;
+	MeshManager* m_pCurrentMeshManager = nullptr;
 };

@@ -9,6 +9,7 @@
 #include "ResourceManager.h"
 #include "Material.h"
 #include "Vertex.h"
+#include "MeshManager.h"
 
 std::atomic<int> Mesh::globalMeshCount = 0;
 
@@ -16,10 +17,6 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indic
     m_vertices = vertices;
     CreateBuffers(vertices, indices);
     this->material = material;
-    m_psoFlags = material->m_psoFlags;
-    if (flags & VertexFlags::VERTEX_SKINNED) {
-        m_psoFlags |= PSOFlags::PSO_SKINNED;
-    }
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
@@ -27,8 +24,8 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indic
         using T = std::decay_t<decltype(vertex)>;
 		m_perMeshBufferData.vertexByteSize = sizeof(T);
 		}, vertices.front());
-    m_pPerMeshBuffer = resourceManager.CreateConstantBuffer<PerMeshCB>(L"PerMeshCB");
-	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+    //m_pPerMeshBuffer = resourceManager.CreateConstantBuffer<PerMeshCB>(L"PerMeshCB");
+	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 	m_globalMeshID = GetNextGlobalIndex();
 }
 
@@ -86,16 +83,8 @@ D3D12_INDEX_BUFFER_VIEW Mesh::GetIndexBufferView() const {
     return m_indexBufferView;
 }
 
-BufferHandle& Mesh::GetPerMeshBuffer() {
-    return m_pPerMeshBuffer;
-}
-
 UINT Mesh::GetIndexCount() const {
     return m_indexCount;
-}
-
-UINT Mesh::GetPSOFlags() const {
-    return m_psoFlags;
 }
 
 int Mesh::GetNextGlobalIndex() {
@@ -109,26 +98,42 @@ int Mesh::GetGlobalID() const {
 void Mesh::SetVertexBufferView(std::unique_ptr<BufferView> view) {
 	m_vertexBufferView2 = std::move(view);
 	m_perMeshBufferData.vertexBufferOffset = m_vertexBufferView2->GetOffset();
-	auto& resourceManager = ResourceManager::GetInstance();
-	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+	//auto& resourceManager = ResourceManager::GetInstance();
+	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletBufferView = std::move(view);
 	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset();
-	auto& resourceManager = ResourceManager::GetInstance();
-	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+	//auto& resourceManager = ResourceManager::GetInstance();
+	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 void Mesh::SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletVerticesBufferView = std::move(view);
 	m_perMeshBufferData.meshletVerticesBufferOffset = m_meshletVerticesBufferView->GetOffset();
-	auto& resourceManager = ResourceManager::GetInstance();
-	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+	//auto& resourceManager = ResourceManager::GetInstance();
+	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletTrianglesBufferView = std::move(view);
 	m_perMeshBufferData.meshletTrianglesBufferOffset = m_meshletTrianglesBufferView->GetOffset();
-	auto& resourceManager = ResourceManager::GetInstance();
-	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+	//auto& resourceManager = ResourceManager::GetInstance();
+	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 
 void Mesh::SetBufferViews(std::unique_ptr<BufferView> vertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView) {
@@ -140,6 +145,10 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> vertexBufferView, std::uni
 	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset() / sizeof(meshopt_Meshlet);
 	m_perMeshBufferData.meshletVerticesBufferOffset = m_meshletVerticesBufferView->GetOffset() / 4;
 	m_perMeshBufferData.meshletTrianglesBufferOffset = m_meshletTrianglesBufferView->GetOffset();
-	auto& resourceManager = ResourceManager::GetInstance();
-	resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+	//auto& resourceManager = ResourceManager::GetInstance();
+	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }

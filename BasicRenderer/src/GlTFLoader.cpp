@@ -9,13 +9,14 @@
 #include "stb/stb_image.h"
 #include "Texture.h"
 #include "Material.h"
-#include "PSOManager.h"
 #include "Sampler.h"
 #include "PixelBuffer.h"
 #include "Animation.h"
 #include "Skeleton.h"
 #include "utilities.h"
 #include "Vertex.h"
+#include "MaterialFlags.h"
+#include "PSOFlags.h"
 
 using nlohmann::json;
 
@@ -609,7 +610,8 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
 	// TODO: convert sRGB to linear before they're sampled. glTF spec says the filtering 
     // might not be right otherwise, even if you do gamma corrrection in the shader
     for (const auto& gltfMaterial : gltfData["materials"]) {
-        UINT psoFlags = 0;
+        UINT materialFlags = 0;
+		UINT psoFlags = 0;
         std::shared_ptr<Texture> baseColorTexture = nullptr;
         std::shared_ptr<Texture> normalTexture = nullptr;
         std::shared_ptr<Texture> aoMap = nullptr;
@@ -623,21 +625,22 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
 
         if (gltfMaterial.contains("doubleSided")) {
             if (gltfMaterial["doubleSided"].get<bool>()) {
-                psoFlags |= PSOFlags::PSO_DOUBLE_SIDED;
+                materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
+				psoFlags |= PSOFlags::PSO_DOUBLE_SIDED;
             }
         }
 
         if (gltfMaterial.contains("pbrMetallicRoughness")) {
-            psoFlags |= PSOFlags::PSO_PBR;
+            materialFlags |= MaterialFlags::MATERIAL_PBR;
             const auto& pbr = gltfMaterial["pbrMetallicRoughness"];
             if (pbr.contains("baseColorTexture")) {
-                psoFlags |= PSOFlags::PSO_BASE_COLOR_TEXTURE;
+                materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
                 int textureIndex = pbr["baseColorTexture"]["index"];
                 baseColorTexture = srgbTextures[textureIndex];
                 //linearTextures[textureIndex]->textureResource.Reset();
             }
             if (pbr.contains("metallicRoughnessTexture")) {
-                psoFlags |= PSOFlags::PSO_PBR_MAPS;
+                materialFlags |= MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
                 int textureIndex = pbr["metallicRoughnessTexture"]["index"];
                 metallicRoughnessTexture = linearTextures[textureIndex];
                 //srgbTextures[textureIndex]->textureResource.Reset();
@@ -654,19 +657,19 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
         }
 
         if (gltfMaterial.contains("normalTexture")) {
-            psoFlags |= PSOFlags::PSO_NORMAL_MAP;
+            materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
             int textureIndex = gltfMaterial["normalTexture"]["index"];
             normalTexture = linearTextures[textureIndex];
             //srgbTextures[textureIndex]->textureResource.Reset();
         }
         if (gltfMaterial.contains("occlusionTexture")) {
-            psoFlags |= PSOFlags::PSO_AO_TEXTURE;
+            materialFlags |= MaterialFlags::MATERIAL_AO_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             int textureIndex = gltfMaterial["occlusionTexture"]["index"];
             aoMap = linearTextures[textureIndex];
             //srgbTextures[textureIndex]->textureResource.Reset();
         }
         if (gltfMaterial.contains("emissiveTexture")) {
-            psoFlags |= PSOFlags::PSO_EMISSIVE_TEXTURE;
+            materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             int textureIndex = gltfMaterial["emissiveTexture"]["index"];
             emissiveTexture = srgbTextures[textureIndex];
             //linearTextures[textureIndex]->textureResource.Reset();
@@ -685,7 +688,9 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
                 blendMode = BlendState::BLEND_STATE_BLEND;
             }
         }
-        std::shared_ptr<Material> newMaterial = std::make_shared<Material>(gltfMaterial["name"], psoFlags,
+        std::shared_ptr<Material> newMaterial = std::make_shared<Material>(gltfMaterial["name"],
+            materialFlags,
+			psoFlags,
             baseColorTexture,
             normalTexture,
             aoMap,

@@ -12,6 +12,7 @@
 #include "Resource.h"
 #include "BufferHandle.h"
 #include "DynamicBufferBase.h"
+#include "DeletionManager.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -19,17 +20,27 @@ template<class T>
 class DynamicStructuredBuffer : public DynamicBufferBase {
 public:
 
-	static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"") {
-		return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name));
-	}
+    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name, UAV));
+    }
 
-    void Add(const T& element) {
+    unsigned int Add(const T& element) {
         if (m_data.size() >= m_capacity) {
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, m_dataBuffer);
+            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
         }
         m_data.push_back(element);
         m_needsUpdate = true;
+
+        unsigned int index = m_data.size() - 1;
+
+        // Update upload buffer
+        void* uploadData = nullptr;
+        m_uploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&uploadData));
+        std::memcpy(reinterpret_cast<unsigned char*>(uploadData) + index * sizeof(T), &m_data[index], sizeof(T));
+        m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+
+        return index;
     }
 
     void RemoveAt(UINT index) {
@@ -52,7 +63,7 @@ public:
             CreateBuffer(newCapacity);
             m_capacity = newCapacity;
         }
-        
+
     }
 
     void UpdateAt(UINT index, const T& element) {
@@ -75,7 +86,7 @@ public:
         return false;
     }
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)>& callback) {
+    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
         onResized = callback;
     }
 
@@ -86,16 +97,28 @@ public:
     UINT Size() {
         return m_data.size();
     }
+
+	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+
 protected:
     void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
-		currentState = newState;
+        currentState = newState;
         m_dataBuffer->Transition(commandList, prevState, newState);
     }
 
 private:
-    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"")
-        : m_globalResizableBufferID(id), m_capacity(capacity), m_needsUpdate(false) {
+    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
+        : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(capacity);
+        if (name != L"") {
+            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+        }
+        else {
+            m_dataBuffer->SetName(m_name.c_str());
+        }
+    }
+
+    void OnSetName() override {
         if (name != L"") {
             m_dataBuffer->SetName((m_name + L": " + name).c_str());
         }
@@ -110,12 +133,29 @@ private:
 
     UINT m_globalResizableBufferID;
 
-    std::function<void(UINT, UINT, UINT, std::shared_ptr<Buffer>&)> onResized;
+    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
+
+    bool m_UAV = false;
 
     void CreateBuffer(UINT capacity) {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true);
-        m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false);
+        auto newUploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, sizeof(T) * capacity, true, m_UAV);
+
+        void* mappedData;
+        if (m_uploadBuffer != nullptr) {
+            m_uploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+            void* newMappedData = nullptr;
+            newUploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&newMappedData));
+            std::memcpy(newMappedData, mappedData, sizeof(T) * m_capacity);
+            newUploadBuffer->m_buffer->Unmap(0, nullptr);
+            m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+        }
+        m_uploadBuffer = newUploadBuffer;
+
+        if (m_dataBuffer != nullptr) {
+            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+        }
+        m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false, m_UAV);
     }
 };

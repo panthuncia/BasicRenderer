@@ -1,6 +1,7 @@
 #include "Skeleton.h"
 #include <spdlog/spdlog.h>
 #include "ResourceManager.h"
+#include "DeletionManager.h"
 
 Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
     : m_nodes(nodes), m_inverseBindMatrices(inverseBindMatrices) {
@@ -19,6 +20,12 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferH
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
     m_transformsHandle.dataBuffer->SetName(L"BoneTransforms");
+}
+
+Skeleton::~Skeleton() {
+	auto& deletionManager = DeletionManager::GetInstance();
+	deletionManager.MarkForDelete(m_transformsHandle.dataBuffer);
+	deletionManager.MarkForDelete(m_inverseBindMatricesHandle.dataBuffer);
 }
 
 
@@ -59,11 +66,11 @@ void Skeleton::UpdateTransforms() {
 }
 
 UINT Skeleton::GetTransformsBufferIndex() {
-    return m_transformsHandle.index;
+    return m_transformsHandle.dataBuffer->GetSRVInfo().index;
 }
 
 UINT Skeleton::GetInverseBindMatricesBufferIndex() {
-    return m_inverseBindMatricesHandle.index;
+    return m_inverseBindMatricesHandle.dataBuffer->GetSRVInfo().index;
 }
 
 BufferHandle Skeleton::GetInverseBindMatricesHandle() {

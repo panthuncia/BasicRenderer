@@ -11,17 +11,29 @@
 #include "ShadowMaps.h"
 #include "ResourceManager.h"
 #include "SettingsManager.h"
+#include "DynamicResource.h"
+#include "IndirectCommandBufferManager.h"
+#include "MaterialBuckets.h"
+#include "DeletionManager.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
-    m_lightBufferHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 1, L"lightBuffer<LightInfo>");
-    m_spotViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
-    m_pointViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
-    m_directionalViewInfoHandle = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");
+    m_lightBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 1, L"lightBuffer<LightInfo>");
+    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
+    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
+    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	getCurrentShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<ShadowMaps*>("currentShadowMapsResourceGroup");
+}
+
+LightManager::~LightManager() {
+	auto& deletionManager = DeletionManager::GetInstance();
+	deletionManager.MarkForDelete(m_lightBuffer);
+	deletionManager.MarkForDelete(m_spotViewInfo);
+	deletionManager.MarkForDelete(m_pointViewInfo);
+	deletionManager.MarkForDelete(m_directionalViewInfo);
 }
 
 void LightManager::Initialize() {
@@ -57,8 +69,8 @@ void LightManager::AddLight(Light* lightNode, bool shadowCasting, Camera* curren
 }
 
 unsigned int LightManager::CreateLightInfo(Light* node) {
-    m_lightBufferHandle.buffer->Add(node->GetLightInfo());
-    return m_lightBufferHandle.buffer->Size() - 1; // Return new light's index
+    m_lightBuffer->Add(node->GetLightInfo());
+    return m_lightBuffer->Size() - 1; // Return new light's index
 }
 
 void LightManager::RemoveLight(Light* light) {
@@ -74,24 +86,28 @@ void LightManager::RemoveLight(Light* light) {
 
     m_lights.erase(m_lights.begin() + index);
 
-    m_lightBufferHandle.buffer->RemoveAt(index);
+    m_lightBuffer->RemoveAt(index);
 	light->RemoveLightObserver(this);
+	light->SetLightBufferIndex(-1);
+	RemoveLightViewInfo(light);
+
+	m_lightDrawSetBufferMap.erase(light->GetLocalID());
 }
 
 unsigned int LightManager::GetLightBufferDescriptorIndex() {
-    return m_lightBufferHandle.index;
+    return m_lightBuffer->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
-	return m_pointViewInfoHandle.index;
+	return m_pointViewInfo->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
-	return m_spotViewInfoHandle.index;
+	return m_spotViewInfo->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return m_directionalViewInfoHandle.index;
+	return m_directionalViewInfo->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetNumLights() {
@@ -102,17 +118,21 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
     auto projectionMatrix = node->GetLightProjectionMatrix();
 	switch (node->GetLightType()) {
 	case LightType::Point: {
-		auto cubeViewIndex = m_pointViewInfoHandle.buffer->Size() / 6;
+		auto cubeViewIndex = m_pointViewInfo->Size() / 6;
 		node->SetLightViewInfoIndex(cubeViewIndex);
 		auto cubemapMatrices = GetCubemapViewMatrices(node->transform.getGlobalPosition());
 		for (int i = 0; i < 6; i++) {
-			m_pointViewInfoHandle.buffer->Add(XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
+			m_pointViewInfo->Add(XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
+			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
+			node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
 		}
 		break;
 	}
 	case LightType::Spot: {
-		node->SetLightViewInfoIndex(m_spotViewInfoHandle.buffer->Size());
-		m_spotViewInfoHandle.buffer->Add(XMMatrixMultiply(node->GetLightViewMatrix(), projectionMatrix));
+		node->SetLightViewInfoIndex(m_spotViewInfo->Size());
+		m_spotViewInfo->Add(XMMatrixMultiply(node->GetLightViewMatrix(), projectionMatrix));
+		node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
+		node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
 		break;
 	}
 	case LightType::Directional: {
@@ -121,10 +141,12 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 			return -1;
 		}
 		auto numCascades = getNumDirectionalLightCascades();
-		node->SetLightViewInfoIndex(m_directionalViewInfoHandle.buffer->Size() / numCascades);
+		node->SetLightViewInfoIndex(m_directionalViewInfo->Size() / numCascades);
 		auto cascades = setupCascades(numCascades, *node, *camera, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
-			m_directionalViewInfoHandle.buffer->Add(XMMatrixMultiply(cascades[i].orthoMatrix, cascades[i].viewMatrix));
+			m_directionalViewInfo->Add(XMMatrixMultiply(cascades[i].orthoMatrix, cascades[i].viewMatrix));
+			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
+			node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
 		}
 		break;
 	}
@@ -140,12 +162,12 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 	case LightType::Point: {
 		auto cubemapMatrices = GetCubemapViewMatrices(light->transform.getGlobalPosition());
 		for (int i = 0; i < 6; i++) {
-			m_pointViewInfoHandle.buffer->UpdateAt(light->GetCurrentviewInfoIndex()*6+i,XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
+			m_pointViewInfo->UpdateAt(light->GetCurrentviewInfoIndex()*6+i,XMMatrixMultiply(cubemapMatrices[i], projectionMatrix));
 		}
 		break;
 	}
 	case LightType::Spot: {
-		m_spotViewInfoHandle.buffer->UpdateAt(light->GetCurrentviewInfoIndex(), XMMatrixMultiply(light->GetLightViewMatrix(), projectionMatrix));
+		m_spotViewInfo->UpdateAt(light->GetCurrentviewInfoIndex(), XMMatrixMultiply(light->GetLightViewMatrix(), projectionMatrix));
 		break;
 	}
 	case LightType::Directional: {
@@ -156,7 +178,7 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 		auto numCascades = getNumDirectionalLightCascades();
 		auto cascades = setupCascades(numCascades, *light, *m_currentCamera, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
-			m_directionalViewInfoHandle.buffer->UpdateAt(light->GetCurrentviewInfoIndex()*numCascades+i, XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix));
+			m_directionalViewInfo->UpdateAt(light->GetCurrentviewInfoIndex()*numCascades+i, XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix));
 		}
 		break;
 	}
@@ -167,13 +189,18 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 
 void LightManager::RemoveLightViewInfo(Light* node) {
 	int viewInfoIndex = node->GetCurrentviewInfoIndex();
+	if (viewInfoIndex < 0) { // Not a shadow caster
+		return;
+	}
+	m_pCommandBufferManager->UnregisterBuffers(node->GetLocalID()); // Remove indirect command buffers
+	node->DeleteAllIndirectCommandBuffers();
 	switch (node->GetLightType()) {
 	case LightType::Point:
 		// Erase light in point lights
 		m_pointLights.erase(m_pointLights.begin() + viewInfoIndex);
 		// Erase view info in structured buffer
 		for (int i = 0; i < 6; i++) {
-			m_pointViewInfoHandle.buffer->RemoveAt(viewInfoIndex);
+			m_pointViewInfo->RemoveAt(viewInfoIndex);
 		}
 		// Update subsequent view info indices
 		for (int i = viewInfoIndex; i < m_pointLights.size(); i++) {
@@ -184,7 +211,7 @@ void LightManager::RemoveLightViewInfo(Light* node) {
 		// Erase light in spot lights
 		m_spotLights.erase(m_spotLights.begin() + viewInfoIndex);
 		// Erase view info in structured buffer
-		m_spotViewInfoHandle.buffer->RemoveAt(node->GetCurrentviewInfoIndex());
+		m_spotViewInfo->RemoveAt(node->GetCurrentviewInfoIndex());
 		// Update subsequent view info indices
 		for (int i = viewInfoIndex; i < m_spotLights.size(); i++) {
 			m_spotLights[i]->DecrementLightViewInfoIndex();
@@ -195,7 +222,7 @@ void LightManager::RemoveLightViewInfo(Light* node) {
 		m_directionalLights.erase(m_directionalLights.begin() + viewInfoIndex);
 		// Erase view info in structured buffer
 		for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-			m_directionalViewInfoHandle.buffer->RemoveAt(viewInfoIndex);
+			m_directionalViewInfo->RemoveAt(viewInfoIndex);
 		}
 		// Update subsequent view info indices
 		for (int i = viewInfoIndex; i < m_directionalLights.size(); i++) {
@@ -223,19 +250,23 @@ void LightManager::OnNodeUpdated(SceneNode* camera) {
 	}
 }
 void LightManager::OnNodeUpdated(Light* light) {
-	m_lightBufferHandle.buffer->UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
+	m_lightBuffer->UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
 	if (light->GetLightInfo().shadowMapIndex != -1) {
 		UpdateLightViewInfo(light);
 	}
 }
 
 void LightManager::UpdateBuffers() {
-	if (m_lightBufferHandle.buffer->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_lightBufferHandle);
-	if (m_spotViewInfoHandle.buffer->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_spotViewInfoHandle);
-	if (m_pointViewInfoHandle.buffer->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfoHandle);
-	if (m_directionalViewInfoHandle.buffer->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfoHandle);
+	if (m_lightBuffer->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_lightBuffer.get());
+	if (m_spotViewInfo->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_spotViewInfo.get());
+	if (m_pointViewInfo->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfo.get());
+	if (m_directionalViewInfo->UpdateUploadBuffer())
+		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfo.get());
+}
+
+void LightManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {
+	m_pCommandBufferManager = commandBufferManager;
 }

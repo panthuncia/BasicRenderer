@@ -50,7 +50,7 @@ public:
         commandList->SetPipelineState(debugPSO.Get());
         commandList->SetGraphicsRootSignature(debugRootSignature.Get());
 
-        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetHandle().SRVInfo.gpuHandle);
+        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
         auto viewMatrix = XMMatrixTranspose(XMMatrixMultiply(XMMatrixScaling(0.2f, 0.2f, 1.0f), XMMatrixTranslation(0.7, -0.7, 0)));
         commandList->SetGraphicsRoot32BitConstants(1, 16, &viewMatrix, 0);
 

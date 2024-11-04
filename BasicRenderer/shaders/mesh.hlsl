@@ -3,39 +3,38 @@
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
 
-PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID) {
+PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
     Vertex vertex = LoadVertex(byteOffset, buffer, flags);
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
 
-    float3x3 normalMatrixSkinnedIfNecessary = (float3x3) normalMatrix;
+    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)objectBuffer.normalMatrix;
     
-    #if defined(PSO_SKINNED)
-    StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[boneTransformBufferIndex];
-    StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[inverseBindMatricesBufferIndex];
+    if (flags & VERTEX_SKINNED) {
+        StructuredBuffer<float4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
+        StructuredBuffer<float4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
     
-    matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.x);
-    matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.y);
-    matrix bone3 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.z);
-    matrix bone4 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.w);
+        matrix bone1 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.x);
+        matrix bone2 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.y);
+        matrix bone3 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.z);
+        matrix bone4 = loadMatrixFromBuffer(boneTransformsBuffer, vertex.joints.w);
     
-    matrix bindMatrix1 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.x);
-    matrix bindMatrix2 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.y);
-    matrix bindMatrix3 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.z);
-    matrix bindMatrix4 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.w);
+        matrix bindMatrix1 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.x);
+        matrix bindMatrix2 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.y);
+        matrix bindMatrix3 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.z);
+        matrix bindMatrix4 = loadMatrixFromBuffer(inverseBindMatricesBuffer, vertex.joints.w);
 
-    matrix skinMatrix = vertex.weights.x * mul(bindMatrix1, bone1) +
+        matrix skinMatrix = vertex.weights.x * mul(bindMatrix1, bone1) +
                         vertex.weights.y * mul(bindMatrix2, bone2) +
                         vertex.weights.z * mul(bindMatrix3, bone3) +
                         vertex.weights.w * mul(bindMatrix4, bone4);
     
-    pos = mul(pos, skinMatrix);
-    normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3)skinMatrix);
-#endif // SKINNED
-    
-    float4 worldPosition = mul(pos, model);
+        pos = mul(pos, skinMatrix);
+        normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3) skinMatrix);
+    }
+    float4 worldPosition = mul(pos, objectBuffer.model);
     PSInput result;
     
     #if defined(PSO_SHADOW)
@@ -70,18 +69,18 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     
     result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
     
-#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
-    result.TBN_T = normalize(mul(vertex.tangent, normalMatrixSkinnedIfNecessary));
-    result.TBN_B = normalize(mul(vertex.bitangent, normalMatrixSkinnedIfNecessary));
-    result.TBN_N = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
-#endif // NORMAL_MAP
+    if (flags & VERTEX_TANBIT) {
+        result.TBN_T = normalize(mul(vertex.tangent, normalMatrixSkinnedIfNecessary));
+        result.TBN_B = normalize(mul(vertex.bitangent, normalMatrixSkinnedIfNecessary));
+        result.TBN_N = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
+    }
     
-#if defined(PSO_VERTEX_COLORS)
-    result.color = vertex.color;
-#endif
-#if defined(PSO_TEXTURED)
-    result.texcoord = vertex.texcoord;
-#endif
+    if (flags & VERTEX_COLORS) {
+        result.color = vertex.color;
+    };
+    if (flags & VERTEX_TEXCOORDS) {
+        result.texcoord = vertex.texcoord;
+    }
     result.meshletIndex = vGroupID.x;
     return result;
 }
@@ -120,22 +119,28 @@ void MSMain(
     out vertices PSInput outputVertices[64],
     out indices uint3 outputTriangles[64]) {
 
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferIndex]; // Base vertex buffer
-    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferIndex]; // Meshlets, containing vertex & primitive offset & num
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferIndex]; // Meshlet vertices, as indices into base vertex buffer
-    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferDescriptorIndex]; // Base vertex buffer
+    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferDescriptorIndex]; // Meshlets, containing vertex & primitive offset & num
+    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferDescriptorIndex]; // Meshlet vertices, as indices into base vertex buffer
+    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferDescriptorIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
     
-    uint meshletOffset = meshletBufferOffset;
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
+    
+    uint meshletOffset = meshBuffer.meshletBufferOffset;
     Meshlet meshlet = meshletBuffer[meshletOffset+vGroupID.x];
     SetMeshOutputCounts(meshlet.VertCount, meshlet.TriCount);
     
-    uint triOffset = meshletTrianglesBufferOffset+meshlet.TriOffset + uGroupThreadID * 3;
+    uint triOffset = meshBuffer.meshletTrianglesBufferOffset + meshlet.TriOffset + uGroupThreadID * 3;
     uint3 meshletIndices = uint3(LoadByte(meshletTrianglesBuffer, triOffset), LoadByte(meshletTrianglesBuffer, triOffset + 1), LoadByte(meshletTrianglesBuffer, triOffset+2)); // Local indices into meshletVerticesBuffer
-    uint vertOffset = meshlet.VertOffset + meshletVerticesBufferOffset;
-    //uint3 vertexIndices = uint3(meshletVerticesBuffer[vertOffset + meshletIndices.x], meshletVerticesBuffer[vertOffset + meshletIndices.y], meshletVerticesBuffer[vertOffset + meshletIndices.z]); // Global indices into vertexBuffer
+    uint vertOffset = meshlet.VertOffset + meshBuffer.meshletVerticesBufferOffset;
+    
     if (uGroupThreadID < meshlet.VertCount) {
         uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, vertexBufferOffset, thisVertex, vertexFlags, vertexByteSize, vGroupID);
+        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshBuffer.vertexBufferOffset, thisVertex, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, vGroupID, objectBuffer);
     }
     if (uGroupThreadID < meshlet.TriCount) {
         outputTriangles[uGroupThreadID] = meshletIndices;

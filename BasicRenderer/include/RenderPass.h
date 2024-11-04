@@ -12,6 +12,11 @@ struct PassParameters {
     std::vector<std::shared_ptr<Resource>> shaderResources;
     std::vector<std::shared_ptr<Resource>> renderTargets;
     std::vector<std::shared_ptr<Resource>> depthTextures;
+	std::vector<std::shared_ptr<Resource>> constantBuffers;
+	std::vector<std::shared_ptr<Resource>> unorderedAccessViews;
+	std::vector<std::shared_ptr<Resource>> copyTargets;
+	std::vector<std::shared_ptr<Resource>> copySources;
+	std::vector<std::shared_ptr<Resource>> indirectArgumentBuffers;
 };
 
 class RenderPass {

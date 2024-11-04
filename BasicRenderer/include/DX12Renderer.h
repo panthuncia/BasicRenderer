@@ -122,6 +122,7 @@ private:
 	std::function<void(bool)> setImageBasedLightingEnabled;
 	std::function<void(std::string)> setEnvironment;
 	std::function<bool()> getMeshShadersEnabled;
+    std::function<bool()> getIndirectDrawsEnabled;
 };
 
 #endif //DX12RENDERER_H

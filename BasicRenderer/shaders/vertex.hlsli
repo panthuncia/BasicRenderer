@@ -11,34 +11,21 @@ struct Vertex {
     float3 bitangent : BINORMAL0;
     uint4 joints : TEXCOORD1;
     float4 weights : TEXCOORD2;
+    float3 color;
 };
 
-#if defined(PSO_VERTEX_COLORS)
 struct PSInput {
     float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD3;
-    float4 positionViewSpace : TEXCOORD4;
-    float3 normalWorldSpace : TEXCOORD5;
-    float4 color : COLOR;
-    uint meshletIndex : TEXCOORD6;
+    float4 positionWorldSpace : TEXCOORD0;
+    float4 positionViewSpace : TEXCOORD1;
+    float3 normalWorldSpace : TEXCOORD2;
+    float2 texcoord : TEXCOORD3;
+    float3 TBN_T : TEXCOORD4;      // First row of TBN
+    float3 TBN_B : TEXCOORD5;      // Second row of TBN
+    float3 TBN_N : TEXCOORD6;      // Third row of TBN
+    float3 color : TEXCOORD7;
+    uint meshletIndex : TEXCOORD8;
 };
-#else
-struct PSInput {
-    float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD3;
-    float4 positionViewSpace : TEXCOORD4;
-    float3 normalWorldSpace : TEXCOORD5;
-#if defined(PSO_TEXTURED)
-    float2 texcoord : TEXCOORD0;
-#endif // TEXTURED
-#if defined(PSO_NORMAL_MAP) || defined(PSO_PARALLAX)
-    float3 TBN_T : TEXCOORD6;      // First row of TBN
-    float3 TBN_B : TEXCOORD7;      // Second row of TBN
-    float3 TBN_N : TEXCOORD8;      // Third row of TBN
-#endif // NORMAL_MAP
-    uint meshletIndex : TEXCOORD9;
-};
-#endif
 
 #define VERTEX_COLORS 1 << 0
 #define VERTEX_NORMAL 1 << 1
@@ -82,6 +69,8 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
         vertex.weights = LoadFloat4(byteOffset, buffer);
         byteOffset += 16;
     }
+    
+    vertex.color = float3(1.0, 1.0, 1.0);
 
     return vertex;
 }

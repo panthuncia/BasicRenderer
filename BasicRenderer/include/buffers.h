@@ -27,6 +27,8 @@ struct PerObjectCB {
     DirectX::XMMATRIX normalMatrix;
     unsigned int boneTransformBufferIndex;
     unsigned int inverseBindMatricesBufferIndex;
+    unsigned int isValid = 1;
+    unsigned int pad0;
 };
 
 struct PerMeshCB {
@@ -37,10 +39,11 @@ struct PerMeshCB {
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
     unsigned int meshletTrianglesBufferOffset;
+    unsigned int isValid = 1;
 };
 
 struct PerMaterialCB {
-    unsigned int psoFlags;
+    unsigned int materialFlags;
     unsigned int baseColorTextureIndex;
     unsigned int baseColorSamplerIndex;
     unsigned int normalTextureIndex;
@@ -81,4 +84,5 @@ struct LightInfo {
     float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
+    unsigned int isValid;
 };

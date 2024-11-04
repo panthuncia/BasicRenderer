@@ -49,42 +49,64 @@ public:
 
 		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
 
-		unsigned int meshletBufferIndices[4] = {};
+		unsigned int staticBufferIndices[5] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
-		meshletBufferIndices[0] = meshManager->GetVertexBufferIndex();
-		meshletBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
-		meshletBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
-		meshletBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
-		commandList->SetGraphicsRoot32BitConstants(5, 4, &meshletBufferIndices, 0);
+		auto& objectManager = context.currentScene->GetObjectManager();
+		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
+		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
+		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
+		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
+		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
+
+		commandList->SetGraphicsRoot32BitConstants(5, 5, &staticBufferIndices, 0);
+
+		//D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
+		//D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 
 		auto drawObjects = [&]() {
+			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
+			commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
 			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetOpaqueMeshes();
 
-				commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+				//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
+				//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
-					auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | PSOFlags::PSO_SHADOW, mesh.material->m_blendState);
+					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-
+					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+					//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+					//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}
+
+			unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+			commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+
 			for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetTransparentMeshes();
 
-				commandList->SetGraphicsRootConstantBufferView(0, renderable->GetConstantBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
+				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+				//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
+				//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
-					auto pso = psoManager.GetMeshPSO(mesh.GetPSOFlags() | PSOFlags::PSO_SHADOW, mesh.material->m_blendState);
+					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					commandList->SetGraphicsRootConstantBufferView(1, mesh.GetPerMeshBuffer().dataBuffer->m_buffer->GetGPUVirtualAddress());
-
+					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+					//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+					//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}
@@ -99,7 +121,7 @@ public:
 			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
 			switch (light->GetLightType()) {
 				case LightType::Spot: {
-					auto& dsvHandle = shadowMap->GetHandle().DSVInfo[0].cpuHandle;
+					auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
 					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 					int lightIndex = light->GetCurrentLightBufferIndex();
@@ -114,7 +136,7 @@ public:
 					int lightViewIndex = light->GetCurrentviewInfoIndex()*6;
 					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					for (int i = 0; i < 6; i++) {
-						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
+						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
@@ -128,7 +150,7 @@ public:
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						auto& dsvHandle = shadowMap->GetHandle().DSVInfo[i].cpuHandle;
+						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);

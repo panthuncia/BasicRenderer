@@ -42,7 +42,7 @@ public:
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lutTexture->GetHandle().RTVInfo[0].cpuHandle;
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lutTexture->GetBuffer()->GetRTVInfos()[0].cpuHandle;
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         commandList->SetPipelineState(PSO.Get());
