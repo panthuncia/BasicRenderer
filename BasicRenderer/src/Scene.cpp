@@ -199,8 +199,8 @@ void Scene::RemoveLightByID(UINT id) {
     if (it != lightsByID.end()) {
         auto& light = it->second;
         light->parent->RemoveChild(id);
-        lightsByID.erase(it);
         lightManager.RemoveLight(light.get());
+        lightsByID.erase(it);
     }
 }
 
