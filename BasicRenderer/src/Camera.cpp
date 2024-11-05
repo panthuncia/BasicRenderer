@@ -1,5 +1,6 @@
 #include "camera.h"
 #include "utilities.h"
+#include "ResourceManager.h"
 
 using namespace DirectX;
 
@@ -18,4 +19,13 @@ void Camera::OnUpdate() {
     auto inverseMatrix = XMMatrixInverse(nullptr, transform.modelMatrix);
     viewMatrix = RemoveScalingFromMatrix(inverseMatrix);
     UpdateViewProjectionMatrix();
+	if (m_cameraBufferView) {
+        auto pUploadData = m_cameraBufferView->Map<CameraInfo>();
+		pUploadData->view = viewMatrix;
+		pUploadData->projection = projectionMatrix;
+
+		auto buffer = m_cameraBufferView->GetBuffer();
+        buffer->MarkViewDirty(m_cameraBufferView.get());
+        ResourceManager::GetInstance().QueueViewedDynamicBufferViewUpdate(m_cameraBufferView->GetBuffer());
+	}
 }

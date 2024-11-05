@@ -42,8 +42,19 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& objectManager = context.currentScene->GetObjectManager();
+		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
+		auto& objectManager = context.currentScene->GetObjectManager();
+		auto& cameraManager = context.currentScene->GetCameraManager();
+		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
+		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
+		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
+		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
+		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
+
+		commandList->SetComputeRoot32BitConstants(5, 6, &staticBufferIndices, 0);
+
 		// opaque buffer
 		auto numOpaqueDraws = context.currentScene->GetNumOpaqueDraws();
 		if (numOpaqueDraws > 0) {

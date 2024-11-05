@@ -13,6 +13,7 @@
 #include "PixelBuffer.h"
 
 class DynamicGloballyIndexedResource;
+class BufferView;
 
 enum LightType {
 	Point = 0,
@@ -103,6 +104,12 @@ public:
 		return m_perViewTransparentIndirectCommandBuffers;
 	}
 
+	void SetCameraBufferViews(std::vector<std::shared_ptr<BufferView>> cameraBufferViews);
+
+	std::vector<std::shared_ptr<BufferView>>& GetCameraBufferViews() {
+		return m_cameraBufferViews;
+	}
+
 private:
 
 	Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
@@ -117,6 +124,7 @@ private:
 	std::shared_ptr<Texture> m_shadowMap;
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewOpaqueIndirectCommandBuffers;
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewTransparentIndirectCommandBuffers;
+	std::vector<std::shared_ptr<BufferView>> m_cameraBufferViews;
 
 	void NotifyLightObservers();
 	void UpdateLightInfo();

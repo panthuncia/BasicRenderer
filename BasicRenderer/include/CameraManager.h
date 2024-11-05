@@ -3,7 +3,8 @@
 #include <memory.h>
 
 #include "buffers.h"
-#include "DynamicStructuredBuffer.h"
+
+#include "LazyDynamicStructuredBuffer.h"
 
 class CameraManager {
 public:
@@ -18,7 +19,11 @@ public:
 	std::shared_ptr<BufferView> AddCamera(CameraInfo& camera);
 	void RemoveCamera(std::shared_ptr<BufferView> view);
 
+	void UpdateCamera(std::shared_ptr<BufferView> view, CameraInfo& camera) {
+		m_pCameraBuffer->UpdateAt(view.get(), camera);
+	}
+
 private:
 	CameraManager();
-	std::shared_ptr<DynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
+	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
 };

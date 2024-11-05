@@ -84,6 +84,7 @@ UINT Scene::AddLight(std::shared_ptr<Light> light, bool shadowCasting) {
     nextNodeID++;
 
     lightManager.AddLight(light.get(), shadowCasting, pCamera.get());
+
     return light->GetLocalID();
 }
 
@@ -309,9 +310,15 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
         indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
         m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
 		m_pPrimaryCameraTransparentIndirectCommandBuffer = nullptr;
+
+		m_pCameraManager->RemoveCamera(pCamera->GetCameraBufferView());
+		pCamera->SetCameraBufferView(nullptr);
     }
 
     pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
+    CameraInfo info;
+	pCamera->SetCameraBufferView(m_pCameraManager->AddCamera(info));
+
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
     lightManager.SetCurrentCamera(pCamera.get());
     AddNode(pCamera);
@@ -515,6 +522,7 @@ void Scene::MakeResident() {
     }
 
 	m_pCameraManager = CameraManager::CreateUnique();
+	lightManager.SetCameraManager(m_pCameraManager.get());
 }
 
 void Scene::MakeNonResident() {
@@ -564,4 +572,8 @@ unsigned int Scene::GetNumTransparentDraws() {
 
 const std::unique_ptr<IndirectCommandBufferManager>& Scene::GetIndirectCommandBufferManager() {
 	return indirectCommandBufferManager;
+}
+
+const std::unique_ptr<CameraManager>& Scene::GetCameraManager() {
+	return m_pCameraManager;
 }

@@ -63,16 +63,18 @@ public:
 		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
 		commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
 
-		unsigned int staticBufferIndices[5] = {};
+		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
+		auto& cameraManager = context.currentScene->GetCameraManager();
 		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
 		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
 		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
 		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
 		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
 
-		commandList->SetGraphicsRoot32BitConstants(5, 5, &staticBufferIndices, 0);
+		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {

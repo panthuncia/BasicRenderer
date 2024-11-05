@@ -49,16 +49,18 @@ public:
 
 		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
 
-		unsigned int staticBufferIndices[5] = {};
+		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
+		auto& cameraManager = context.currentScene->GetCameraManager();
 		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
 		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
 		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
 		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
 		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
 
-		commandList->SetGraphicsRoot32BitConstants(5, 5, &staticBufferIndices, 0);
+		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
 
 		//D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 		//D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();

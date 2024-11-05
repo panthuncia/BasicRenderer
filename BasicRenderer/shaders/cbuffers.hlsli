@@ -30,6 +30,7 @@ cbuffer StaticBufferIndices : register(b6) {
     uint meshletVerticesBufferDescriptorIndex;
     uint meshletTrianglesBufferDescriptorIndex;
     uint perObjectBufferDescriptorIndex;
+    uint cameraBufferDescriptorIndex;
 }
 
 cbuffer variableBufferIndices : register(b7) {

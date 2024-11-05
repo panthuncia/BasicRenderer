@@ -160,3 +160,7 @@ void Light::SetShadowMap(std::shared_ptr<Texture> shadowMap) {
 std::shared_ptr<Texture>& Light::getShadowMap() {
 	return m_shadowMap;
 }
+
+void Light::SetCameraBufferViews(std::vector<std::shared_ptr<BufferView>> views) {
+	m_cameraBufferViews = views;
+}

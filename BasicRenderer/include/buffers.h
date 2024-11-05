@@ -2,9 +2,10 @@
 #include <DirectXMath.h>
 
 struct CameraInfo {
-    DirectX::XMFLOAT4X4 positionWorldSpace;
+    DirectX::XMFLOAT4 positionWorldSpace;
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX projection;
+	DirectX::XMMATRIX viewProjection;
 };
 
 struct PerFrameCB {

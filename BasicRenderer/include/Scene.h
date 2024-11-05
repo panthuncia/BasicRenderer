@@ -61,6 +61,7 @@ public:
 	unsigned int GetNumOpaqueDraws();
 	unsigned int GetNumTransparentDraws();
 	const std::unique_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
+	const std::unique_ptr<CameraManager>& GetCameraManager();
 
 private:
     std::shared_ptr<Camera> pCamera;
@@ -86,6 +87,8 @@ private:
     std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraTransparentIndirectCommandBuffer;
 	std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+
+
 
 	unsigned int m_numDrawsInScene = 0;
 	unsigned int m_numOpaqueDraws = 0;

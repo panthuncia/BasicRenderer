@@ -68,22 +68,29 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
 #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     switch(light.type) {
         case 0: { // Point light
-            StructuredBuffer<float4> pointLightCubemapBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
-            lightMatrix = loadMatrixFromBuffer(pointLightCubemapBuffer, lightViewIndex);
+            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
+            uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
+            Camera lightCamera = cameras[lightCameraIndex];
+            lightMatrix = lightCamera.viewProjection;
             break;
         }
         case 1: { // Spot light
-            StructuredBuffer<float4> spotLightMatrixBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
-            lightMatrix = loadMatrixFromBuffer(spotLightMatrixBuffer, lightViewIndex);
+            StructuredBuffer<unsigned int> spotLightMatrixIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
+            uint lightCameraIndex = spotLightMatrixIndexBuffer[lightViewIndex];
+            Camera lightCamera = cameras[lightCameraIndex];
+            lightMatrix = lightCamera.viewProjection;
             break;
         }
         case 2: { // Directional light
-            StructuredBuffer<float4> directionalLightCascadeBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
-            lightMatrix = loadMatrixFromBuffer(directionalLightCascadeBuffer, lightViewIndex);
+            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+            uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
+            Camera lightCamera = cameras[lightCameraIndex];
+            lightMatrix = lightCamera.viewProjection;
             break;
         }
     }
@@ -482,7 +489,7 @@ float unprojectDepth(float depth, float near, float far) {
     return near * far / (far - depth * (far - near));
 }
 
-float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, StructuredBuffer<float4> pointShadowViewInfoBuffer) {
+float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz-light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
     float3 worldDir = normalize(lightToFrag);
@@ -516,9 +523,11 @@ float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInf
     else if (worldDir.z == -maxDir) {
         faceIndex = 5; // -Z
     }
-    matrix lightViewProjectionMatrix = loadMatrixFromBuffer(pointShadowViewInfoBuffer, light.shadowViewInfoIndex*6 + faceIndex);
     
-    float4 fragPosLightSpace = mul(float4(fragPosWorldSpace.xyz, 1.0), lightViewProjectionMatrix);
+    uint cameraIndex = pointShadowCameraIndexBuffer[light.shadowViewInfoIndex * 6 + faceIndex];
+    Camera lightCamera = cameraBuffer[cameraIndex];
+    
+    float4 fragPosLightSpace = mul(float4(fragPosWorldSpace.xyz, 1.0), lightCamera.viewProjection);
     float dist = length(lightToFrag);
     float lightSpaceDepth = fragPosLightSpace.z / fragPosLightSpace.w;
     
@@ -538,14 +547,16 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
 }
 
 
-float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<float4> cascadeViewBuffer) {
+float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     
     float depth = abs(fragPosViewSpace.z);
     int cascadeIndex = calculateShadowCascadeIndex(depth, numCascades, cascadeSplits);
 
     int infoIndex = numCascades * light.shadowViewInfoIndex + cascadeIndex;
-    matrix lightMatrix = loadMatrixFromBuffer(cascadeViewBuffer, infoIndex);
-    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
+    
+    Camera lightCamera = cameraBuffer[cascadeCameraIndexBuffer[infoIndex]];
+    
+    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightCamera.viewProjection);
     float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
     uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
     uv.y = 1.0 - uv.y;
@@ -731,9 +742,10 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
             parallaxShadowParams.uv = uv;
         }
         
-        StructuredBuffer<float4> pointShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
-        StructuredBuffer<float4> spotShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
-        StructuredBuffer<float4> directionalShadowViewInfoBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+        StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
+        StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
+        StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+        StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
         
         for (uint i = 0; i < perFrameBuffer.numLights; i++) {
             LightInfo light = lights[i];
@@ -742,18 +754,19 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                 if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
                     switch (light.type) {
                         case 0:{ // Point light
-                                shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoBuffer);
+                                shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
                         //return float4(shadow, shadow, shadow, 1.0);
                                 break;
                             }
                         case 1:{ // Spot light
-                                matrix lightMatrix = loadMatrixFromBuffer(spotShadowViewInfoBuffer, light.shadowViewInfoIndex);
-                                shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, lightMatrix);
+                                uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
+                                Camera camera = cameraBuffer[spotShadowCameraIndex];
+                                shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, camera.viewProjection);
                                 break;
                             }
                         case 2:{// Directional light
-                                shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoBuffer);
-                                break;
+                                shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
+                                //break;
                             }
                     }
                 }

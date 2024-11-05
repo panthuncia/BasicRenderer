@@ -5,6 +5,7 @@ struct Camera {
     float4 positionWorldSpace;
     row_major matrix view;
     row_major matrix projection;
+    row_major matrix viewProjection;
 };
 
 struct PerFrameBuffer {
