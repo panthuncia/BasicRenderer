@@ -82,6 +82,8 @@ private:
     template <typename VertexType>
     void CreateMeshlets(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices);
     void CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices);
+	template <typename VertexType>
+	void ComputeBoundingSphere(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices);
     static int GetNextGlobalIndex();
 
     static std::atomic<int> globalMeshCount;

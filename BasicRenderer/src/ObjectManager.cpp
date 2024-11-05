@@ -18,9 +18,9 @@ ObjectManager::ObjectManager() {
 }
 void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	object->SetCurrentManager(this);
-	std::unique_ptr<BufferView> view = m_perObjectBuffers->Add();
-	m_perObjectBuffers->UpdateAt(view, object->GetPerObjectCBData());
-	object->SetCurrentPerObjectCBView(std::move(view));
+	std::shared_ptr<BufferView> view = m_perObjectBuffers->Add();
+	m_perObjectBuffers->UpdateAt(view.get(), object->GetPerObjectCBData());
+	object->SetCurrentPerObjectCBView(view);
 
 	auto& manager = ResourceManager::GetInstance();
 	manager.QueueViewedDynamicBufferViewUpdate(object->GetCurrentPerObjectCBView()->GetBuffer());
@@ -71,9 +71,10 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 
 void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 	auto& view = object->GetCurrentPerObjectCBView();
-	m_perObjectBuffers->Remove(view);
+	m_perObjectBuffers->Remove(view.get());
 
-	object->SetCurrentPerObjectCBView(nullptr);
+	DeletionManager::GetInstance().MarkForDelete(view);
+
 	object->SetCurrentManager(nullptr);
 
 	// Remove the object's draw set commands from the draw set buffers
@@ -94,7 +95,7 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 	//m_objects.erase(m_objects.begin() + index);
 }
 
-void ObjectManager::UpdatePerObjectBuffer(std::unique_ptr<BufferView>& view, PerObjectCB& data) {
+void ObjectManager::UpdatePerObjectBuffer(BufferView* view, PerObjectCB& data) {
 	m_perObjectBuffers->UpdateAt(view, data);
 	ResourceManager::GetInstance().QueueViewedDynamicBufferViewUpdate(view->GetBuffer());
 }

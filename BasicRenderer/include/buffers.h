@@ -1,6 +1,12 @@
 #pragma once
 #include <DirectXMath.h>
 
+struct CameraInfo {
+    DirectX::XMFLOAT4X4 positionWorldSpace;
+    DirectX::XMMATRIX view;
+    DirectX::XMMATRIX projection;
+};
+
 struct PerFrameCB {
     DirectX::XMMATRIX viewMatrix;
     DirectX::XMMATRIX projectionMatrix;
@@ -31,6 +37,11 @@ struct PerObjectCB {
     unsigned int pad0;
 };
 
+struct BoundingSphere {
+	DirectX::XMFLOAT4 center;
+	float radius;
+};
+
 struct PerMeshCB {
     unsigned int materialDataIndex;
     unsigned int vertexFlags;
@@ -39,7 +50,7 @@ struct PerMeshCB {
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
     unsigned int meshletTrianglesBufferOffset;
-    unsigned int isValid = 1;
+	BoundingSphere boundingSphere;
 };
 
 struct PerMaterialCB {

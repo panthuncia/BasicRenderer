@@ -26,6 +26,7 @@ public:
 
 private:
     DeletionManager() = default;
+
     // TODO: Currently, resource transitions for the initial states of resources of new objects are handled at the start of each frame.
     // This means that if an object is loaded mid-frame, and one of its resources is queued for deletion (buffer resizing, for example),
     // it will be added to the transition queue, then deleted, and then its transition will be processed, which is invalid.

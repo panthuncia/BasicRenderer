@@ -1,6 +1,8 @@
 #ifndef __CBUFFERS_HLSL__
 #define __CBUFFERS_HLSL__
 
+#include "structs.hlsli"
+
 cbuffer PerObject : register(b1) {
     uint perObjectBufferIndex;
 };

@@ -33,11 +33,11 @@ public:
 		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(id, capacity, name, alignment, UAV));
 	}
 
-    std::unique_ptr<BufferView> Add() {
+    std::shared_ptr<BufferView> Add() {
 		if (!m_freeIndices.empty()) { // Reuse a free index
 			unsigned int index = m_freeIndices.back();
 			m_freeIndices.pop_back();
-            return std::move(BufferView::CreateUnique(this, index * m_elementSize, m_elementSize, typeid(T)));
+            return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
         }
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
@@ -45,13 +45,13 @@ public:
             onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this);
         }
 		unsigned int index = m_usedCapacity - 1;
-        return std::move(BufferView::CreateUnique(this, index * m_elementSize, m_elementSize, typeid(T)));
+        return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
     }
 
-    void Remove(std::unique_ptr<BufferView>& view) {
+    void Remove(BufferView* view) {
 		T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
 		element->isValid = false;
-		MarkViewDirty(view.get());
+		MarkViewDirty(view);
 		unsigned int index = view->GetOffset() / m_elementSize;
 		m_freeIndices.push_back(index);
     }
@@ -63,10 +63,10 @@ public:
         }
     }
 
-    void UpdateAt(std::unique_ptr<BufferView>& view, const T& data) {
+    void UpdateAt(BufferView* view, const T& data) {
         T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
 		*element = data;
-		MarkViewDirty(view.get());
+		MarkViewDirty(view);
     }
 
 

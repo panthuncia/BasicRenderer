@@ -22,7 +22,7 @@ public:
 	unsigned int GetPerObjectBufferSRVIndex() const {
 		return m_perObjectBuffers->GetSRVInfo().index;
 	}
-	void UpdatePerObjectBuffer(std::unique_ptr<BufferView>&, PerObjectCB& data);
+	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerObjectCB>>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}

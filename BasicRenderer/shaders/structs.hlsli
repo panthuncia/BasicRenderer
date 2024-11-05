@@ -1,6 +1,12 @@
 #ifndef __STRUCTS_HLSL__
 #define __STRUCTS_HLSL__
 
+struct Camera {
+    float4 positionWorldSpace;
+    row_major matrix view;
+    row_major matrix projection;
+};
+
 struct PerFrameBuffer {
     row_major matrix view;
     row_major matrix projection;
@@ -82,6 +88,11 @@ struct PerObjectBuffer {
     uint pad0;
 };
 
+struct BoundingSphere {
+    float4 center;
+    float radius;
+};
+
 struct PerMeshBuffer {
     uint materialDataIndex;
     uint vertexFlags;
@@ -90,7 +101,7 @@ struct PerMeshBuffer {
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
     uint meshletTrianglesBufferOffset;
-    uint isValid;
+    BoundingSphere boundingSphere;
 };
 
 #endif // __STRUCTS_HLSL__

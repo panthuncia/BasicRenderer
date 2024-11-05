@@ -64,7 +64,7 @@ void RenderableObject::UpdateBuffers() {
     );
 
     perObjectCBData.normalMatrix = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
-    m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView, perObjectCBData);
+    m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
 }
 
 void RenderableObject::OnUpdate() {
@@ -76,7 +76,7 @@ void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
     perObjectCBData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
     perObjectCBData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
     if (m_currentManager != nullptr) {
-        m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView, perObjectCBData);
+        m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
     }
     skeleton->userIDs.push_back(localID);
 }
@@ -89,11 +89,11 @@ PerObjectCB& RenderableObject::GetPerObjectCBData() {
 	return perObjectCBData;
 }
 
-void RenderableObject::SetCurrentPerObjectCBView(std::unique_ptr<BufferView> view) {
-    m_perObjectCBView = std::move(view);
+void RenderableObject::SetCurrentPerObjectCBView(std::shared_ptr<BufferView>& view) {
+    m_perObjectCBView = view;
 }
 
-std::unique_ptr<BufferView>& RenderableObject::GetCurrentPerObjectCBView() {
+std::shared_ptr<BufferView>& RenderableObject::GetCurrentPerObjectCBView() {
 	return m_perObjectCBView;
 }
 

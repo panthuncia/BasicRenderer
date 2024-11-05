@@ -4,6 +4,8 @@
 
 #include "Utilities.h"
 #include "SettingsManager.h"
+#include "CameraManager.h"
+
 Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
@@ -168,7 +170,6 @@ void Scene::RemoveObjectByID(UINT id) {
         if (nameIt != objectsByName.end()) {
             objectsByName.erase(nameIt);
         }
-        objectsByID.erase(it);
         opaqueObjectsByID.erase(it->second->GetLocalID());
         transparentObjectsByID.erase(it->second->GetLocalID());
 
@@ -188,6 +189,8 @@ void Scene::RemoveObjectByID(UINT id) {
 			m_numTransparentDraws--;
 			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Transparent, m_numTransparentDraws);
         }
+		DeletionManager::GetInstance().MarkForDelete(it->second); // defer deletion to the end of the frame
+        objectsByID.erase(it);
     }
 }
 
@@ -199,6 +202,69 @@ void Scene::RemoveLightByID(UINT id) {
         lightsByID.erase(it);
         lightManager.RemoveLight(light.get());
     }
+}
+
+void Scene::RemoveNodeByID(UINT id) {
+	auto it = nodesByID.find(id);
+	if (it != nodesByID.end()) {
+		auto& node = it->second;
+
+		std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
+        for (auto& childNode : node->children) {
+			childrenToRemove.push_back(childNode.second);
+        }
+		for (auto& childNode : childrenToRemove) {
+			node->parent->AddChild(childNode);
+		}
+
+		node->parent->RemoveChild(id);
+		nodesByID.erase(it);
+	}
+}
+
+void Scene::RemoveEntityByID(UINT id, bool recurse) {
+	auto it = objectsByID.find(id);
+	if (it != objectsByID.end()) {
+		if (recurse) {
+			auto& object = it->second;
+			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
+			for (auto& child : object->children) {
+				childrenToRemove.push_back(child.second);
+			}
+			for (auto& child : childrenToRemove) {
+				RemoveEntityByID(child->GetLocalID(), recurse);
+			}
+		}
+		RemoveObjectByID(id);
+	}
+	auto it1 = lightsByID.find(id);
+	if (it1 != lightsByID.end()) {
+		if (recurse) {
+			auto& light = it1->second;
+			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
+			for (auto& child : light->children) {
+				childrenToRemove.push_back(child.second);
+			}
+            for (auto& child : childrenToRemove) {
+                RemoveEntityByID(child->GetLocalID(), recurse);
+            }
+		}
+		RemoveLightByID(id);
+	}
+	auto it2 = nodesByID.find(id);
+	if (it2 != nodesByID.end()) {
+		if (recurse) {
+			auto& node = it2->second;
+			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
+			for (auto& child : node->children) {
+				childrenToRemove.push_back(child.second);
+			}
+			for (auto& child : childrenToRemove) {
+				RemoveEntityByID(child->GetLocalID(), recurse);
+			}
+		}
+		RemoveNodeByID(id);
+	}
 }
 
 std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetRenderableObjectIDMap() {
@@ -447,6 +513,8 @@ void Scene::MakeResident() {
         m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Opaque);
 		m_pPrimaryCameraTransparentIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Transparent);
     }
+
+	m_pCameraManager = CameraManager::CreateUnique();
 }
 
 void Scene::MakeNonResident() {
@@ -458,6 +526,8 @@ void Scene::MakeNonResident() {
         m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
 		m_pPrimaryCameraTransparentIndirectCommandBuffer = nullptr;
     }
+
+	m_pCameraManager = nullptr;
 }
 
 void Scene::Activate() {

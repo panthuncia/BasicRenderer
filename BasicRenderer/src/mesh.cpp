@@ -52,6 +52,29 @@ void Mesh::CreateMeshlets(const std::vector<VertexType>& vertices, const std::ve
     meshopt_buildMeshlets(m_meshlets.data(), m_meshletVertices.data(), m_meshletTriangles.data(), indices.data(), indices.size(), (float*)vertices.data(), vertices.size(), sizeof(VertexType), maxVertices, maxPrimitives, 0);
 }
 
+template <typename VertexType>
+void Mesh::ComputeBoundingSphere(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices) {
+	BoundingSphere sphere = {};
+
+	for (const auto& v : vertices) {
+		sphere.center.x += v.position.x;
+		sphere.center.y += v.position.y;
+		sphere.center.z += v.position.z;
+	}
+	sphere.center.x /= vertices.size();
+	sphere.center.y /= vertices.size();
+	sphere.center.z /= vertices.size();
+
+	for (const auto& v : vertices) {
+		float dx = v.position.x - sphere.center.x;
+		float dy = v.position.y - sphere.center.y;
+		float dz = v.position.z - sphere.center.z;
+		float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+		sphere.radius = (std::max)(sphere.radius, distance);
+	}	
+	m_perMeshBufferData.boundingSphere = sphere;
+}
+
 void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices) {
 
     std::visit([&](auto&& vertex) {
@@ -63,6 +86,7 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
         }
 		CreateMeshlets(specificVertices, indices);
         CreateVertexBuffer(specificVertices);
+		ComputeBoundingSphere(specificVertices, indices);
         }, vertices.front());
 
     const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT32));

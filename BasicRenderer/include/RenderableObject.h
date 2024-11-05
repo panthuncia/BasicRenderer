@@ -25,8 +25,9 @@ public:
 	void SetSkin(std::shared_ptr<Skeleton> skeleton);
 	std::shared_ptr<Skeleton>& GetSkin();
 	PerObjectCB& GetPerObjectCBData();
-	void SetCurrentPerObjectCBView(std::unique_ptr<BufferView> view);
-	std::unique_ptr<BufferView>& GetCurrentPerObjectCBView();
+	void SetCurrentPerObjectCBView(std::shared_ptr<BufferView>& view);
+	std::shared_ptr<BufferView>& GetCurrentPerObjectCBView();
+
 	void SetCurrentManager(ObjectManager* manager);
 	void SetCurrentOpaqueDrawSetIndices(const std::vector<unsigned int>& indices);
 	void SetCurrentTransparentDrawSetIndices(const std::vector<unsigned int>& indices);
@@ -43,7 +44,7 @@ private:
 	bool m_hasTransparent = false;
 	bool m_hasOpaque = false;
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
-	std::unique_ptr<BufferView> m_perObjectCBView;
+	std::shared_ptr<BufferView> m_perObjectCBView;
 	ObjectManager* m_currentManager = nullptr;
 protected:
 	void OnUpdate() override;
