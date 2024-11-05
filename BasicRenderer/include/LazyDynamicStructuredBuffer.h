@@ -8,6 +8,7 @@
 #include <string>
 #include <concepts>
 #include <memory>
+#include <deque>
 
 #include "DeviceManager.h"
 #include "Buffer.h"
@@ -25,7 +26,7 @@ public:
 	virtual size_t GetElementSize() const = 0;
 };
 
-template <HasIsValid T>  // Enforce the concept at the template parameter level
+template <typename T>  // Enforce the concept at the template parameter level
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 
@@ -35,8 +36,8 @@ public:
 
     std::shared_ptr<BufferView> Add() {
 		if (!m_freeIndices.empty()) { // Reuse a free index
-			unsigned int index = m_freeIndices.back();
-			m_freeIndices.pop_back();
+			unsigned int index = m_freeIndices.front();
+			m_freeIndices.pop_front();
             return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
         }
         m_usedCapacity++;
@@ -50,7 +51,7 @@ public:
 
     void Remove(BufferView* view) {
 		T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
-		element->isValid = false;
+		//element->isValid = false;
 		MarkViewDirty(view);
 		unsigned int index = view->GetOffset() / m_elementSize;
 		m_freeIndices.push_back(index);
@@ -117,7 +118,7 @@ private:
     UINT m_capacity;
 	UINT m_usedCapacity = 0;
     bool m_needsUpdate;
-	std::vector<unsigned int> m_freeIndices;
+	std::deque<unsigned int> m_freeIndices;
     void* m_mappedData = nullptr;
     UINT m_globalResizableBufferID;
     size_t m_elementSize = 0;

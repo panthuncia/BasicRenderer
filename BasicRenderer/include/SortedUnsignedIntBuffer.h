@@ -37,12 +37,6 @@ public:
         // Insert the element
         m_data.insert(it, element);
 
-		// Update upload buffer from insertion point onwards
-		void* uploadData = nullptr;
-		m_uploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&uploadData));
-		std::memcpy(reinterpret_cast<unsigned char*>(uploadData) + index * sizeof(unsigned int), &m_data[index], sizeof(unsigned int)*(m_data.size()-index));
-		m_uploadBuffer->m_buffer->Unmap(0, nullptr);
-
         // Update the earliest modified index
         if (index < m_earliestModifiedIndex) {
             m_earliestModifiedIndex = index;
@@ -66,6 +60,14 @@ public:
                 m_earliestModifiedIndex = index;
             }
         }
+    }
+
+    void UpdateUploadBuffer() {
+        // Update upload buffer from insertion point onwards
+        void* uploadData = nullptr;
+        m_uploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&uploadData));
+        std::memcpy(reinterpret_cast<unsigned char*>(uploadData) + m_earliestModifiedIndex * sizeof(unsigned int), &m_data[m_earliestModifiedIndex], sizeof(unsigned int) * (m_data.size() - m_earliestModifiedIndex));
+        m_uploadBuffer->m_buffer->Unmap(0, nullptr);
     }
 
     // Get element at index

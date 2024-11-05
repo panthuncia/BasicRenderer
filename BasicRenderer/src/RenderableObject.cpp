@@ -116,3 +116,19 @@ void RenderableObject::SetCurrentTransparentDrawSetIndices(const std::vector<uns
 std::vector<unsigned int>& RenderableObject::GetCurrentTransparentDrawSetIndices() {
 	return m_transparentDrawSetIndices;
 }
+
+void RenderableObject::SetCurrentOpaqueDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views) {
+	m_opaqueDrawSetCommandViews = views;
+}
+
+void RenderableObject::SetCurrentTransparentDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views) {
+	m_transparentDrawSetCommandViews = views;
+}
+
+std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentOpaqueDrawSetCommandViews() {
+	return m_opaqueDrawSetCommandViews;
+}
+
+std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentTransparentDrawSetCommandViews() {
+	return m_transparentDrawSetCommandViews;
+}
