@@ -18,7 +18,7 @@
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
-    m_lightBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 1, L"lightBuffer<LightInfo>");
+    m_lightBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 10, L"lightBuffer<LightInfo>");
     m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
     m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
     m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<DirectX::XMMATRIX>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");

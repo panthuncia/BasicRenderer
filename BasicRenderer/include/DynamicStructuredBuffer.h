@@ -37,7 +37,7 @@ public:
         // Update upload buffer
         void* uploadData = nullptr;
         m_uploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&uploadData));
-        std::memcpy(reinterpret_cast<unsigned char*>(uploadData) + index * sizeof(T), &m_data[index], sizeof(T));
+        std::memcpy(reinterpret_cast<unsigned char*>(uploadData) + index * sizeof(T), &element, sizeof(T));
         m_uploadBuffer->m_buffer->Unmap(0, nullptr);
 
         return index;

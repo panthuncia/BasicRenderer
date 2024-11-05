@@ -95,5 +95,4 @@ struct LightInfo {
     float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
-    unsigned int isValid;
 };
