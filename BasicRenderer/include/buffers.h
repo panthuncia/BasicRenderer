@@ -9,11 +9,9 @@ struct CameraInfo {
 };
 
 struct PerFrameCB {
-    DirectX::XMMATRIX viewMatrix;
-    DirectX::XMMATRIX projectionMatrix;
-    DirectX::XMVECTOR eyePosWorldSpace;
     DirectX::XMVECTOR ambientLighting;
     DirectX::XMVECTOR shadowCascadeSplits;
+	unsigned int mainCameraIndex;
     unsigned int lightBufferIndex;
     unsigned int numLights;
     unsigned int pointLightCubemapBufferIndex;
@@ -27,6 +25,7 @@ struct PerFrameCB {
 	unsigned int environmentBRDFLUTIndex;
 	unsigned int environmentBRDFLUTSamplerIndex;
     unsigned int outputType;
+	unsigned int pad[2];
 };
 
 struct PerObjectCB {

@@ -36,10 +36,12 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     }
     float4 worldPosition = mul(pos, objectBuffer.model);
     PSInput result;
+
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+
     
 #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     switch(light.type) {
@@ -69,10 +71,12 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     return result;
 #endif // SHADOW
     
+    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    
     result.positionWorldSpace = worldPosition;
-    float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
+    float4 viewPosition = mul(worldPosition, mainCamera.view);
     result.positionViewSpace = viewPosition;
-    result.position = mul(viewPosition, perFrameBuffer.projection);
+    result.position = mul(viewPosition, mainCamera.projection);
     
     result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
     

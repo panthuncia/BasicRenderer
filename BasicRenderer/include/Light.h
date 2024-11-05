@@ -77,7 +77,6 @@ public:
 		NotifyLightObservers();
 	}
 
-	void UpdateLightMatrices();
 	DirectX::XMMATRIX GetLightViewMatrix();
 	DirectX::XMMATRIX GetLightProjectionMatrix();
 	DirectX::XMVECTOR GetLightDir();
@@ -128,7 +127,6 @@ private:
 
 	void NotifyLightObservers();
 	void UpdateLightInfo();
-	void CreateFrameConstantBuffers();
 	void CreateProjectionMatrix(float nearPlane, float farPlane);
 
 	std::function<uint8_t()> getNumCascades;

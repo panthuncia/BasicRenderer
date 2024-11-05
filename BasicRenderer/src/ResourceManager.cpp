@@ -77,11 +77,8 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
 }
 
 
-void ResourceManager::UpdatePerFrameBuffer(DirectX::XMFLOAT3 eyeWorld, DirectX::XMMATRIX viewMatrix, DirectX::XMMATRIX projectionMatrix, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
-
-	perFrameCBData.viewMatrix = viewMatrix;
-	perFrameCBData.projectionMatrix = projectionMatrix;
-	perFrameCBData.eyePosWorldSpace = DirectX::XMLoadFloat3(&eyeWorld);
+void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
+	perFrameCBData.mainCameraIndex = cameraIndex;
 	perFrameCBData.numLights = numLights;
 	perFrameCBData.lightBufferIndex = lightBufferIndex;
 	perFrameCBData.pointLightCubemapBufferIndex = pointCubemapMatricesBufferIndex;

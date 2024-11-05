@@ -65,10 +65,11 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     PSInput output;
     float4 worldPosition = mul(pos, objectBuffer.model);
+
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     
 #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     switch(light.type) {
@@ -97,10 +98,13 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     output.position = mul(worldPosition, lightMatrix);
     return output;
 #endif // SHADOW
+    
+    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    
     output.positionWorldSpace = worldPosition;
-    float4 viewPosition = mul(worldPosition, perFrameBuffer.view);
+    float4 viewPosition = mul(worldPosition, mainCamera.view);
     output.positionViewSpace = viewPosition;
-    output.position = mul(viewPosition, perFrameBuffer.projection);
+    output.position = mul(viewPosition, mainCamera.projection);
     
     output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
     
@@ -646,7 +650,9 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
     
-    float3 viewDir = normalize(perFrameBuffer.eyePosWorldSpace.xyz - input.positionWorldSpace.xyz);
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
     
     float2 uv = float2(0.0, 0.0);
     if (materialFlags & MATERIAL_TEXTURED) {

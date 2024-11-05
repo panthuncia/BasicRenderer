@@ -440,10 +440,10 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     currentScene->Update();
     auto camera = currentScene->GetCamera();
-
+	unsigned int cameraIndex = camera->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
     ThrowIfFailed(commandAllocator->Reset());
 
-    ResourceManager::GetInstance().UpdatePerFrameBuffer(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
+    ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
     resourceManager.UpdateGPUBuffers();
     resourceManager.ExecuteResourceTransitions();

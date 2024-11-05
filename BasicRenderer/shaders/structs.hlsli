@@ -9,11 +9,9 @@ struct Camera {
 };
 
 struct PerFrameBuffer {
-    row_major matrix view;
-    row_major matrix projection;
-    float4 eyePosWorldSpace;
     float4 ambientLighting;
     float4 shadowCascadeSplits;
+    uint mainCameraIndex;
     uint lightBufferIndex;
     uint numLights;
     uint pointLightCubemapBufferIndex;
@@ -27,6 +25,7 @@ struct PerFrameBuffer {
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
     uint outputType;
+    uint pad[2];
 };
 
 struct LightInfo {

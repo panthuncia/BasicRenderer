@@ -74,46 +74,6 @@ void Light::NotifyLightObservers() {
 	}
 }
 
-void Light::UpdateLightMatrices() {
-	switch (m_lightFrameConstantHandles.size()) {
-	case 1: {
-		PerFrameCB frameCB;
-		frameCB.viewMatrix = XMMatrixIdentity();
-		frameCB.projectionMatrix = XMMatrixIdentity();
-		frameCB.eyePosWorldSpace = m_lightInfo.posWorldSpace;
-		frameCB.ambientLighting = m_lightInfo.color;
-		frameCB.lightBufferIndex = m_currentLightBufferIndex;
-		frameCB.numLights = 1;
-		ResourceManager::GetInstance().UpdateConstantBuffer<PerFrameCB>(m_lightFrameConstantHandles[0], frameCB);
-	}
-	}
-}
-
-void Light::CreateFrameConstantBuffers() {
-	auto& resourceManager = ResourceManager::GetInstance();
-
-	switch (m_lightInfo.type) {
-	case LightType::Point: // Six views for cubemap
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		break;
-	case LightType::Spot:
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		break;
-	case LightType::Directional:
-		uint8_t numCascades = getNumCascades();
-		for (int i = 0; i < numCascades; i++) {
-			m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		}
-		break;
-	}
-	UpdateLightMatrices();
-}
-
 LightType Light::GetLightType() const {
 	return (LightType)m_lightInfo.type;
 }

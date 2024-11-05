@@ -21,8 +21,11 @@ void Camera::OnUpdate() {
     UpdateViewProjectionMatrix();
 	if (m_cameraBufferView) {
         auto pUploadData = m_cameraBufferView->Map<CameraInfo>();
+        auto pos = transform.getGlobalPosition();
+        pUploadData->positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
 		pUploadData->view = viewMatrix;
 		pUploadData->projection = projectionMatrix;
+		pUploadData->viewProjection = viewProjectionMatrix;
 
 		auto buffer = m_cameraBufferView->GetBuffer();
         buffer->MarkViewDirty(m_cameraBufferView.get());
