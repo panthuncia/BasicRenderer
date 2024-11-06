@@ -1,11 +1,16 @@
 #pragma once
 #include <DirectXMath.h>
 
+struct ClippingPlane {
+	DirectX::XMFLOAT4 plane;
+};
+
 struct CameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX projection;
 	DirectX::XMMATRIX viewProjection;
+	ClippingPlane clippingPlanes[6];
 };
 
 struct PerFrameCB {

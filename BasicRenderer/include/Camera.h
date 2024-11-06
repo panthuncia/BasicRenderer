@@ -4,8 +4,10 @@
 #include <string>
 #include <memory>
 #include <DirectXMath.h>
+#include <array>
 
 #include "SceneNode.h"
+#include "buffers.h"
 
 class BufferView;
 
@@ -64,6 +66,7 @@ protected:
     float aspectRatio;
     float zNear;
     float zFar;
+	std::array<ClippingPlane, 6> m_clippingPlanes;
 
 	std::shared_ptr<BufferView> m_cameraBufferView = nullptr;
 

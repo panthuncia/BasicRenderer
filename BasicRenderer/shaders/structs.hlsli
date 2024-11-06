@@ -1,11 +1,16 @@
 #ifndef __STRUCTS_HLSL__
 #define __STRUCTS_HLSL__
 
+struct ClippingPlane {
+    float4 plane;
+};
+
 struct Camera {
     float4 positionWorldSpace;
     row_major matrix view;
     row_major matrix projection;
     row_major matrix viewProjection;
+    ClippingPlane clippingPlanes[6];
 };
 
 struct PerFrameBuffer {

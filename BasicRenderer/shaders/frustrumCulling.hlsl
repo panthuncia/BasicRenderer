@@ -14,8 +14,34 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
     StructuredBuffer<IndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];
     AppendStructuredBuffer<IndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     
     uint index = activeDrawSetIndicesBuffer[dispatchID];
     IndirectCommand command = indirectCommandBuffer[index];
+    
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    Camera camera = cameras[lightViewIndex]; // In compute root signature, this directly indexes the camera buffer instead of using indirection through light view index buffers
+    
+    PerMeshBuffer perMesh = perMeshBuffer[command.perMeshBufferIndex];
+    PerObjectBuffer perObject = perObjectBuffer[command.perObjectBufferIndex];
+    
+    // Frustrum culling
+    float4 objectSpaceCenter = float4(perMesh.boundingSphere.center.xyz, 1.0);
+    float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
+    float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
+    
+    bool bCulled = false;
+    
+    for (uint i = 0; i < 6; i++) {
+        float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
+        float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
+        bCulled |= distance < -perMesh.boundingSphere.radius;
+    }
+    
+    if (bCulled) {
+        return;
+    }
+    
     indirectCommandOutputBuffer.Append(command);
 }

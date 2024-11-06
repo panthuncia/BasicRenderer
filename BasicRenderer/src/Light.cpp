@@ -26,8 +26,10 @@ Light::Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 colo
 	}
 
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 
 	CreateProjectionMatrix(nearPlane, farPlane);
+	CalculateFrustumPlanes();
 }
 
 Light::Light(LightInfo& lightInfo) : SceneNode(m_name) {
@@ -38,6 +40,7 @@ Light::Light(LightInfo& lightInfo) : SceneNode(m_name) {
 	m_lightInfo.nearPlane = nearPlane;
 	m_lightInfo.farPlane = farPlane;
 	CreateProjectionMatrix(nearPlane, farPlane);
+	CalculateFrustumPlanes();
 }
 
 LightInfo& Light::GetLightInfo() {
@@ -65,6 +68,22 @@ void Light::RemoveLightObserver(ISceneNodeObserver<Light>* observer) {
 	auto it = std::remove(lightObservers.begin(), lightObservers.end(), observer);
 	if (it != lightObservers.end()) {
 		lightObservers.erase(it);
+	}
+}
+
+void Light::CalculateFrustumPlanes() {
+	switch (m_lightInfo.type) {
+	case LightType::Directional:
+		break; // Directional is special-cased, frustrums are in world space, calculated during cascade setup
+	case LightType::Spot: {
+		m_frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, acos(m_lightInfo.outerConeAngle) * 2, m_lightInfo.nearPlane, m_lightInfo.farPlane));
+		break;
+	case LightType::Point: {
+		for (int i = 0; i < 6; i++) {
+			m_frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, XM_PI / 2, m_lightInfo.nearPlane, m_lightInfo.farPlane)); // TODO: All of these are the same.
+		}
+		}
+	}
 	}
 }
 

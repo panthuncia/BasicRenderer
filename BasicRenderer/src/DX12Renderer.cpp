@@ -31,6 +31,7 @@
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
+#include "RenderPasses/DebugSpheresPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -790,6 +791,10 @@ void DX12Renderer::CreateRenderGraph() {
 
 	auto debugPass = std::make_shared<DebugRenderPass>();
     newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+
+    auto debugSpherePass = std::make_shared<DebugSpherePass>();
+	newGraph->AddPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+
     newGraph->Compile();
     newGraph->Setup(commandQueue.Get());
 

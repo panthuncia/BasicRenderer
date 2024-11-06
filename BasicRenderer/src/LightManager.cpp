@@ -194,6 +194,7 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 	switch (light->GetLightType()) {
 	case LightType::Point: {
 		auto cubemapMatrices = GetCubemapViewMatrices(light->transform.getGlobalPosition());
+		auto planes = light->GetFrustumPlanes();
 		for (int i = 0; i < 6; i++) {
 			CameraInfo info = {};
 			auto pos = light->transform.getGlobalPosition();
@@ -201,6 +202,12 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 			info.view = cubemapMatrices[i];
 			info.projection = projectionMatrix;
 			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], projectionMatrix);
+			info.clippingPlanes[0] = planes[i][0];
+			info.clippingPlanes[1] = planes[i][1];
+			info.clippingPlanes[2] = planes[i][2];
+			info.clippingPlanes[3] = planes[i][3];
+			info.clippingPlanes[4] = planes[i][4];
+			info.clippingPlanes[5] = planes[i][5];
 			m_pCameraManager->UpdateCamera(views[i], info);
 		}
 		break;
@@ -212,6 +219,13 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 		camera.view = light->GetLightViewMatrix();
 		camera.projection = projectionMatrix;
 		camera.viewProjection = XMMatrixMultiply(light->GetLightViewMatrix(), projectionMatrix);
+		auto planes = light->GetFrustumPlanes();
+		camera.clippingPlanes[0] = planes[0][0];
+		camera.clippingPlanes[1] = planes[0][1];
+		camera.clippingPlanes[2] = planes[0][2];
+		camera.clippingPlanes[3] = planes[0][3];
+		camera.clippingPlanes[4] = planes[0][4];
+		camera.clippingPlanes[5] = planes[0][5];
 		m_pCameraManager->UpdateCamera(views[0], camera);
 		break;
 	}
@@ -229,6 +243,12 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 			info.view = cascades[i].viewMatrix;
 			info.projection = cascades[i].orthoMatrix;
 			info.viewProjection = XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
+			info.clippingPlanes[0] = cascades[i].frustumPlanes[0];
+			info.clippingPlanes[1] = cascades[i].frustumPlanes[1];
+			info.clippingPlanes[2] = cascades[i].frustumPlanes[2];
+			info.clippingPlanes[3] = cascades[i].frustumPlanes[3];
+			info.clippingPlanes[4] = cascades[i].frustumPlanes[4];
+			info.clippingPlanes[5] = cascades[i].frustumPlanes[5];
 			m_pCameraManager->UpdateCamera(views[i], info);
 		}
 		break;

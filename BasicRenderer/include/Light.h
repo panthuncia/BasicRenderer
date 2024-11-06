@@ -109,6 +109,10 @@ public:
 		return m_cameraBufferViews;
 	}
 
+	std::vector<std::array<ClippingPlane, 6>>& GetFrustumPlanes() {
+		return m_frustumPlanes;
+	}
+
 private:
 
 	Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
@@ -124,12 +128,15 @@ private:
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewOpaqueIndirectCommandBuffers;
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewTransparentIndirectCommandBuffers;
 	std::vector<std::shared_ptr<BufferView>> m_cameraBufferViews;
+	std::vector<std::array<ClippingPlane, 6>> m_frustumPlanes;
 
 	void NotifyLightObservers();
 	void UpdateLightInfo();
 	void CreateProjectionMatrix(float nearPlane, float farPlane);
+	void CalculateFrustumPlanes();
 
 	std::function<uint8_t()> getNumCascades;
+	std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
 
 	friend class ShadowMaps;
 };

@@ -204,7 +204,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	dragonScene->GetRoot().m_name = L"dragonRoot";
 
     auto tigerScene = loadGLB("models/tiger.glb");
-    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
+    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
 	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	tigerScene->GetRoot().m_name = L"tigerRoot";
 
@@ -245,12 +245,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
-    renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	renderer.GetCurrentScene()->AppendScene(*mountainScene);
+    //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
+	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 	renderer.MarkForDelete(carScene);
