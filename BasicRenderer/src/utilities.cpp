@@ -1039,3 +1039,15 @@ std::array<ClippingPlane, 6> GetFrustumPlanesOrthographic(const float left, cons
 
     return planes;
 }
+
+DirectX::XMFLOAT3 Subtract(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b) {
+	return DirectX::XMFLOAT3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+DirectX::XMFLOAT3 Add(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b) {
+	return DirectX::XMFLOAT3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+DirectX::XMFLOAT3 Scale(const DirectX::XMFLOAT3& a, const float scale) {
+	return DirectX::XMFLOAT3(a.x * scale, a.y * scale, a.z * scale);
+}

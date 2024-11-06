@@ -20,7 +20,6 @@ void MSMain(
     const uint3 vGroupID : SV_GroupID,
     out vertices PSInput outputVertices[42],
     out indices uint3 outputTriangles[80]) {
-    // Set the number of vertices and triangles to output
     SetMeshOutputCounts(42, 80);
 
     const float3 positions[42] = {
@@ -172,7 +171,6 @@ void MSMain(
         
         float4 normal = float4(normalize(thisPosition - center.xyz), 1.0);
         vertex.normal = normalize(mul(mul(normal, camera.view), camera.projection).xyz);
-        // Set other vertex attributes as needed
         outputVertices[uGroupThreadID] = vertex;
     }
 

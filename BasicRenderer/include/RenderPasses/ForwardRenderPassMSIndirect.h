@@ -20,8 +20,7 @@ public:
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
-		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-
+		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");		
 	}
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
@@ -29,6 +28,7 @@ public:
 		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
 		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 		m_commandList->Close();
+
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
@@ -90,7 +90,8 @@ public:
 		auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
 		auto pso = psoManager.GetMeshPSO(localPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
-		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), indirectCommandBuffer->GetAPIResource(), 0, nullptr, 0);
+		auto apiResource = indirectCommandBuffer->GetAPIResource();
+		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 
 		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
@@ -100,9 +101,11 @@ public:
 		indirectCommandBuffer = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer();
 		pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_BLEND, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
-		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), indirectCommandBuffer->GetAPIResource(), 0, nullptr, 0);
+		apiResource = indirectCommandBuffer->GetAPIResource();
+		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 		commandList->Close();
+
 		return { commandList };
 	}
 
@@ -117,5 +120,4 @@ private:
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
-
 };

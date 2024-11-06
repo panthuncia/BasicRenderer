@@ -67,20 +67,20 @@ public:
 
 		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
 
-		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* transparentIndirectCommandBuffer) {
+		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* transparentIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t transparentCommandCounterOffset) {
 			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
 			commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
 
 			auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
 			commandList->SetPipelineState(pso.Get());
-			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), opaqueIndirectCommandBuffer, 0, nullptr, 0);
+			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
 
 			unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
 			commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
 			pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
 			commandList->SetPipelineState(pso.Get());
-			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), transparentIndirectCommandBuffer, 0, nullptr, 0);
+			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), transparentIndirectCommandBuffer, 0, transparentIndirectCommandBuffer, transparentCommandCounterOffset);
 			
 		};
 
@@ -100,8 +100,9 @@ public:
 					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					int lightViewIndex = light->GetCurrentviewInfoIndex();
 					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
-
-					drawObjects(light->GetPerViewOpaqueIndirectCommandBuffers()[0]->GetAPIResource(), light->GetPerViewTransparentIndirectCommandBuffers()[0]->GetAPIResource());
+					auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[0];
+					auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[0];
+					drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
 					break;
 				}
 				case LightType::Point: {
@@ -116,7 +117,9 @@ public:
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
-						drawObjects(opaqueBuffers[i]->GetAPIResource(), transparentBuffers[i]->GetAPIResource());
+						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
+						auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[i];
+						drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
 					}
 					break;
 				}
@@ -132,7 +135,9 @@ public:
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
-						drawObjects(opaqueBuffers[i]->GetAPIResource(), transparentBuffers[i]->GetAPIResource());
+						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
+						auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[i];
+						drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
 					}
 				}
 			}

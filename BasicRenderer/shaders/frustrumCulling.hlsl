@@ -31,12 +31,22 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
     float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
     
+    // Calculate the scale factor for the bounding sphere radius
+    float3 scaleFactors = float3(
+    length(perObject.model[0].xyz),
+    length(perObject.model[1].xyz),
+    length(perObject.model[2].xyz)
+);
+    float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
+    float scaledBoundingRadius = perMesh.boundingSphere.radius * maxScale;
+    
     bool bCulled = false;
     
     for (uint i = 0; i < 6; i++) {
         float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
         float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
-        bCulled |= distance < -perMesh.boundingSphere.radius;
+        float boundingRadius = perMesh.boundingSphere.radius;
+        bCulled |= distance < -scaledBoundingRadius; // Can I just exit here?
     }
     
     if (bCulled) {
