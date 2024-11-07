@@ -26,8 +26,10 @@ Light::Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 colo
 	}
 
 	getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 
 	CreateProjectionMatrix(nearPlane, farPlane);
+	CalculateFrustumPlanes();
 }
 
 Light::Light(LightInfo& lightInfo) : SceneNode(m_name) {
@@ -38,6 +40,7 @@ Light::Light(LightInfo& lightInfo) : SceneNode(m_name) {
 	m_lightInfo.nearPlane = nearPlane;
 	m_lightInfo.farPlane = farPlane;
 	CreateProjectionMatrix(nearPlane, farPlane);
+	CalculateFrustumPlanes();
 }
 
 LightInfo& Light::GetLightInfo() {
@@ -68,50 +71,26 @@ void Light::RemoveLightObserver(ISceneNodeObserver<Light>* observer) {
 	}
 }
 
+void Light::CalculateFrustumPlanes() {
+	switch (m_lightInfo.type) {
+	case LightType::Directional:
+		break; // Directional is special-cased, frustrums are in world space, calculated during cascade setup
+	case LightType::Spot: {
+		m_frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, acos(m_lightInfo.outerConeAngle) * 2, m_lightInfo.nearPlane, m_lightInfo.farPlane));
+		break;
+	case LightType::Point: {
+		for (int i = 0; i < 6; i++) {
+			m_frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, XM_PI / 2, m_lightInfo.nearPlane, m_lightInfo.farPlane)); // TODO: All of these are the same.
+		}
+		}
+	}
+	}
+}
+
 void Light::NotifyLightObservers() {
 	for (auto observer : lightObservers) {
 		observer->OnNodeUpdated(this);
 	}
-}
-
-void Light::UpdateLightMatrices() {
-	switch (m_lightFrameConstantHandles.size()) {
-	case 1: {
-		PerFrameCB frameCB;
-		frameCB.viewMatrix = XMMatrixIdentity();
-		frameCB.projectionMatrix = XMMatrixIdentity();
-		frameCB.eyePosWorldSpace = m_lightInfo.posWorldSpace;
-		frameCB.ambientLighting = m_lightInfo.color;
-		frameCB.lightBufferIndex = m_currentLightBufferIndex;
-		frameCB.numLights = 1;
-		ResourceManager::GetInstance().UpdateConstantBuffer<PerFrameCB>(m_lightFrameConstantHandles[0], frameCB);
-	}
-	}
-}
-
-void Light::CreateFrameConstantBuffers() {
-	auto& resourceManager = ResourceManager::GetInstance();
-
-	switch (m_lightInfo.type) {
-	case LightType::Point: // Six views for cubemap
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		break;
-	case LightType::Spot:
-		m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		break;
-	case LightType::Directional:
-		uint8_t numCascades = getNumCascades();
-		for (int i = 0; i < numCascades; i++) {
-			m_lightFrameConstantHandles.push_back(resourceManager.CreateConstantBuffer<PerFrameCB>());
-		}
-		break;
-	}
-	UpdateLightMatrices();
 }
 
 LightType Light::GetLightType() const {
@@ -159,4 +138,8 @@ void Light::SetShadowMap(std::shared_ptr<Texture> shadowMap) {
 
 std::shared_ptr<Texture>& Light::getShadowMap() {
 	return m_shadowMap;
+}
+
+void Light::SetCameraBufferViews(std::vector<std::shared_ptr<BufferView>> views) {
+	m_cameraBufferViews = views;
 }

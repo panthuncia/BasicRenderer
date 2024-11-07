@@ -15,6 +15,7 @@
 #include "MeshManager.h"
 #include "ObjectManager.h"
 #include "IndirectCommandBufferManager.h"
+#include "CameraManager.h"
 
 class DynamicGloballyIndexedResource;
 
@@ -32,6 +33,8 @@ public:
     void RemoveObjectByName(const std::wstring& name);
     void RemoveObjectByID(UINT id);
     void RemoveLightByID(UINT Id);
+	void RemoveNodeByID(UINT id);
+	void RemoveEntityByID(UINT id, bool recurse = false);
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetOpaqueRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetTransparentRenderableObjectIDMap();
@@ -58,6 +61,7 @@ public:
 	unsigned int GetNumOpaqueDraws();
 	unsigned int GetNumTransparentDraws();
 	const std::unique_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
+	const std::unique_ptr<CameraManager>& GetCameraManager();
 
 private:
     std::shared_ptr<Camera> pCamera;
@@ -82,6 +86,9 @@ private:
 	std::unique_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraTransparentIndirectCommandBuffer;
+	std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+
+
 
 	unsigned int m_numDrawsInScene = 0;
 	unsigned int m_numOpaqueDraws = 0;

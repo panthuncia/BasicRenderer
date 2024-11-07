@@ -13,6 +13,7 @@
 #include "PixelBuffer.h"
 
 class DynamicGloballyIndexedResource;
+class BufferView;
 
 enum LightType {
 	Point = 0,
@@ -76,7 +77,6 @@ public:
 		NotifyLightObservers();
 	}
 
-	void UpdateLightMatrices();
 	DirectX::XMMATRIX GetLightViewMatrix();
 	DirectX::XMMATRIX GetLightProjectionMatrix();
 	DirectX::XMVECTOR GetLightDir();
@@ -103,6 +103,16 @@ public:
 		return m_perViewTransparentIndirectCommandBuffers;
 	}
 
+	void SetCameraBufferViews(std::vector<std::shared_ptr<BufferView>> cameraBufferViews);
+
+	std::vector<std::shared_ptr<BufferView>>& GetCameraBufferViews() {
+		return m_cameraBufferViews;
+	}
+
+	std::vector<std::array<ClippingPlane, 6>>& GetFrustumPlanes() {
+		return m_frustumPlanes;
+	}
+
 private:
 
 	Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
@@ -117,13 +127,16 @@ private:
 	std::shared_ptr<Texture> m_shadowMap;
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewOpaqueIndirectCommandBuffers;
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewTransparentIndirectCommandBuffers;
+	std::vector<std::shared_ptr<BufferView>> m_cameraBufferViews;
+	std::vector<std::array<ClippingPlane, 6>> m_frustumPlanes;
 
 	void NotifyLightObservers();
 	void UpdateLightInfo();
-	void CreateFrameConstantBuffers();
 	void CreateProjectionMatrix(float nearPlane, float farPlane);
+	void CalculateFrustumPlanes();
 
 	std::function<uint8_t()> getNumCascades;
+	std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
 
 	friend class ShadowMaps;
 };

@@ -1,6 +1,8 @@
 #ifndef __CBUFFERS_HLSL__
 #define __CBUFFERS_HLSL__
 
+#include "structs.hlsli"
+
 cbuffer PerObject : register(b1) {
     uint perObjectBufferIndex;
 };
@@ -28,6 +30,7 @@ cbuffer StaticBufferIndices : register(b6) {
     uint meshletVerticesBufferDescriptorIndex;
     uint meshletTrianglesBufferDescriptorIndex;
     uint perObjectBufferDescriptorIndex;
+    uint cameraBufferDescriptorIndex;
 }
 
 cbuffer variableBufferIndices : register(b7) {

@@ -35,16 +35,25 @@ public:
 
 protected:
     // Override the base Resource method to transition all resources in the group
-    void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) {
+		m_transitions.clear();
         for (auto& pair : resourcesByID) {
-            pair.second->Transition(commandList, prevState, newState);
+            auto& trans = pair.second->GetTransitions(prevState, newState);
+            for (auto& transition : trans) {
+				m_transitions.push_back(transition);
+            }
         }
 		for (auto& resource : resources) {
-			resource->Transition(commandList, prevState, newState);
-		}
+			auto& trans = resource->GetTransitions(prevState, newState);
+            for (auto& transition : trans) {
+				m_transitions.push_back(transition);
+            }
+        }
         currentState = newState; // Set the state for the group as a whole
+		return m_transitions;
     }
 protected:
     std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
 	std::vector<std::shared_ptr<Resource>> resources;
+    std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
 };

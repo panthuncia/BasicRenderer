@@ -10,7 +10,9 @@
 
 class FrustrumCullingPass : public RenderPass {
 public:
-	FrustrumCullingPass() {}
+	FrustrumCullingPass() {
+		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	}
 
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
@@ -42,8 +44,21 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& objectManager = context.currentScene->GetObjectManager();
+		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
+		auto& objectManager = context.currentScene->GetObjectManager();
+		auto& cameraManager = context.currentScene->GetCameraManager();
+		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
+		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
+		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
+		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
+		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
+
+		commandList->SetComputeRoot32BitConstants(5, 6, &staticBufferIndices, 0);
+
+		unsigned int numCascades = getNumDirectionalLightCascades();
+
 		// opaque buffer
 		auto numOpaqueDraws = context.currentScene->GetNumOpaqueDraws();
 		if (numOpaqueDraws > 0) {
@@ -61,15 +76,22 @@ public:
 			bufferIndices[4] = context.currentScene->GetNumOpaqueDraws()-1;
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			commandList->SetComputeRoot32BitConstants(3, 1, &cameraIndex, 0);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			//  Then, process buffer for each light
 			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
 				auto& light = lightPair.second;
+				auto& lightViews = light->GetCameraBufferViews();
+				int i = 0;
 				for (auto& buffer : light->GetPerViewOpaqueIndirectCommandBuffers()) {
 					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
 					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
+					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
+					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
 				}
 			}
@@ -91,14 +113,21 @@ public:
 			bufferIndices[4] = context.currentScene->GetNumTransparentDraws()-1;
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			commandList->SetComputeRoot32BitConstants(3, 1, &cameraIndex, 0);
 		
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
 				auto& light = lightPair.second;
+				auto& lightViews = light->GetCameraBufferViews();
+				int i = 0;
 				for (auto& buffer : light->GetPerViewTransparentIndirectCommandBuffers()) {
 					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
 					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
+					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
+					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
 				}
 			}
@@ -148,4 +177,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
 	ComPtr<ID3D12PipelineState> m_PSO;
+
+	std::function<uint8_t()> getNumDirectionalLightCascades;
+
 };

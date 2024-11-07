@@ -14,6 +14,7 @@ class Light;
 class ShadowMaps;
 class SceneNode;
 class IndirectCommandBufferManager;
+class CameraManager;
 
 class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
 public:
@@ -32,12 +33,14 @@ public:
     void OnNodeUpdated(Light* light) override;
     void UpdateBuffers();
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
+	void SetCameraManager(CameraManager* cameraManager);
+
 
 private:
     std::shared_ptr<DynamicStructuredBuffer<LightInfo>> m_lightBuffer;
-    std::shared_ptr<DynamicStructuredBuffer<DirectX::XMMATRIX>> m_spotViewInfo;
-    std::shared_ptr<DynamicStructuredBuffer<DirectX::XMMATRIX>> m_pointViewInfo;
-    std::shared_ptr<DynamicStructuredBuffer<DirectX::XMMATRIX>> m_directionalViewInfo;
+    std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_spotViewInfo; // Indices into camera buffer
+    std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_pointViewInfo;
+    std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_directionalViewInfo;
     //std::unordered_map<int, unsigned int> lightIndexMap; // Maps localID to buffer index
     std::vector<Light*> m_lights; // Active light IDs
     std::vector<Light*> m_spotLights;
@@ -57,6 +60,7 @@ private:
     std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
     std::function<void(std::shared_ptr<void>)> markForDelete;
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
+    CameraManager* m_pCameraManager = nullptr;
 
     Camera* m_currentCamera = nullptr;
 

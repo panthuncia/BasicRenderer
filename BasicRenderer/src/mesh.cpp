@@ -52,6 +52,63 @@ void Mesh::CreateMeshlets(const std::vector<VertexType>& vertices, const std::ve
     meshopt_buildMeshlets(m_meshlets.data(), m_meshletVertices.data(), m_meshletTriangles.data(), indices.data(), indices.size(), (float*)vertices.data(), vertices.size(), sizeof(VertexType), maxVertices, maxPrimitives, 0);
 }
 
+template <typename VertexType>
+void Mesh::ComputeAABB(const std::vector<VertexType>& vertices, DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max) {
+	// Initialize min and max vectors
+	min.x = min.y = min.z = std::numeric_limits<float>::infinity();
+	max.x = max.y = max.z = -std::numeric_limits<float>::infinity();
+
+	// Loop through each vertex and update min and max
+	for (const auto& v : vertices) {
+		// Update min
+		min.x = (std::min)(min.x, v.position.x);
+		min.y = (std::min)(min.y, v.position.y);
+		min.z = (std::min)(min.z, v.position.z);
+
+		// Update max
+		max.x = (std::max)(max.x, v.position.x);
+		max.y = (std::max)(max.y, v.position.y);
+		max.z = (std::max)(max.z, v.position.z);
+	}
+}
+
+template <typename VertexType>
+void Mesh::ComputeBoundingSphere(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices) {
+	BoundingSphere sphere = {};
+
+	XMFLOAT3 min, max;
+
+	// Compute the Axis-Aligned Bounding Box
+	ComputeAABB(vertices, min, max);
+	XMFLOAT3 center = Scale(Add(min, max), 0.5f);
+
+	// Compute the radius of the bounding sphere
+	XMFLOAT3 diagonal = Subtract(max, min);
+	float radius = 0.5f * sqrt(diagonal.x * diagonal.x + diagonal.y * diagonal.y + diagonal.z * diagonal.z);
+
+	// Set the bounding sphere
+	sphere.center = DirectX::XMFLOAT4(center.x, center.y, center.z, 1.0);
+	sphere.radius = radius;
+
+	//for (const auto& v : vertices) {
+	//	sphere.center.x += v.position.x;
+	//	sphere.center.y += v.position.y;
+	//	sphere.center.z += v.position.z;
+	//}
+	//sphere.center.x /= vertices.size();
+	//sphere.center.y /= vertices.size();
+	//sphere.center.z /= vertices.size();
+
+	//for (const auto& v : vertices) {
+	//	float dx = v.position.x - sphere.center.x;
+	//	float dy = v.position.y - sphere.center.y;
+	//	float dz = v.position.z - sphere.center.z;
+	//	float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+	//	sphere.radius = (std::max)(sphere.radius, distance);
+	//}	
+	m_perMeshBufferData.boundingSphere = sphere;
+}
+
 void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices) {
 
     std::visit([&](auto&& vertex) {
@@ -63,6 +120,7 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
         }
 		CreateMeshlets(specificVertices, indices);
         CreateVertexBuffer(specificVertices);
+		ComputeBoundingSphere(specificVertices, indices);
         }, vertices.front());
 
     const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT32));

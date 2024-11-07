@@ -9,6 +9,8 @@
 #include <functional>
 #include <filesystem>
 #include <fstream>
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 #include "MeshUtilities.h"
 #include "PSOFlags.h"
@@ -298,7 +300,9 @@ std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera
         // TODO: Figure out why the cascades are kinda broken. Hack by making them thicc for now.
         XMMATRIX orthoMatrix = XMMatrixOrthographicOffCenterRH(minX, maxX, minY, maxY, minZ - 100.0f, maxZ + 100.0f);
 
-        cascades.push_back({ splitDist, orthoMatrix, lightViewMatrix });
+		auto clippingPlanes = GetFrustumPlanesOrthographic(minX, maxX, maxY, minY, minZ - 100.0f, maxZ + 100.0f);
+
+        cascades.push_back({ splitDist, orthoMatrix, lightViewMatrix, clippingPlanes });
 
         prevSplitDist = splitDist;
     }
@@ -987,4 +991,63 @@ std::wstring getFileNameFromPath(const std::wstring& path) {
     }
 
     return path.substr(fileNameStart, lastDot - fileNameStart);
+}
+
+std::array<ClippingPlane, 6> GetFrustumPlanesPerspective(const float aspectRatio, const float fovRad, const float nearClip, const float farClip) {
+    std::array<ClippingPlane, 6> planes = {};
+
+    float tanHalfFOV = tan(fovRad / 2.0f);
+
+    // Near and Far Planes (aligned with Z-axis)
+    planes[0] = { DirectX::XMFLOAT4(0, 0, -1, -nearClip) }; // Near plane
+    planes[1] = { DirectX::XMFLOAT4(0, 0, 1, farClip) };    // Far plane
+
+    planes[2] = { DirectX::XMFLOAT4(1, 0, -tanHalfFOV * aspectRatio, 0) }; // Left plane
+    planes[3] = { DirectX::XMFLOAT4( - 1, 0, -tanHalfFOV * aspectRatio, 0) }; // Right plane
+
+    planes[4] = { DirectX::XMFLOAT4(0, 1, -tanHalfFOV, 0) }; // Bottom plane
+    planes[5] = { DirectX::XMFLOAT4(0, -1, -tanHalfFOV, 0) }; // Top plane
+
+    // Normalize the planes
+    for (int i = 0; i < 6; ++i) {
+        float A = planes[i].plane.x;
+        float B = planes[i].plane.y;
+        float C = planes[i].plane.z;
+        float D = planes[i].plane.w;
+        float length = sqrt(A * A + B * B + C * C);
+        planes[i].plane.x = A / length;
+        planes[i].plane.y = B / length;
+        planes[i].plane.z = C / length;
+        planes[i].plane.w = D / length;
+    }
+
+    return planes;
+}
+
+std::array<ClippingPlane, 6> GetFrustumPlanesOrthographic(const float left, const float right, const float top, const float bottom, const float nearClip, const float farClip) {
+    std::array<ClippingPlane, 6> planes = {};
+
+    // Near and Far Planes (aligned with Z-axis)
+    planes[0] = { DirectX::XMFLOAT4(0, 0, -1, -nearClip) }; // Near plane
+    planes[1] = { DirectX::XMFLOAT4(0, 0, 1, farClip) };    // Far plane
+
+    planes[2] = { DirectX::XMFLOAT4(1, 0, 0, -left) }; // Left plane
+    planes[3] = { DirectX::XMFLOAT4(-1, 0, 0, right) }; // Right plane
+
+    planes[4] = { DirectX::XMFLOAT4(0, 1, 0, -bottom) }; // Bottom plane
+    planes[5] = { DirectX::XMFLOAT4(0, -1, 0, top) }; // Top plane
+
+    return planes;
+}
+
+DirectX::XMFLOAT3 Subtract(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b) {
+	return DirectX::XMFLOAT3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+DirectX::XMFLOAT3 Add(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b) {
+	return DirectX::XMFLOAT3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+DirectX::XMFLOAT3 Scale(const DirectX::XMFLOAT3& a, const float scale) {
+	return DirectX::XMFLOAT3(a.x * scale, a.y * scale, a.z * scale);
 }

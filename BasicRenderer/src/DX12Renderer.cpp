@@ -31,6 +31,7 @@
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
+#include "RenderPasses/DebugSpheresPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -440,10 +441,10 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     currentScene->Update();
     auto camera = currentScene->GetCamera();
-
+	unsigned int cameraIndex = camera->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
     ThrowIfFailed(commandAllocator->Reset());
 
-    ResourceManager::GetInstance().UpdatePerFrameBuffer(camera->transform.getGlobalPosition(), camera->GetViewMatrix(), camera->GetProjectionMatrix(), currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
+    ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
     resourceManager.UpdateGPUBuffers();
     resourceManager.ExecuteResourceTransitions();
@@ -790,6 +791,10 @@ void DX12Renderer::CreateRenderGraph() {
 
 	auto debugPass = std::make_shared<DebugRenderPass>();
     newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+
+    auto debugSpherePass = std::make_shared<DebugSpherePass>();
+	newGraph->AddPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+
     newGraph->Compile();
     newGraph->Setup(commandQueue.Get());
 

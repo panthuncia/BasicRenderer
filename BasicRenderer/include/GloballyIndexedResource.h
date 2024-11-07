@@ -9,7 +9,7 @@ class GloballyIndexedResourceBase : public Resource {
 public:
 	GloballyIndexedResourceBase() : Resource() {};
 protected:
-	virtual void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override = 0;
+	virtual std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override = 0;
 };
 
 class GloballyIndexedResource : public GloballyIndexedResourceBase

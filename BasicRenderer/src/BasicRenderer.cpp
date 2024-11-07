@@ -204,7 +204,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	dragonScene->GetRoot().m_name = L"dragonRoot";
 
     auto tigerScene = loadGLB("models/tiger.glb");
-    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.1 });
+    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
 	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	tigerScene->GetRoot().m_name = L"tigerRoot";
 
@@ -245,11 +245,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    renderer.GetCurrentScene()->AppendScene(*carScene);
-	renderer.GetCurrentScene()->AppendScene(*mountainScene);
+    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
+	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 	renderer.MarkForDelete(carScene);
@@ -302,12 +303,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	auto light1 = Light::CreatePointLight(L"light1", XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032);
     light1->animationController->setAnimationClip(animation);
     cubeScaleNode->AddChild(light1);
-    scene->AddLight(light1, true);
+    //scene->AddLight(light1, true);
+	//scene->RemoveLightByID(light1->GetLocalID());
 	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));
     scene->AddLight(light2, true);
     //auto light3 = Light::CreateDirectionalLight("light3", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(-1, -1, -1));
     auto light3 = Light::CreateSpotLight(L"light3", XMFLOAT3(0, 4, 0), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);
-	scene->AddLight(light3, true);
+	//scene->AddLight(light3, true);
     //light3->AddChild(cubeScaleNode);
 
 	renderer.SetDebugTexture(light2->getShadowMap().get());

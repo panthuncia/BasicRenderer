@@ -1,12 +1,22 @@
 #ifndef __STRUCTS_HLSL__
 #define __STRUCTS_HLSL__
 
-struct PerFrameBuffer {
+struct ClippingPlane {
+    float4 plane;
+};
+
+struct Camera {
+    float4 positionWorldSpace;
     row_major matrix view;
     row_major matrix projection;
-    float4 eyePosWorldSpace;
+    row_major matrix viewProjection;
+    ClippingPlane clippingPlanes[6];
+};
+
+struct PerFrameBuffer {
     float4 ambientLighting;
     float4 shadowCascadeSplits;
+    uint mainCameraIndex;
     uint lightBufferIndex;
     uint numLights;
     uint pointLightCubemapBufferIndex;
@@ -20,6 +30,7 @@ struct PerFrameBuffer {
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
     uint outputType;
+    uint pad[2];
 };
 
 struct LightInfo {
@@ -82,6 +93,11 @@ struct PerObjectBuffer {
     uint pad0;
 };
 
+struct BoundingSphere {
+    float4 center;
+    float radius;
+};
+
 struct PerMeshBuffer {
     uint materialDataIndex;
     uint vertexFlags;
@@ -90,7 +106,7 @@ struct PerMeshBuffer {
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
     uint meshletTrianglesBufferOffset;
-    uint isValid;
+    BoundingSphere boundingSphere;
 };
 
 #endif // __STRUCTS_HLSL__

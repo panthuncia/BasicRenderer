@@ -347,11 +347,11 @@ void PSOManager::createRootSignature() {
     parameters[4].Constants.Num32BitValues = 2;
     parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-	// Fourth integer root constant, used for global buffer indices
+	// Static buffer indices
 	parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[5].Constants.ShaderRegister = 6;
 	parameters[5].Constants.RegisterSpace = 0;
-	parameters[5].Constants.Num32BitValues = 5;
+	parameters[5].Constants.Num32BitValues = 6;
 	parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Variable buffer indices

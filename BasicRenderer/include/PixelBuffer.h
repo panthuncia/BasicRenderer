@@ -22,7 +22,7 @@ public:
     ComPtr<ID3D12Resource> GetTexture() const {
 		return handle.texture;
     }
-    void Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState);
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 
 	ID3D12Resource* GetAPIResource() const override { return handle.texture.Get(); }
@@ -37,4 +37,7 @@ private:
     unsigned int m_height;
 	unsigned int m_channels;
     DXGI_FORMAT m_format;
+
+	std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
+	std::vector<D3D12_RESOURCE_BARRIER> m_emptyTransitions = {};
 };

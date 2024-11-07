@@ -18,7 +18,7 @@ public:
 	virtual ID3D12Resource* GetAPIResource() const = 0;
 
 protected:
-    virtual void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) = 0;
+    virtual std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) = 0;
     virtual void OnSetName() {}
     ResourceState currentState;
     std::wstring name;

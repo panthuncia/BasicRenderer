@@ -20,8 +20,7 @@ public:
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
-		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-
+		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");		
 	}
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
@@ -29,6 +28,7 @@ public:
 		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
 		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 		m_commandList->Close();
+
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
@@ -63,16 +63,18 @@ public:
 		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
 		commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
 
-		unsigned int staticBufferIndices[5] = {};
+		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
+		auto& cameraManager = context.currentScene->GetCameraManager();
 		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
 		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
 		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
 		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
 		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
 
-		commandList->SetGraphicsRoot32BitConstants(5, 5, &staticBufferIndices, 0);
+		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
@@ -88,7 +90,8 @@ public:
 		auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
 		auto pso = psoManager.GetMeshPSO(localPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
-		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), indirectCommandBuffer->GetAPIResource(), 0, nullptr, 0);
+		auto apiResource = indirectCommandBuffer->GetAPIResource();
+		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 
 		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
@@ -98,9 +101,11 @@ public:
 		indirectCommandBuffer = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer();
 		pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_BLEND, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
-		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), indirectCommandBuffer->GetAPIResource(), 0, nullptr, 0);
+		apiResource = indirectCommandBuffer->GetAPIResource();
+		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 		commandList->Close();
+
 		return { commandList };
 	}
 
@@ -115,5 +120,4 @@ private:
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
-
 };

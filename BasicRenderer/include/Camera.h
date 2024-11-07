@@ -2,9 +2,14 @@
 
 #include <vector>
 #include <string>
+#include <memory>
 #include <DirectXMath.h>
+#include <array>
 
 #include "SceneNode.h"
+#include "buffers.h"
+
+class BufferView;
 
 class Camera : public SceneNode {
 public:
@@ -40,6 +45,13 @@ public:
         return fieldOfView;
     }
 
+	void SetCameraBufferView(std::shared_ptr<BufferView> view) {
+		m_cameraBufferView = view;
+	}
+
+	std::shared_ptr<BufferView> GetCameraBufferView() {
+		return m_cameraBufferView;
+	}
 
 private:
 protected:
@@ -54,6 +66,9 @@ protected:
     float aspectRatio;
     float zNear;
     float zFar;
+	std::array<ClippingPlane, 6> m_clippingPlanes;
+
+	std::shared_ptr<BufferView> m_cameraBufferView = nullptr;
 
 	void OnUpdate() override;
 };

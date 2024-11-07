@@ -8,6 +8,7 @@
 #include <string>
 #include <concepts>
 #include <memory>
+#include <deque>
 
 #include "DeviceManager.h"
 #include "Buffer.h"
@@ -25,7 +26,7 @@ public:
 	virtual size_t GetElementSize() const = 0;
 };
 
-template <HasIsValid T>  // Enforce the concept at the template parameter level
+template <typename T>  // Enforce the concept at the template parameter level
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 
@@ -33,11 +34,11 @@ public:
 		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(id, capacity, name, alignment, UAV));
 	}
 
-    std::unique_ptr<BufferView> Add() {
+    std::shared_ptr<BufferView> Add() {
 		if (!m_freeIndices.empty()) { // Reuse a free index
-			unsigned int index = m_freeIndices.back();
-			m_freeIndices.pop_back();
-            return std::move(BufferView::CreateUnique(this, index * m_elementSize, m_elementSize, typeid(T)));
+			unsigned int index = m_freeIndices.front();
+			m_freeIndices.pop_front();
+            return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
         }
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
@@ -45,13 +46,13 @@ public:
             onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this);
         }
 		unsigned int index = m_usedCapacity - 1;
-        return std::move(BufferView::CreateUnique(this, index * m_elementSize, m_elementSize, typeid(T)));
+        return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
     }
 
-    void Remove(std::unique_ptr<BufferView>& view) {
+    void Remove(BufferView* view) {
 		T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
-		element->isValid = false;
-		MarkViewDirty(view.get());
+		//element->isValid = false;
+		MarkViewDirty(view);
 		unsigned int index = view->GetOffset() / m_elementSize;
 		m_freeIndices.push_back(index);
     }
@@ -63,10 +64,10 @@ public:
         }
     }
 
-    void UpdateAt(std::unique_ptr<BufferView>& view, const T& data) {
+    void UpdateAt(BufferView* view, const T& data) {
         T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
 		*element = data;
-		MarkViewDirty(view.get());
+		MarkViewDirty(view);
     }
 
 
@@ -93,9 +94,9 @@ public:
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
 
 protected:
-    void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
 		currentState = newState;
-        m_dataBuffer->Transition(commandList, prevState, newState);
+        return m_dataBuffer->GetTransitions(prevState, newState);
     }
 
 private:
@@ -117,7 +118,7 @@ private:
     UINT m_capacity;
 	UINT m_usedCapacity = 0;
     bool m_needsUpdate;
-	std::vector<unsigned int> m_freeIndices;
+	std::deque<unsigned int> m_freeIndices;
     void* m_mappedData = nullptr;
     UINT m_globalResizableBufferID;
     size_t m_elementSize = 0;
