@@ -129,9 +129,9 @@ public:
 	}
 
 protected:
-    void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState) override {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
         currentState = newState;
-        m_dataBuffer->Transition(commandList, prevState, newState);
+        return m_dataBuffer->GetTransitions(prevState, newState);
     }
 
 private:

@@ -32,11 +32,11 @@ public:
         return resource;
     }
 
-    void Transition(ID3D12GraphicsCommandList* commandList,
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(
         ResourceState prevState, ResourceState newState) override {
         if (resource) {
-            resource->Transition(commandList, prevState, newState);
             SetState(newState); // Keep the wrapper's state in sync
+            return resource->GetTransitions(prevState, newState);
         }
     }
 
@@ -82,11 +82,11 @@ public:
         return m_resource;
     }
 
-    void Transition(ID3D12GraphicsCommandList* commandList,
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(
         ResourceState prevState, ResourceState newState) override {
         if (m_resource) {
-            m_resource->Transition(commandList, prevState, newState);
             SetState(newState); // Keep the wrapper's state in sync
+            return m_resource->GetTransitions(prevState, newState);
         }
     }
 

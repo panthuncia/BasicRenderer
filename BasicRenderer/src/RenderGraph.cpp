@@ -95,10 +95,14 @@ void RenderGraph::Execute(RenderContext& context) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
         m_transitionCommandList->Reset(m_commandAllocator.Get(), NULL);
+		std::vector<D3D12_RESOURCE_BARRIER> barriers;
         for (auto& transition : batch.transitions) {
-            transition.pResource->Transition(m_transitionCommandList.Get(), transition.fromState, transition.toState);
-
+            auto& transitions = transition.pResource->GetTransitions(transition.fromState, transition.toState);
+            for (auto& barrier : transitions) {
+				barriers.push_back(barrier);
+            }
         }
+		m_transitionCommandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
         m_transitionCommandList->Close();
         ID3D12CommandList* ppCommandLists[] = { m_transitionCommandList.Get()};
         queue->ExecuteCommandLists(1, ppCommandLists);

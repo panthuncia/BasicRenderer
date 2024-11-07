@@ -372,17 +372,19 @@ void ResourceManager::ExecuteResourceTransitions() {
 	if (FAILED(hr)) {
 		spdlog::error("Failed to reset command list");
 	}
+	std::vector<D3D12_RESOURCE_BARRIER> barriers;
 	for (auto& transition : queuedResourceTransitions) {
 		if (transition.resource == nullptr) {
 			spdlog::error("Resource is null in transition");
 			throw std::runtime_error("Resource is null");
 		}
-		if (transition.afterState == ResourceState::UNORDERED_ACCESS){
-			print("hello");
+		auto& trans = transition.resource->GetTransitions(transition.beforeState, transition.afterState);
+		for (auto& barrier : trans) {
+			barriers.push_back(barrier);
 		}
-		transition.resource->Transition(transitionCommandList.Get(), transition.beforeState, transition.afterState);
 		transition.resource->SetState(transition.afterState);
 	}
+	transitionCommandList->ResourceBarrier(barriers.size(), barriers.data());
 
 	hr = commandList->Close();
 	if (FAILED(hr)) {

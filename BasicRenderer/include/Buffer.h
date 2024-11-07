@@ -41,12 +41,14 @@ public:
 	~Buffer() = default;
 	ResourceCPUAccessType m_accessType;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
-	void Transition(ID3D12GraphicsCommandList* commandList, ResourceState prevState, ResourceState newState);
+	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState);
 
 	ID3D12Resource* GetAPIResource() const override { return m_buffer.Get(); }
 protected:
 	void OnSetName() override { m_buffer->SetName(name.c_str()); }
 private:
+	std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
+	std::vector<D3D12_RESOURCE_BARRIER> m_emptyTransitions = {};
 	Buffer(ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
 		uint32_t bufferSize, 

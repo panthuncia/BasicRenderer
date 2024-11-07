@@ -12,9 +12,9 @@ UINT Texture::GetSamplerDescriptorIndex() {
 	return m_sampler->GetDescriptorIndex();
 }
 
-void Texture::Transition(ID3D12GraphicsCommandList* commandList, ResourceState fromState, ResourceState toState) {
+std::vector<D3D12_RESOURCE_BARRIER>& Texture::GetTransitions(ResourceState fromState, ResourceState toState) {
 	currentState = toState;
-	m_image->Transition(commandList, fromState, toState); // Transition the underlying PixelBuffer
+	return m_image->GetTransitions(fromState, toState); // Transition the underlying PixelBuffer
 }
 
 void Texture::SetName(const std::wstring& name) {
