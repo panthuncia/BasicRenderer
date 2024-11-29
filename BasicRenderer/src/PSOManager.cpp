@@ -330,7 +330,7 @@ void PSOManager::createRootSignature() {
     parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[2].Constants.ShaderRegister = 3; // b3 for first integer root constant
     parameters[2].Constants.RegisterSpace = 0;
-    parameters[2].Constants.Num32BitValues = 2;
+    parameters[2].Constants.Num32BitValues = 1;
     parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Second integer root constant, used for shadow light view offset

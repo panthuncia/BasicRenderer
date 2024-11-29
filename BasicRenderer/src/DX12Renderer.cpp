@@ -234,12 +234,12 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
-        //DWORD callbackCookie = 0;
-        //infoQueue->RegisterMessageCallback(
-        //    D3D12DebugCallback,
-        //    D3D12_MESSAGE_CALLBACK_FLAG_NONE,
-        //    nullptr,
-        //    &callbackCookie);
+
+        DWORD callbackCookie = 0;
+        infoQueue->RegisterMessageCallback([](D3D12_MESSAGE_CATEGORY category, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID id, LPCSTR description, void* context) {
+            // Log or print the debug messages,
+            spdlog::error("D3D12 Debug Message: {}", description);
+            }, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &callbackCookie);
     }
 #endif
 
@@ -300,7 +300,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     // Create frame resources
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
-
     for (UINT n = 0; n < 2; n++) {
         ThrowIfFailed(swapChain->GetBuffer(n, IID_PPV_ARGS(&renderTargets[n])));
         device->CreateRenderTargetView(renderTargets[n].Get(), nullptr, rtvHandle);

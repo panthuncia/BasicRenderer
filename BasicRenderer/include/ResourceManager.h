@@ -160,7 +160,10 @@ public:
 			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
             if (UAVCounter) {
                 uavDesc.Buffer.CounterOffsetInBytes = counterOffset;
-            }
+			}
+			else {
+				uavDesc.Buffer.CounterOffsetInBytes = 0;
+			}
 
 			// Shader visible UAV
 			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
@@ -168,14 +171,15 @@ public:
 			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), handle.dataBuffer->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
 
 			// Non-shader visible UAV
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
+            /*D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
             uavUintDesc.Format = DXGI_FORMAT_R32_UINT;
             uavUintDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
             uavUintDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
 			uavUintDesc.Buffer.NumElements = (numElements*sizeof(T))/sizeof(unsigned int);
+			uavUintDesc.Buffer.CounterOffsetInBytes = 0;
 			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
 			D3D12_CPU_DESCRIPTOR_HANDLE uavNonShaderVisibleHandle = m_nonShaderVisibleHeap->GetCPUHandle(uavNonShaderVisibleIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavUintDesc, uavNonShaderVisibleHandle);
+			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavUintDesc, uavNonShaderVisibleHandle);*/
 
 
 			ShaderVisibleIndexInfo uavInfo;
@@ -183,10 +187,10 @@ public:
 			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
             handle.dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, counterOffset);
 
-			NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
-			uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
-			uavNonShaderVisibleInfo.cpuHandle = uavNonShaderVisibleHandle;
-			handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
+			//NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
+			//uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
+			//uavNonShaderVisibleInfo.cpuHandle = uavNonShaderVisibleHandle;
+			//handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
         }
 
         return handle;

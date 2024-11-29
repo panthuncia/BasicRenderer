@@ -102,7 +102,9 @@ void RenderGraph::Execute(RenderContext& context) {
 				barriers.push_back(barrier);
             }
         }
-		m_transitionCommandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        if (barriers.size() > 0) {
+            m_transitionCommandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        }
         m_transitionCommandList->Close();
         ID3D12CommandList* ppCommandLists[] = { m_transitionCommandList.Get()};
         queue->ExecuteCommandLists(1, ppCommandLists);
