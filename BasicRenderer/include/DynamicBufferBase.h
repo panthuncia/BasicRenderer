@@ -14,7 +14,6 @@ class Buffer;
 class DynamicBufferBase : public GloballyIndexedResource {
 public:
     DynamicBufferBase() {}
-    std::shared_ptr<Buffer> m_uploadBuffer = nullptr;
     std::shared_ptr<Buffer> m_dataBuffer = nullptr;
 protected:
     virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {};
@@ -23,7 +22,6 @@ protected:
 class ViewedDynamicBufferBase : public DynamicBufferBase {
 public:
     ViewedDynamicBufferBase() {}
-    virtual void* GetMappedData() = 0;
 
     void MarkViewDirty(BufferView* view) {
         m_dirtyViews.push_back(view);
@@ -36,6 +34,8 @@ public:
     const std::vector<BufferView*>& GetDirtyViews() {
         return m_dirtyViews;
     }
+
+    virtual void UpdateView(BufferView* view, const void* data) = 0;
 
 protected:
     virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {};

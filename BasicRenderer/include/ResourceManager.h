@@ -347,7 +347,6 @@ public:
 #endif
 			QueueResourceTransition(transition);
 		}
-		QueueDynamicBufferUpdate(buffer);
     }
 
     void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer) {
@@ -379,7 +378,6 @@ public:
 #endif
             //QueueResourceTransition(transition);
         }
-        QueueDynamicBufferUpdate(buffer);
     }
 
     template<typename T>
@@ -620,26 +618,12 @@ public:
 	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData, bool UAV = false);
     void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 
-    void QueueDynamicBufferUpdate(DynamicBufferBase* ptr) {
-        dynamicBuffersToUpdate.push_back(ptr);
-    }
-
-	void QueueViewedDynamicBufferViewUpdate(ViewedDynamicBufferBase* handle) {
-		dynamicBuffersToUpdateViews.push_back(handle);
-	}
-
-	void QueueLazyDynamicBufferUpdate(LazyDynamicStructuredBufferBase* handle) {
-		dynamicBuffersToUpdate.push_back(handle);
-	}
-
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
     void UpdateGPUBuffers();
 
 	void QueueResourceTransition(const ResourceTransition& transition);
     void ExecuteResourceTransitions();
-
-	void CreateRenderTargetViewForExternalResource(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc);
 
     void setEnvironmentIrradianceMapSamplerIndex(int index) { perFrameCBData.environmentIrradianceSamplerIndex = index; }
 	void setEnvironmentIrradianceMapIndex(int index) { perFrameCBData.environmentIrradianceMapIndex = index; }
@@ -649,6 +633,7 @@ public:
 	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
 	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
+    
 private:
     ResourceManager(){};
     void WaitForCopyQueue();
@@ -701,4 +686,5 @@ private:
     ComPtr<ID3D12Resource> m_uavCounterReset;
 
 	int defaultShadowSamplerIndex = -1;
+
 };

@@ -35,6 +35,7 @@
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
+#include "UploadManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -145,6 +146,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
+	settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
 	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
 		return currentScene->GetRenderableObjectIDMap();
@@ -250,7 +252,9 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     // Initialize device manager and PSO manager
     DeviceManager::GetInstance().Initialize(device, commandQueue);
-    PSOManager::getInstance().initialize();
+    PSOManager::GetInstance().initialize();
+	UploadManager::GetInstance().Initialize();
+
 
     // Describe and create the swap chain
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
@@ -447,6 +451,12 @@ void DX12Renderer::Update(double elapsedSeconds) {
     ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
     resourceManager.UpdateGPUBuffers();
+
+    auto& updateManager = UploadManager::GetInstance();
+	updateManager.ResetAllocators(); // Reset allocators to avoid leaking memory
+    updateManager.ExecuteResourceCopies(commandQueue.Get());// copies come before uploads to avoid overwriting data
+	updateManager.ProcessUploads(frameIndex, commandQueue.Get());
+
     resourceManager.ExecuteResourceTransitions();
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 }
@@ -622,7 +632,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
         });
 
 	context.SetActionHandler(InputAction::Reset, [this](float magnitude, const InputData& inputData) {
-        PSOManager::getInstance().ReloadShaders();
+        PSOManager::GetInstance().ReloadShaders();
 		});
 
     context.SetActionHandler(InputAction::X, [this](float magnitude, const InputData& inputData) {

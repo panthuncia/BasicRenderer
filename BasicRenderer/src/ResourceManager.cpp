@@ -257,64 +257,6 @@ void ResourceManager::UpdateGPUBuffers() {
 			copyCommandList->ResourceBarrier(1, &barrier);
 		}
 	}
-	for (DynamicBufferBase* dynamicBufferHandle : dynamicBuffersToUpdate) { // Update full buffers
-		// Ensure both buffers are valid
-		if (dynamicBufferHandle->m_uploadBuffer && dynamicBufferHandle->m_dataBuffer) {
-			auto startState = ResourceStateToD3D12(dynamicBufferHandle->m_dataBuffer->GetState());
-			D3D12_RESOURCE_BARRIER barrier = {};
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = dynamicBufferHandle->m_dataBuffer->m_buffer.Get();
-			barrier.Transition.StateBefore = startState;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-
-			// Transition the data buffer to a state suitable for copying into it
-			copyCommandList->ResourceBarrier(1, &barrier);
-
-			// Perform the copy
-			copyCommandList->CopyResource(dynamicBufferHandle->m_dataBuffer->m_buffer.Get(), dynamicBufferHandle->m_uploadBuffer->m_buffer.Get());
-
-			// Transition back to the original state
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.StateAfter = startState;
-			copyCommandList->ResourceBarrier(1, &barrier);
-		}
-	}
-
-	for (ViewedDynamicBufferBase* buffer : dynamicBuffersToUpdateViews) { // Update partial buffers
-
-		const auto& bufferViewsToUpdate = buffer->GetDirtyViews();
-		if (bufferViewsToUpdate.empty()) {
-			continue;
-		}
-
-		auto startState = ResourceStateToD3D12(buffer->m_dataBuffer->GetState());
-		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			buffer->m_dataBuffer->m_buffer.Get(),
-			startState,
-			D3D12_RESOURCE_STATE_COPY_DEST
-		);
-		copyCommandList->ResourceBarrier(1, &barrier);
-
-		for (const auto& bufferView : bufferViewsToUpdate) {
-			copyCommandList->CopyBufferRegion(
-				buffer->m_dataBuffer->m_buffer.Get(),
-				bufferView->GetOffset(),
-				buffer->m_uploadBuffer->m_buffer.Get(),
-				bufferView->GetOffset(),
-				bufferView->GetSize()
-			);
-		}
-		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			buffer->m_dataBuffer->m_buffer.Get(),
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			startState
-		);
-		copyCommandList->ResourceBarrier(1, &barrier);
-
-		buffer->ClearDirtyViews();
-	}
 
 	hr = copyCommandList->Close();
 	if (FAILED(hr)) {
@@ -487,3 +429,46 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 
 	return pBuffer;
 }
+
+//void ResourceManager::ExecuteResourceCopies() {
+//	auto& device = DeviceManager::GetInstance().GetDevice();
+//	auto& commandList = copyCommandList;
+//	auto& commandAllocator = copyCommandAllocator;
+//	if (queuedResourceCopies.size() == 0) {
+//		return;
+//	}
+//
+//	auto hr = commandList->Reset(commandAllocator.Get(), nullptr);
+//	if (FAILED(hr)) {
+//		spdlog::error("Failed to reset command list");
+//	}
+//	for (auto& copy : queuedResourceCopies) {
+//		if (copy.source && copy.destination) {
+//			// Transition for copy
+//			auto startState = ResourceStateToD3D12(copy.destination->GetState());
+//			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+//				copy.destination->GetAPIResource(),
+//				startState,
+//				D3D12_RESOURCE_STATE_COPY_DEST
+//			);
+//			commandList->ResourceBarrier(1, &barrier);
+//
+//			commandList->CopyResource(copy.destination->GetAPIResource(), copy.source->GetAPIResource());
+//
+//			barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+//				copy.destination->GetAPIResource(),
+//				D3D12_RESOURCE_STATE_COPY_DEST,
+//				startState
+//			);
+//			commandList->ResourceBarrier(1, &barrier);
+//		}
+//	}
+//	hr = commandList->Close();
+//	if (FAILED(hr)) {
+//		spdlog::error("Failed to close command list");
+//	}
+//
+//	ID3D12CommandList* ppCommandLists[] = { copyCommandList.Get() };
+//	copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+//	queuedResourceCopies.clear();
+//}

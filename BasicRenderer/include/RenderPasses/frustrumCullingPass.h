@@ -30,7 +30,7 @@ public:
 		ThrowIfFailed(m_commandAllocator->Reset());
 		ThrowIfFailed(commandList->Reset(m_commandAllocator.Get(), nullptr));
 
-		auto rootSignature = PSOManager::getInstance().GetRootSignature();
+		auto rootSignature = PSOManager::GetInstance().GetRootSignature();
 		commandList->SetComputeRootSignature(rootSignature.Get());
 
 		// Set the descriptor heaps
@@ -150,7 +150,7 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::getInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+		PSOManager::GetInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
 
 		// Define the pipeline state stream subobjects for compute
 		struct PipelineStateStream {
@@ -159,7 +159,7 @@ private:
 		};
 
 		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = PSOManager::getInstance().GetRootSignature().Get();
+		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetRootSignature().Get();
 		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 
 		// Create the pipeline state stream descriptor

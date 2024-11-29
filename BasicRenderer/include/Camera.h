@@ -16,21 +16,21 @@ public:
 	Camera(std::wstring name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
 
     void UpdateViewMatrix(XMFLOAT3 eye, XMFLOAT3 target, XMFLOAT3 upVec) {
-        viewMatrix = XMMatrixLookAtRH(XMLoadFloat3(&eye), XMLoadFloat3(&target), XMLoadFloat3(&upVec));
-        viewMatrixInverse = XMMatrixInverse(nullptr, viewMatrix);
+        m_cameraInfo.view = XMMatrixLookAtRH(XMLoadFloat3(&eye), XMLoadFloat3(&target), XMLoadFloat3(&upVec));
+        //viewMatrixInverse = XMMatrixInverse(nullptr, viewMatrix);
         UpdateViewProjectionMatrix();
     }
 
     void UpdateViewProjectionMatrix() {
-        viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projectionMatrix);
-        viewProjectionMatrixInverse = XMMatrixInverse(nullptr, viewProjectionMatrix);
+		m_cameraInfo.viewProjection = XMMatrixMultiply(m_cameraInfo.view, m_cameraInfo.projection);
+        //viewProjectionMatrixInverse = XMMatrixInverse(nullptr, viewProjectionMatrix);
     }
 
     DirectX::XMMATRIX GetViewMatrix() const {
-        return viewMatrix;
+        return m_cameraInfo.view;
     }
     DirectX::XMMATRIX GetProjectionMatrix() const {
-        return projectionMatrix;
+        return m_cameraInfo.projection;
     }
 
     float GetNear() const {
@@ -57,16 +57,12 @@ private:
 protected:
     XMFLOAT3 lookAt;
     XMFLOAT3 up;
-    XMMATRIX viewMatrix;
-    XMMATRIX viewMatrixInverse;
-    XMMATRIX projectionMatrix;
-    XMMATRIX viewProjectionMatrix;
-    XMMATRIX viewProjectionMatrixInverse;
     float fieldOfView;
     float aspectRatio;
     float zNear;
     float zFar;
 	std::array<ClippingPlane, 6> m_clippingPlanes;
+	CameraInfo m_cameraInfo;
 
 	std::shared_ptr<BufferView> m_cameraBufferView = nullptr;
 

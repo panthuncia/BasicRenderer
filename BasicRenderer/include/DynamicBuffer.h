@@ -16,13 +16,9 @@
 #include "Resource.h"
 #include "BufferHandle.h"
 #include "DynamicBufferBase.h"
+#include "MemoryBlock.h"
 
 using Microsoft::WRL::ComPtr;
-struct MemoryBlock {
-    size_t offset; // Start offset within the buffer
-    size_t size;   // Size of the block
-    bool isFree;   // Whether the block is free or allocated
-};
 
 class BufferView;
 
@@ -35,6 +31,8 @@ public:
 
     std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
     void Deallocate(const std::shared_ptr<BufferView>& view);
+	std::unique_ptr<BufferView> AddData(const void* data, size_t size, std::type_index type);
+	void UpdateView(BufferView* view, const void* data);
 
     void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*)>& callback) {
         onResized = callback;

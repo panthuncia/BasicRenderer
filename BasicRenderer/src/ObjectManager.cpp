@@ -19,12 +19,8 @@ ObjectManager::ObjectManager() {
 void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	object->SetCurrentManager(this);
 	std::shared_ptr<BufferView> view = m_perObjectBuffers->Add();
-	m_perObjectBuffers->UpdateAt(view.get(), object->GetPerObjectCBData());
+	m_perObjectBuffers->UpdateView(view.get(), &object->GetPerObjectCBData());
 	object->SetCurrentPerObjectCBView(view);
-
-	auto& manager = ResourceManager::GetInstance();
-	manager.QueueViewedDynamicBufferViewUpdate(object->GetCurrentPerObjectCBView()->GetBuffer());
-
 
 	if (object->HasOpaque()) {
 		std::vector<unsigned int> indices;
@@ -39,7 +35,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			auto view = m_opaqueDrawSetCommandsBuffer->Add();
 			views.push_back(view);
-			m_opaqueDrawSetCommandsBuffer->UpdateAt(view.get(), command);
+			m_opaqueDrawSetCommandsBuffer->UpdateView(view.get(), &command);
 			unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
 			indices.push_back(index);
 			m_activeOpaqueDrawSetIndices->Insert(index);
@@ -47,11 +43,6 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 
 		object->SetCurrentOpaqueDrawSetCommandViews(views);
 		object->SetCurrentOpaqueDrawSetIndices(indices);
-
-		// TODO: Instead of inserting one update for every object, insert one update for all objects
-		m_activeOpaqueDrawSetIndices->UpdateUploadBuffer();
-		manager.QueueDynamicBufferUpdate(m_opaqueDrawSetCommandsBuffer.get());
-		manager.QueueDynamicBufferUpdate(m_activeOpaqueDrawSetIndices.get());
 	}
 
 	if (object->HasTransparent()) {
@@ -66,16 +57,13 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			auto view = m_transparentDrawSetCommandsBuffer->Add();
 			views.push_back(view);
-			m_transparentDrawSetCommandsBuffer->UpdateAt(view.get(), command);
+			m_transparentDrawSetCommandsBuffer->UpdateView(view.get(), &command);
 			unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
 			indices.push_back(index);
 			m_activeTransparentDrawSetIndices->Insert(index);
 		}
 		object->SetCurrentTransparentDrawSetIndices(indices);
 		object->SetCurrentTransparentDrawSetCommandViews(views);
-		m_activeTransparentDrawSetIndices->UpdateUploadBuffer();
-		manager.QueueDynamicBufferUpdate(m_transparentDrawSetCommandsBuffer.get());
-		manager.QueueDynamicBufferUpdate(m_activeTransparentDrawSetIndices.get());
 	}
 
 	//m_objects.push_back(object);
@@ -107,18 +95,8 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 	}
 	object->SetCurrentTransparentDrawSetIndices({});
 	object->SetCurrentTransparentDrawSetCommandViews({});
-
-	m_activeOpaqueDrawSetIndices->UpdateUploadBuffer();
-	m_activeTransparentDrawSetIndices->UpdateUploadBuffer();
-	auto& manager = ResourceManager::GetInstance();
-	manager.QueueDynamicBufferUpdate(m_activeOpaqueDrawSetIndices.get());
-	manager.QueueDynamicBufferUpdate(m_activeTransparentDrawSetIndices.get());
-
-
-	//m_objects.erase(m_objects.begin() + index);
 }
 
 void ObjectManager::UpdatePerObjectBuffer(BufferView* view, PerObjectCB& data) {
-	m_perObjectBuffers->UpdateAt(view, data);
-	ResourceManager::GetInstance().QueueViewedDynamicBufferViewUpdate(view->GetBuffer());
+	m_perObjectBuffers->UpdateView(view, &data);
 }

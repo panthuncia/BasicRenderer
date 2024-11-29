@@ -27,7 +27,7 @@ public:
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
-		auto& psoManager = PSOManager::getInstance();
+		auto& psoManager = PSOManager::GetInstance();
 		auto commandList = m_commandList.Get();
 		ThrowIfFailed(m_allocator->Reset());
 		commandList->Reset(m_allocator.Get(), nullptr);
@@ -132,7 +132,7 @@ private:
 
 	void CreateDebugMeshPSO() {
 
-		auto manager = PSOManager::getInstance();
+		auto manager = PSOManager::GetInstance();
 		// Compile shaders
 		Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
 		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
