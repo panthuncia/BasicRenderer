@@ -14,7 +14,7 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 		samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
 		samplerDesc.MipLODBias = 0;
 		samplerDesc.MaxAnisotropy = 1;
-		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
 		m_defaultSampler = Sampler::CreateSampler(samplerDesc);
 	}
 	return m_defaultSampler;
@@ -23,7 +23,7 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 std::shared_ptr<Sampler> Sampler::GetDefaultShadowSampler() {
 	if (m_defaultShadowSampler == nullptr) {
 		D3D12_SAMPLER_DESC samplerDesc = {};
-		samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+		samplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
 		samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;

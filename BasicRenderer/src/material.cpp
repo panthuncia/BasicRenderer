@@ -108,7 +108,7 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
     defaultSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     defaultSamplerDesc.MipLODBias = 0.0f;
     defaultSamplerDesc.MaxAnisotropy = 1;
-    defaultSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    defaultSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
     defaultSamplerDesc.BorderColor[0] = 0.0f;
     defaultSamplerDesc.BorderColor[1] = 0.0f;
     defaultSamplerDesc.BorderColor[2] = 0.0f;

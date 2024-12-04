@@ -573,7 +573,7 @@ std::vector<std::shared_ptr<Sampler>> parseGLTFSamplers(const json& gltfData) {
             samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
             samplerDesc.MipLODBias = 0.0f;
             samplerDesc.MaxAnisotropy = 1;
-            samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+            samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
             samplerDesc.BorderColor[0] = 1.0f;
             samplerDesc.BorderColor[1] = 1.0f;
             samplerDesc.BorderColor[2] = 1.0f;

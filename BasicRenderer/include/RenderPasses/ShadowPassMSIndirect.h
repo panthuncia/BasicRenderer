@@ -68,20 +68,25 @@ public:
 		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
 
 		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* transparentIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t transparentCommandCounterOffset) {
-			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
+			auto numOpaque = context.currentScene->GetNumOpaqueDraws();
+			if (numOpaque != 0) {
+				unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
+				commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
 
-			auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
-			commandList->SetPipelineState(pso.Get());
-			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
+				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+				commandList->SetPipelineState(pso.Get());
+				commandList->ExecuteIndirect(commandSignature.Get(), numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
+			}
 
-			unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+			auto numTransparent = context.currentScene->GetNumTransparentDraws();
+			if (numTransparent != 0) {
+				unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+				commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-			pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
-			commandList->SetPipelineState(pso.Get());
-			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), transparentIndirectCommandBuffer, 0, transparentIndirectCommandBuffer, transparentCommandCounterOffset);
-			
+				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+				commandList->SetPipelineState(pso.Get());
+				commandList->ExecuteIndirect(commandSignature.Get(), numTransparent, transparentIndirectCommandBuffer, 0, transparentIndirectCommandBuffer, transparentCommandCounterOffset);
+			}
 		};
 
 		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
