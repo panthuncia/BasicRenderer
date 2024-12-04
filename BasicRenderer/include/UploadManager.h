@@ -29,8 +29,8 @@ public:
 	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, uint8_t numResources, size_t dataBufferOffset);
 	void ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
-	void ExecuteResourceCopies(ID3D12CommandQueue* queue);
-	void ResetAllocators();
+	void ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue);
+	void ResetAllocators(uint8_t frameIndex);
 private:
 	UploadManager() = default;
 	void ReleaseData(size_t size, size_t offset);
@@ -40,8 +40,8 @@ private:
 	std::shared_ptr<Buffer> m_uploadBuffer;
 	std::vector<MemoryBlock> m_memoryBlocks;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12Fence>> m_fences;
 
 	std::function<uint8_t()> getNumFramesInFlight;

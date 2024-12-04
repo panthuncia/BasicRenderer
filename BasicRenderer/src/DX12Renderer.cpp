@@ -146,7 +146,6 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
-	settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
 	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
 		return currentScene->GetRenderableObjectIDMap();
@@ -162,6 +161,7 @@ void DX12Renderer::SetSettings() {
         });
 	settingsManager.registerSetting<bool>("enableMeshShader", true);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", true);
+	settingsManager.registerSetting<uint8_t>("numFramesInFlight", 2);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -175,6 +175,8 @@ void DX12Renderer::SetSettings() {
 	setEnvironment = settingsManager.getSettingSetter<std::string>("environmentName");
 	getMeshShadersEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
+	getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
+	m_numFramesInFlight = getNumFramesInFlight();
 
     settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
@@ -206,7 +208,7 @@ void EnableShaderBasedValidation() {
 }
 
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
-     UINT dxgiFactoryFlags = 0;
+    UINT dxgiFactoryFlags = 0;
 
 #if defined(_DEBUG)
     ComPtr<ID3D12Debug> debugController;
@@ -253,12 +255,13 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Initialize device manager and PSO manager
     DeviceManager::GetInstance().Initialize(device, commandQueue);
     PSOManager::GetInstance().initialize();
-	UploadManager::GetInstance().Initialize();
+    UploadManager::GetInstance().Initialize();
 
 
     // Describe and create the swap chain
+    auto numFramesInFlight = getNumFramesInFlight();
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-    swapChainDesc.BufferCount = 2;
+    swapChainDesc.BufferCount = numFramesInFlight;
     swapChainDesc.Width = x_res;
     swapChainDesc.Height = y_res;
     swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -280,53 +283,47 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // We do not support fullscreen transitions
     ThrowIfFailed(factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
 
-    frameIndex = swapChain->GetCurrentBackBufferIndex();
+    m_frameIndex = swapChain->GetCurrentBackBufferIndex();
 
     // Create RTV descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-    rtvHeapDesc.NumDescriptors = 2;
+    rtvHeapDesc.NumDescriptors = numFramesInFlight;
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     ThrowIfFailed(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap)));
 
     rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
+	dsvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
     // Create depth stencil descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-    dsvHeapDesc.NumDescriptors = 1;
+    dsvHeapDesc.NumDescriptors = numFramesInFlight;
     dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
     dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     ThrowIfFailed(device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvHeap)));
 
     // Create frame resources
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
-    for (UINT n = 0; n < 2; n++) {
+    renderTargets.resize(numFramesInFlight);
+    for (UINT n = 0; n < numFramesInFlight; n++) {
         ThrowIfFailed(swapChain->GetBuffer(n, IID_PPV_ARGS(&renderTargets[n])));
         device->CreateRenderTargetView(renderTargets[n].Get(), nullptr, rtvHandle);
         rtvHandle.Offset(1, rtvDescriptorSize);
     }
 
     // Create command allocator
-    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+
+    for (int i = 0; i < numFramesInFlight; i++) {
+        ComPtr<ID3D12CommandAllocator> allocator;
+        ComPtr<ID3D12GraphicsCommandList7> commandList;
+        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+        commandList->Close();
+        m_commandAllocators.push_back(allocator);
+        m_commandLists.push_back(commandList);
+    }
 
 
     ResourceManager::GetInstance().Initialize(commandQueue.Get());
-
-    // Create the command list
-    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-
-    // Close the command list
-    ThrowIfFailed(commandList->Close());
-
-    // Create a fence
-    ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
-    fenceValue = 1;
-
-    // Create an event handle for the fence
-    fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    if (fenceEvent == nullptr) {
-        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-    }
 
     // Create the depth stencil buffer
     D3D12_RESOURCE_DESC depthStencilDesc = CD3DX12_RESOURCE_DESC::Tex2D(
@@ -339,35 +336,55 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
     depthOptimizedClearValue.DepthStencil.Stencil = 0;
 
-    auto dsvHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    ThrowIfFailed(device->CreateCommittedResource(
-        &dsvHeapProperties,
-        D3D12_HEAP_FLAG_NONE,
-        &depthStencilDesc,
-        D3D12_RESOURCE_STATE_DEPTH_WRITE,
-        &depthOptimizedClearValue,
-        IID_PPV_ARGS(&depthStencilBuffer)
-    ));
+    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    for (int i = 0; i < numFramesInFlight; i++){
+        auto dsvHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+		ComPtr<ID3D12Resource> depthStencilBuffer;
+        ThrowIfFailed(device->CreateCommittedResource(
+            &dsvHeapProperties,
+            D3D12_HEAP_FLAG_NONE,
+            &depthStencilDesc,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &depthOptimizedClearValue,
+            IID_PPV_ARGS(&depthStencilBuffer)
+        ));
 
-    // Create the depth stencil view
-    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-    dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
-    device->CreateDepthStencilView(depthStencilBuffer.Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
+		depthStencilBuffers.push_back(depthStencilBuffer);
+        // Create the depth stencil view
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+        device->CreateDepthStencilView(depthStencilBuffers[i].Get(), &dsvDesc, dsvHandle);
+        dsvHandle.Offset(1, dsvDescriptorSize);
+    }
+
+    // Create per-frame fence information
+	m_frameFenceValues.resize(numFramesInFlight);
+	for (int i = 0; i < numFramesInFlight; i++) {
+		m_frameFenceValues[i] = 0;
+	}
+    ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameFence)));
+    m_frameFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (m_frameFenceEvent == nullptr) {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+    }
+
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     if (!device) return;
 
     // Wait for the GPU to complete all operations
-	WaitForPreviousFrame();
+	WaitForFrame(m_frameIndex);
 
     // Release the resources tied to the swap chain
-    for (int i = 0; i < 2; ++i) {
+    auto numFramesInFlight = getNumFramesInFlight();
+
+    for (int i = 0; i < numFramesInFlight; ++i) {
         renderTargets[i].Reset();
+		depthStencilBuffers[i].Reset();
     }
-    depthStencilBuffer.Reset();
 
     // Resize the swap chain
     ThrowIfFailed(swapChain->ResizeBuffers(
@@ -376,11 +393,11 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
         DXGI_FORMAT_R8G8B8A8_UNORM,
         DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
 
-    frameIndex = swapChain->GetCurrentBackBufferIndex();
+    m_frameIndex = swapChain->GetCurrentBackBufferIndex();
 
     // Recreate the render target views
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
-    for (UINT i = 0; i < 2; i++) {
+    for (UINT i = 0; i < numFramesInFlight; i++) {
         ThrowIfFailed(swapChain->GetBuffer(i, IID_PPV_ARGS(&renderTargets[i])));
         device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
         rtvHandle.Offset(1, rtvDescriptorSize);
@@ -397,36 +414,35 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     depthOptimizedClearValue.DepthStencil.Stencil = 0;
 
     auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    ThrowIfFailed(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &depthStencilDesc,
-        D3D12_RESOURCE_STATE_DEPTH_WRITE,
-        &depthOptimizedClearValue,
-        IID_PPV_ARGS(&depthStencilBuffer)));
 
-    // Create the depth stencil view
-    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-    dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
-    device->CreateDepthStencilView(depthStencilBuffer.Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    for (int i = 0; i < numFramesInFlight; i++) {
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &depthStencilDesc,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &depthOptimizedClearValue,
+            IID_PPV_ARGS(&depthStencilBuffers[i])));
+
+        // Create the depth stencil view
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+        device->CreateDepthStencilView(depthStencilBuffers[i].Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    }
 }
 
 
-void DX12Renderer::WaitForPreviousFrame() {
-    // Signal and increment the fence value
-    const UINT64 fenceToWaitFor = fenceValue;
-    ThrowIfFailed(commandQueue->Signal(fence.Get(), fenceToWaitFor));
-    fenceValue++;
+void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
+    // Check if the fence value for the current frame is complete
+    if (m_frameFence->GetCompletedValue() < m_frameFenceValues[currentFrameIndex]) {
+        // Set the event to be triggered when the GPU reaches the required fence value
+        ThrowIfFailed(m_frameFence->SetEventOnCompletion(m_frameFenceValues[currentFrameIndex], m_frameFenceEvent));
 
-    // Wait until the previous frame is finished
-    if (fence->GetCompletedValue() < fenceToWaitFor) {
-        ThrowIfFailed(fence->SetEventOnCompletion(fenceToWaitFor, fenceEvent));
-        WaitForSingleObject(fenceEvent, INFINITE);
+        // Wait for the event
+        WaitForSingleObject(m_frameFenceEvent, INFINITE);
     }
-
-    frameIndex = swapChain->GetCurrentBackBufferIndex();
 }
 
 void DX12Renderer::Update(double elapsedSeconds) {
@@ -445,6 +461,11 @@ void DX12Renderer::Update(double elapsedSeconds) {
     currentScene->Update();
     auto camera = currentScene->GetCamera();
 	unsigned int cameraIndex = camera->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+	auto& commandAllocator = m_commandAllocators[m_frameIndex];
+	auto& commandList = m_commandLists[m_frameIndex];
+
+	WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+
     ThrowIfFailed(commandAllocator->Reset());
 
     ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
@@ -452,9 +473,9 @@ void DX12Renderer::Update(double elapsedSeconds) {
     resourceManager.UpdateGPUBuffers();
 
     auto& updateManager = UploadManager::GetInstance();
-	updateManager.ResetAllocators(); // Reset allocators to avoid leaking memory
-    updateManager.ExecuteResourceCopies(commandQueue.Get());// copies come before uploads to avoid overwriting data
-	updateManager.ProcessUploads(frameIndex, commandQueue.Get());
+	updateManager.ResetAllocators(m_frameIndex); // Reset allocators to avoid leaking memory
+    updateManager.ExecuteResourceCopies(m_frameIndex, commandQueue.Get());// copies come before uploads to avoid overwriting data
+	updateManager.ProcessUploads(m_frameIndex, commandQueue.Get());
 
     resourceManager.ExecuteResourceTransitions();
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
@@ -462,6 +483,8 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
 void DX12Renderer::Render() {
     // Record all the commands we need to render the scene into the command list
+    auto& commandAllocator = m_commandAllocators[m_frameIndex];
+    auto& commandList = m_commandLists[m_frameIndex];
 
     m_context.currentScene = currentScene.get();
 	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
@@ -471,19 +494,20 @@ void DX12Renderer::Render() {
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
     m_context.dsvHeap = dsvHeap.Get();
-    m_context.renderTargets = renderTargets;
+    m_context.renderTargets = renderTargets.data();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
-    m_context.frameIndex = frameIndex;
+    m_context.dsvDescriptorSize = dsvDescriptorSize;
+    m_context.frameIndex = m_frameIndex;
     m_context.xRes = m_xRes;
     m_context.yRes = m_yRes;
 
     // Indicate that the back buffer will be used as a render target
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
     
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.rtvDescriptorSize);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.dsvDescriptorSize);
+    //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     // Clear the render target
     const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
@@ -503,7 +527,7 @@ void DX12Renderer::Render() {
     commandList->Reset(commandAllocator.Get(), nullptr);
 
     // Indicate that the back buffer will now be used to present
-    barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
     commandList->ResourceBarrier(1, &barrier);
 
     ThrowIfFailed(commandList->Close());
@@ -512,10 +536,12 @@ void DX12Renderer::Render() {
     ppCommandLists[0] = commandList.Get();
     commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
+    SignalFence(commandQueue, m_frameIndex);
+
     // Present the frame
     ThrowIfFailed(swapChain->Present(1, 0));
 
-    WaitForPreviousFrame();
+    AdvanceFrameIndex();
 
 	ProcessReadbackRequests(); // Save images to disk if requested
 
@@ -523,9 +549,22 @@ void DX12Renderer::Render() {
     DeletionManager::GetInstance().ProcessDeletions();
 }
 
+void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t currentFrameIndex) {
+    // Signal the fence
+    m_currentFrameFenceValue++;
+    ThrowIfFailed(commandQueue->Signal(m_frameFence.Get(), m_currentFrameFenceValue));
+
+    // Store the fence value for the current frame
+    m_frameFenceValues[currentFrameIndex] = m_currentFrameFenceValue;
+}
+
+void DX12Renderer::AdvanceFrameIndex() {
+    m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
+}
+
 void DX12Renderer::Cleanup() {
-    WaitForPreviousFrame();
-    CloseHandle(fenceEvent);
+    WaitForFrame(m_frameIndex);
+    CloseHandle(m_frameFenceEvent);
 	currentScene = nullptr;
     DeletionManager::GetInstance().Cleanup();
 }

@@ -1,6 +1,7 @@
 #include "RenderGraph.h"
 #include "RenderContext.h"
 #include "utilities.h"
+#include "SettingsManager.h"
 
 static bool mapHasResourceNotInState(std::unordered_map<std::wstring, ResourceState>& map, std::wstring resourceName, ResourceState state) {
     return mapHasKeyNotAsValue<std::wstring, ResourceState>(map, resourceName, state);
@@ -55,9 +56,16 @@ void RenderGraph::Setup(ID3D12CommandQueue* queue) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
 
-    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
-    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_transitionCommandList)));
-    m_transitionCommandList->Close();
+    uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+    for (int i = 0; i < numFramesInFlight; i++) {
+        ComPtr<ID3D12CommandAllocator> allocator;
+        ComPtr<ID3D12GraphicsCommandList7> commandList;
+        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+        commandList->Close();
+        m_commandAllocators.push_back(allocator);
+        m_transitionCommandLists.push_back(commandList);
+    }
 }
 
 void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name) {
@@ -90,11 +98,13 @@ std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) 
 void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto& queue = manager.GetCommandQueue();
-    m_commandAllocator->Reset();
+	auto& transitionCommandList = m_transitionCommandLists[context.frameIndex];
+	auto& commandAllocator = m_commandAllocators[context.frameIndex];
+    commandAllocator->Reset();
     for (auto& batch : batches) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
-        m_transitionCommandList->Reset(m_commandAllocator.Get(), NULL);
+        transitionCommandList->Reset(commandAllocator.Get(), NULL);
 		std::vector<D3D12_RESOURCE_BARRIER> barriers;
         for (auto& transition : batch.transitions) {
             auto& transitions = transition.pResource->GetTransitions(transition.fromState, transition.toState);
@@ -103,10 +113,10 @@ void RenderGraph::Execute(RenderContext& context) {
             }
         }
         if (barriers.size() > 0) {
-            m_transitionCommandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+            transitionCommandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
         }
-        m_transitionCommandList->Close();
-        ID3D12CommandList* ppCommandLists[] = { m_transitionCommandList.Get()};
+        transitionCommandList->Close();
+        ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get()};
         queue->ExecuteCommandLists(1, ppCommandLists);
 
         // Execute all passes in the batch

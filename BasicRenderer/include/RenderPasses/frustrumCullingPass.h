@@ -7,6 +7,7 @@
 #include "RenderContext.h"
 #include "DeviceManager.h"
 #include "utilities.h"
+#include "SettingsManager.h"
 
 class FrustrumCullingPass : public RenderPass {
 public:
@@ -17,18 +18,26 @@ public:
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
+		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
 
-		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
-		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
-		m_commandList->Close();
+		for (int i = 0; i < numFramesInFlight; i++) {
+			ComPtr<ID3D12CommandAllocator> allocator;
+			ComPtr<ID3D12GraphicsCommandList7> commandList;
+			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+			commandList->Close();
+			m_allocators.push_back(allocator);
+			m_commandLists.push_back(commandList);
+		}
 
 		CreatePSO();
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
-		auto commandList = m_commandList.Get();
-		ThrowIfFailed(m_commandAllocator->Reset());
-		ThrowIfFailed(commandList->Reset(m_commandAllocator.Get(), nullptr));
+		auto& commandList = m_commandLists[context.frameIndex];
+		auto& allocator = m_allocators[context.frameIndex];
+		ThrowIfFailed(allocator->Reset());
+		commandList->Reset(allocator.Get(), nullptr);
 
 		auto rootSignature = PSOManager::GetInstance().GetRootSignature();
 		commandList->SetComputeRootSignature(rootSignature.Get());
@@ -138,7 +147,7 @@ public:
 
 		//invalidated = false;
 
-		return { commandList };
+		return { commandList.Get()};
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -174,8 +183,8 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
+	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
+	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;

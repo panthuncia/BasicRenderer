@@ -5,6 +5,7 @@
 #include "Resource.h"
 #include "SettingsManager.h"
 #include "DeletionManager.h"
+#include "utilities.h"
 
 void UploadManager::Initialize() {
 	auto& device = DeviceManager::GetInstance().GetDevice();
@@ -14,9 +15,16 @@ void UploadManager::Initialize() {
     m_memoryBlocks.push_back({ 0, initialCapacity, true });
     auto& manager = DeviceManager::GetInstance();
 
-    device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator));
-    device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList));
-    m_commandList->Close();
+	uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+	for (int i = 0; i < numFramesInFlight; i++) {
+		ComPtr<ID3D12CommandAllocator> allocator;
+		ComPtr<ID3D12GraphicsCommandList> commandList;
+		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+		commandList->Close();
+		m_commandAllocators.push_back(allocator);
+		m_commandLists.push_back(commandList);
+	}
 
     getNumFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
     m_numFramesInFlight = getNumFramesInFlight();
@@ -146,7 +154,9 @@ void UploadManager::GrowBuffer(size_t newCapacity) {
 }
 
 void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue) {
-	m_commandList->Reset(m_commandAllocator.Get(), nullptr);
+	auto& commandAllocator = m_commandAllocators[frameIndex];
+	auto& commandList = m_commandLists[frameIndex];
+	commandList->Reset(commandAllocator.Get(), nullptr);
     for(auto& update : m_frameResourceUpdates[frameIndex]) {
 
         Resource* buffer = update.resourceToUpdate;
@@ -156,9 +166,9 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
             startState,
             D3D12_RESOURCE_STATE_COPY_DEST
         );
-        m_commandList->ResourceBarrier(1, &barrier);
+        commandList->ResourceBarrier(1, &barrier);
 
-		m_commandList->CopyBufferRegion(
+		commandList->CopyBufferRegion(
 			buffer->GetAPIResource(),
 			update.dataBufferOffset,
 			update.uploadBuffer->GetAPIResource(),
@@ -171,11 +181,11 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 			D3D12_RESOURCE_STATE_COPY_DEST,
 			startState
 		);
-		m_commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
     }
-	m_commandList->Close();
+	commandList->Close();
 
-	ID3D12CommandList* commandLists[] = { m_commandList.Get() };
+	ID3D12CommandList* commandLists[] = { commandList.Get() };
 	queue->ExecuteCommandLists(1, commandLists);
 
 	for (auto& update : m_frameResourceUpdates[frameIndex]) {
@@ -194,8 +204,10 @@ void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destinati
     queuedResourceCopies.push_back(copy);
 }
 
-void UploadManager::ExecuteResourceCopies(ID3D12CommandQueue* queue) {
-	m_commandList->Reset(m_commandAllocator.Get(), nullptr);
+void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue) {
+	auto& commandAllocator = m_commandAllocators[frameIndex];
+	auto& commandList = m_commandLists[frameIndex];
+	commandList->Reset(commandAllocator.Get(), nullptr);
 	for (auto& copy : queuedResourceCopies) {
 		auto startState = ResourceStateToD3D12(copy.source->GetState());
 		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -203,16 +215,16 @@ void UploadManager::ExecuteResourceCopies(ID3D12CommandQueue* queue) {
 			startState,
 			D3D12_RESOURCE_STATE_COPY_SOURCE
 		);
-		m_commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
 
 		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			copy.destination->GetAPIResource(),
 			ResourceStateToD3D12(copy.destination->GetState()),
 			D3D12_RESOURCE_STATE_COPY_DEST
 		);
-		m_commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
 
-        m_commandList->CopyBufferRegion(
+        commandList->CopyBufferRegion(
             copy.destination->GetAPIResource(),
             0,
             copy.source->GetAPIResource(),
@@ -224,27 +236,28 @@ void UploadManager::ExecuteResourceCopies(ID3D12CommandQueue* queue) {
 			D3D12_RESOURCE_STATE_COPY_SOURCE,
 			startState
 		);
-		m_commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
 
 		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			copy.destination->GetAPIResource(),
 			D3D12_RESOURCE_STATE_COPY_DEST,
 			ResourceStateToD3D12(copy.destination->GetState())
 		);
-		m_commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
 	}
-	m_commandList->Close();
+	commandList->Close();
 
-	ID3D12CommandList* commandLists[] = { m_commandList.Get() };
+	ID3D12CommandList* commandLists[] = { commandList.Get() };
 	queue->ExecuteCommandLists(1, commandLists);
 
 	queuedResourceCopies.clear();
 }
 
-void UploadManager::ResetAllocators() {
+void UploadManager::ResetAllocators(uint8_t frameIndex) {
 	//for (uint8_t index = 0; index < m_numFramesInFlight; index++) {
 	//	m_fences[index]->Signal(0);
 	//}
-	m_commandAllocator->Reset();
+	auto& commandAllocator = m_commandAllocators[frameIndex];
+	commandAllocator->Reset();
 	//m_commandList->Reset(m_commandAllocator.Get(), nullptr);
 }

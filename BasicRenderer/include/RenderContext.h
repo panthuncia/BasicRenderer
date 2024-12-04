@@ -17,6 +17,7 @@ public:
     ID3D12DescriptorHeap* dsvHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> *renderTargets;
     UINT rtvDescriptorSize;
+	UINT dsvDescriptorSize;
     UINT frameIndex;
     UINT xRes;
     UINT yRes;
