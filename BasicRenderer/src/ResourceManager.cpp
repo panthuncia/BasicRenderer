@@ -19,7 +19,9 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	m_dsvHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 10000, false);
 	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2000000, false);
 
-	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
+	m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+
+	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(m_numFramesInFlight, L"PerFrameCB");
 
 	perFrameCBData.ambientLighting = XMVectorSet(0.1, 0.1, 0.1, 1.0);
 	perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
@@ -77,7 +79,7 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
 }
 
 
-void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
+void ResourceManager::UpdatePerFrameBuffer(uint8_t frameIndex, UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex) {
 	perFrameCBData.mainCameraIndex = cameraIndex;
 	perFrameCBData.numLights = numLights;
 	perFrameCBData.lightBufferIndex = lightBufferIndex;
@@ -85,7 +87,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UIN
 	perFrameCBData.spotLightMatrixBufferIndex = spotMatricesBufferIndex;
 	perFrameCBData.directionalLightCascadeBufferIndex = directionalCascadeMatricesBufferIndex;
 
-	UpdateConstantBuffer(perFrameBufferHandle, perFrameCBData);
+	UpdateConstantBuffer(frameIndex, perFrameBufferHandle, perFrameCBData);
 }
 
 void ResourceManager::WaitForCopyQueue() {
@@ -221,7 +223,7 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
 	ThrowIfFailed(commandAllocator->Reset());
 }
 
-void ResourceManager::UpdateGPUBuffers() {
+void ResourceManager::UpdateGPUBuffers(uint8_t frameIndex) {
 
 	// Reset the command allocator
 	HRESULT hr = copyCommandAllocator->Reset();
@@ -240,7 +242,7 @@ void ResourceManager::UpdateGPUBuffers() {
 			D3D12_RESOURCE_BARRIER barrier = {};
 			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = bufferHandle.dataBuffer->m_buffer.Get();
+			barrier.Transition.pResource = bufferHandle.dataBuffer->GetAPIResource(frameIndex);
 			barrier.Transition.StateBefore = startState;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
 			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -249,7 +251,7 @@ void ResourceManager::UpdateGPUBuffers() {
 			copyCommandList->ResourceBarrier(1, &barrier);
 
 			// Perform the copy
-			copyCommandList->CopyResource(bufferHandle.dataBuffer->m_buffer.Get(), bufferHandle.uploadBuffer->m_buffer.Get());
+			copyCommandList->CopyResource(bufferHandle.dataBuffer->GetAPIResource(frameIndex), bufferHandle.uploadBuffer->GetAPIResource(frameIndex));
 
 			// Transition back to the original state
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
@@ -270,11 +272,11 @@ void ResourceManager::UpdateGPUBuffers() {
 	dynamicBuffersToUpdate.clear();
 }
 
-BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData, bool UAV) {
+BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, uint8_t numFrameCopies, ResourceState usageType, void* pInitialData, bool UAV) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	BufferHandle handle;
-	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-	handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, numFrameCopies, true, false);
+	handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, numFrameCopies, false, UAV);
 	if (pInitialData) {
 		UpdateBuffer(handle, pInitialData, bufferSize);
 	}
@@ -291,9 +293,9 @@ void ResourceManager::UpdateBuffer(BufferHandle& bufferHandle, void* pData, size
 	if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
 		void* mappedData;
 		D3D12_RANGE readRange(0, 0);
-		bufferHandle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
+		bufferHandle.uploadBuffer->GetAPIResource(0)->Map(0, &readRange, &mappedData);
 		memcpy(mappedData, pData, size);
-		bufferHandle.uploadBuffer->m_buffer->Unmap(0, nullptr);
+		bufferHandle.uploadBuffer->GetAPIResource(0)->Unmap(0, nullptr);
 		buffersToUpdate.push_back(bufferHandle);
 	}
 }
@@ -302,7 +304,7 @@ void ResourceManager::QueueResourceTransition(const ResourceTransition& transiti
 	queuedResourceTransitions.push_back(transition);
 }
 
-void ResourceManager::ExecuteResourceTransitions() {
+void ResourceManager::ExecuteResourceTransitions(uint8_t frameIndex) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	auto& commandList = transitionCommandList;
 	auto& commandAllocator = transitionCommandAllocator;
@@ -320,7 +322,7 @@ void ResourceManager::ExecuteResourceTransitions() {
 			spdlog::error("Resource is null in transition");
 			throw std::runtime_error("Resource is null");
 		}
-		auto& trans = transition.resource->GetTransitions(transition.beforeState, transition.afterState);
+		auto& trans = transition.resource->GetTransitions(frameIndex, transition.beforeState, transition.afterState);
 		for (auto& barrier : trans) {
 			barriers.push_back(barrier);
 		}
@@ -339,7 +341,7 @@ void ResourceManager::ExecuteResourceTransitions() {
 	queuedResourceTransitions.clear();
 }
 
-std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress) {
+std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, uint8_t numDataBuffers, std::wstring name, bool byteAddress) {
 #if defined(_DEBUG)
 	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
 	assert(byteAddress ? numElements % 4 == 0 : true);
@@ -350,7 +352,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	bufferSize += bufferSize % 4; // Align to 4 bytes
 	// Create the dynamic structured buffer instance
 	UINT bufferID = GetNextResizableBufferID();
-	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name);
+	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, m_numFramesInFlight, bufferID, bufferSize, name);
 	ResourceTransition transition;
 	transition.resource = pDynamicBuffer.get();
 	transition.beforeState = ResourceState::UNKNOWN;
@@ -373,26 +375,32 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
 	srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
-	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-	bufferIDDescriptorIndexMap[bufferID] = index;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-	device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+	std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
+	for (int i = 0; i < numDataBuffers; i++) {
+		UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+		bufferIDDescriptorIndexMap[bufferID + i] = index;
+		CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
+		device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->GetAPIResource(i), &srvDesc, cpuHandle);
 
-	CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-	ShaderVisibleIndexInfo srvInfo;
-	srvInfo.index = index;
-	srvInfo.gpuHandle = gpuHandle;
+		CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+		ShaderVisibleIndexInfo srvInfo;
+		srvInfo.index = index;
+		srvInfo.gpuHandle = gpuHandle;
 
-	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+		indexInfos.push_back(std::make_shared<ResourceIndexInfo>(srvInfo));
+		indexInfos[i]->m_SRVInfo = srvInfo;		
+	}
+
+	pDynamicBuffer->SetIndexInfo(indexInfos);
 
 	return pDynamicBuffer;
 }
 
-std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, std::wstring name) {
+std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, uint8_t numDataBuffers, std::wstring name) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
 	UINT bufferID = GetNextResizableBufferID();
-	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(bufferID, capacity, name);
+	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(numDataBuffers, bufferID, capacity, name);
 	ResourceTransition transition;
 	transition.resource = pBuffer.get();
 	transition.beforeState = ResourceState::UNKNOWN;
@@ -415,17 +423,23 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	srvDesc.Buffer.StructureByteStride = 4;
 	srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-	bufferIDDescriptorIndexMap[bufferID] = index;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-	device->CreateShaderResourceView(pBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+	std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
+	for (int i = 0; i < numDataBuffers; i++) {
+		UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+		bufferIDDescriptorIndexMap[bufferID + i] = index;
+		CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
+		device->CreateShaderResourceView(pBuffer->GetBuffer()->GetAPIResource(i), &srvDesc, cpuHandle);
 
-	CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-	ShaderVisibleIndexInfo srvInfo;
-	srvInfo.index = index;
-	srvInfo.gpuHandle = gpuHandle;
+		CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+		ShaderVisibleIndexInfo srvInfo;
+		srvInfo.index = index;
+		srvInfo.gpuHandle = gpuHandle;
 
-	pBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+		indexInfos.push_back(std::make_shared<ResourceIndexInfo>(srvInfo));
+		indexInfos[i]->m_SRVInfo = srvInfo;
+	}
+
+	pBuffer->SetIndexInfo(indexInfos);
 
 	return pBuffer;
 }

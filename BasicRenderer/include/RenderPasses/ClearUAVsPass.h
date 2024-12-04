@@ -36,10 +36,10 @@ public:
 		// opaque buffer
 		auto resource = currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
 		auto counterOffset = resource->GetUAVCounterOffset();
-		auto apiResource = resource->GetAPIResource();
+		auto apiResource = resource->GetAPIResource(context.frameIndex);
 		
 		auto clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetOpaqueClearBuffer();
-		auto clearBufferAPIResource = clearBuffer->GetAPIResource();
+		auto clearBufferAPIResource = clearBuffer->GetAPIResource(context.frameIndex);
 
 		//commandList->CopyResource(apiResource, clearBufferAPIResource); // Copy zeroes
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
@@ -47,7 +47,7 @@ public:
 		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
 			auto& light = lightPair.second;
 			for (auto& buffer : light->GetPerViewOpaqueIndirectCommandBuffers()) {
-				apiResource = buffer->GetAPIResource();
+				apiResource = buffer->GetAPIResource(context.frameIndex);
 				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 			}
 		}
@@ -55,10 +55,10 @@ public:
 		// Transparent buffer
 		resource = currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
 		counterOffset = resource->GetUAVCounterOffset();
-		apiResource = resource->GetAPIResource();
+		apiResource = resource->GetAPIResource(context.frameIndex);
 
 		clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetTransparentClearBuffer();
-		clearBufferAPIResource = clearBuffer->GetAPIResource();
+		clearBufferAPIResource = clearBuffer->GetAPIResource(context.frameIndex);
 
 		//commandList->CopyResource(apiResource, clearBufferAPIResource);
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
@@ -66,7 +66,7 @@ public:
 		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
 			auto& light = lightPair.second;
 			for (auto& buffer : light->GetPerViewTransparentIndirectCommandBuffers()) {
-				apiResource = buffer->GetAPIResource();
+				apiResource = buffer->GetAPIResource(context.frameIndex);
 				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 			}
 		}

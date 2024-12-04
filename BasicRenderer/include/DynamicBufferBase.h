@@ -15,8 +15,10 @@ class DynamicBufferBase : public GloballyIndexedResource {
 public:
     DynamicBufferBase() {}
     std::shared_ptr<Buffer> m_dataBuffer = nullptr;
+	Buffer* GetBuffer() { return m_dataBuffer.get(); }
 protected:
     virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {};
+    uint8_t m_numDataBuffers = 0;
 };
 
 class ViewedDynamicBufferBase : public DynamicBufferBase {

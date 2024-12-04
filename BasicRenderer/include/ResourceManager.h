@@ -37,10 +37,10 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
     ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
-    void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
+    void UpdatePerFrameBuffer(uint8_t frameIndex, UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
 
     template<typename T>
-    BufferHandle CreateIndexedConstantBuffer(std::wstring name = L"") {
+    BufferHandle CreateIndexedConstantBuffer(uint8_t numFrameCopies, std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -62,35 +62,44 @@ public:
 #endif
 		QueueResourceTransition(transition);
         // Create a descriptor for the buffer
-        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-        cbvDesc.BufferLocation = bufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
-        cbvDesc.SizeInBytes = bufferSize;
 
-        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbvSrvUavHeap->GetCPUHandle(index);
+		std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
 
-        ShaderVisibleIndexInfo cbvInfo;
-        cbvInfo.index = index;
-        cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        bufferHandle.dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
+        for (int i = 0; i < numFrameCopies; i++) {
+            D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+            cbvDesc.BufferLocation = bufferHandle.dataBuffer->GetAPIResource(i)->GetGPUVirtualAddress();
+            cbvDesc.SizeInBytes = bufferSize;
 
-        device->CreateConstantBufferView(&cbvDesc, handle);
+            UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+            D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbvSrvUavHeap->GetCPUHandle(index);
+
+            ShaderVisibleIndexInfo cbvInfo;
+            cbvInfo.index = index;
+            cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+
+            device->CreateConstantBufferView(&cbvDesc, handle);
+			indexInfos.push_back(std::make_shared<ResourceIndexInfo>());
+			indexInfos[i]->m_CBVInfo = cbvInfo;
+			indexInfos[i]->m_pCBVHeap = m_cbvSrvUavHeap;
+        }
+
+		bufferHandle.dataBuffer->SetIndexInfo(indexInfos);
 
         return bufferHandle;
     }
 
     template<typename T>
-    void UpdateConstantBuffer(BufferHandle& handle, const T& data) {
+    void UpdateConstantBuffer(uint8_t frameIndex, BufferHandle& handle, const T& data) {
         void* mappedData;
         D3D12_RANGE readRange(0, 0);
-        handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
+        handle.uploadBuffer->GetAPIResource(frameIndex)->Map(0, &readRange, &mappedData);
         memcpy(mappedData, &data, sizeof(T));
-        handle.uploadBuffer->m_buffer->Unmap(0, nullptr);
+        handle.uploadBuffer->GetAPIResource(frameIndex)->Unmap(0, nullptr);
 
         buffersToUpdate.push_back(handle);
     }
     template<typename T>
-    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
+    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, uint8_t numFrameCopies, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
@@ -120,12 +129,13 @@ public:
 
         BufferHandle handle;
 		if (hasUploadBuffer) {
-			handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+			handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, numFrameCopies, true, false);
 		}
 		else {
 			handle.uploadBuffer = nullptr;
 		}
-        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, numFrameCopies, false, UAV);
+        
         
         ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
 #if defined(_DEBUG)
@@ -133,7 +143,10 @@ public:
 #endif
         QueueResourceTransition(transition);
 
-        unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
+		std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
+		for (int i = 0; i < numFrameCopies; i++) {
+			indexInfos.push_back(std::make_shared<ResourceIndexInfo>());
+		}
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -143,14 +156,18 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(handle.dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
+        for (int i = 0; i < numFrameCopies; i++) {
+            unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
 
-        ShaderVisibleIndexInfo srvInfo;
-        srvInfo.index = index;
-        srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
+            device->CreateShaderResourceView(handle.dataBuffer->GetAPIResource(i).Get(), &srvDesc, srvHandle);
 
+            ShaderVisibleIndexInfo srvInfo;
+            srvInfo.index = index;
+            srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+			indexInfos[i]->m_SRVInfo = srvInfo;
+			indexInfos[i]->m_pSRVHeap = m_cbvSrvUavHeap;
+        }
         if (UAV) {
 			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 			uavDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -165,39 +182,27 @@ public:
 				uavDesc.Buffer.CounterOffsetInBytes = 0;
 			}
 
-			// Shader visible UAV
-			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-			D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), handle.dataBuffer->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
+            for (int i = 0; i < numFrameCopies; i++) {
+                // Shader visible UAV
+                unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+                D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
+                device->CreateUnorderedAccessView(handle.dataBuffer->GetAPIResource(i), handle.dataBuffer->GetAPIResource(i), &uavDesc, uavShaderVisibleHandle);
 
-			// Non-shader visible UAV
-            /*D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
-            uavUintDesc.Format = DXGI_FORMAT_R32_UINT;
-            uavUintDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            uavUintDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-			uavUintDesc.Buffer.NumElements = (numElements*sizeof(T))/sizeof(unsigned int);
-			uavUintDesc.Buffer.CounterOffsetInBytes = 0;
-			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
-			D3D12_CPU_DESCRIPTOR_HANDLE uavNonShaderVisibleHandle = m_nonShaderVisibleHeap->GetCPUHandle(uavNonShaderVisibleIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavUintDesc, uavNonShaderVisibleHandle);*/
-
-
-			ShaderVisibleIndexInfo uavInfo;
-			uavInfo.index = uavShaderVisibleIndex;
-			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-            handle.dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, counterOffset);
-
-			//NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
-			//uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
-			//uavNonShaderVisibleInfo.cpuHandle = uavNonShaderVisibleHandle;
-			//handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
+                ShaderVisibleIndexInfo uavInfo;
+                uavInfo.index = uavShaderVisibleIndex;
+                uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
+				indexInfos[i]->m_UAVShaderVisibleInfo = uavInfo;
+				indexInfos[i]->m_pUAVShaderVisibleHeap = m_cbvSrvUavHeap;
+            }
         }
+
+		handle.dataBuffer->SetIndexInfo(indexInfos, counterOffset);
 
         return handle;
     }
 
     template<typename T>
-    void UpdateIndexedStructuredBuffer(BufferHandle& handle, T* data, UINT startIndex, UINT numElements) {
+    void UpdateIndexedStructuredBuffer(uint8_t frameIndex, BufferHandle& handle, T* data, UINT startIndex, UINT numElements) {
         //if (handle.buffer == nullptr) {
         //    spdlog::error("Buffer not initialized.");
         //    throw std::runtime_error("Buffer not initialized.");
@@ -211,7 +216,7 @@ public:
         // Map the buffer
         void* mappedData = nullptr;
         D3D12_RANGE readRange = { offset, offset + updateSize };
-        HRESULT hr = handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
+        HRESULT hr = handle.uploadBuffer->GetAPIResource(0)->Map(0, &readRange, &mappedData);
         if (FAILED(hr)) {
             spdlog::error("Failed to map buffer with HRESULT: {}", hr);
             throw std::runtime_error("Failed to map buffer.");
@@ -222,7 +227,7 @@ public:
 
         // Unmap the buffer
         D3D12_RANGE writtenRange = { offset, offset + updateSize };
-        handle.uploadBuffer->m_buffer->Unmap(0, &writtenRange);
+        handle.uploadBuffer->GetAPIResource(frameIndex)->Unmap(0, &writtenRange);
 
         buffersToUpdate.push_back(handle);
     }
@@ -271,7 +276,7 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", size_t alignment = 1) {
+    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, uint8_t numDataBuffers, UINT capacity = 64, std::wstring name = "", size_t alignment = 1) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -300,21 +305,26 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-        bufferIDDescriptorIndexMap[bufferID] = index;
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+		std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
+		for (int i = 0; i < numDataBuffers; i++) {
+			UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+			D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+			device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->GetAPIResource(i), &srvDesc, srvHandle);
+			indexInfos.push_back(std::make_shared<ResourceIndexInfo>());
+			ShaderVisibleIndexInfo srvInfo;
+			srvInfo.index = descriptorIndex;
+			srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
+			indexInfos[i]->m_SRVInfo = srvInfo;
+			indexInfos[i]->m_pSRVHeap = m_cbvSrvUavHeap;
+		}
 
-		ShaderVisibleIndexInfo srvInfo;
-		srvInfo.index = index;
-		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-		pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+		pDynamicBuffer->SetIndexInfo(indexInfos);
 
         return pDynamicBuffer;
     }
 
-    std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false);
-	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, std::wstring name = L"");
+    std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, uint8_t numDataBuffers, std::wstring name, bool byteAddress = false);
+	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, uint8_t numDataBuffers, std::wstring name = L"");
 
     UINT GetNextResizableBufferID() {
         UINT val = numResizableBuffers;
@@ -323,8 +333,6 @@ public:
     }
 
     void onDynamicStructuredBufferResized(UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
-        UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create a Shader Resource View for the buffer
@@ -337,7 +345,20 @@ public:
         srvDesc.Buffer.StructureByteStride = typeSize;
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        device->CreateShaderResourceView(buffer->m_dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
+		std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
+        for (int i = 0; i < buffer->m_dataBuffer->GetNumDataBuffers(); i++) {
+			UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+            D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+            device->CreateShaderResourceView(buffer->m_dataBuffer->GetAPIResource(i), &srvDesc, srvHandle);
+			indexInfos.push_back(std::make_shared<ResourceIndexInfo>());
+			ShaderVisibleIndexInfo srvInfo;
+			srvInfo.index = descriptorIndex;
+			srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
+			indexInfos[i]->m_SRVInfo = srvInfo;
+			indexInfos[i]->m_pSRVHeap = m_cbvSrvUavHeap;
+        }
+
+		buffer->SetIndexInfo(indexInfos);
         
 		auto bufferState = buffer->GetState();
 		// After resize, internal buffer state will not match the wrapper state
@@ -354,8 +375,6 @@ public:
     }
 
     void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer) {
-        UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create a Shader Resource View for the buffer
@@ -368,7 +387,20 @@ public:
         srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
         srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
-        device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
+		std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
+		for (int i = 0; i < buffer->m_dataBuffer->GetNumDataBuffers(); i++) {
+			UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+			D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+			device->CreateShaderResourceView(buffer->m_dataBuffer->GetAPIResource(i), &srvDesc, srvHandle);
+			indexInfos.push_back(std::make_shared<ResourceIndexInfo>());
+			ShaderVisibleIndexInfo srvInfo;
+			srvInfo.index = descriptorIndex;
+			srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
+			indexInfos[i]->m_SRVInfo = srvInfo;
+			indexInfos[i]->m_pSRVHeap = m_cbvSrvUavHeap;
+		}
+
+		buffer->SetIndexInfo(indexInfos);
 
         auto bufferState = buffer->GetState();
         // After resize, internal buffer state will not match the wrapper state
@@ -619,15 +651,15 @@ public:
         return handle;
     }
 
-	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData, bool UAV = false);
+	BufferHandle CreateBuffer(size_t size, uint8_t numFrameCopies, ResourceState usageType, void* pInitialData, bool UAV = false);
     void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
-    void UpdateGPUBuffers();
+    void UpdateGPUBuffers(uint8_t frameIndex);
 
 	void QueueResourceTransition(const ResourceTransition& transition);
-    void ExecuteResourceTransitions();
+    void ExecuteResourceTransitions(uint8_t frameIndex);
 
     void setEnvironmentIrradianceMapSamplerIndex(int index) { perFrameCBData.environmentIrradianceSamplerIndex = index; }
 	void setEnvironmentIrradianceMapIndex(int index) { perFrameCBData.environmentIrradianceMapIndex = index; }
@@ -674,7 +706,7 @@ private:
 	BufferHandle perFrameBufferHandle;
     UINT8* pPerFrameConstantBuffer;
     PerFrameCB perFrameCBData;
-    UINT currentFrameIndex;
+    uint8_t m_numFramesInFlight = 0;
 
     std::shared_ptr<DynamicStructuredBuffer<LightInfo>> lightBufferPtr;
 

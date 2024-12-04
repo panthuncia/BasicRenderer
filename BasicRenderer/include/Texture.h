@@ -9,7 +9,7 @@ class PixelBuffer;
 class Sampler;
 class RenderContext;
 
-class Texture : public Resource { // Sometimes, a resource needs a unique sampler, so both Texture and PixelBuffer inherit from Resource
+class Texture : public SingleResource { // Sometimes, a resource needs a unique sampler, so both Texture and PixelBuffer inherit from Resource
 public:
 	Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler);
 	UINT GetSamplerDescriptorIndex();
@@ -18,7 +18,7 @@ public:
 	}
 	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
 	virtual void SetName(const std::wstring& name);
-	ID3D12Resource* GetAPIResource() const override;
+	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override;
 private:
 	std::shared_ptr<PixelBuffer> m_image;
 	std::shared_ptr<Sampler> m_sampler;

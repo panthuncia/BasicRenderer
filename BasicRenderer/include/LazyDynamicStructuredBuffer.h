@@ -31,8 +31,8 @@ template <typename T>  // Enforce the concept at the template parameter level
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 
-	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false) {
-		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(id, capacity, name, alignment, UAV));
+	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(uint8_t numDataBuffers, UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false) {
+		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(numDataBuffers, id, capacity, name, alignment, UAV));
 	}
 
     std::shared_ptr<BufferView> Add() {
@@ -90,20 +90,21 @@ public:
 		return m_elementSize;
 	}
 
-	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override { return m_dataBuffer->GetAPIResource(frameIndex); }
 
 protected:
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(uint8_t frameIndex, ResourceState prevState, ResourceState newState) override {
 		currentState = newState;
-        return m_dataBuffer->GetTransitions(prevState, newState);
+        return m_dataBuffer->GetTransitions(frameIndex, prevState, newState);
     }
 
 private:
-    LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false)
+    LazyDynamicStructuredBuffer(uint8_t numDataBuffers, UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
 		m_elementSize = ((sizeof(T) + alignment - 1) / alignment) * alignment;
         CreateBuffer(capacity);
 		SetName(name);
+		m_numDataBuffers = numDataBuffers;
     }
     void OnSetName() override {
         if (name != L"") {

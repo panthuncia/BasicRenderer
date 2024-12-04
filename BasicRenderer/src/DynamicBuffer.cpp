@@ -111,18 +111,17 @@ void DynamicBuffer::Deallocate(const std::shared_ptr<BufferView>& view) {
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto& device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity, false, m_UAV);
+    m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity, m_numDataBuffers, false, m_UAV);
     CD3DX12_RANGE readRange(0, 0);
     m_memoryBlocks.push_back({ 0, capacity, true });
 }
 
 void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto& device = DeviceManager::GetInstance().GetDevice();
-    auto newUploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, newSize, true, false);
     if (m_dataBuffer != nullptr) {
         DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
     }
-    auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize, false, m_UAV);
+    auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize, m_numDataBuffers, false, m_UAV);
 	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
 	m_dataBuffer = newDataBuffer;
 

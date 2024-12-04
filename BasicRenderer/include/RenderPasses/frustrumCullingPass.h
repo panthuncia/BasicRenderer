@@ -52,8 +52,8 @@ public:
 		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
 		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
 		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
-		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex(context.frameIndex);
+		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex(context.frameIndex);
 
 		commandList->SetComputeRoot32BitConstants(5, 6, &staticBufferIndices, 0);
 
@@ -65,14 +65,14 @@ public:
 			unsigned int numThreadGroups = std::ceil(context.currentScene->GetNumOpaqueDraws() / 64.0);
 			// First, process buffer for main camera
 			auto resource = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
-			auto apiResource = resource->GetAPIResource();
-			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
-			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
+			auto apiResource = resource->GetAPIResource(context.frameIndex);
+			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo(context.frameIndex);
+			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo(context.frameIndex);
 			unsigned int bufferIndices[5] = {};
 			bufferIndices[0] = meshManager->GetOpaquePerMeshBufferSRVIndex();
-			bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
-			bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
-			bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex(context.frameIndex);
+			bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex(context.frameIndex);
+			bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo(context.frameIndex).index;
 			bufferIndices[4] = context.currentScene->GetNumOpaqueDraws()-1;
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
@@ -87,7 +87,7 @@ public:
 				auto& lightViews = light->GetCameraBufferViews();
 				int i = 0;
 				for (auto& buffer : light->GetPerViewOpaqueIndirectCommandBuffers()) {
-					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo(context.frameIndex).index;
 					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
@@ -102,14 +102,14 @@ public:
 		if (numTransparentDraws > 0) {
 			unsigned int numThreadGroups = std::ceil(context.currentScene->GetNumTransparentDraws() / 64.0);
 			auto resource = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
-			auto apiResource = resource->GetAPIResource();
-			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
-			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
+			auto apiResource = resource->GetAPIResource(context.frameIndex);
+			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo(context.frameIndex);
+			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo(context.frameIndex);
 			unsigned int bufferIndices[5] = {};
 			bufferIndices[0] = meshManager->GetTransparentPerMeshBufferSRVIndex();
-			bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex();
-			bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex();
-			bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex(context.frameIndex);
+			bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex(context.frameIndex);
+			bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo(context.frameIndex).index;
 			bufferIndices[4] = context.currentScene->GetNumTransparentDraws()-1;
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
@@ -123,7 +123,7 @@ public:
 				auto& lightViews = light->GetCameraBufferViews();
 				int i = 0;
 				for (auto& buffer : light->GetPerViewTransparentIndirectCommandBuffers()) {
-					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo(context.frameIndex).index;
 					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);

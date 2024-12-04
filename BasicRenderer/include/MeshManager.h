@@ -21,29 +21,29 @@ public:
 	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket);
 	void RemoveMesh(std::shared_ptr<BufferView> view);
 	unsigned int GetVertexBufferIndex() const {
-		return m_vertices->GetSRVInfo().index;
+		return m_vertices->GetSRVInfo(0).index;
 	}
 	unsigned int GetMeshletOffsetBufferIndex() const {
-		return m_meshletOffsets->GetSRVInfo().index;
+		return m_meshletOffsets->GetSRVInfo(0).index;
 	}
 	unsigned int GetMeshletIndexBufferIndex() const {
-		return m_meshletIndices->GetSRVInfo().index;
+		return m_meshletIndices->GetSRVInfo(0).index;
 	}
 	unsigned int GetMeshletTriangleBufferIndex() const {
-		return m_meshletTriangles->GetSRVInfo().index;
+		return m_meshletTriangles->GetSRVInfo(0).index;
 	}
 	std::shared_ptr<ResourceGroup> GetResourceGroup() {
 		return m_resourceGroup;
 	}
 	unsigned int GetOpaquePerMeshBufferSRVIndex() const {
-		return m_opaquePerMeshBuffers->GetSRVInfo().index;
+		return m_opaquePerMeshBuffers->GetSRVInfo(0).index;
 	}
 	std::shared_ptr<DynamicBuffer>& GetOpaquePerMeshBuffers() {
 		return m_opaquePerMeshBuffers;
 	}
 
 	unsigned int GetTransparentPerMeshBufferSRVIndex() const {
-		return m_transparentPerMeshBuffers->GetSRVInfo().index;
+		return m_transparentPerMeshBuffers->GetSRVInfo(0).index;
 	}
 	std::shared_ptr<DynamicBuffer>& GetTransparentPerMeshBuffers() {
 		return m_transparentPerMeshBuffers;

@@ -33,16 +33,16 @@ public:
     }
 
     std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(
-        ResourceState prevState, ResourceState newState) override {
+        uint8_t frameIndex, ResourceState prevState, ResourceState newState) override {
         if (resource) {
             SetState(newState); // Keep the wrapper's state in sync
-            return resource->GetTransitions(prevState, newState);
+            return resource->GetTransitions(frameIndex, prevState, newState);
         }
     }
 
-	ID3D12Resource* GetAPIResource() const override {
+	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override {
 		if (resource) {
-			return resource->GetAPIResource();
+			return resource->GetAPIResource(frameIndex);
 		}
 		return nullptr;
 	}
@@ -83,16 +83,17 @@ public:
     }
 
     std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(
+        uint8_t frameIndex,
         ResourceState prevState, ResourceState newState) override {
         if (m_resource) {
             SetState(newState); // Keep the wrapper's state in sync
-            return m_resource->GetTransitions(prevState, newState);
+            return m_resource->GetTransitions(frameIndex, prevState, newState);
         }
     }
 
-    ID3D12Resource* GetAPIResource() const override {
+    ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override {
         if (m_resource) {
-            return m_resource->GetAPIResource();
+            return m_resource->GetAPIResource(frameIndex);
         }
         return nullptr;
     }

@@ -21,6 +21,7 @@ void UploadManager::Initialize() {
     getNumFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
     m_numFramesInFlight = getNumFramesInFlight();
     m_frameResourceUpdates.resize(m_numFramesInFlight);
+    m_queuedResourceCopies.resize(m_numFramesInFlight);
 	m_fences.resize(m_numFramesInFlight);
     for (uint8_t index = 0; index < m_numFramesInFlight; index++) {
         device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fences[index]));
@@ -152,22 +153,22 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
         Resource* buffer = update.resourceToUpdate;
         auto startState = ResourceStateToD3D12(update.resourceToUpdate->GetState());
         D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-            buffer->GetAPIResource(),
+            buffer->GetAPIResource(frameIndex),
             startState,
             D3D12_RESOURCE_STATE_COPY_DEST
         );
         m_commandList->ResourceBarrier(1, &barrier);
 
 		m_commandList->CopyBufferRegion(
-			buffer->GetAPIResource(),
+			buffer->GetAPIResource(frameIndex),
 			update.dataBufferOffset,
-			update.uploadBuffer->GetAPIResource(),
+			update.uploadBuffer->GetAPIResource(frameIndex),
 			update.uploadBufferOffset,
 			update.size
 		);
 
 		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			buffer->GetAPIResource(),
+			buffer->GetAPIResource(frameIndex),
 			D3D12_RESOURCE_STATE_COPY_DEST,
 			startState
 		);
@@ -186,17 +187,18 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 	m_frameResourceUpdates[frameIndex].clear();
 }
 
-void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size) {
+void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size, uint8_t numResources) {
     ResourceCopy copy;
     copy.source = source;
     copy.destination = destination;
 	copy.size = size;
-    queuedResourceCopies.push_back(copy);
+    for()
+    m_queuedResourceCopies.push_back(copy);
 }
 
-void UploadManager::ExecuteResourceCopies(ID3D12CommandQueue* queue) {
+void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue) {
 	m_commandList->Reset(m_commandAllocator.Get(), nullptr);
-	for (auto& copy : queuedResourceCopies) {
+	for (auto& copy : m_queuedResourceCopies) {
 		auto startState = ResourceStateToD3D12(copy.source->GetState());
 		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			copy.source->GetAPIResource(),

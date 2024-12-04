@@ -13,47 +13,34 @@ public:
 		name = groupName;
     }
 
-	void AddIndexedResource(std::shared_ptr<Resource> resource, uint64_t index) { // uint64_t to allow Cantor pairing
-        resourcesByID[index] = resource;
-    }
-
 	void AddResource(std::shared_ptr<Resource> resource) {
-		resources.push_back(resource);
+		resourcesByID[resource->GetGlobalResourceID()] = resource;
 	}
 
-    virtual void RemoveIndexedResource(uint32_t index) {
-        auto iter = resourcesByID.find(index);
-        if (iter != resourcesByID.end()) {
-            resourcesByID.erase(iter);
-        }
-    }
+	void RemoveResource(Resource* resource) {
+		resourcesByID.erase(resource->GetGlobalResourceID());
+	}
 
-	ID3D12Resource* GetAPIResource() const override {
+	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override {
 		spdlog::error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
 		return nullptr;
 	}
 
 protected:
     // Override the base Resource method to transition all resources in the group
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(uint8_t frameIndex, ResourceState prevState, ResourceState newState) {
 		m_transitions.clear();
         for (auto& pair : resourcesByID) {
-            auto& trans = pair.second->GetTransitions(prevState, newState);
+            auto& trans = pair.second->GetTransitions(frameIndex, prevState, newState);
             for (auto& transition : trans) {
 				m_transitions.push_back(transition);
             }
         }
-		for (auto& resource : resources) {
-			auto& trans = resource->GetTransitions(prevState, newState);
-            for (auto& transition : trans) {
-				m_transitions.push_back(transition);
-            }
-        }
+
         currentState = newState; // Set the state for the group as a whole
 		return m_transitions;
     }
 protected:
     std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
-	std::vector<std::shared_ptr<Resource>> resources;
     std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
 };

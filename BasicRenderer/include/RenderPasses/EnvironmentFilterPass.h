@@ -182,12 +182,12 @@ private:
         CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, 1, ResourceState::VERTEX, (void*)skyboxVertices);
         ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)skyboxVertices, vertexBufferSize);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->GetAPIResource(0)->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(SkyboxVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 

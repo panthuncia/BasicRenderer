@@ -72,8 +72,8 @@ public:
 		constants.center[2] = 0.0;
 		constants.radius = 1.0;
 		constants.perObjectIndex = 0;
-		constants.cameraBufferIndex = context.currentScene->GetCameraManager()->GetCameraBufferSRVIndex();
-		constants.objectBufferIndex = context.currentScene->GetObjectManager()->GetPerObjectBufferSRVIndex();
+		constants.cameraBufferIndex = context.currentScene->GetCameraManager()->GetCameraBufferSRVIndex(context.frameIndex);
+		constants.objectBufferIndex = context.currentScene->GetObjectManager()->GetPerObjectBufferSRVIndex(context.frameIndex);
 
 		commandList->SetGraphicsRoot32BitConstants(0, 8, &constants, 0);
 

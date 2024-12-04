@@ -13,9 +13,17 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
     ResourceManager& resourceManager = ResourceManager::GetInstance();
 
     handle = resourceManager.CreateTexture(desc, initialData);
-    SetSRVDescriptor(handle.srvHeap, handle.SRVInfo);
-	SetRTVDescriptors(handle.rtvHeap, handle.RTVInfo);
-	SetDSVDescriptors(handle.dsvHeap, handle.DSVInfo);
+	std::shared_ptr<ResourceIndexInfo> indexInfo = std::make_shared<ResourceIndexInfo>();
+	indexInfo->m_pSRVHeap = handle.srvHeap;
+	indexInfo->m_SRVInfo = handle.SRVInfo;
+	indexInfo->m_pRTVHeap = handle.rtvHeap;
+	indexInfo->m_RTVInfos = handle.RTVInfo;
+	indexInfo->m_pDSVHeap = handle.dsvHeap;
+	indexInfo->m_DSVInfos = handle.DSVInfo;
+
+	std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos = { indexInfo };
+	SetIndexInfo(indexInfos);
+
     currentState = ResourceState::UNKNOWN;
 	m_width = desc.width;
 	m_height = desc.height;
@@ -31,7 +39,7 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 	m_transitions.push_back(barrier);
 }
 
-std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState fromState, ResourceState toState) {
+std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (uint8_t frameIndex, ResourceState fromState, ResourceState toState) {
     if (fromState == toState) return m_emptyTransitions;
 
     D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);

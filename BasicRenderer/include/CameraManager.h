@@ -12,8 +12,8 @@ public:
 		return std::unique_ptr<CameraManager>(new CameraManager());
 	}
 
-	unsigned int GetCameraBufferSRVIndex() const {
-		return m_pCameraBuffer->GetSRVInfo().index;
+	unsigned int GetCameraBufferSRVIndex(uint8_t frameIndex) const {
+		return m_pCameraBuffer->GetSRVInfo(frameIndex).index;
 	}
 
 	std::shared_ptr<BufferView> AddCamera(CameraInfo& camera);

@@ -19,28 +19,28 @@ public:
 	}
 	void AddObject(std::shared_ptr<RenderableObject>& object);
 	void RemoveObject(std::shared_ptr<RenderableObject>& object);
-	unsigned int GetPerObjectBufferSRVIndex() const {
-		return m_perObjectBuffers->GetSRVInfo().index;
+	unsigned int GetPerObjectBufferSRVIndex(uint8_t frameIndex) const {
+		return m_perObjectBuffers->GetSRVInfo(frameIndex).index;
 	}
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerObjectCB>>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}
 
-	unsigned int GetOpaqueDrawSetCommandsBufferSRVIndex() const {
-		return m_opaqueDrawSetCommandsBuffer->GetSRVInfo().index;
+	unsigned int GetOpaqueDrawSetCommandsBufferSRVIndex(uint8_t frameIndex) const {
+		return m_opaqueDrawSetCommandsBuffer->GetSRVInfo(frameIndex).index;
 	}
 	
-	unsigned int GetTransparentDrawSetCommandsBufferSRVIndex() const {
-		return m_transparentDrawSetCommandsBuffer->GetSRVInfo().index;
+	unsigned int GetTransparentDrawSetCommandsBufferSRVIndex(uint8_t frameIndex) const {
+		return m_transparentDrawSetCommandsBuffer->GetSRVInfo(frameIndex).index;
 	}
 
-	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const {
-		return m_activeOpaqueDrawSetIndices->GetSRVInfo().index;
+	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex(uint8_t frameIndex) const {
+		return m_activeOpaqueDrawSetIndices->GetSRVInfo(frameIndex).index;
 	}
 
-	unsigned int GetActiveTransparentDrawSetIndicesBufferSRVIndex() const {
-		return m_activeTransparentDrawSetIndices->GetSRVInfo().index;
+	unsigned int GetActiveTransparentDrawSetIndicesBufferSRVIndex(uint8_t frameIndex) const {
+		return m_activeTransparentDrawSetIndices->GetSRVInfo(frameIndex).index;
 	}
 
 	std::shared_ptr<LazyDynamicStructuredBuffer<IndirectCommand>>& GetOpaqueDrawSetCommandsBuffer() {

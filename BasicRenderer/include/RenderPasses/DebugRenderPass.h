@@ -50,7 +50,7 @@ public:
         commandList->SetPipelineState(debugPSO.Get());
         commandList->SetGraphicsRootSignature(debugRootSignature.Get());
 
-        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo(context.frameIndex).gpuHandle);
         auto viewMatrix = XMMatrixTranspose(XMMatrixMultiply(XMMatrixScaling(0.2f, 0.2f, 1.0f), XMMatrixTranslation(0.7, -0.7, 0)));
         commandList->SetGraphicsRoot32BitConstants(1, 16, &viewMatrix, 0);
 
@@ -105,12 +105,12 @@ private:
         CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenTriangleVertices);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, 1, ResourceState::VERTEX, (void*)fullscreenTriangleVertices);
 		ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)fullscreenTriangleVertices, vertexBufferSize);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->GetAPIResource(0)->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(DebugVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 

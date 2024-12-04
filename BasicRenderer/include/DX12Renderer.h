@@ -64,7 +64,8 @@ private:
     ComPtr<ID3D12Fence> fence;
     UINT rtvDescriptorSize;
     UINT dsvDescriptorSize;
-    UINT frameIndex = 0;
+	uint8_t m_numFramesInFlight = 3;
+    uint8_t m_frameIndex = 0;
     HANDLE fenceEvent;
     UINT64 fenceValue;
 

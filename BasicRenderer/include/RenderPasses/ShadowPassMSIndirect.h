@@ -57,8 +57,8 @@ public:
 		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
 		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
 		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
-		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex(context.frameIndex);
+		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex(context.frameIndex);
 
 		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
 
@@ -93,7 +93,7 @@ public:
 			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
 			switch (light->GetLightType()) {
 				case LightType::Spot: {
-					auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
+					auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos(context.frameIndex)[0].cpuHandle;
 					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 					int lightIndex = light->GetCurrentLightBufferIndex();
@@ -102,7 +102,7 @@ public:
 					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 					auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[0];
 					auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[0];
-					drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
+					drawObjects(opaque->GetAPIResource(context.frameIndex), transparent->GetAPIResource(context.frameIndex), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
 					break;
 				}
 				case LightType::Point: {
@@ -112,14 +112,14 @@ public:
 					auto& opaqueBuffers = light->GetPerViewOpaqueIndirectCommandBuffers();
 					auto& transparentBuffers = light->GetPerViewTransparentIndirectCommandBuffers();
 					for (int i = 0; i < 6; i++) {
-						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
+						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos(context.frameIndex)[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
 						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
 						auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[i];
-						drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
+						drawObjects(opaque->GetAPIResource(context.frameIndex), transparent->GetAPIResource(context.frameIndex), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
 					}
 					break;
 				}
@@ -130,14 +130,14 @@ public:
 					auto& opaqueBuffers = light->GetPerViewOpaqueIndirectCommandBuffers();
 					auto& transparentBuffers = light->GetPerViewTransparentIndirectCommandBuffers();
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
+						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos(context.frameIndex)[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
 						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
 						auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[i];
-						drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
+						drawObjects(opaque->GetAPIResource(context.frameIndex), transparent->GetAPIResource(context.frameIndex), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
 					}
 				}
 			}

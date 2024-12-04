@@ -21,8 +21,8 @@ template<class T>
 class DynamicStructuredBuffer : public DynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name, UAV));
+    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(uint8_t numDataBuffers, UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(numDataBuffers, id, capacity, name, UAV));
     }
 
     unsigned int Add(const T& element) {
@@ -88,7 +88,7 @@ protected:
     }
 
 private:
-    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
+    DynamicStructuredBuffer(uint8_t numDataBuffers, UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(capacity);
         if (name != L"") {
@@ -97,6 +97,7 @@ private:
         else {
             m_dataBuffer->SetName(m_name.c_str());
         }
+		m_numDataBuffers = numDataBuffers;
     }
 
     void OnSetName() override {
@@ -122,7 +123,7 @@ private:
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
         auto& device = DeviceManager::GetInstance().GetDevice();
 
-        auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false, m_UAV);
+        auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, m_numDataBuffers, false, m_UAV);
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);

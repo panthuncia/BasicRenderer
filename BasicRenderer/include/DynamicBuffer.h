@@ -25,8 +25,8 @@ class BufferView;
 class DynamicBuffer : public ViewedDynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name));
+    static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, uint8_t numDataBuffers, UINT id = 0, size_t capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, numDataBuffers, id, capacity, name));
     }
 
     std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
@@ -50,19 +50,20 @@ public:
 		return m_mappedData;
 	}
 
-	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override { return m_dataBuffer->GetAPIResource(frameIndex); }
 
 protected:
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(uint8_t frameIndex, ResourceState prevState, ResourceState newState) override {
         currentState = newState;
-        return m_dataBuffer->GetTransitions(prevState, newState);
+        return m_dataBuffer->GetTransitions(frameIndex, prevState, newState);
     }
 
 private:
-    DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"", bool UAV = false)
+    DynamicBuffer(bool byteAddress, size_t elementSize, uint8_t numDataBuffers, UINT id = 0, size_t size = 64*1024, std::wstring name = L"", bool UAV = false)
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(size);
         SetName(name);
+		m_numDataBuffers = numDataBuffers;
     }
 
     void SetName(std::wstring name) {

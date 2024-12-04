@@ -42,7 +42,7 @@ public:
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lutTexture->GetBuffer()->GetRTVInfos()[0].cpuHandle;
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lutTexture->GetBuffer()->GetRTVInfos(context.frameIndex)[0].cpuHandle;
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         commandList->SetPipelineState(PSO.Get());
@@ -103,12 +103,12 @@ private:
         CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenQuadVertices);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, 1, ResourceState::VERTEX, (void*)fullscreenQuadVertices);
 		ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)fullscreenQuadVertices, vertexBufferSize);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->GetAPIResource(0)->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(DebugVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 

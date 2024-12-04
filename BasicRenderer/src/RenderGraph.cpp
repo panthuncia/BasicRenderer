@@ -97,7 +97,7 @@ void RenderGraph::Execute(RenderContext& context) {
         m_transitionCommandList->Reset(m_commandAllocator.Get(), NULL);
 		std::vector<D3D12_RESOURCE_BARRIER> barriers;
         for (auto& transition : batch.transitions) {
-            auto& transitions = transition.pResource->GetTransitions(transition.fromState, transition.toState);
+            auto& transitions = transition.pResource->GetTransitions(context.frameIndex, transition.fromState, transition.toState);
             for (auto& barrier : transitions) {
 				barriers.push_back(barrier);
             }

@@ -146,7 +146,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
-	settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
+	settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
 	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
 		return currentScene->GetRenderableObjectIDMap();
@@ -280,7 +280,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // We do not support fullscreen transitions
     ThrowIfFailed(factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
 
-    frameIndex = swapChain->GetCurrentBackBufferIndex();
+    m_frameIndex = swapChain->GetCurrentBackBufferIndex();
 
     // Create RTV descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
@@ -376,7 +376,7 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
         DXGI_FORMAT_R8G8B8A8_UNORM,
         DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
 
-    frameIndex = swapChain->GetCurrentBackBufferIndex();
+    m_frameIndex = swapChain->GetCurrentBackBufferIndex();
 
     // Recreate the render target views
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
@@ -426,7 +426,7 @@ void DX12Renderer::WaitForPreviousFrame() {
         WaitForSingleObject(fenceEvent, INFINITE);
     }
 
-    frameIndex = swapChain->GetCurrentBackBufferIndex();
+   m_frameIndex = swapChain->GetCurrentBackBufferIndex();
 }
 
 void DX12Renderer::Update(double elapsedSeconds) {
@@ -447,16 +447,16 @@ void DX12Renderer::Update(double elapsedSeconds) {
 	unsigned int cameraIndex = camera->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
     ThrowIfFailed(commandAllocator->Reset());
 
-    ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
+    ResourceManager::GetInstance().UpdatePerFrameBuffer(m_frameIndex, cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdateGPUBuffers();
+    resourceManager.UpdateGPUBuffers(m_frameIndex);
 
     auto& updateManager = UploadManager::GetInstance();
 	updateManager.ResetAllocators(); // Reset allocators to avoid leaking memory
-    updateManager.ExecuteResourceCopies(commandQueue.Get());// copies come before uploads to avoid overwriting data
-	updateManager.ProcessUploads(frameIndex, commandQueue.Get());
+    updateManager.ExecuteResourceCopies(m_frameIndex, commandQueue.Get());// copies come before uploads to avoid overwriting data
+	updateManager.ProcessUploads(m_frameIndex, commandQueue.Get());
 
-    resourceManager.ExecuteResourceTransitions();
+    resourceManager.ExecuteResourceTransitions(m_frameIndex);
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 }
 
@@ -473,12 +473,12 @@ void DX12Renderer::Render() {
     m_context.dsvHeap = dsvHeap.Get();
     m_context.renderTargets = renderTargets;
     m_context.rtvDescriptorSize = rtvDescriptorSize;
-    m_context.frameIndex = frameIndex;
+    m_context.frameIndex = m_frameIndex;
     m_context.xRes = m_xRes;
     m_context.yRes = m_yRes;
 
     // Indicate that the back buffer will be used as a render target
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
     
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.rtvDescriptorSize);
@@ -503,7 +503,7 @@ void DX12Renderer::Render() {
     commandList->Reset(commandAllocator.Get(), nullptr);
 
     // Indicate that the back buffer will now be used to present
-    barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
     commandList->ResourceBarrier(1, &barrier);
 
     ThrowIfFailed(commandList->Close());
@@ -521,6 +521,9 @@ void DX12Renderer::Render() {
 
     m_stuffToDelete.clear(); // Deferred deletion
     DeletionManager::GetInstance().ProcessDeletions();
+
+    m_frameIndex++;
+	m_frameIndex %= m_numFramesInFlight;
 }
 
 void DX12Renderer::Cleanup() {
@@ -713,7 +716,7 @@ void DX12Renderer::CreateRenderGraph() {
 		m_lutTexture = std::make_shared<Texture>(lutBuffer, sampler);
 		m_lutTexture->SetName(L"LUTTexture");
 
-        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo().index);
+        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo(0).index);
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
 		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
@@ -922,7 +925,7 @@ void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
 	m_environmentIrradiance = texture;
     m_environmentIrradiance->SetName(L"EnvironmentRadiance");
     auto& manager = ResourceManager::GetInstance();
-	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetBuffer()->GetSRVInfo().index);
+	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetBuffer()->GetSRVInfo(0).index);
 	manager.setEnvironmentIrradianceMapSamplerIndex(m_environmentIrradiance->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }
@@ -934,7 +937,7 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	m_prefilteredEnvironment = texture;
 	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");
 	auto& manager = ResourceManager::GetInstance();
-	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo().index);
+	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo(0).index);
 	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }

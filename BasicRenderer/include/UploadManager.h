@@ -29,7 +29,7 @@ public:
 	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, uint8_t numResources, size_t dataBufferOffset);
 	void ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
-	void ExecuteResourceCopies(ID3D12CommandQueue* queue);
+	void ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue);
 	void ResetAllocators();
 private:
 	UploadManager() = default;
@@ -48,7 +48,7 @@ private:
 	uint8_t m_numFramesInFlight;
 	std::vector<std::vector<ResourceUpdate>> m_frameResourceUpdates;
 
-	std::vector<ResourceCopy> queuedResourceCopies;
+	std::vector<std::vector<ResourceCopy>> m_queuedResourceCopies;
 
 };
 

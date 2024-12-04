@@ -17,8 +17,8 @@ using Microsoft::WRL::ComPtr;
 
 class SortedUnsignedIntBuffer : public DynamicBufferBase {
 public:
-    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(id, capacity, name, UAV));
+    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint8_t numDataBuffers, UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(numDataBuffers, id, capacity, name, UAV));
     }
 
     // Insert an element while maintaining sorted order
@@ -79,32 +79,6 @@ public:
         }
     }
 
-    // Update only the modified portion of the buffer
-    //bool UpdateUploadBuffer() {
-    //    if (m_earliestModifiedIndex < m_data.size()) {
-    //        // Calculate the byte offset and size to update
-    //        size_t offset = m_earliestModifiedIndex * sizeof(unsigned int);
-    //        size_t dataSize = (m_data.size() - m_earliestModifiedIndex) * sizeof(unsigned int);
-
-    //        // Map the buffer
-    //        unsigned int* pData = nullptr;
-    //        D3D12_RANGE readRange = { 0, 0 };
-    //        m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pData));
-
-    //        // Copy the modified data
-    //        memcpy(reinterpret_cast<unsigned char*>(pData) + offset, m_data.data() + m_earliestModifiedIndex, dataSize);
-
-    //        // Unmap the buffer
-    //        m_uploadBuffer->m_buffer->Unmap(0, nullptr);
-
-    //        // Reset the earliest modified index
-    //        //m_earliestModifiedIndex = m_data.size();
-
-    //        return true;
-    //    }
-    //    return false;
-    //}
-
     void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
         onResized = callback;
     }
@@ -117,21 +91,22 @@ public:
         return static_cast<UINT>(m_data.size());
     }
 
-	ID3D12Resource* GetAPIResource() const override {
-		return m_dataBuffer->GetAPIResource();
+	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override {
+		return m_dataBuffer->GetAPIResource(frameIndex);
 	}
 
 protected:
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(uint8_t frameIndex, ResourceState prevState, ResourceState newState) override {
         currentState = newState;
-        return m_dataBuffer->GetTransitions(prevState, newState);
+        return m_dataBuffer->GetTransitions(frameIndex, prevState, newState);
     }
 
 private:
-    SortedUnsignedIntBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
+    SortedUnsignedIntBuffer(uint8_t numDataBuffers, UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
         CreateBuffer(capacity);
         SetName(name);
+		m_numDataBuffers = numDataBuffers;
     }
 
     void OnSetName() override {
@@ -160,7 +135,7 @@ private:
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
         auto& device = DeviceManager::GetInstance().GetDevice();
 
-        auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(unsigned int) * capacity, false, m_UAV);
+        auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(unsigned int) * capacity, m_numDataBuffers, false, m_UAV);
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);

@@ -72,7 +72,7 @@ public:
             if (pass == 0) {
                 for (int i = 0; i < 6; i++) {
                     const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-					commandList->ClearRenderTargetView(m_environmentRadiance->GetBuffer()->GetRTVInfos()[i].cpuHandle, clearColor, 0, nullptr);
+					commandList->ClearRenderTargetView(m_environmentRadiance->GetBuffer()->GetRTVInfos(context.frameIndex)[i].cpuHandle, clearColor, 0, nullptr);
                 }
             }
             ID3D12DescriptorHeap* descriptorHeaps[] = {
@@ -84,7 +84,7 @@ public:
 
             commandList->SetGraphicsRootSignature(environmentConversionRootSignature.Get());
 
-            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo(context.frameIndex).gpuHandle);
 
             commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
             commandList->RSSetViewports(1, &viewport);
@@ -101,8 +101,8 @@ public:
             for (int i = 0; i < 6; i++) {
 
                 CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
-                rtvHandles[0] = m_environmentCubeMap->GetBuffer()->GetRTVInfos()[i].cpuHandle;
-                rtvHandles[1] = m_environmentRadiance->GetBuffer()->GetRTVInfos()[i].cpuHandle;
+                rtvHandles[0] = m_environmentCubeMap->GetBuffer()->GetRTVInfos(context.frameIndex)[i].cpuHandle;
+                rtvHandles[1] = m_environmentRadiance->GetBuffer()->GetRTVInfos(context.frameIndex)[i].cpuHandle;
 
                 CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
@@ -222,12 +222,12 @@ private:
         CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, 1, ResourceState::VERTEX, (void*)skyboxVertices);
         ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)skyboxVertices, vertexBufferSize);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->GetAPIResource(0)->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(SkyboxVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 
