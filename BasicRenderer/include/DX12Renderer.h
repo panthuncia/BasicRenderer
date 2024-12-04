@@ -111,6 +111,7 @@ private:
     void SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t currentFrameIndex);
     void AdvanceFrameIndex();
     void CheckDebugMessages();
+    void FlushCommandQueue();
 
     void ProcessReadbackRequests();
 

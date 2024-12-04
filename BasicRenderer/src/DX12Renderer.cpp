@@ -562,8 +562,34 @@ void DX12Renderer::AdvanceFrameIndex() {
     m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
 }
 
+void DX12Renderer::FlushCommandQueue() {
+    // Create a fence and an event to wait on
+    Microsoft::WRL::ComPtr<ID3D12Fence> flushFence;
+    ThrowIfFailed(DeviceManager::GetInstance().GetDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&flushFence)));
+
+    HANDLE flushEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (!flushEvent) {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+    }
+
+    // Signal the fence and wait
+    const UINT64 flushValue = 1;
+    ThrowIfFailed(commandQueue->Signal(flushFence.Get(), flushValue));
+    if (flushFence->GetCompletedValue() < flushValue) {
+        ThrowIfFailed(flushFence->SetEventOnCompletion(flushValue, flushEvent));
+        WaitForSingleObject(flushEvent, INFINITE);
+    }
+
+    CloseHandle(flushEvent);
+}
+
 void DX12Renderer::Cleanup() {
-    WaitForFrame(m_frameIndex);
+    spdlog::info("In cleanup");
+    // Wait for all GPU frames to complete
+    for (int i = 0; i < m_numFramesInFlight; ++i) {
+        WaitForFrame(i);
+    }
+    FlushCommandQueue();
     CloseHandle(m_frameFenceEvent);
 	currentScene = nullptr;
     DeletionManager::GetInstance().Cleanup();
