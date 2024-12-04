@@ -79,12 +79,12 @@ public:
         return m_data.size();
     }
 
-	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override { return m_dataBuffer->GetAPIResource(frameIndex); }
 
 protected:
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
+    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(uint8_t frameIndex, ResourceState prevState, ResourceState newState) override {
         currentState = newState;
-        return m_dataBuffer->GetTransitions(prevState, newState);
+        return m_dataBuffer->GetTransitions(frameIndex, prevState, newState);
     }
 
 private:
@@ -125,7 +125,7 @@ private:
 
         auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, m_numDataBuffers, false, m_UAV);
         if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
+            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity, m_numDataBuffers);
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
         }
 		m_dataBuffer = newDataBuffer;

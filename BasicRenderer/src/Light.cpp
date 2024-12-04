@@ -132,7 +132,7 @@ DirectX::XMVECTOR Light::GetLightDir() {
 
 void Light::SetShadowMap(std::shared_ptr<Texture> shadowMap) {
 	m_shadowMap = shadowMap;
-	m_lightInfo.shadowMapIndex = shadowMap->GetBuffer()->GetSRVInfo().index;
+	m_lightInfo.shadowMapIndex = shadowMap->GetBuffer()->GetSRVInfo(0).index;
 	m_lightInfo.shadowSamplerIndex = shadowMap->GetSamplerDescriptorIndex();
 }
 

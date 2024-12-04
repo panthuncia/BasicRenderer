@@ -10,7 +10,7 @@ void UploadManager::Initialize() {
 	auto& device = DeviceManager::GetInstance().GetDevice();
     unsigned int initialCapacity = 10000;
 	m_currentCapacity = initialCapacity;
-	m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, initialCapacity, true, false);
+	m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, initialCapacity, 1, true, false);
     m_memoryBlocks.push_back({ 0, initialCapacity, true });
     auto& manager = DeviceManager::GetInstance();
 
@@ -59,11 +59,11 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 			// Copy the data to the upload buffer
             unsigned char* mappedData = nullptr;
 			CD3DX12_RANGE readRange(0, 0);
-			m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&mappedData));
+			m_uploadBuffer->GetAPIResource(0)->Map(0, &readRange, reinterpret_cast<void**>(&mappedData));
 
 			memcpy(mappedData + offset, data, size);
 
-			m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+			m_uploadBuffer->GetAPIResource(0)->Unmap(0, nullptr);
 
 			// Add the resource update
 			for (uint8_t i = 0; i < numResources; ++i)
@@ -140,7 +140,7 @@ void UploadManager::GrowBuffer(size_t newCapacity) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
     DeletionManager::GetInstance().MarkForDelete(m_uploadBuffer);
-    m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, newCapacity, true, false);
+    m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, newCapacity, 1, true, false);
     m_memoryBlocks.clear();
     m_memoryBlocks.push_back({ 0, newCapacity, true });
 	m_currentCapacity = newCapacity;
@@ -192,55 +192,57 @@ void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destinati
     copy.source = source;
     copy.destination = destination;
 	copy.size = size;
-    for()
-    m_queuedResourceCopies.push_back(copy);
+    for (int i = 0; i < numResources; i++) {
+		copy.dataBufferIndex = i;
+        m_queuedResourceCopies[i].push_back(copy);
+    }
 }
 
 void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue) {
 	m_commandList->Reset(m_commandAllocator.Get(), nullptr);
-	for (auto& copy : m_queuedResourceCopies) {
-		auto startState = ResourceStateToD3D12(copy.source->GetState());
-		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.source->GetAPIResource(),
-			startState,
-			D3D12_RESOURCE_STATE_COPY_SOURCE
-		);
-		m_commandList->ResourceBarrier(1, &barrier);
+    for (auto& copy : m_queuedResourceCopies[frameIndex]) {
+		uint8_t index = copy.dataBufferIndex;
+        auto startState = ResourceStateToD3D12(copy.source->GetState());
+        D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            copy.source->GetAPIResource(index),
+            startState,
+            D3D12_RESOURCE_STATE_COPY_SOURCE
+        );
+        m_commandList->ResourceBarrier(1, &barrier);
 
-		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.destination->GetAPIResource(),
-			ResourceStateToD3D12(copy.destination->GetState()),
-			D3D12_RESOURCE_STATE_COPY_DEST
-		);
-		m_commandList->ResourceBarrier(1, &barrier);
+        barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            copy.destination->GetAPIResource(index),
+            ResourceStateToD3D12(copy.destination->GetState()),
+            D3D12_RESOURCE_STATE_COPY_DEST
+        );
+        m_commandList->ResourceBarrier(1, &barrier);
 
         m_commandList->CopyBufferRegion(
-            copy.destination->GetAPIResource(),
+            copy.destination->GetAPIResource(index),
             0,
-            copy.source->GetAPIResource(),
+            copy.source->GetAPIResource(index),
             0,
             copy.size);
 
-		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.source->GetAPIResource(),
-			D3D12_RESOURCE_STATE_COPY_SOURCE,
-			startState
-		);
-		m_commandList->ResourceBarrier(1, &barrier);
+        barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            copy.source->GetAPIResource(index),
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            startState
+        );
+        m_commandList->ResourceBarrier(1, &barrier);
 
-		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.destination->GetAPIResource(),
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			ResourceStateToD3D12(copy.destination->GetState())
-		);
-		m_commandList->ResourceBarrier(1, &barrier);
-	}
+        barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            copy.destination->GetAPIResource(index),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            ResourceStateToD3D12(copy.destination->GetState())
+        );
+        m_commandList->ResourceBarrier(1, &barrier);
+    }
+	m_queuedResourceCopies[frameIndex].clear();
 	m_commandList->Close();
 
 	ID3D12CommandList* commandLists[] = { m_commandList.Get() };
 	queue->ExecuteCommandLists(1, commandLists);
-
-	queuedResourceCopies.clear();
 }
 
 void UploadManager::ResetAllocators() {

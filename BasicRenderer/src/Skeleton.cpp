@@ -3,22 +3,26 @@
 #include "ResourceManager.h"
 #include "DeletionManager.h"
 
+#include "SettingsManager.h"
+
 Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
     : m_nodes(nodes), m_inverseBindMatrices(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
+	uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
+    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV, numFramesInFlight);
     m_transformsHandle.dataBuffer->SetName(L"BoneTransforms");
-    m_inverseBindMatricesHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
+    m_inverseBindMatricesHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV, 1);
 	m_inverseBindMatricesHandle.dataBuffer->SetName(L"InverseBindMatrices");
-    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
+    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(0, m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
 }
 
 Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle inverseBindMatricesHandle)
     : m_nodes(nodes), m_inverseBindMatricesHandle(inverseBindMatricesHandle) {
     m_boneTransforms.resize(nodes.size() * 16);
+    uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
+    m_transformsHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV, numFramesInFlight);
     m_transformsHandle.dataBuffer->SetName(L"BoneTransforms");
 }
 
@@ -52,7 +56,7 @@ void Skeleton::SetAnimation(size_t index) {
     }
 }
 
-void Skeleton::UpdateTransforms() {
+void Skeleton::UpdateTransforms(uint8_t frameIndex) {
     for (size_t i = 0; i < m_nodes.size(); ++i) {
         if (m_nodes[i]->transform.isDirty) {
             spdlog::warn("Skeleton node wasn't updated!");
@@ -62,15 +66,15 @@ void Skeleton::UpdateTransforms() {
         memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
     }
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(m_transformsHandle, reinterpret_cast<XMMATRIX*>(m_boneTransforms.data()), 0, m_nodes.size());
+    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(frameIndex, m_transformsHandle, reinterpret_cast<XMMATRIX*>(m_boneTransforms.data()), 0, m_nodes.size());
 }
 
-UINT Skeleton::GetTransformsBufferIndex() {
-    return m_transformsHandle.dataBuffer->GetSRVInfo().index;
+UINT Skeleton::GetTransformsBufferIndex(uint8_t frameIndex) {
+    return m_transformsHandle.dataBuffer->GetSRVInfo(frameIndex).index;
 }
 
 UINT Skeleton::GetInverseBindMatricesBufferIndex() {
-    return m_inverseBindMatricesHandle.dataBuffer->GetSRVInfo().index;
+    return m_inverseBindMatricesHandle.dataBuffer->GetSRVInfo(0).index;
 }
 
 BufferHandle Skeleton::GetInverseBindMatricesHandle() {

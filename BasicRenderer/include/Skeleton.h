@@ -22,8 +22,8 @@ public:
     ~Skeleton();
     void AddAnimation(const std::shared_ptr<Animation>& animation);
     void SetAnimation(size_t index);
-    void UpdateTransforms();
-    UINT GetTransformsBufferIndex();
+    void UpdateTransforms(uint8_t frameIndex);
+    UINT GetTransformsBufferIndex(uint8_t frameIndex);
     UINT GetInverseBindMatricesBufferIndex();
     BufferHandle GetInverseBindMatricesHandle();
 

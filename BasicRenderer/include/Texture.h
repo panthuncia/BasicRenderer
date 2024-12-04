@@ -16,7 +16,7 @@ public:
 	std::shared_ptr<PixelBuffer> GetBuffer() {
 		return m_image;
 	}
-	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
+	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(uint8_t frameIndex, ResourceState fromState, ResourceState toState) override;
 	virtual void SetName(const std::wstring& name);
 	ID3D12Resource* GetAPIResource(uint8_t frameIndex) const override;
 private:

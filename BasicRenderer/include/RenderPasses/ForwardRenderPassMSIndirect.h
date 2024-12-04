@@ -90,7 +90,7 @@ public:
 		auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
 		auto pso = psoManager.GetMeshPSO(localPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
-		auto apiResource = indirectCommandBuffer->GetAPIResource();
+		auto apiResource = indirectCommandBuffer->GetAPIResource(context.frameIndex);
 		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 
@@ -101,7 +101,7 @@ public:
 		indirectCommandBuffer = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer();
 		pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_BLEND, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
-		apiResource = indirectCommandBuffer->GetAPIResource();
+		apiResource = indirectCommandBuffer->GetAPIResource(context.frameIndex);
 		commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 		commandList->Close();

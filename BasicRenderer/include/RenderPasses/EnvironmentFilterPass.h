@@ -58,11 +58,11 @@ public:
 
             commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo(0).gpuHandle);
 
             commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
             commandList->SetPipelineState(PSO.Get());
-            auto& rtvs = m_prefilteredEnvironment->GetBuffer()->GetRTVInfos();
+            auto& rtvs = m_prefilteredEnvironment->GetBuffer()->GetRTVInfos(0);
             unsigned int maxMipLevels = rtvs.size()/6;
             for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
             {

@@ -10,9 +10,9 @@ Material::Material(const std::string& name,
     UINT materialFlags, UINT psoFlags)
     : m_name(name), m_psoFlags(psoFlags) {
     auto& resourceManager = ResourceManager::GetInstance();
-    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
+    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>(1);
 	m_materialData.materialFlags = materialFlags;
-    resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+    resourceManager.UpdateConstantBuffer(0, m_perMaterialHandle, m_materialData);
 }
 
 Material::Material(const std::string& name,
@@ -52,40 +52,40 @@ Material::Material(const std::string& name,
     m_materialData.metallicFactor = metallicFactor;
     m_materialData.roughnessFactor = roughnessFactor;
     if (baseColorTexture != nullptr) {
-        m_materialData.baseColorTextureIndex = baseColorTexture->GetBuffer()->GetSRVInfo().index;
+        m_materialData.baseColorTextureIndex = baseColorTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.baseColorSamplerIndex = baseColorTexture->GetSamplerDescriptorIndex();
 		baseColorTexture->GetBuffer()->SetName(L"BaseColorTexture");
     }
     if (normalTexture != nullptr) {
-        m_materialData.normalTextureIndex = normalTexture->GetBuffer()->GetSRVInfo().index;
+        m_materialData.normalTextureIndex = normalTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.normalSamplerIndex = normalTexture->GetSamplerDescriptorIndex();
         normalTexture->GetBuffer()->SetName(L"NormalTexture");
     }
     if (aoMap != nullptr) {
-        m_materialData.aoMapIndex = aoMap->GetBuffer()->GetSRVInfo().index;
+        m_materialData.aoMapIndex = aoMap->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.aoSamplerIndex = aoMap->GetSamplerDescriptorIndex();
         aoMap->GetBuffer()->SetName(L"AOMap");
     }
     if (heightMap != nullptr) {
-        m_materialData.heightMapIndex = heightMap->GetBuffer()->GetSRVInfo().index;
+        m_materialData.heightMapIndex = heightMap->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.heightMapIndex = heightMap->GetSamplerDescriptorIndex();
         heightMap->GetBuffer()->SetName(L"HeightMap");
     }
     if (metallicRoughnessTexture != nullptr) {
-        m_materialData.metallicRoughnessTextureIndex = metallicRoughnessTexture->GetBuffer()->GetSRVInfo().index;
+        m_materialData.metallicRoughnessTextureIndex = metallicRoughnessTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.metallicRoughnessSamplerIndex = metallicRoughnessTexture->GetSamplerDescriptorIndex();
 		metallicRoughnessTexture->GetBuffer()->SetName(L"MetallicRoughnessTexture");
     }
     if (emissiveTexture != nullptr) {
-        m_materialData.emissiveTextureIndex = emissiveTexture->GetBuffer()->GetSRVInfo().index;
+        m_materialData.emissiveTextureIndex = emissiveTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.emissiveSamplerIndex = emissiveTexture->GetSamplerDescriptorIndex();
 		emissiveTexture->GetBuffer()->SetName(L"EmissiveTexture");
     }
 
     auto& resourceManager = ResourceManager::GetInstance();
-    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
+    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>(1);
 	m_perMaterialHandle.dataBuffer->SetName(L"PerMaterialCB ("+s2ws(name)+L")");
-    resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+    resourceManager.UpdateConstantBuffer(0, m_perMaterialHandle, m_materialData);
 }
 
 std::shared_ptr<Texture> Material::createDefaultTexture() {
@@ -124,24 +124,24 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
 }
 
 UINT Material::GetMaterialBufferIndex() {
-    return m_perMaterialHandle.dataBuffer->GetCBVInfo().index;
+    return m_perMaterialHandle.dataBuffer->GetCBVInfo(0).index;
 }
 
 void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
     m_materialData.materialFlags |= MaterialFlags::MATERIAL_PARALLAX;
 	m_heightMap = heightmap;
 	heightmap->GetBuffer()->SetName(L"HeightMap");
-	m_materialData.heightMapIndex = heightmap->GetBuffer()->GetSRVInfo().index;
+	m_materialData.heightMapIndex = heightmap->GetBuffer()->GetSRVInfo(0).index;
 	m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
-	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+	ResourceManager::GetInstance().UpdateConstantBuffer(0, m_perMaterialHandle, m_materialData);
 }
 
 void Material::SetTextureScale(float scale) {
 	m_materialData.textureScale = scale;
-	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+	ResourceManager::GetInstance().UpdateConstantBuffer(0, m_perMaterialHandle, m_materialData);
 }
 
 void Material::SetHeightmapScale(float scale) {
 	m_materialData.heightMapScale = scale;
-	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+	ResourceManager::GetInstance().UpdateConstantBuffer(0, m_perMaterialHandle, m_materialData);
 }

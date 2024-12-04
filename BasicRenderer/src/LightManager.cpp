@@ -17,11 +17,12 @@
 #include "DeletionManager.h"
 
 LightManager::LightManager() {
+	uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     auto& resourceManager = ResourceManager::GetInstance();
-    m_lightBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 10, L"lightBuffer<LightInfo>");
-    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
-    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
-    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");
+    m_lightBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 10, numFramesInFlight, L"lightBuffer<LightInfo>");
+    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, numFramesInFlight, L"spotViewInfo<matrix>");
+    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, numFramesInFlight, L"pointViewInfo<matrix>");
+    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, numFramesInFlight, L"direcitonalViewInfo<matrix>");
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
@@ -94,20 +95,20 @@ void LightManager::RemoveLight(Light* light) {
 	m_lightDrawSetBufferMap.erase(light->GetLocalID());
 }
 
-unsigned int LightManager::GetLightBufferDescriptorIndex() {
-    return m_lightBuffer->GetSRVInfo().index;
+unsigned int LightManager::GetLightBufferDescriptorIndex(uint8_t frameIndex) {
+    return m_lightBuffer->GetSRVInfo(frameIndex).index;
 }
 
-unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
-	return m_pointViewInfo->GetSRVInfo().index;
+unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex(uint8_t frameIndex) {
+	return m_pointViewInfo->GetSRVInfo(frameIndex).index;
 }
 
-unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
-	return m_spotViewInfo->GetSRVInfo().index;
+unsigned int LightManager::GetSpotMatricesDescriptorIndex(uint8_t frameIndex) {
+	return m_spotViewInfo->GetSRVInfo(frameIndex).index;
 }
 
-unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return m_directionalViewInfo->GetSRVInfo().index;
+unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex(uint8_t frameIndex) {
+	return m_directionalViewInfo->GetSRVInfo(frameIndex).index;
 }
 
 unsigned int LightManager::GetNumLights() {

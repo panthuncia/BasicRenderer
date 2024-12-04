@@ -19,6 +19,7 @@ public:
 struct ResourceCopy {
 	std::shared_ptr<Resource> source;
 	std::shared_ptr<Resource> destination;
+	uint8_t dataBufferIndex;
 	size_t size;
 };
 
@@ -28,7 +29,7 @@ public:
 	void Initialize();
 	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, uint8_t numResources, size_t dataBufferOffset);
 	void ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue);
-	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
+	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size, uint8_t numResources);
 	void ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue);
 	void ResetAllocators();
 private:

@@ -122,7 +122,7 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
         DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
     }
     auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize, m_numDataBuffers, false, m_UAV);
-	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
+	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity, m_numDataBuffers);
 	m_dataBuffer = newDataBuffer;
 
     size_t oldCapacity = m_capacity;

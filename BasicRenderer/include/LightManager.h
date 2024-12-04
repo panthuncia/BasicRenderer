@@ -23,10 +23,10 @@ public:
     void Initialize();
     void AddLight(Light* lightNode, bool shadowCasting = false, Camera* currentCamera = nullptr);
     void RemoveLight(Light* light);
-    unsigned int GetLightBufferDescriptorIndex();
-    unsigned int GetPointCubemapMatricesDescriptorIndex();
-    unsigned int GetSpotMatricesDescriptorIndex();
-    unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
+    unsigned int GetLightBufferDescriptorIndex(uint8_t frameIndex);
+    unsigned int GetPointCubemapMatricesDescriptorIndex(uint8_t frameIndex);
+    unsigned int GetSpotMatricesDescriptorIndex(uint8_t frameIndex);
+    unsigned int GetDirectionalCascadeMatricesDescriptorIndex(uint8_t frameIndex);
     unsigned int GetNumLights();
     void SetCurrentCamera(Camera* camera);
     void OnNodeUpdated(SceneNode* camera) override;

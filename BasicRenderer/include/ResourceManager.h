@@ -50,8 +50,8 @@ public:
 
         BufferHandle bufferHandle;
         // Create the buffer
-        bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-        bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
+        bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, numFrameCopies, true, false);
+        bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, numFrameCopies, false, false);
 		bufferHandle.dataBuffer->SetName(name);
         ResourceTransition transition;
 		transition.resource = bufferHandle.dataBuffer.get();
@@ -160,7 +160,7 @@ public:
             unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
 
             D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-            device->CreateShaderResourceView(handle.dataBuffer->GetAPIResource(i).Get(), &srvDesc, srvHandle);
+            device->CreateShaderResourceView(handle.dataBuffer->GetAPIResource(i), &srvDesc, srvHandle);
 
             ShaderVisibleIndexInfo srvInfo;
             srvInfo.index = index;
@@ -233,14 +233,14 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
+    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(ResourceState usage, uint8_t numFrameCopies, UINT capacity = 64, std::wstring name = "") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
-        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name);
+        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(numFrameCopies, bufferID, capacity, name);
         ResourceTransition transition;
         transition.resource = pDynamicBuffer.get();
 		transition.beforeState = ResourceState::UNKNOWN;
@@ -262,15 +262,20 @@ public:
         srvDesc.Buffer.StructureByteStride = sizeof(T);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-        bufferIDDescriptorIndexMap[bufferID] = index;
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+		std::vector<std::shared_ptr<ResourceIndexInfo>> indexInfos;
+		for (int i = 0; i < numFrameCopies; i++) {
+			UINT descriptorIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+			D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
+			device->CreateShaderResourceView(pDynamicBuffer->GetAPIResource(i), &srvDesc, srvHandle);
+			indexInfos.push_back(std::make_shared<ResourceIndexInfo>());
+			ShaderVisibleIndexInfo srvInfo;
+			srvInfo.index = descriptorIndex;
+			srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(descriptorIndex);
+			indexInfos[i]->m_SRVInfo = srvInfo;
+			indexInfos[i]->m_pSRVHeap = m_cbvSrvUavHeap;
+		}
 
-        ShaderVisibleIndexInfo srvInfo;
-        srvInfo.index = index;
-        srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+		pDynamicBuffer->SetIndexInfo(indexInfos);
 
         return pDynamicBuffer;
     }
@@ -283,7 +288,7 @@ public:
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
-        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, alignment);
+        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(numDataBuffers, bufferID, capacity, name, alignment);
         ResourceTransition transition;
         transition.resource = pDynamicBuffer.get();
         transition.beforeState = ResourceState::UNKNOWN;

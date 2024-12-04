@@ -288,7 +288,7 @@ SceneNode& Scene::GetRoot() {
     return sceneRoot;
 }
 
-void Scene::Update() {
+void Scene::Update(uint8_t frameIndex) {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
@@ -299,7 +299,7 @@ void Scene::Update() {
     }
     this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
-        skeleton->UpdateTransforms();
+        skeleton->UpdateTransforms(frameIndex);
     }
     PostUpdate();
 }
@@ -345,20 +345,20 @@ UINT Scene::GetNumLights() {
     return lightsByID.size();
 }
 
-UINT Scene::GetLightBufferDescriptorIndex() {
-    return lightManager.GetLightBufferDescriptorIndex();
+UINT Scene::GetLightBufferDescriptorIndex(uint8_t frameIndex) {
+    return lightManager.GetLightBufferDescriptorIndex(frameIndex);
 }
 
-UINT Scene::GetPointCubemapMatricesDescriptorIndex() {
-	return lightManager.GetPointCubemapMatricesDescriptorIndex();
+UINT Scene::GetPointCubemapMatricesDescriptorIndex(uint8_t frameIndex) {
+	return lightManager.GetPointCubemapMatricesDescriptorIndex(frameIndex);
 }
 
-UINT Scene::GetSpotMatricesDescriptorIndex() {
-	return lightManager.GetSpotMatricesDescriptorIndex();
+UINT Scene::GetSpotMatricesDescriptorIndex(uint8_t frameIndex) {
+	return lightManager.GetSpotMatricesDescriptorIndex(frameIndex);
 }
 
-UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return lightManager.GetDirectionalCascadeMatricesDescriptorIndex();
+UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex(uint8_t frameIndex) {
+	return lightManager.GetDirectionalCascadeMatricesDescriptorIndex(frameIndex);
 }
 
 std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
