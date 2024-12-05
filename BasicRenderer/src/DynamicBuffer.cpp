@@ -59,14 +59,14 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
 	std::unique_ptr<BufferView> view = Allocate(size, type);
     
     auto& uploadManager = UploadManager::GetInstance();
-	uploadManager.UploadData(data, size, this, 1, view->GetOffset());
+	uploadManager.UploadData(data, size, this, view->GetOffset());
 
 	return std::move(view);
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
 	auto& uploadManager = UploadManager::GetInstance();
-	uploadManager.UploadData(data, view->GetSize(), this, 1, view->GetOffset());
+	uploadManager.UploadData(data, view->GetSize(), this, view->GetOffset());
 }
 
 void DynamicBuffer::Deallocate(const std::shared_ptr<BufferView>& view) {
@@ -112,7 +112,6 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto& device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
     m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity, false, m_UAV);
-    CD3DX12_RANGE readRange(0, 0);
     m_memoryBlocks.push_back({ 0, capacity, true });
 }
 

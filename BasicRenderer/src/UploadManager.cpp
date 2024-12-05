@@ -15,8 +15,9 @@ void UploadManager::Initialize() {
     m_memoryBlocks.push_back({ 0, initialCapacity, true });
     auto& manager = DeviceManager::GetInstance();
 
-	uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-	for (int i = 0; i < numFramesInFlight; i++) {
+	m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+	m_pendingReleases.resize(m_numFramesInFlight);
+	for (int i = 0; i < m_numFramesInFlight; i++) {
 		ComPtr<ID3D12CommandAllocator> allocator;
 		ComPtr<ID3D12GraphicsCommandList> commandList;
 		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
@@ -28,21 +29,10 @@ void UploadManager::Initialize() {
 
     getNumFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
     m_numFramesInFlight = getNumFramesInFlight();
-    m_frameResourceUpdates.resize(m_numFramesInFlight);
-	m_fences.resize(m_numFramesInFlight);
-    for (uint8_t index = 0; index < m_numFramesInFlight; index++) {
-        device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fences[index]));
-    }
 }
 
-void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, uint8_t numResources, size_t dataBufferOffset) {
+void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset) {
 	//auto view = BufferView::CreateShared(m_uploadBuffer.get(), 0, size, typeid(T));
-#if defined(_DEBUG)
-	if (numResources != 1 && numResources != m_numFramesInFlight)
-	{
-		throw std::runtime_error("UploadManager::UploadData: numResources must be 1 or equal to the number of frames in flight");
-	}
-#endif
 
 	size_t requiredSize = size;
 
@@ -72,17 +62,14 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 
 			m_uploadBuffer->m_buffer->Unmap(0, nullptr);
 
-			// Add the resource update
-			for (uint8_t i = 0; i < numResources; ++i)
-			{
-				ResourceUpdate update;
-				update.size = size;
-				update.resourceToUpdate = resourceToUpdate;
-				update.uploadBuffer = m_uploadBuffer;
-				update.uploadBufferOffset = offset;
-				update.dataBufferOffset = dataBufferOffset;
-				m_frameResourceUpdates[i].push_back(update);
-			}
+
+			ResourceUpdate update;
+			update.size = size;
+			update.resourceToUpdate = resourceToUpdate;
+			update.uploadBuffer = m_uploadBuffer;
+			update.uploadBufferOffset = offset;
+			update.dataBufferOffset = dataBufferOffset;
+			m_resourceUpdates.push_back(update);
 
 			return;
         }
@@ -103,7 +90,7 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
     GrowBuffer(newCapacity);
     //spdlog::info("Growing buffer to {} bytes", newCapacity);
     // Try allocating again
-    UploadData(data, size, resourceToUpdate, numResources, dataBufferOffset);
+    UploadData(data, size, resourceToUpdate, dataBufferOffset);
 }
 
 void UploadManager::ReleaseData(size_t size, size_t offset) {
@@ -143,6 +130,13 @@ void UploadManager::ReleaseData(size_t size, size_t offset) {
     }
 }
 
+void UploadManager::ProcessDeferredReleases(uint8_t frameIndex) {
+	for (const auto& request : m_pendingReleases[frameIndex]) {
+		ReleaseData(request.size, request.offset);
+	}
+	m_pendingReleases[frameIndex].clear();
+}
+
 void UploadManager::GrowBuffer(size_t newCapacity) {
     auto& device = DeviceManager::GetInstance().GetDevice();
 
@@ -151,13 +145,16 @@ void UploadManager::GrowBuffer(size_t newCapacity) {
     m_memoryBlocks.clear();
     m_memoryBlocks.push_back({ 0, newCapacity, true });
 	m_currentCapacity = newCapacity;
+	for (auto& vec : m_pendingReleases) {
+		vec.clear(); // Pending releases are no longer valid
+	}
 }
 
 void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Reset(commandAllocator.Get(), nullptr);
-    for(auto& update : m_frameResourceUpdates[frameIndex]) {
+    for(auto& update : m_resourceUpdates) {
 
         Resource* buffer = update.resourceToUpdate;
         auto startState = ResourceStateToD3D12(update.resourceToUpdate->GetState());
@@ -188,12 +185,12 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 	ID3D12CommandList* commandLists[] = { commandList.Get() };
 	queue->ExecuteCommandLists(1, commandLists);
 
-	for (auto& update : m_frameResourceUpdates[frameIndex]) {
+	for (auto& update : m_resourceUpdates) {
 		if (update.uploadBuffer == m_uploadBuffer) { // If these are not the same, the upload buffer was reallocated and will be deleted anyway
-			ReleaseData(update.size, update.uploadBufferOffset);
+			m_pendingReleases[frameIndex].push_back({ update.size, update.uploadBufferOffset });
 		}
 	}
-	m_frameResourceUpdates[frameIndex].clear();
+	m_resourceUpdates.clear();
 }
 
 void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size) {
@@ -254,10 +251,6 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 }
 
 void UploadManager::ResetAllocators(uint8_t frameIndex) {
-	//for (uint8_t index = 0; index < m_numFramesInFlight; index++) {
-	//	m_fences[index]->Signal(0);
-	//}
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	commandAllocator->Reset();
-	//m_commandList->Reset(m_commandAllocator.Get(), nullptr);
 }

@@ -6,6 +6,7 @@
 #include "SettingsManager.h"
 #include "DynamicBuffer.h"
 #include "SortedUnsignedIntBuffer.h"
+#include "UploadManager.h"
 void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
@@ -85,7 +86,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UIN
 	perFrameCBData.spotLightMatrixBufferIndex = spotMatricesBufferIndex;
 	perFrameCBData.directionalLightCascadeBufferIndex = directionalCascadeMatricesBufferIndex;
 
-	UpdateConstantBuffer(perFrameBufferHandle, perFrameCBData);
+	UploadManager::GetInstance().UploadData(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.dataBuffer.get(), 0);
 }
 
 void ResourceManager::WaitForCopyQueue() {
@@ -221,62 +222,13 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
 	ThrowIfFailed(commandAllocator->Reset());
 }
 
-void ResourceManager::UpdateGPUBuffers() {
-
-	// Reset the command allocator
-	HRESULT hr = copyCommandAllocator->Reset();
-	if (FAILED(hr)) {
-		spdlog::error("Failed to reset command allocator");
-	}
-
-	hr = copyCommandList->Reset(copyCommandAllocator.Get(), nullptr);
-	if (FAILED(hr)) {
-		spdlog::error("Failed to reset command list");
-	}
-	for (BufferHandle& bufferHandle : buffersToUpdate) {
-		// Ensure both buffers are valid
-		if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
-			auto startState = ResourceStateToD3D12(bufferHandle.dataBuffer->GetState());
-			D3D12_RESOURCE_BARRIER barrier = {};
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = bufferHandle.dataBuffer->m_buffer.Get();
-			barrier.Transition.StateBefore = startState;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-
-			// Transition the data buffer to a state suitable for copying into it
-			copyCommandList->ResourceBarrier(1, &barrier);
-
-			// Perform the copy
-			copyCommandList->CopyResource(bufferHandle.dataBuffer->m_buffer.Get(), bufferHandle.uploadBuffer->m_buffer.Get());
-
-			// Transition back to the original state
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.StateAfter = startState;
-			copyCommandList->ResourceBarrier(1, &barrier);
-		}
-	}
-
-	hr = copyCommandList->Close();
-	if (FAILED(hr)) {
-		spdlog::error("Failed to close command list");
-	}
-	// Execute the copy command list
-	ID3D12CommandList* ppCommandLists[] = { copyCommandList.Get() };
-	copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-	WaitForCopyQueue();
-	buffersToUpdate.clear();
-	dynamicBuffersToUpdate.clear();
-}
-
 BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData, bool UAV) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	BufferHandle handle;
-	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+	//handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
 	handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
 	if (pInitialData) {
-		UpdateBuffer(handle, pInitialData, bufferSize);
+		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, handle.dataBuffer.get(), 0);
 	}
 
 	ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
@@ -285,17 +237,6 @@ BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usag
 #endif
 	QueueResourceTransition(transition);
 	return handle;
-}
-
-void ResourceManager::UpdateBuffer(BufferHandle& bufferHandle, void* pData, size_t size) {
-	if (bufferHandle.uploadBuffer && bufferHandle.dataBuffer) {
-		void* mappedData;
-		D3D12_RANGE readRange(0, 0);
-		bufferHandle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
-		memcpy(mappedData, pData, size);
-		bufferHandle.uploadBuffer->m_buffer->Unmap(0, nullptr);
-		buffersToUpdate.push_back(bufferHandle);
-	}
 }
 
 void ResourceManager::QueueResourceTransition(const ResourceTransition& transition) {

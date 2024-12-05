@@ -35,7 +35,7 @@ public:
 
         unsigned int index = m_data.size() - 1;
 
-		UploadManager::GetInstance().UploadData(&element, sizeof(T), this, 1, index * sizeof(T));
+		UploadManager::GetInstance().UploadData(&element, sizeof(T), this, index * sizeof(T));
 
         return index;
     }
@@ -64,7 +64,7 @@ public:
     }
 
     void UpdateAt(UINT index, const T& element) {
-		UploadManager::GetInstance().UploadData(&element, sizeof(T), this, 1, index * sizeof(T));
+		UploadManager::GetInstance().UploadData(&element, sizeof(T), this, index * sizeof(T));
     }
 
     void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {

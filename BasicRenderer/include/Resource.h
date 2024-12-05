@@ -11,7 +11,7 @@ class Resource {
 public:
     Resource() : currentState(ResourceState::UNKNOWN) {}
 
-    ResourceState GetState() const { return currentState; }
+    virtual ResourceState GetState() const { return currentState; }
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& name) { this->name = name; OnSetName(); }

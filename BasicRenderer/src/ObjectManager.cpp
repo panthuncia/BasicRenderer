@@ -10,16 +10,19 @@
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_perObjectBuffers = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerObjectCB>(ResourceState::ALL_SRV, 1, L"perObjectBuffers<PerObjectCB>", 1);
-	m_opaqueDrawSetCommandsBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<IndirectCommand>(ResourceState::ALL_SRV, 1, L"drawSetCommandsBuffer<IndirectCommand>", 1);
-	m_transparentDrawSetCommandsBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<IndirectCommand>(ResourceState::ALL_SRV, 1, L"drawSetCommandsBuffer<IndirectCommand>", 1);
+	//m_perObjectBuffers = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerObjectCB>(ResourceState::ALL_SRV, 1, L"perObjectBuffers<PerObjectCB>", 1);
+	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, ResourceState::ALL_SRV, L"meshletOffsets");
+	//m_opaqueDrawSetCommandsBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<IndirectCommand>(ResourceState::ALL_SRV, 1, L"drawSetCommandsBuffer<IndirectCommand>", 1);
+	m_opaqueDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"meshletOffsets");
+	//m_transparentDrawSetCommandsBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<IndirectCommand>(ResourceState::ALL_SRV, 1, L"drawSetCommandsBuffer<IndirectCommand>", 1);
+	m_transparentDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"meshletOffsets");
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
 	m_activeTransparentDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeTransparentDrawSetIndices");
 }
 void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	object->SetCurrentManager(this);
-	std::shared_ptr<BufferView> view = m_perObjectBuffers->Add();
-	m_perObjectBuffers->UpdateView(view.get(), &object->GetPerObjectCBData());
+	std::shared_ptr<BufferView> view = m_perObjectBuffers->AddData(&object->GetPerObjectCBData(), sizeof(PerObjectCB), typeid(PerObjectCB));
+	// m_perObjectBuffers->UpdateView(view.get(), &object->GetPerObjectCBData());
 	object->SetCurrentPerObjectCBView(view);
 
 	if (object->HasOpaque()) {
@@ -33,9 +36,9 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			auto view = m_opaqueDrawSetCommandsBuffer->Add();
+			std::shared_ptr<BufferView> view = m_opaqueDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), typeid(IndirectCommand));
 			views.push_back(view);
-			m_opaqueDrawSetCommandsBuffer->UpdateView(view.get(), &command);
+			//m_opaqueDrawSetCommandsBuffer->UpdateView(view.get(), &command);
 			unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
 			indices.push_back(index);
 			m_activeOpaqueDrawSetIndices->Insert(index);
@@ -55,9 +58,9 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			auto view = m_transparentDrawSetCommandsBuffer->Add();
+			std::shared_ptr<BufferView> view = m_transparentDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), typeid(IndirectCommand));
 			views.push_back(view);
-			m_transparentDrawSetCommandsBuffer->UpdateView(view.get(), &command);
+			//m_transparentDrawSetCommandsBuffer->UpdateView(view.get(), &command);
 			unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
 			indices.push_back(index);
 			m_activeTransparentDrawSetIndices->Insert(index);
@@ -71,7 +74,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 
 void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 	auto& view = object->GetCurrentPerObjectCBView();
-	m_perObjectBuffers->Remove(view.get());
+	m_perObjectBuffers->Deallocate(view);
 
 	DeletionManager::GetInstance().MarkForDelete(view);
 
@@ -80,7 +83,7 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 	// Remove the object's draw set commands from the draw set buffers
 	auto& opaqueViews = object->GetCurrentOpaqueDrawSetCommandViews();
 	for (auto view : opaqueViews) {
-		m_opaqueDrawSetCommandsBuffer->Remove(view.get());
+		m_opaqueDrawSetCommandsBuffer->Deallocate(view);
 		unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
 		m_activeOpaqueDrawSetIndices->Remove(index);
 	}
@@ -89,7 +92,7 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 
 	auto& transparentViews = object->GetCurrentTransparentDrawSetCommandViews();
 	for (auto view : transparentViews) {
-		m_transparentDrawSetCommandsBuffer->Remove(view.get());
+		m_transparentDrawSetCommandsBuffer->Deallocate(view);
 		unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
 		m_activeTransparentDrawSetIndices->Remove(index);
 	}

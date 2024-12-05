@@ -245,8 +245,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);

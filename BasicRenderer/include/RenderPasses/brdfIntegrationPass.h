@@ -6,7 +6,7 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "utilities.h"
-
+#include "UploadManager.h"
 class BRDFIntegrationPass : public RenderPass {
 public:
     BRDFIntegrationPass(std::shared_ptr<Texture> lutTexture) {
@@ -104,7 +104,7 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenQuadVertices);
-		ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)fullscreenQuadVertices, vertexBufferSize);
+		UploadManager::GetInstance().UploadData((void*)fullscreenQuadVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 

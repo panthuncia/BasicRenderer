@@ -23,7 +23,7 @@ public:
 		return m_perObjectBuffers->GetSRVInfo().index;
 	}
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
-	std::shared_ptr<LazyDynamicStructuredBuffer<PerObjectCB>>& GetPerObjectBuffers() {
+	std::shared_ptr<DynamicBuffer>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}
 
@@ -43,11 +43,11 @@ public:
 		return m_activeTransparentDrawSetIndices->GetSRVInfo().index;
 	}
 
-	std::shared_ptr<LazyDynamicStructuredBuffer<IndirectCommand>>& GetOpaqueDrawSetCommandsBuffer() {
+	std::shared_ptr<DynamicBuffer>& GetOpaqueDrawSetCommandsBuffer() {
 		return m_opaqueDrawSetCommandsBuffer;
 	}
 
-	std::shared_ptr<LazyDynamicStructuredBuffer<IndirectCommand>>& GetTransparentDrawSetCommandsBuffer() {
+	std::shared_ptr<DynamicBuffer>& GetTransparentDrawSetCommandsBuffer() {
 		return m_transparentDrawSetCommandsBuffer;
 	}
 
@@ -62,9 +62,9 @@ public:
 private:
 	ObjectManager();
 	std::vector<std::shared_ptr<RenderableObject>> m_objects;
-	std::shared_ptr<LazyDynamicStructuredBuffer<PerObjectCB>> m_perObjectBuffers;
-	std::shared_ptr<LazyDynamicStructuredBuffer<IndirectCommand>> m_opaqueDrawSetCommandsBuffer;
-	std::shared_ptr<LazyDynamicStructuredBuffer<IndirectCommand>> m_transparentDrawSetCommandsBuffer;
+	std::shared_ptr<DynamicBuffer> m_perObjectBuffers;
+	std::shared_ptr<DynamicBuffer> m_opaqueDrawSetCommandsBuffer;
+	std::shared_ptr<DynamicBuffer> m_transparentDrawSetCommandsBuffer;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeOpaqueDrawSetIndices;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeTransparentDrawSetIndices;
 };

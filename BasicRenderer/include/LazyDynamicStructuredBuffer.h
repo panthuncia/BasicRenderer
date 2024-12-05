@@ -70,7 +70,7 @@ public:
 
     void UpdateView(BufferView* view, const void* data) {
 		auto& manager = UploadManager::GetInstance();
-		manager.UploadData(data, sizeof(T), this, 1, view->GetOffset());
+		manager.UploadData(data, sizeof(T), this, view->GetOffset());
     }
 
 
@@ -91,6 +91,8 @@ public:
 	}
 
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+
+    virtual ResourceState GetState() const override { return m_dataBuffer->GetState(); }
 
 protected:
     std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
@@ -131,7 +133,7 @@ private:
 
         auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, m_elementSize * capacity, false, m_UAV);
         if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
+            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity*sizeof(T));
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
         }
         m_dataBuffer = newDataBuffer;

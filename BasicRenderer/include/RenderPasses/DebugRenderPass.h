@@ -6,6 +6,7 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "SettingsManager.h"
+#include "UploadManager.h"
 
 class DebugRenderPass : public RenderPass {
 public:
@@ -115,7 +116,7 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenTriangleVertices);
-		ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)fullscreenTriangleVertices, vertexBufferSize);
+		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 

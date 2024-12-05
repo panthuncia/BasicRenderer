@@ -25,10 +25,7 @@ public:
     void Insert(unsigned int element) {
         // Resize the buffer if necessary
         if (m_data.size() >= m_capacity) {
-            Resize(m_capacity * 2);
-            if (onResized) {
-                onResized(m_globalResizableBufferID, sizeof(unsigned int), m_capacity, this);
-            }
+            GrowBuffer(m_capacity * 2);
         }
         // Find the insertion point
         auto it = std::lower_bound(m_data.begin(), m_data.end(), element);
@@ -41,7 +38,7 @@ public:
         if (index < m_earliestModifiedIndex) {
             m_earliestModifiedIndex = index;
         }
-		UploadManager::GetInstance().UploadData(&element, sizeof(unsigned int), this, 1, index * sizeof(unsigned int));
+		UploadManager::GetInstance().UploadData(&element, sizeof(unsigned int), this, index * sizeof(unsigned int));
 
     }
 
@@ -70,13 +67,6 @@ public:
 
     const unsigned int& operator[](UINT index) const {
         return m_data[index];
-    }
-
-    void Resize(UINT newCapacity) {
-        if (newCapacity > m_capacity) {
-            CreateBuffer(newCapacity, m_capacity);
-            m_capacity = newCapacity;
-        }
     }
 
     // Update only the modified portion of the buffer
@@ -157,16 +147,25 @@ private:
 	bool m_UAV = false;
 
     // Create the GPU buffers
-    void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
-        auto& device = DeviceManager::GetInstance().GetDevice();
+    void CreateBuffer(size_t capacity) {
+		auto& device = DeviceManager::GetInstance().GetDevice();
+		m_capacity = capacity;
+		m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity * sizeof(unsigned int), false, m_UAV);
+    }
 
-        auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(unsigned int) * capacity, false, m_UAV);
-        if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
-            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
-        }
-        m_dataBuffer = newDataBuffer;
+    void GrowBuffer(size_t newSize) {
+		auto& device = DeviceManager::GetInstance().GetDevice();
+		if (m_dataBuffer != nullptr) {
+			DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+		}
+		auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize * sizeof(unsigned int), false, m_UAV);
+		UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity*sizeof(unsigned int));
+		m_dataBuffer = newDataBuffer;
 
-        SetName(name);
+		size_t oldCapacity = m_capacity;
+		size_t sizeDiff = newSize - m_capacity;
+		m_capacity = newSize;
+		onResized(m_globalResizableBufferID, sizeof(unsigned int), m_capacity, this);
+		SetName(name);
     }
 };

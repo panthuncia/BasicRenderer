@@ -22,15 +22,22 @@ struct ResourceCopy {
 	size_t size;
 };
 
+struct ReleaseRequest {
+	size_t size;
+	uint64_t offset;
+};
+
 class UploadManager {
 public:
 	static UploadManager& GetInstance();
 	void Initialize();
-	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, uint8_t numResources, size_t dataBufferOffset);
+	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset);
 	void ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
 	void ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue);
 	void ResetAllocators(uint8_t frameIndex);
+	void ProcessDeferredReleases(uint8_t frameIndex);
+
 private:
 	UploadManager() = default;
 	void ReleaseData(size_t size, size_t offset);
@@ -42,13 +49,14 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12Fence>> m_fences;
 
 	std::function<uint8_t()> getNumFramesInFlight;
-	uint8_t m_numFramesInFlight;
-	std::vector<std::vector<ResourceUpdate>> m_frameResourceUpdates;
+	std::vector<ResourceUpdate> m_resourceUpdates;
+	std::vector<std::vector<ReleaseRequest>> m_pendingReleases;
 
 	std::vector<ResourceCopy> queuedResourceCopies;
+
+	uint8_t m_numFramesInFlight = 0;
 
 };
 

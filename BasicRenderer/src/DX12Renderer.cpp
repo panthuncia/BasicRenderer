@@ -116,8 +116,10 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_yRes = y_res;
     SetSettings();
     LoadPipeline(hwnd, x_res, y_res);
+    DeletionManager::GetInstance().Initialize();
     CreateGlobalResources();
 	Menu::GetInstance().Initialize(hwnd, device, commandQueue, swapChain);
+    
 }
 
 void DX12Renderer::CreateGlobalResources() {
@@ -446,6 +448,9 @@ void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 }
 
 void DX12Renderer::Update(double elapsedSeconds) {
+    WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+    auto& updateManager = UploadManager::GetInstance();
+    updateManager.ProcessDeferredReleases(m_frameIndex);
 
     if (rebuildRenderGraph) {
 		CreateRenderGraph();
@@ -464,15 +469,12 @@ void DX12Renderer::Update(double elapsedSeconds) {
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
 
-	WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
     ThrowIfFailed(commandAllocator->Reset());
 
     ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdateGPUBuffers();
 
-    auto& updateManager = UploadManager::GetInstance();
 	updateManager.ResetAllocators(m_frameIndex); // Reset allocators to avoid leaking memory
     updateManager.ExecuteResourceCopies(m_frameIndex, commandQueue.Get());// copies come before uploads to avoid overwriting data
 	updateManager.ProcessUploads(m_frameIndex, commandQueue.Get());
@@ -560,6 +562,7 @@ void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t 
 
 void DX12Renderer::AdvanceFrameIndex() {
     m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
+    spdlog::info("Advanced to frame index {}", m_frameIndex);
 }
 
 void DX12Renderer::FlushCommandQueue() {
