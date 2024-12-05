@@ -148,6 +148,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
+    settingsManager.registerSetting<bool>("allowTearing", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
 	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
 		return currentScene->GetRenderableObjectIDMap();
@@ -178,7 +179,6 @@ void DX12Renderer::SetSettings() {
 	getMeshShadersEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
-	m_numFramesInFlight = getNumFramesInFlight();
 
     settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
@@ -199,6 +199,11 @@ void DX12Renderer::SetSettings() {
 	settingsManager.addObserver<bool>("enableIndirectDraws", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
 		});
+	settingsManager.addObserver<bool>("allowTearing", [this](const bool& newValue) {
+		m_allowTearing = newValue;
+		});
+
+    m_numFramesInFlight = getNumFramesInFlight();
 }
 
 void EnableShaderBasedValidation() {
@@ -268,8 +273,9 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     swapChainDesc.Height = y_res;
     swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
     ComPtr<IDXGISwapChain1> swapChainTemp;
     ThrowIfFailed(factory->CreateSwapChainForHwnd(
@@ -539,7 +545,7 @@ void DX12Renderer::Render() {
     commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Present the frame
-    ThrowIfFailed(swapChain->Present(1, 0));
+    ThrowIfFailed(swapChain->Present(0, m_allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
 
     AdvanceFrameIndex();
 

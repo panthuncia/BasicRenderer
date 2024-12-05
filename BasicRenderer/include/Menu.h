@@ -27,7 +27,7 @@ struct FrameContext {
 
 static UINT g_frameIndex = 0;
 static HANDLE g_hSwapChainWaitableObject = nullptr;
-constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 2;
+constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 3;
 static FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {};
 static ID3D12Fence* g_fence = nullptr;
 static HANDLE g_fenceEvent = nullptr;
@@ -102,6 +102,10 @@ private:
 	std::function < std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()> getRenderableObjects;
 	std::function<SceneNode& ()> getSceneRoot;
 	std::function < std::shared_ptr<SceneNode>(Scene& scene)> appendScene;
+
+    bool allowTearing = false;
+	std::function<bool()> getAllowTearing;
+    std::function<void(bool)> setAllowTearing;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -193,6 +197,11 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
+
+	setAllowTearing = settingsManager.getSettingSetter<bool>("allowTearing");
+	getAllowTearing = settingsManager.getSettingGetter<bool>("allowTearing");
+	allowTearing = getAllowTearing();
+
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -240,6 +249,9 @@ inline void Menu::Render(const RenderContext& context) {
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
 		}
+        if (ImGui::Checkbox("Uncap framerate", &allowTearing)) {
+			setAllowTearing(allowTearing);
+        }
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();

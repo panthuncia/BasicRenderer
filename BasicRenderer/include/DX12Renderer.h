@@ -115,6 +115,9 @@ private:
 
     void ProcessReadbackRequests();
 
+	// Settings
+	bool m_allowTearing = false;
+
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;
 	std::function<void(float)> setCameraSpeed;
