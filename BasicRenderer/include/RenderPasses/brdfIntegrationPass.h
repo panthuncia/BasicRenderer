@@ -6,7 +6,7 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "utilities.h"
-
+#include "UploadManager.h"
 class BRDFIntegrationPass : public RenderPass {
 public:
     BRDFIntegrationPass(std::shared_ptr<Texture> lutTexture) {
@@ -30,7 +30,7 @@ public:
     }
 
     std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
-        auto& psoManager = PSOManager::getInstance();
+        auto& psoManager = PSOManager::GetInstance();
         auto& commandList = m_commandList;
         ThrowIfFailed(m_allocator->Reset());
 		commandList->Reset(m_allocator.Get(), nullptr);
@@ -104,7 +104,7 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenQuadVertices);
-		ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)fullscreenQuadVertices, vertexBufferSize);
+		UploadManager::GetInstance().UploadData((void*)fullscreenQuadVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
@@ -140,8 +140,8 @@ private:
         // Compile shaders
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::getInstance().CompileShader(L"shaders/brdfIntegration.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::getInstance().CompileShader(L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+        PSOManager::GetInstance().CompileShader(L"shaders/brdfIntegration.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+        PSOManager::GetInstance().CompileShader(L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
         static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },

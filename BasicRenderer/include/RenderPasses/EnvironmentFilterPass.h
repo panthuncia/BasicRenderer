@@ -9,6 +9,7 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "Utilities.h"
+#include "UploadManager.h"
 
 class EnvironmentFilterPass : public RenderPass {
 public:
@@ -183,7 +184,7 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
-        ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)skyboxVertices, vertexBufferSize);
+		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
@@ -242,8 +243,8 @@ private:
         // Compile shaders
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::getInstance().CompileShader(L"shaders/blurEnvironment.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::getInstance().CompileShader(L"shaders/blurEnvironment.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+        PSOManager::GetInstance().CompileShader(L"shaders/blurEnvironment.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+        PSOManager::GetInstance().CompileShader(L"shaders/blurEnvironment.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
         static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },

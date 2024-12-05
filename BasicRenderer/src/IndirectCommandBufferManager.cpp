@@ -36,7 +36,7 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
     commandSignatureDesc.ByteStride = sizeof(IndirectCommand);
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-    auto rootSignature = PSOManager::getInstance().GetRootSignature();
+    auto rootSignature = PSOManager::GetInstance().GetRootSignature();
 	ThrowIfFailed(device->CreateCommandSignature(&commandSignatureDesc, rootSignature.Get(), IID_PPV_ARGS(&m_commandSignature)));
 
     // Initialize with one dummy draw

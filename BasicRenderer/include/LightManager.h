@@ -31,7 +31,6 @@ public:
     void SetCurrentCamera(Camera* camera);
     void OnNodeUpdated(SceneNode* camera) override;
     void OnNodeUpdated(Light* light) override;
-    void UpdateBuffers();
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 	void SetCameraManager(CameraManager* cameraManager);
 

@@ -43,7 +43,7 @@ namespace std {
 
 class PSOManager {
 public:
-    static PSOManager& getInstance();
+    static PSOManager& GetInstance();
 
     void initialize();
 
@@ -75,7 +75,7 @@ private:
     D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
 };
 
-inline PSOManager& PSOManager::getInstance() {
+inline PSOManager& PSOManager::GetInstance() {
     static PSOManager instance;
     return instance;
 }

@@ -18,6 +18,7 @@
 #include "Concepts/HasIsValid.h"
 #include "BufferView.h"
 #include "DeletionManager.h"
+#include "UploadManager.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -49,25 +50,27 @@ public:
         return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
     }
 
+	std::shared_ptr<BufferView> Add(const T& data) {
+		auto view = Add();
+		UpdateAt(view.get(), data);
+		return view;
+	}
+
     void Remove(BufferView* view) {
-		T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
-		//element->isValid = false;
-		MarkViewDirty(view);
 		unsigned int index = view->GetOffset() / m_elementSize;
 		m_freeIndices.push_back(index);
     }
 
-    void Resize(UINT newCapacity) {
+    void Resize(size_t newCapacity) {
         if (newCapacity > m_capacity) {
-            CreateBuffer(newCapacity);
+            CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
         }
     }
 
-    void UpdateAt(BufferView* view, const T& data) {
-        T* element = reinterpret_cast<T*>(reinterpret_cast<char*>(m_mappedData) + view->GetOffset());
-		*element = data;
-		MarkViewDirty(view);
+    void UpdateView(BufferView* view, const void* data) {
+		auto& manager = UploadManager::GetInstance();
+		manager.UploadData(data, sizeof(T), this, view->GetOffset());
     }
 
 
@@ -87,11 +90,9 @@ public:
 		return m_elementSize;
 	}
 
-	void* GetMappedData() {
-		return m_mappedData;
-	}
-
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+
+    virtual ResourceState GetState() const override { return m_dataBuffer->GetState(); }
 
 protected:
     std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
@@ -115,11 +116,10 @@ private:
         }
     }
 
-    UINT m_capacity;
-	UINT m_usedCapacity = 0;
+    size_t m_capacity;
+	size_t m_usedCapacity = 0;
     bool m_needsUpdate;
 	std::deque<unsigned int> m_freeIndices;
-    void* m_mappedData = nullptr;
     UINT m_globalResizableBufferID;
     size_t m_elementSize = 0;
 
@@ -128,23 +128,16 @@ private:
 
     bool m_UAV = false;
 
-    void CreateBuffer(UINT capacity) {
+    void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        auto newUploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, m_elementSize * capacity, true, false);
-        if (m_uploadBuffer != nullptr) {
-            void* newMappedData = nullptr;
-			newUploadBuffer->m_buffer->Map(0, nullptr, reinterpret_cast<void**>(&newMappedData));
-			std::memcpy(newMappedData, m_mappedData, m_elementSize * m_capacity);
-            newUploadBuffer->m_buffer->Unmap(0, nullptr);
-        }
-		m_uploadBuffer = newUploadBuffer;
 
+        auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, m_elementSize * capacity, false, m_UAV);
         if (m_dataBuffer != nullptr) {
-			DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity*sizeof(T));
+            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
         }
-        m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, m_elementSize * capacity, false, m_UAV);
+        m_dataBuffer = newDataBuffer;
         SetName(name);
-        CD3DX12_RANGE readRange(0, 0);
-        m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&m_mappedData));
+
     }
 };

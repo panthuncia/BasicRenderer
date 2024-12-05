@@ -21,16 +21,24 @@ public:
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
-		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
-		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
-		m_commandList->Close();
+		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+		for (int i = 0; i < numFramesInFlight; i++) {
+			ComPtr<ID3D12CommandAllocator> allocator;
+			ComPtr<ID3D12GraphicsCommandList7> commandList;
+			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+			commandList->Close();
+			m_allocators.push_back(allocator);
+			m_commandLists.push_back(commandList);
+		}
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
-		auto& psoManager = PSOManager::getInstance();
-		auto commandList = m_commandList.Get();
-		ThrowIfFailed(m_allocator->Reset());
-		commandList->Reset(m_allocator.Get(), nullptr);
+		auto& psoManager = PSOManager::GetInstance();
+		auto& commandList = m_commandLists[context.frameIndex];
+		auto& allocator = m_allocators[context.frameIndex];
+		ThrowIfFailed(allocator->Reset());
+		commandList->Reset(allocator.Get(), nullptr);
 
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
 			context.textureDescriptorHeap, // The texture descriptor heap
@@ -46,7 +54,7 @@ public:
 
 		// Set the render target
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
+		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -94,7 +102,7 @@ public:
 		}
 
 		commandList->Close();
-		return { commandList };
+		return { commandList.Get() };
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -132,7 +140,7 @@ private:
 
 	void CreateDebugMeshPSO() {
 
-		auto manager = PSOManager::getInstance();
+		auto manager = PSOManager::GetInstance();
 		// Compile shaders
 		Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
 		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
@@ -202,8 +210,8 @@ private:
 
 	ComPtr<ID3D12RootSignature> m_debugRootSignature;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-	ComPtr<ID3D12GraphicsCommandList7> m_commandList;
-	ComPtr<ID3D12CommandAllocator> m_allocator;
+	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
+	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;

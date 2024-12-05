@@ -20,7 +20,7 @@ public:
 	void RemoveCamera(std::shared_ptr<BufferView> view);
 
 	void UpdateCamera(std::shared_ptr<BufferView> view, CameraInfo& camera) {
-		m_pCameraBuffer->UpdateAt(view.get(), camera);
+		m_pCameraBuffer->UpdateView(view.get(), &camera);
 	}
 
 private:

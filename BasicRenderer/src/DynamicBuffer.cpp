@@ -5,6 +5,7 @@
 #include "DirectX/d3dx12.h"
 #include "BufferView.h"
 #include "DeletionManager.h"
+#include "UploadManager.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index type) {
     size_t requiredSize = size;
@@ -54,6 +55,20 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
     return Allocate(size, type);
 }
 
+std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, std::type_index type) {
+	std::unique_ptr<BufferView> view = Allocate(size, type);
+    
+    auto& uploadManager = UploadManager::GetInstance();
+	uploadManager.UploadData(data, size, this, view->GetOffset());
+
+	return std::move(view);
+}
+
+void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
+	auto& uploadManager = UploadManager::GetInstance();
+	uploadManager.UploadData(data, view->GetSize(), this, view->GetOffset());
+}
+
 void DynamicBuffer::Deallocate(const std::shared_ptr<BufferView>& view) {
     size_t offset = view->GetOffset();
     size_t size = view->GetSize();
@@ -96,13 +111,7 @@ void DynamicBuffer::Deallocate(const std::shared_ptr<BufferView>& view) {
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto& device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, capacity, true, false);
-    if (m_dataBuffer != nullptr) {
-        DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
-    }
     m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity, false, m_UAV);
-    CD3DX12_RANGE readRange(0, 0);
-    m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&m_mappedData));
     m_memoryBlocks.push_back({ 0, capacity, true });
 }
 
@@ -112,14 +121,10 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     if (m_dataBuffer != nullptr) {
         DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
     }
-    m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize, false, m_UAV);
+    auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize, false, m_UAV);
+	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
+	m_dataBuffer = newDataBuffer;
 
-    void* newMappedData = nullptr;
-    CD3DX12_RANGE readRange(0, 0);
-    newUploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&newMappedData));
-    memcpy(newMappedData, m_mappedData, m_capacity);
-	m_mappedData = newMappedData;
-	m_uploadBuffer = newUploadBuffer;
     size_t oldCapacity = m_capacity;
     size_t sizeDiff = newSize - m_capacity;
     m_capacity = newSize;

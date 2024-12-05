@@ -56,17 +56,19 @@ private:
     ComPtr<IDXGISwapChain4> swapChain;
     ComPtr<ID3D12CommandQueue> commandQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
-    ComPtr<ID3D12Resource> renderTargets[2];
+	std::vector<ComPtr<ID3D12Resource>> renderTargets;
     ComPtr<ID3D12DescriptorHeap> dsvHeap;
-    ComPtr<ID3D12Resource> depthStencilBuffer;
-    ComPtr<ID3D12CommandAllocator> commandAllocator;
-    ComPtr<ID3D12GraphicsCommandList> commandList;
-    ComPtr<ID3D12Fence> fence;
+	std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
+    std::vector<ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
+    std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
     UINT rtvDescriptorSize;
     UINT dsvDescriptorSize;
-    UINT frameIndex;
-    HANDLE fenceEvent;
-    UINT64 fenceValue;
+    uint8_t m_frameIndex = 0;
+	uint8_t m_numFramesInFlight = 0;
+    ComPtr<ID3D12Fence> m_frameFence;
+    std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
+    HANDLE m_frameFenceEvent;
+    UINT64 m_currentFrameFenceValue = 0;
 
     InputManager inputManager;
     MovementState movementState;
@@ -105,8 +107,11 @@ private:
     void SetSettings();
     void SetEnvironmentInternal(std::wstring name);
 
-    void WaitForPreviousFrame();
+    void WaitForFrame(uint8_t frameIndex);
+    void SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t currentFrameIndex);
+    void AdvanceFrameIndex();
     void CheckDebugMessages();
+    void FlushCommandQueue();
 
     void ProcessReadbackRequests();
 
@@ -123,6 +128,7 @@ private:
 	std::function<void(std::string)> setEnvironment;
 	std::function<bool()> getMeshShadersEnabled;
     std::function<bool()> getIndirectDrawsEnabled;
+	std::function<uint8_t()> getNumFramesInFlight;
 };
 
 #endif //DX12RENDERER_H

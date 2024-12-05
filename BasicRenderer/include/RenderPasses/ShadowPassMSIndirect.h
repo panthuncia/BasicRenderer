@@ -21,16 +21,24 @@ public:
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
-		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
-		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
-		m_commandList->Close();
+		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+		for (int i = 0; i < numFramesInFlight; i++) {
+			ComPtr<ID3D12CommandAllocator> allocator;
+			ComPtr<ID3D12GraphicsCommandList7> commandList;
+			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+			commandList->Close();
+			m_allocators.push_back(allocator);
+			m_commandLists.push_back(commandList);
+		}
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
-		auto& psoManager = PSOManager::getInstance();
-		auto commandList = m_commandList.Get();
-		ThrowIfFailed(m_allocator->Reset());
-		commandList->Reset(m_allocator.Get(), nullptr);
+		auto& psoManager = PSOManager::GetInstance();
+		auto& commandList = m_commandLists[context.frameIndex];
+		auto& allocator = m_allocators[context.frameIndex];
+		ThrowIfFailed(allocator->Reset());
+		commandList->Reset(allocator.Get(), nullptr);
 
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
 			context.textureDescriptorHeap, // The texture descriptor heap
@@ -68,20 +76,25 @@ public:
 		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
 
 		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* transparentIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t transparentCommandCounterOffset) {
-			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
+			auto numOpaque = context.currentScene->GetNumOpaqueDraws();
+			if (numOpaque != 0) {
+				unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
+				commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
 
-			auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
-			commandList->SetPipelineState(pso.Get());
-			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumOpaqueDraws(), opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
+				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+				commandList->SetPipelineState(pso.Get());
+				commandList->ExecuteIndirect(commandSignature.Get(), numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
+			}
 
-			unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+			auto numTransparent = context.currentScene->GetNumTransparentDraws();
+			if (numTransparent != 0) {
+				unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+				commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-			pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
-			commandList->SetPipelineState(pso.Get());
-			commandList->ExecuteIndirect(commandSignature.Get(), context.currentScene->GetNumTransparentDraws(), transparentIndirectCommandBuffer, 0, transparentIndirectCommandBuffer, transparentCommandCounterOffset);
-			
+				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+				commandList->SetPipelineState(pso.Get());
+				commandList->ExecuteIndirect(commandSignature.Get(), numTransparent, transparentIndirectCommandBuffer, 0, transparentIndirectCommandBuffer, transparentCommandCounterOffset);
+			}
 		};
 
 		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
@@ -143,7 +156,7 @@ public:
 			}
 		}
 		commandList->Close();
-		return { commandList };
+		return { commandList.Get()};
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -151,8 +164,8 @@ public:
 	}
 
 private:
-	ComPtr<ID3D12GraphicsCommandList7> m_commandList;
-	ComPtr<ID3D12CommandAllocator> m_allocator;
+	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
+	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<uint16_t()> getShadowResolution;
 };

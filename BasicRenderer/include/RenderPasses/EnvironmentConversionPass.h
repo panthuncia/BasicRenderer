@@ -9,6 +9,7 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "Utilities.h"
+#include "UploadManager.h"
 
 class EnvironmentConversionPass : public RenderPass {
 public:
@@ -36,16 +37,18 @@ public:
         m_phiBatchSize = totalPhiSamples / m_numPasses;
 
         auto& queue = manager.GetCommandQueue();
-        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
+        for (int i = 0; i < m_numPasses; i++) {
+            ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocators[i])));
+        }
 
         m_commandLists.clear();
         for (int i = 0; i < m_numPasses; i++) {
 			ComPtr<ID3D12GraphicsCommandList> commandList;
-            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocators[i].Get(), nullptr, IID_PPV_ARGS(&commandList)));
             commandList->Close();
 			m_commandLists.push_back(commandList);
         }
-        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
+        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocators.back().Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
 		m_copyCommandList->Close();
 
 		CreateEnvironmentConversionRootSignature();
@@ -61,14 +64,15 @@ public:
 
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
 
-        ThrowIfFailed(m_allocator->Reset());
 
 		std::vector<ID3D12GraphicsCommandList*> commandLists;
 		unsigned int startPass = m_currentPass;
 		for (int pass = m_currentPass; pass < m_numPasses && pass < startPass + 1; pass++) { // Do at most one pass per frame to avoid device timeout
+            ThrowIfFailed(m_allocators[pass]->Reset());
+            auto commandList = m_commandLists[pass].Get();
+            commandList->Reset(m_allocators[pass].Get(), environmentConversionPSO.Get());
             m_currentPass += 1;
-			auto commandList = m_commandLists[pass].Get();
-			commandList->Reset(m_allocator.Get(), environmentConversionPSO.Get());
+
             if (pass == 0) {
                 for (int i = 0; i < 6; i++) {
                     const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -123,7 +127,7 @@ public:
             invalidated = false;
 			m_currentPass = 0;
 
-            m_copyCommandList->Reset(m_allocator.Get(), nullptr);
+            m_copyCommandList->Reset(m_allocators.back().Get(), nullptr);
             auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds", L"environments");
             SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentRadiance.get(), path);
             path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
@@ -158,7 +162,7 @@ private:
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_copyCommandList;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_allocator;
+    std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_allocators;
 
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
     ComPtr<ID3D12PipelineState> environmentConversionPSO;
@@ -223,7 +227,7 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
-        ResourceManager::GetInstance().UpdateBuffer(vertexBufferHandle, (void*)skyboxVertices, vertexBufferSize);
+		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
@@ -284,8 +288,8 @@ private:
         // Compile shaders
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::getInstance().CompileShader(L"shaders/envToCubemap.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::getInstance().CompileShader(L"shaders/envToCubemap.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+        PSOManager::GetInstance().CompileShader(L"shaders/envToCubemap.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+        PSOManager::GetInstance().CompileShader(L"shaders/envToCubemap.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
         static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },

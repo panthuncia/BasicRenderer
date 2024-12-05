@@ -7,6 +7,7 @@
 #include "RenderContext.h"
 #include "DeviceManager.h"
 #include "utilities.h"
+#include "SettingsManager.h"
 
 class FrustrumCullingPass : public RenderPass {
 public:
@@ -17,20 +18,28 @@ public:
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
+		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
 
-		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
-		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
-		m_commandList->Close();
+		for (int i = 0; i < numFramesInFlight; i++) {
+			ComPtr<ID3D12CommandAllocator> allocator;
+			ComPtr<ID3D12GraphicsCommandList7> commandList;
+			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+			commandList->Close();
+			m_allocators.push_back(allocator);
+			m_commandLists.push_back(commandList);
+		}
 
 		CreatePSO();
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
-		auto commandList = m_commandList.Get();
-		ThrowIfFailed(m_commandAllocator->Reset());
-		ThrowIfFailed(commandList->Reset(m_commandAllocator.Get(), nullptr));
+		auto& commandList = m_commandLists[context.frameIndex];
+		auto& allocator = m_allocators[context.frameIndex];
+		ThrowIfFailed(allocator->Reset());
+		commandList->Reset(allocator.Get(), nullptr);
 
-		auto rootSignature = PSOManager::getInstance().GetRootSignature();
+		auto rootSignature = PSOManager::GetInstance().GetRootSignature();
 		commandList->SetComputeRootSignature(rootSignature.Get());
 
 		// Set the descriptor heaps
@@ -138,7 +147,7 @@ public:
 
 		//invalidated = false;
 
-		return { commandList };
+		return { commandList.Get()};
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -150,7 +159,7 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::getInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+		PSOManager::GetInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
 
 		// Define the pipeline state stream subobjects for compute
 		struct PipelineStateStream {
@@ -159,7 +168,7 @@ private:
 		};
 
 		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = PSOManager::getInstance().GetRootSignature().Get();
+		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetRootSignature().Get();
 		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 
 		// Create the pipeline state stream descriptor
@@ -174,8 +183,8 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
+	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
+	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;

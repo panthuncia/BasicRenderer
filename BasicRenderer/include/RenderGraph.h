@@ -45,8 +45,8 @@ private:
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
 	std::vector<PassBatch> batches;
 
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_transitionCommandList;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_transitionCommandLists;
 
 	void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
 	void UpdateDesiredResourceStates(PassBatch& batch, PassAndResources& passAndResources);

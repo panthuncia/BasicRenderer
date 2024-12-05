@@ -2,6 +2,7 @@
 #include <spdlog/spdlog.h>
 #include "ResourceManager.h"
 #include "DeletionManager.h"
+#include "UploadManager.h"
 
 Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
     : m_nodes(nodes), m_inverseBindMatrices(inverseBindMatrices) {
@@ -11,7 +12,7 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const s
     m_transformsHandle.dataBuffer->SetName(L"BoneTransforms");
     m_inverseBindMatricesHandle = resourceManager.CreateIndexedStructuredBuffer<DirectX::XMMATRIX>(nodes.size(), ResourceState::NON_PIXEL_SRV);
 	m_inverseBindMatricesHandle.dataBuffer->SetName(L"InverseBindMatrices");
-    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(m_inverseBindMatricesHandle, m_inverseBindMatrices.data(), 0, nodes.size());
+    UploadManager::GetInstance().UploadData(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesHandle.dataBuffer.get(), 0);
 }
 
 Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle inverseBindMatricesHandle)
@@ -61,8 +62,7 @@ void Skeleton::UpdateTransforms() {
 
         memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
     }
-    auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdateIndexedStructuredBuffer<DirectX::XMMATRIX>(m_transformsHandle, reinterpret_cast<XMMATRIX*>(m_boneTransforms.data()), 0, m_nodes.size());
+    UploadManager::GetInstance().UploadData(m_boneTransforms.data(), m_nodes.size() * sizeof(XMMATRIX), m_transformsHandle.dataBuffer.get(), 0);
 }
 
 UINT Skeleton::GetTransformsBufferIndex() {

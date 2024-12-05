@@ -50,7 +50,7 @@ public:
 
         BufferHandle bufferHandle;
         // Create the buffer
-        bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+        //bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
         bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
 		bufferHandle.dataBuffer->SetName(name);
         ResourceTransition transition;
@@ -79,16 +79,6 @@ public:
         return bufferHandle;
     }
 
-    template<typename T>
-    void UpdateConstantBuffer(BufferHandle& handle, const T& data) {
-        void* mappedData;
-        D3D12_RANGE readRange(0, 0);
-        handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
-        memcpy(mappedData, &data, sizeof(T));
-        handle.uploadBuffer->m_buffer->Unmap(0, nullptr);
-
-        buffersToUpdate.push_back(handle);
-    }
     template<typename T>
     BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -119,12 +109,12 @@ public:
 		}
 
         BufferHandle handle;
-		if (hasUploadBuffer) {
-			handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-		}
-		else {
-			handle.uploadBuffer = nullptr;
-		}
+		//if (hasUploadBuffer) {
+		//	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+		//}
+		//else {
+		//	handle.uploadBuffer = nullptr;
+		//}
         handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
         
         ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
@@ -160,7 +150,10 @@ public:
 			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
             if (UAVCounter) {
                 uavDesc.Buffer.CounterOffsetInBytes = counterOffset;
-            }
+			}
+			else {
+				uavDesc.Buffer.CounterOffsetInBytes = 0;
+			}
 
 			// Shader visible UAV
 			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
@@ -168,14 +161,15 @@ public:
 			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), handle.dataBuffer->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
 
 			// Non-shader visible UAV
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
+            /*D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
             uavUintDesc.Format = DXGI_FORMAT_R32_UINT;
             uavUintDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
             uavUintDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
 			uavUintDesc.Buffer.NumElements = (numElements*sizeof(T))/sizeof(unsigned int);
+			uavUintDesc.Buffer.CounterOffsetInBytes = 0;
 			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
 			D3D12_CPU_DESCRIPTOR_HANDLE uavNonShaderVisibleHandle = m_nonShaderVisibleHeap->GetCPUHandle(uavNonShaderVisibleIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavUintDesc, uavNonShaderVisibleHandle);
+			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavUintDesc, uavNonShaderVisibleHandle);*/
 
 
 			ShaderVisibleIndexInfo uavInfo;
@@ -183,44 +177,13 @@ public:
 			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
             handle.dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, counterOffset);
 
-			NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
-			uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
-			uavNonShaderVisibleInfo.cpuHandle = uavNonShaderVisibleHandle;
-			handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
+			//NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
+			//uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
+			//uavNonShaderVisibleInfo.cpuHandle = uavNonShaderVisibleHandle;
+			//handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
         }
 
         return handle;
-    }
-
-    template<typename T>
-    void UpdateIndexedStructuredBuffer(BufferHandle& handle, T* data, UINT startIndex, UINT numElements) {
-        //if (handle.buffer == nullptr) {
-        //    spdlog::error("Buffer not initialized.");
-        //    throw std::runtime_error("Buffer not initialized.");
-        //}
-
-        // Calculate the size of the data to update
-        UINT elementSize = sizeof(T);
-        UINT updateSize = numElements * elementSize;
-        UINT offset = startIndex * elementSize;
-
-        // Map the buffer
-        void* mappedData = nullptr;
-        D3D12_RANGE readRange = { offset, offset + updateSize };
-        HRESULT hr = handle.uploadBuffer->m_buffer->Map(0, &readRange, &mappedData);
-        if (FAILED(hr)) {
-            spdlog::error("Failed to map buffer with HRESULT: {}", hr);
-            throw std::runtime_error("Failed to map buffer.");
-        }
-
-        // Copy new data to the buffer
-        memcpy(static_cast<char*>(mappedData) + offset, data, updateSize);
-
-        // Unmap the buffer
-        D3D12_RANGE writtenRange = { offset, offset + updateSize };
-        handle.uploadBuffer->m_buffer->Unmap(0, &writtenRange);
-
-        buffersToUpdate.push_back(handle);
     }
 
     template<typename T>
@@ -333,7 +296,7 @@ public:
         srvDesc.Buffer.StructureByteStride = typeSize;
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-        device->CreateShaderResourceView(buffer->m_dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
+        device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
         
 		auto bufferState = buffer->GetState();
 		// After resize, internal buffer state will not match the wrapper state
@@ -347,7 +310,6 @@ public:
 #endif
 			QueueResourceTransition(transition);
 		}
-		QueueDynamicBufferUpdate(buffer);
     }
 
     void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer) {
@@ -371,7 +333,7 @@ public:
         // After resize, internal buffer state will not match the wrapper state
         if (bufferState != ResourceState::UNKNOWN) {
             ResourceTransition transition;
-            transition.resource = buffer;
+            transition.resource = buffer->m_dataBuffer.get();
             transition.beforeState = ResourceState::UNKNOWN;
             transition.afterState = buffer->GetState();
 #if defined(_DEBUG)
@@ -379,7 +341,6 @@ public:
 #endif
             //QueueResourceTransition(transition);
         }
-        QueueDynamicBufferUpdate(buffer);
     }
 
     template<typename T>
@@ -394,7 +355,7 @@ public:
         BufferHandle handle;
 
 		// Create the upload and data buffers
-        handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
+        //handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
         handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
 		handle.dataBuffer->SetName(name);
         ResourceTransition transition;
@@ -618,28 +579,12 @@ public:
     }
 
 	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData, bool UAV = false);
-    void UpdateBuffer(BufferHandle& handle, void* data, size_t size);
-
-    void QueueDynamicBufferUpdate(DynamicBufferBase* ptr) {
-        dynamicBuffersToUpdate.push_back(ptr);
-    }
-
-	void QueueViewedDynamicBufferViewUpdate(ViewedDynamicBufferBase* handle) {
-		dynamicBuffersToUpdateViews.push_back(handle);
-	}
-
-	void QueueLazyDynamicBufferUpdate(LazyDynamicStructuredBufferBase* handle) {
-		dynamicBuffersToUpdate.push_back(handle);
-	}
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
-    void UpdateGPUBuffers();
 
 	void QueueResourceTransition(const ResourceTransition& transition);
     void ExecuteResourceTransitions();
-
-	void CreateRenderTargetViewForExternalResource(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc);
 
     void setEnvironmentIrradianceMapSamplerIndex(int index) { perFrameCBData.environmentIrradianceSamplerIndex = index; }
 	void setEnvironmentIrradianceMapIndex(int index) { perFrameCBData.environmentIrradianceMapIndex = index; }
@@ -649,6 +594,7 @@ public:
 	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
 	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
+    
 private:
     ResourceManager(){};
     void WaitForCopyQueue();
@@ -701,4 +647,5 @@ private:
     ComPtr<ID3D12Resource> m_uavCounterReset;
 
 	int defaultShadowSamplerIndex = -1;
+
 };

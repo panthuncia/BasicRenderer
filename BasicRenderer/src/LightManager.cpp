@@ -332,17 +332,6 @@ void LightManager::OnNodeUpdated(Light* light) {
 	}
 }
 
-void LightManager::UpdateBuffers() {
-	if (m_lightBuffer->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_lightBuffer.get());
-	if (m_spotViewInfo->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_spotViewInfo.get());
-	if (m_pointViewInfo->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_pointViewInfo.get());
-	if (m_directionalViewInfo->UpdateUploadBuffer())
-		ResourceManager::GetInstance().QueueDynamicBufferUpdate(m_directionalViewInfo.get());
-}
-
 void LightManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {
 	m_pCommandBufferManager = commandBufferManager;
 }

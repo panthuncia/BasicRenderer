@@ -41,14 +41,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 		}
         // Allocate buffer view
         size_t size = vertices.size() * sizeof(VertexType);
-		view = m_vertices->Allocate(size, typeid(VertexType));
-
-        // Map and copy data
-        VertexType* dataPtr = view->Map<VertexType>();
-        std::memcpy(dataPtr, specificVertices.data(), size);
-		view->GetBuffer()->MarkViewDirty(view.get());
-		//mesh->SetVertexBufferView(std::move(view));
-		manager.QueueViewedDynamicBufferViewUpdate(m_vertices.get());
+		view = m_vertices->AddData(specificVertices.data(), size, typeid(VertexType));
 
         }, vertices.front());
 
@@ -56,44 +49,26 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	auto& meshlets = mesh->GetMeshlets();
 	auto test = vertices[0];
 	spdlog::info("Adding {} meshlets, allocating {} bytes", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));
-	auto meshletOffsetsView = m_meshletOffsets->Allocate(meshlets.size() * sizeof(meshopt_Meshlet), typeid(meshopt_Meshlet));
-	std::memcpy(meshletOffsetsView->Map<meshopt_Meshlet>(), meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet));
-	meshletOffsetsView->GetBuffer()->MarkViewDirty(meshletOffsetsView.get());
-	//mesh->SetMeshletOffsetsBufferView(std::move(meshletOffsetsView));
-	manager.QueueViewedDynamicBufferViewUpdate(m_meshletOffsets.get());
+	auto meshletOffsetsView = m_meshletOffsets->AddData(meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet), typeid(meshopt_Meshlet));
 
 	auto& meshletVertices = mesh->GetMeshletVertices();
-	auto meshletIndicesView = m_meshletIndices->Allocate(meshletVertices.size() * sizeof(unsigned int), typeid(unsigned int));
-	std::memcpy(meshletIndicesView->Map<unsigned int>(), meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int));
-	meshletIndicesView->GetBuffer()->MarkViewDirty(meshletIndicesView.get());
-	//mesh->SetMeshletVerticesBufferView(std::move(meshletIndicesView));
-	manager.QueueViewedDynamicBufferViewUpdate(m_meshletIndices.get());
+	auto meshletIndicesView = m_meshletIndices->AddData(meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int), typeid(unsigned int));
 
 	auto& meshletTriangles = mesh->GetMeshletTriangles();
-	auto meshletTrianglesView = m_meshletTriangles->Allocate(meshletTriangles.size() * sizeof(unsigned char), typeid(unsigned char));
-	std::memcpy(meshletTrianglesView->Map<unsigned char>(), meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char));
-	meshletTrianglesView->GetBuffer()->MarkViewDirty(meshletTrianglesView.get());
-	//mesh->SetMeshletTrianglesBufferView(std::move(meshletTrianglesView));
-	manager.QueueViewedDynamicBufferViewUpdate(m_meshletTriangles.get());
+	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), typeid(unsigned char));
 
 	mesh->SetBufferViews(std::move(view), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
 
 	// Per mesh buffer
 	switch (bucket){
 	case MaterialBuckets::Opaque: {
-		auto perMeshBufferView = m_opaquePerMeshBuffers->Allocate(sizeof(PerMeshCB), typeid(PerMeshCB));
-		std::memcpy(perMeshBufferView->Map<PerMeshCB>(), &mesh->GetPerMeshCBData(), sizeof(PerMeshCB));
-		perMeshBufferView->GetBuffer()->MarkViewDirty(perMeshBufferView.get());
+		auto perMeshBufferView = m_opaquePerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
 		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
-		manager.QueueViewedDynamicBufferViewUpdate(m_opaquePerMeshBuffers.get());
 		break;
 	}
 	case MaterialBuckets::Transparent: {
-		auto perMeshBufferView = m_transparentPerMeshBuffers->Allocate(sizeof(PerMeshCB), typeid(PerMeshCB));
-		std::memcpy(perMeshBufferView->Map<PerMeshCB>(), &mesh->GetPerMeshCBData(), sizeof(PerMeshCB));
-		perMeshBufferView->GetBuffer()->MarkViewDirty(perMeshBufferView.get());
+		auto perMeshBufferView = m_transparentPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
 		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
-		manager.QueueViewedDynamicBufferViewUpdate(m_transparentPerMeshBuffers.get());
 		break;
 	}
 	}
@@ -106,7 +81,5 @@ void MeshManager::RemoveMesh(std::shared_ptr<BufferView> view) {
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {
-	std::memcpy(view->Map<PerMeshCB>(), &data, sizeof(PerMeshCB));
-	view->GetBuffer()->MarkViewDirty(view.get());
-	ResourceManager::GetInstance().QueueViewedDynamicBufferViewUpdate(view->GetBuffer());
+	view->GetBuffer()->UpdateView(view.get(), &data);
 }

@@ -339,7 +339,6 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
 }
 
 void Scene::PostUpdate() {
-    lightManager.UpdateBuffers();
 }
 
 UINT Scene::GetNumLights() {

@@ -1,39 +1,38 @@
 #pragma once
 #include <memory>
 #include <vector>
+#include "SettingsManager.h"
 
 class DeletionManager {
 public:
     static DeletionManager& GetInstance();
 
+	void Initialize() {
+		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+		m_deletionQueue.resize(numFramesInFlight);
+	}
+
     template <typename T>
     void MarkForDelete(const std::shared_ptr<T>& ptr) {
-        m_deferredDeletion.push_back(std::static_pointer_cast<void>(ptr));
+		m_deletionQueue[0].push_back(ptr);
     }
 
 	void ProcessDeletions() {
-		m_stuffToDelete.clear();
-        for (auto& ptr : m_deferredDeletion) {
-			m_stuffToDelete.push_back(ptr);
-        }
-        m_deferredDeletion.clear();
+		m_deletionQueue.back().clear();
+		for (int i = m_deletionQueue.size() - 2; i >= 0; --i) {
+			m_deletionQueue[i + 1].swap(m_deletionQueue[i]);
+		}
 	}
 
     void Cleanup() {
-		m_deferredDeletion.clear();
-		m_stuffToDelete.clear();
+		m_deletionQueue.clear();
+		m_deletionQueue.push_back(std::vector<std::shared_ptr<void>>());
     }
 
 private:
     DeletionManager() = default;
 
-    // TODO: Currently, resource transitions for the initial states of resources of new objects are handled at the start of each frame.
-    // This means that if an object is loaded mid-frame, and one of its resources is queued for deletion (buffer resizing, for example),
-    // it will be added to the transition queue, then deleted, and then its transition will be processed, which is invalid.
-    // As a hack solution, this does double-frame deferred deletion. There is probably a better solution. My initial resource transitions
-    // should probably be reworked- I wrote them before I understood how resource states worked.
-	std::vector<std::shared_ptr<void>> m_deferredDeletion; // double deferred deletion to avoid deleting objects while transitioning them
-    std::vector<std::shared_ptr<void>> m_stuffToDelete;
+	std::vector<std::vector<std::shared_ptr<void>>> m_deletionQueue;
 };
 
 inline DeletionManager& DeletionManager::GetInstance() {

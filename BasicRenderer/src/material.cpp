@@ -5,6 +5,7 @@
 #include "utilities.h"
 #include "TextureDescription.h"
 #include "MaterialFlags.h"
+#include "UploadManager.h"
 
 Material::Material(const std::string& name,
     UINT materialFlags, UINT psoFlags)
@@ -12,7 +13,7 @@ Material::Material(const std::string& name,
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
 	m_materialData.materialFlags = materialFlags;
-    resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
 }
 
 Material::Material(const std::string& name,
@@ -85,7 +86,8 @@ Material::Material(const std::string& name,
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
 	m_perMaterialHandle.dataBuffer->SetName(L"PerMaterialCB ("+s2ws(name)+L")");
-    resourceManager.UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
 }
 
 std::shared_ptr<Texture> Material::createDefaultTexture() {
@@ -108,7 +110,7 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
     defaultSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     defaultSamplerDesc.MipLODBias = 0.0f;
     defaultSamplerDesc.MaxAnisotropy = 1;
-    defaultSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    defaultSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
     defaultSamplerDesc.BorderColor[0] = 0.0f;
     defaultSamplerDesc.BorderColor[1] = 0.0f;
     defaultSamplerDesc.BorderColor[2] = 0.0f;
@@ -133,15 +135,15 @@ void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
 	heightmap->GetBuffer()->SetName(L"HeightMap");
 	m_materialData.heightMapIndex = heightmap->GetBuffer()->GetSRVInfo().index;
 	m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
-	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
 }
 
 void Material::SetTextureScale(float scale) {
 	m_materialData.textureScale = scale;
-	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
 }
 
 void Material::SetHeightmapScale(float scale) {
 	m_materialData.heightMapScale = scale;
-	ResourceManager::GetInstance().UpdateConstantBuffer(m_perMaterialHandle, m_materialData);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
 }
