@@ -163,7 +163,7 @@ void DX12Renderer::SetSettings() {
         });
 	settingsManager.registerSetting<bool>("enableMeshShader", true);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", true);
-	settingsManager.registerSetting<uint8_t>("numFramesInFlight", 2);
+	settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -538,12 +538,12 @@ void DX12Renderer::Render() {
     ppCommandLists[0] = commandList.Get();
     commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
-    SignalFence(commandQueue, m_frameIndex);
-
     // Present the frame
     ThrowIfFailed(swapChain->Present(1, 0));
 
     AdvanceFrameIndex();
+
+    SignalFence(commandQueue, m_frameIndex);
 
 	ProcessReadbackRequests(); // Save images to disk if requested
 
@@ -551,13 +551,13 @@ void DX12Renderer::Render() {
     DeletionManager::GetInstance().ProcessDeletions();
 }
 
-void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t currentFrameIndex) {
+void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t frameIndexToSignal) {
     // Signal the fence
     m_currentFrameFenceValue++;
     ThrowIfFailed(commandQueue->Signal(m_frameFence.Get(), m_currentFrameFenceValue));
 
     // Store the fence value for the current frame
-    m_frameFenceValues[currentFrameIndex] = m_currentFrameFenceValue;
+    m_frameFenceValues[frameIndexToSignal] = m_currentFrameFenceValue;
 }
 
 void DX12Renderer::AdvanceFrameIndex() {
