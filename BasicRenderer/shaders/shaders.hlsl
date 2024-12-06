@@ -68,6 +68,13 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
 
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+    
+    if (materialFlags & MATERIAL_TEXTURED) {
+        output.texcoord = input.texcoord;
+    }
+    
 #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     LightInfo light = lights[currentLightID];
@@ -108,8 +115,6 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
     
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
-    uint materialFlags = materialInfo.materialFlags;
     if (materialFlags & MATERIAL_NORMAL_MAP || materialFlags & MATERIAL_PARALLAX) {
         output.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));
         output.TBN_B = normalize(mul(input.bitangent, normalMatrixSkinnedIfNecessary));
@@ -117,10 +122,6 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     }
 
     output.color = input.color;
-    
-    if (materialFlags & MATERIAL_TEXTURED) {
-        output.texcoord = input.texcoord;
-    }
 
     output.meshletIndex = 0; // Unused for vertex shader
     return output;
@@ -642,13 +643,30 @@ float3 getIBLGGXFresnel(float3 n, float3 v, float roughness, float3 F0, float sp
 
 float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
+    
+#if defined(PSO_SHADOW) // Alpha tested shadows
+    #ifndef PSO_DOUBLE_SIDED
+        return float4(0, 0, 0, 0);
+    #endif // DOUBLE_SIDED
+    if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
+        Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
+        SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
+        float2 uv = input.texcoord;
+        float4 baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
+        if (baseColor.a < 0.1){
+            discard;
+        }
+    }
+    return float4(0, 0, 0, 0);
+#endif // SHADOW
+
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];

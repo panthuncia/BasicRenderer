@@ -91,7 +91,7 @@ public:
 				unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
 				commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_OPAQUE, false);
 				commandList->SetPipelineState(pso.Get());
 				commandList->ExecuteIndirect(commandSignature.Get(), numTransparent, transparentIndirectCommandBuffer, 0, transparentIndirectCommandBuffer, transparentCommandCounterOffset);
 			}

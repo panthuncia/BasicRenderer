@@ -64,9 +64,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
     psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
+    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
         psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    }
+    //}
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     if (wireframe) {
         psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
@@ -107,9 +107,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
     CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
-    if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
+    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
         CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
-    }
+    //}
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
