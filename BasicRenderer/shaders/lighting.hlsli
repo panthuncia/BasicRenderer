@@ -181,11 +181,11 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
         SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
         baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
-#if defined(PSO_DOUBLE_SIDED)
+#if defined(PSO_ALPHA_TEST)
         if (baseColor.a < 0.1){
             discard;
         }
-#endif // DOUBLE_SIDED
+#endif // ALPHA_TEST
         baseColor.rgb = SRGBToLinear(baseColor.rgb);
     }
 

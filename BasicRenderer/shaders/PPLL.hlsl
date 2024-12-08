@@ -48,7 +48,7 @@ void WriteFragmentAttributes(int nAddress, int nPreviousLink, float4 vColor, flo
     LinkedListUAV[nAddress] = element;
 }
 
-[earlydepthstencil]
+//[earlydepthstencil]
 void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
