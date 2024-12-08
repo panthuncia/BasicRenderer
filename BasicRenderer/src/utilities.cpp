@@ -373,7 +373,8 @@ CD3DX12_RESOURCE_DESC CreateTextureResourceDesc(
     int mipLevels,
     bool isCubemap,
     bool allowRTV,
-    bool allowDSV) {
+    bool allowDSV,
+    bool allowUAV) {
 
     CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Tex2D(
         format,
@@ -384,6 +385,7 @@ CD3DX12_RESOURCE_DESC CreateTextureResourceDesc(
 
     if (allowRTV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
     if (allowDSV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+	if (allowUAV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     return desc;
 }
@@ -455,6 +457,87 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
     srvInfo.gpuHandle = gpuHandle;
 
     return srvInfo;
+}
+
+ShaderVisibleIndexInfo CreateUnorderedAccessView(
+    ID3D12Device* device,
+    ID3D12Resource* resource,
+    DXGI_FORMAT format,
+    DescriptorHeap* uavHeap,
+    bool isArray,
+    int arraySize,
+    int mipSlice,
+    int firstArraySlice,
+    int planeSlice) {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+    uavDesc.Format = format;
+
+    // For now, only support Texture2D or Texture2DArray.
+    // TODO: consolidate other uav creation into this?
+    if (isArray) {
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+        uavDesc.Texture2DArray.MipSlice = mipSlice;
+        uavDesc.Texture2DArray.FirstArraySlice = firstArraySlice;
+        uavDesc.Texture2DArray.ArraySize = arraySize;
+        uavDesc.Texture2DArray.PlaneSlice = planeSlice;
+    }
+    else {
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uavDesc.Texture2D.MipSlice = mipSlice;
+        uavDesc.Texture2D.PlaneSlice = planeSlice;
+    }
+
+    UINT descriptorIndex = uavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = uavHeap->GetCPUHandle(descriptorIndex);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = uavHeap->GetGPUHandle(descriptorIndex);
+
+	// No counter for texture UAVs
+    device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
+
+    ShaderVisibleIndexInfo uavInfo;
+    uavInfo.index = descriptorIndex;
+    uavInfo.gpuHandle = gpuHandle;
+
+    return uavInfo;
+}
+
+NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear operations need a non-shader visible UAV
+    ID3D12Device* device,
+    ID3D12Resource* resource,
+    DXGI_FORMAT format,
+    DescriptorHeap* uavHeap,
+    bool isArray,
+    int arraySize,
+    int mipSlice,
+    int firstArraySlice,
+    int planeSlice) {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+    uavDesc.Format = format;
+
+    if (isArray) {
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+        uavDesc.Texture2DArray.MipSlice = mipSlice;
+        uavDesc.Texture2DArray.FirstArraySlice = firstArraySlice;
+        uavDesc.Texture2DArray.ArraySize = arraySize;
+        uavDesc.Texture2DArray.PlaneSlice = planeSlice;
+    }
+    else {
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uavDesc.Texture2D.MipSlice = mipSlice;
+        uavDesc.Texture2D.PlaneSlice = planeSlice;
+    }
+
+    UINT descriptorIndex = uavHeap->AllocateDescriptor();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = uavHeap->GetCPUHandle(descriptorIndex);
+
+    // No counter for texture UAVs
+    device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
+
+    NonShaderVisibleIndexInfo uavInfo;
+    uavInfo.index = descriptorIndex;
+	uavInfo.cpuHandle = cpuHandle;
+
+    return uavInfo;
 }
 
 std::vector<NonShaderVisibleIndexInfo> CreateRenderTargetViews(

@@ -478,9 +478,10 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
 
     ThrowIfFailed(commandAllocator->Reset());
-
-    ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
+
+	currentRenderGraph->Update();
 
 	updateManager.ResetAllocators(m_frameIndex); // Reset allocators to avoid leaking memory
     updateManager.ExecuteResourceCopies(m_frameIndex, commandQueue.Get());// copies come before uploads to avoid overwriting data
@@ -880,6 +881,7 @@ void DX12Renderer::CreateRenderGraph() {
     desc.format = DXGI_FORMAT_R32_UINT;
     desc.hasRTV = false;
     desc.hasUAV = true;
+	desc.hasNonShaderVisibleUAV = true;
     desc.initialState = ResourceState::PIXEL_SRV;
 	auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
 	PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");

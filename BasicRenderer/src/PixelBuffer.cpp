@@ -13,9 +13,15 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
     ResourceManager& resourceManager = ResourceManager::GetInstance();
 
     handle = resourceManager.CreateTexture(desc, initialData);
-    SetSRVDescriptor(handle.srvHeap, handle.SRVInfo);
-	SetRTVDescriptors(handle.rtvHeap, handle.RTVInfo);
-	SetDSVDescriptors(handle.dsvHeap, handle.DSVInfo);
+    SetSRVDescriptor(handle.srvUavHeap, handle.SRVInfo);
+    if(desc.hasUAV)
+        SetUAVGPUDescriptor(handle.srvUavHeap, handle.UAVInfo);
+    if(desc.hasNonShaderVisibleUAV)
+        SetUAVCPUDescriptor(handle.srvUavHeap, handle.NSVUAVInfo);
+	if (desc.hasRTV)
+		SetRTVDescriptors(handle.rtvHeap, handle.RTVInfo);
+	if (desc.hasDSV)
+	    SetDSVDescriptors(handle.dsvHeap, handle.DSVInfo);
     currentState = ResourceState::UNKNOWN;
 	m_width = desc.width;
 	m_height = desc.height;

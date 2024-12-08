@@ -12,6 +12,7 @@ struct TextureDescription {
     bool hasRTV = false;
     bool hasDSV = false;
     bool hasUAV = false;
+	bool hasNonShaderVisibleUAV = false;
     bool generateMipMaps = false;
     ResourceState initialState = ResourceState::UNKNOWN;
 };

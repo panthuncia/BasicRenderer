@@ -24,6 +24,7 @@ public:
     virtual ~RenderPass() = default;
 
     virtual void Setup() = 0;
+	virtual void Update() {};
     virtual std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) = 0;
     virtual void Cleanup(RenderContext& context) = 0;
 

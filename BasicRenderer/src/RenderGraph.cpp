@@ -104,6 +104,14 @@ std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) 
     }
 }
 
+void RenderGraph::Update() {
+    for (auto& batch : batches) {
+        for (auto& passAndResources : batch.passes) {
+            passAndResources.pass->Update();
+        }
+    }
+}
+
 void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto& queue = manager.GetCommandQueue();

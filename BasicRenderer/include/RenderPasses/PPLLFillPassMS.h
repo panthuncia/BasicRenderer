@@ -14,6 +14,7 @@
 #include "ResourceManager.h"
 #include "TextureDescription.h"
 #include "ResourceHandles.h"
+#include "UploadManager.h"
 
 class PPLLFillPassMS : public RenderPass {
 public:
@@ -59,6 +60,9 @@ public:
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
+		uint32_t clearValues[4] = { 0, 0, 0, 0 };
+		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo().cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
+
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
 		commandList->RSSetViewports(1, &viewport);
@@ -99,7 +103,7 @@ public:
 		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
 		// PPLL heads & buffer
-		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo().index, m_PPLLBuffer->GetSRVInfo().index, m_PPLLCounter->GetSRVInfo().index, m_numPPLLNodes};
+		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes};
 		commandList->SetGraphicsRoot32BitConstants(7, 3, &indices, 0);
 
 		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
@@ -123,6 +127,12 @@ public:
 
 		commandList->Close();
 		return { commandList.Get() };
+	}
+
+	virtual void Update() override {
+	    // Reset UAV counter
+		uint32_t zero = 0;
+		UploadManager::GetInstance().UploadData(&zero, sizeof(uint32_t), m_PPLLCounter.get(), 0);
 	}
 
 	void Cleanup(RenderContext& context) override {

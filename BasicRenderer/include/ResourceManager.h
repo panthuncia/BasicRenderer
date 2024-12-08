@@ -390,7 +390,8 @@ public:
             mipLevels,
             desc.isCubemap,
             desc.hasRTV,
-            desc.hasDSV
+            desc.hasDSV,
+            desc.hasUAV
         );
 
         // Handle clear values for RTV and DSV
@@ -435,6 +436,32 @@ public:
             desc.isArray,
             arraySize
         );
+
+        // UAV
+		ShaderVisibleIndexInfo uavInfo;
+		if (desc.hasUAV) {
+			uavInfo = CreateUnorderedAccessView(
+				device.Get(),
+				textureResource.Get(),
+				desc.format,
+				m_cbvSrvUavHeap.get(),
+				desc.isArray,
+				arraySize
+			);
+		}
+
+		// Non-shader visible UAV
+		NonShaderVisibleIndexInfo nonShaderUavInfo;
+        if (desc.hasNonShaderVisibleUAV) {
+			nonShaderUavInfo = CreateNonShaderVisibleUnorderedAccessView(
+				device.Get(),
+				textureResource.Get(),
+				desc.format,
+				m_nonShaderVisibleHeap.get(),
+				desc.isArray,
+				arraySize
+			);
+        }
 
         // Create RTVs if needed
         std::vector<NonShaderVisibleIndexInfo> rtvInfos;
@@ -564,9 +591,11 @@ public:
         TextureHandle<PixelBuffer> handle;
         handle.texture = textureResource;
         handle.SRVInfo = srvInfo;
+		handle.UAVInfo = uavInfo;
+		handle.NSVUAVInfo = nonShaderUavInfo;
         handle.RTVInfo = rtvInfos;
         handle.DSVInfo = dsvInfos;
-		handle.srvHeap = m_cbvSrvUavHeap;
+		handle.srvUavHeap = m_cbvSrvUavHeap;
 		handle.rtvHeap = m_rtvHeap;
 		handle.dsvHeap = m_dsvHeap;
 
