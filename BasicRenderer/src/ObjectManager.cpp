@@ -11,11 +11,11 @@
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	//m_perObjectBuffers = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerObjectCB>(ResourceState::ALL_SRV, 1, L"perObjectBuffers<PerObjectCB>", 1);
-	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, ResourceState::ALL_SRV, L"meshletOffsets");
+	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, ResourceState::ALL_SRV, L"perObjectBuffers<PerObjectCB>");
 	//m_opaqueDrawSetCommandsBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<IndirectCommand>(ResourceState::ALL_SRV, 1, L"drawSetCommandsBuffer<IndirectCommand>", 1);
-	m_opaqueDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"meshletOffsets");
+	m_opaqueDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"drawSetCommandsBuffer<IndirectCommand>");
 	//m_transparentDrawSetCommandsBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<IndirectCommand>(ResourceState::ALL_SRV, 1, L"drawSetCommandsBuffer<IndirectCommand>", 1);
-	m_transparentDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"meshletOffsets");
+	m_transparentDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"drawSetCommandsBuffer<IndirectCommand>");
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
 	m_activeTransparentDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeTransparentDrawSetIndices");
 }

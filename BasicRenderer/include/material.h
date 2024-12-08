@@ -50,5 +50,5 @@ public:
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
 private:
-    BufferHandle m_perMaterialHandle;
+    std::shared_ptr<Buffer> m_perMaterialHandle;
 };

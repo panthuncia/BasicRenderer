@@ -40,7 +40,7 @@ public:
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
 
     template<typename T>
-    BufferHandle CreateIndexedConstantBuffer(std::wstring name = L"") {
+    std::shared_ptr<Buffer> CreateIndexedConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -48,13 +48,12 @@ public:
         // Calculate the size of the buffer to be 256-byte aligned
         UINT bufferSize = (sizeof(T) + 255) & ~255;
 
-        BufferHandle bufferHandle;
         // Create the buffer
         //bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-        bufferHandle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
-		bufferHandle.dataBuffer->SetName(name);
+        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
+		dataBuffer->SetName(name);
         ResourceTransition transition;
-		transition.resource = bufferHandle.dataBuffer.get();
+		transition.resource = dataBuffer.get();
 		transition.beforeState = ResourceState::UNKNOWN;
 		transition.afterState = ResourceState::CONSTANT;
 #if defined(_DEBUG)
@@ -63,7 +62,7 @@ public:
 		QueueResourceTransition(transition);
         // Create a descriptor for the buffer
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-        cbvDesc.BufferLocation = bufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        cbvDesc.BufferLocation = dataBuffer->m_buffer->GetGPUVirtualAddress();
         cbvDesc.SizeInBytes = bufferSize;
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
@@ -72,14 +71,14 @@ public:
         ShaderVisibleIndexInfo cbvInfo;
         cbvInfo.index = index;
         cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        bufferHandle.dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
+        dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
         device->CreateConstantBufferView(&cbvDesc, handle);
 
-        return bufferHandle;
+        return dataBuffer;
     }
 
-    BufferHandle CreateIndexedStructuredBuffer(size_t numElements, size_t elementSize, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
+    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, size_t elementSize, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT bufferSize = numElements * elementSize;
         unsigned int counterOffset = 0;
@@ -106,16 +105,15 @@ public:
             assert(counterOffset % 4096 == 0);
 		}
 
-        BufferHandle handle;
 		//if (hasUploadBuffer) {
 		//	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
 		//}
 		//else {
 		//	handle.uploadBuffer = nullptr;
 		//}
-        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
         
-        ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
+        ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
 #if defined(_DEBUG)
         transition.name = L"IndexedStructuredBuffer";
 #endif
@@ -132,12 +130,12 @@ public:
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(handle.dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
+        device->CreateShaderResourceView(dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
 
         ShaderVisibleIndexInfo srvInfo;
         srvInfo.index = index;
         srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        handle.dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+        dataBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
         if (UAV) {
 			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
@@ -156,7 +154,7 @@ public:
 			// Shader visible UAV
 			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
 			D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), handle.dataBuffer->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
+			device->CreateUnorderedAccessView(dataBuffer->m_buffer.Get(), dataBuffer->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
 
 			// Non-shader visible UAV
             /*D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
@@ -173,7 +171,7 @@ public:
 			ShaderVisibleIndexInfo uavInfo;
 			uavInfo.index = uavShaderVisibleIndex;
 			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-            handle.dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, counterOffset);
+            dataBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, counterOffset);
 
 			//NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
 			//uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
@@ -181,7 +179,7 @@ public:
 			//handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
         }
 
-        return handle;
+        return dataBuffer;
     }
 
     template<typename T>
@@ -342,7 +340,7 @@ public:
     }
 
     template<typename T>
-    BufferHandle CreateConstantBuffer(std::wstring name = L"") {
+    std::shared_ptr<Buffer> CreateConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
 		auto& device = DeviceManager::GetInstance().GetDevice();
@@ -350,14 +348,13 @@ public:
 		// Calculate the size of the buffer to be 256-byte aligned
 		UINT bufferSize = (sizeof(T) + 255) & ~255;
 
-        BufferHandle handle;
 
 		// Create the upload and data buffers
         //handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-        handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
-		handle.dataBuffer->SetName(name);
+        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
+		dataBuffer->SetName(name);
         ResourceTransition transition;
-        transition.resource = handle.dataBuffer.get();
+        transition.resource = dataBuffer.get();
         transition.beforeState = ResourceState::UNKNOWN;
         transition.afterState = ResourceState::CONSTANT;
 #if defined(_DEBUG)
@@ -366,7 +363,7 @@ public:
         QueueResourceTransition(transition);
 
 
-        return handle;
+        return dataBuffer;
     }
 
     template <typename Container = std::vector<const stbi_uc*>>
@@ -576,7 +573,7 @@ public:
         return handle;
     }
 
-	BufferHandle CreateBuffer(size_t size, ResourceState usageType, void* pInitialData, bool UAV = false);
+    std::shared_ptr<Buffer> CreateBuffer(size_t size, ResourceState usageType, void* pInitialData, bool UAV = false);
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
@@ -626,7 +623,7 @@ private:
     HANDLE transitionFenceEvent;
     UINT64 transitionFenceValue = 0;
 
-	BufferHandle perFrameBufferHandle;
+    std::shared_ptr<Buffer> perFrameBufferHandle;
     UINT8* pPerFrameConstantBuffer;
     PerFrameCB perFrameCBData;
     UINT currentFrameIndex;
@@ -636,7 +633,7 @@ private:
     ComPtr<ID3D12GraphicsCommandList> commandList;
     ComPtr<ID3D12CommandAllocator> commandAllocator;
 
-    std::vector<BufferHandle> buffersToUpdate;
+    std::vector<std::shared_ptr<Buffer>> buffersToUpdate;
     std::vector<DynamicBufferBase*> dynamicBuffersToUpdate;
 	std::vector<ViewedDynamicBufferBase*> dynamicBuffersToUpdateViews;
 

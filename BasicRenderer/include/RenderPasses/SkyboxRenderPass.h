@@ -81,7 +81,7 @@ private:
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    BufferHandle vertexBufferHandle;
+    std::shared_ptr<Buffer> vertexBufferHandle;
     std::shared_ptr<Texture> m_texture = nullptr;
 
     ComPtr<ID3D12RootSignature> skyboxRootSignature;
@@ -148,11 +148,11 @@ private:
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
         
-		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
+		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(SkyboxVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 

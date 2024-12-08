@@ -17,28 +17,18 @@
 
 class PPLLFillPassMS : public RenderPass {
 public:
-	PPLLFillPassMS(bool wireframe, uint16_t xRes, uint16_t yRes) {
+	PPLLFillPassMS(bool wireframe, std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer, std::shared_ptr<Buffer> PPLLCounter, size_t numPPLLNodes) {
 		m_wireframe = wireframe;
-		m_xRes = xRes;
-		m_yRes = yRes;
-		m_numPPLLNodes = xRes * yRes * m_aveFragsPerPixel;
 
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-		TextureDescription desc;
-		desc.width = xRes;
-		desc.height = yRes;
-		desc.channels = 1;
-		desc.format = DXGI_FORMAT_R32_UINT;
-		desc.hasRTV = false;
-		desc.hasUAV = true;
-		desc.initialState = ResourceState::PIXEL_SRV;
-		m_PPLLHeadPointerTexture = ResourceManager::GetInstance().CreateTexture(desc);
-		m_PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_numPPLLNodes, m_PPLLNodeSize, ResourceState::UNORDERED_ACCESS, false, true, false);
-		m_PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
-	
+
+		m_PPLLHeadPointerTexture = PPLLHeads;
+		m_PPLLBuffer = PPLLBuffer;
+		m_PPLLCounter = PPLLCounter;
+		m_numPPLLNodes = numPPLLNodes;
 	}
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
@@ -109,7 +99,7 @@ public:
 		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
 		// PPLL heads & buffer
-		uint32_t indices[4] = { m_PPLLHeadPointerTexture.SRVInfo.index, m_PPLLBuffer.dataBuffer->GetSRVInfo().index, m_PPLLCounter.dataBuffer->GetSRVInfo().index, m_numPPLLNodes};
+		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo().index, m_PPLLBuffer->GetSRVInfo().index, m_PPLLCounter->GetSRVInfo().index, m_numPPLLNodes};
 		commandList->SetGraphicsRoot32BitConstants(7, 3, &indices, 0);
 
 		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
@@ -144,17 +134,11 @@ private:
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;
 
-	uint16_t m_xRes;
-	uint16_t m_yRes;
 	size_t m_numPPLLNodes;
 
-	TextureHandle<PixelBuffer> m_PPLLHeadPointerTexture;
-	BufferHandle m_PPLLBuffer;
-	BufferHandle m_PPLLCounter;
-
-	// PPLL settings
-	static const size_t m_aveFragsPerPixel = 12;
-	static const size_t m_PPLLNodeSize = 16;
+	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
+	std::shared_ptr<Buffer> m_PPLLBuffer;
+	std::shared_ptr<Buffer> m_PPLLCounter;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;

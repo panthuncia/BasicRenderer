@@ -82,7 +82,7 @@ public:
 
 private:
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    BufferHandle vertexBufferHandle;
+    std::shared_ptr<Buffer> vertexBufferHandle;
     Texture* m_texture = nullptr;
 
 	std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
@@ -116,11 +116,11 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenTriangleVertices);
-		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
+		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(DebugVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 

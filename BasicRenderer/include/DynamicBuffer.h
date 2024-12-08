@@ -14,7 +14,6 @@
 #include "DeviceManager.h"
 #include "Buffer.h"
 #include "Resource.h"
-#include "BufferHandle.h"
 #include "DynamicBufferBase.h"
 #include "MemoryBlock.h"
 
@@ -65,7 +64,7 @@ private:
         SetName(name);
     }
 
-    void SetName(std::wstring name) {
+    void OnSetName() override {
         if (name != L"") {
 			m_name = name;
 			std::wstring name = m_baseName + L": " + m_name;

@@ -104,19 +104,19 @@ public:
 			commandList->ExecuteIndirect(commandSignature.Get(), numOpaque, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 		}
 
-			auto numTransparent = context.currentScene->GetNumTransparentDraws();
-			if (numTransparent != 0) {
-				unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
-				commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+		auto numTransparent = context.currentScene->GetNumTransparentDraws();
+		if (numTransparent != 0) {
+			unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+			commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-				// Transparent objects
-				auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer();
-				auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_BLEND, m_wireframe);
-				commandList->SetPipelineState(pso.Get());
-				auto apiResource = indirectCommandBuffer->GetAPIResource();
-				commandList->ExecuteIndirect(commandSignature.Get(), numTransparent, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
+			// Transparent objects
+			auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer();
+			auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_BLEND, m_wireframe);
+			commandList->SetPipelineState(pso.Get());
+			auto apiResource = indirectCommandBuffer->GetAPIResource();
+			commandList->ExecuteIndirect(commandSignature.Get(), numTransparent, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
-			}
+		}
 		commandList->Close();
 
 		return { commandList.Get()};

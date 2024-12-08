@@ -870,6 +870,40 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddPass(skyboxPass, skyboxPassParameters);
     }
 
+    static const size_t aveFragsPerPixel = 12;
+    auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
+    static const size_t PPLLNodeSize = 16;
+    TextureDescription desc;
+    desc.width = m_xRes;
+    desc.height = m_yRes;
+    desc.channels = 1;
+    desc.format = DXGI_FORMAT_R32_UINT;
+    desc.hasRTV = false;
+    desc.hasUAV = true;
+    desc.initialState = ResourceState::PIXEL_SRV;
+	auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
+	PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
+    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, ResourceState::UNORDERED_ACCESS, false, true, false);
+	PPLLBuffer->SetName(L"PPLLBuffer");
+    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+	PPLLCounter->SetName(L"PPLLCounter");
+	newGraph->AddResource(PPLLHeadPointerTexture);
+	newGraph->AddResource(PPLLBuffer);
+	newGraph->AddResource(PPLLCounter);
+
+	auto PPLLFillPass = std::make_shared<PPLLFillPassMS>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
+	auto PPLLFillPassParameters = PassParameters();
+	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
+	PPLLFillPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+    PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
+	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
+	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
+	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);
+	newGraph->AddPass(PPLLFillPass, PPLLFillPassParameters);
+
+
     newGraph->AddPass(forwardPass, forwardPassParameters);
 
 	auto debugPass = std::make_shared<DebugRenderPass>();

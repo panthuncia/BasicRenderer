@@ -9,11 +9,11 @@
 #include "Texture.h"
 #include "SceneNode.h"
 #include "buffers.h"
-#include "BufferHandle.h"
 #include "PixelBuffer.h"
 
 class DynamicGloballyIndexedResource;
 class BufferView;
+class Buffer;
 
 enum LightType {
 	Point = 0,
@@ -118,7 +118,7 @@ private:
 	Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
 	Light(LightInfo& lightInfo);
 
-	std::vector<BufferHandle> m_lightFrameConstantHandles;
+	std::vector<std::shared_ptr<Buffer>> m_lightFrameConstantHandles;
 	LightInfo m_lightInfo;
 	int m_currentLightBufferIndex = -1;
 	int m_currentLightViewInfoIndex = -1;

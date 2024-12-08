@@ -7,7 +7,6 @@
 
 struct PPLL_STRUCT {
     uint depth;
-    uint data;
     uint color;
     uint uNext;
 };
@@ -41,17 +40,16 @@ uint PackFloat3ByteIntoUint(float3 vValue, uint uByteValue) {
 }
 
 // Write fragment attributes to list location. 
-void WriteFragmentAttributes(int nAddress, int nPreviousLink, float4 vData, float3 vColor3, float fDepth, RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV) {
+void WriteFragmentAttributes(int nAddress, int nPreviousLink, float4 vColor, float fDepth, RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV) {
     PPLL_STRUCT element;
-    element.data = PackFloat4IntoUint(vData);
-    element.color = PackFloat3ByteIntoUint(vColor3, /*RenderParamsIndex*/0);
+    element.color = PackFloat4IntoUint(vColor);
     element.depth = asuint(saturate(fDepth));
     element.uNext = nPreviousLink;
     LinkedListUAV[nAddress] = element;
 }
 
 [earlydepthstencil]
-void PPLLFillPS(PSInput input) {
+void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
@@ -62,7 +60,7 @@ void PPLLFillPS(PSInput input) {
 
     // Light fragment
     
-    LightingOutput lightingOutput = lightFragment(mainCamera, input, materialInfo, meshBuffer, perFrameBuffer);
+    LightingOutput lightingOutput = lightFragment(mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
 
     
     // Fill the PPLL buffers with the fragment data
@@ -77,5 +75,5 @@ void PPLLFillPS(PSInput input) {
     // Allocate a new fragment
     int nNewFragmentAddress = AllocateFragment(vScreenAddress, LinkedListCounter);
     int nOldFragmentAddress = MakeFragmentLink(vScreenAddress, nNewFragmentAddress, RWFragmentListHead);
-    WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(0, 0, 0, 0), lightingOutput.lighting.xyz, input.position.z, LinkedListUAV);
+    WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(lightingOutput.lighting.xyz, lightingOutput.baseColor.a), input.position.z, LinkedListUAV);
 }
