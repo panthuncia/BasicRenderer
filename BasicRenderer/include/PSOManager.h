@@ -49,10 +49,12 @@ public:
 
     ComPtr<ID3D12PipelineState> GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
     ComPtr<ID3D12PipelineState> GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    ComPtr<ID3D12PipelineState> GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
     ComPtr<ID3D12RootSignature> GetRootSignature();
     void ReloadShaders();
     void CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
+    std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
 
 private:
     PSOManager() = default;
@@ -61,6 +63,7 @@ private:
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_psoCache;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshPSOCache;
+    std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshPPLLPSOCache;
 
     ComPtr<IDxcUtils> pUtils;
     ComPtr<IDxcCompiler3> pCompiler;
@@ -69,8 +72,8 @@ private:
 
     ComPtr<ID3D12PipelineState> CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
     ComPtr<ID3D12PipelineState> CreateMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    ComPtr<ID3D12PipelineState> CreateMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
     void createRootSignature();
     D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
 };

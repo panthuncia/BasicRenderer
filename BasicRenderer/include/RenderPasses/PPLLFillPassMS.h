@@ -11,17 +11,34 @@
 #include "Scene.h"
 #include "Material.h"
 #include "SettingsManager.h"
+#include "ResourceManager.h"
+#include "TextureDescription.h"
+#include "ResourceHandles.h"
 
-class ForwardRenderPassMS : public RenderPass {
+class PPLLFillPassMS : public RenderPass {
 public:
-	ForwardRenderPassMS(bool wireframe) {
+	PPLLFillPassMS(bool wireframe, uint16_t xRes, uint16_t yRes) {
 		m_wireframe = wireframe;
+		m_xRes = xRes;
+		m_yRes = yRes;
+		m_numPPLLNodes = xRes * yRes * m_aveFragsPerPixel;
 
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-
+		TextureDescription desc;
+		desc.width = xRes;
+		desc.height = yRes;
+		desc.channels = 1;
+		desc.format = DXGI_FORMAT_R32_UINT;
+		desc.hasRTV = false;
+		desc.hasUAV = true;
+		desc.initialState = ResourceState::PIXEL_SRV;
+		m_PPLLHeadPointerTexture = ResourceManager::GetInstance().CreateTexture(desc);
+		m_PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_numPPLLNodes, m_PPLLNodeSize, ResourceState::UNORDERED_ACCESS, false, true, false);
+		m_PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+	
 	}
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
@@ -58,9 +75,8 @@ public:
 		commandList->RSSetScissorRects(1, &scissorRect);
 
 		// Set the render target
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
 		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -88,31 +104,13 @@ public:
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
-		
-		unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-		commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
-
-		for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetOpaqueMeshes();
-
-			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-
-			for (auto& pMesh : meshes) {
-				auto& mesh = *pMesh;
-				auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-				commandList->SetPipelineState(pso.Get());
-
-				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-
-				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
-			}
-		}
 
 		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
 		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+
+		// PPLL heads & buffer
+		uint32_t indices[4] = { m_PPLLHeadPointerTexture.SRVInfo.index, m_PPLLBuffer.dataBuffer->GetSRVInfo().index, m_PPLLCounter.dataBuffer->GetSRVInfo().index, m_numPPLLNodes};
+		commandList->SetGraphicsRoot32BitConstants(7, 3, &indices, 0);
 
 		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
@@ -123,7 +121,7 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
-				auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+				auto pso = psoManager.GetMeshPPLLPSO(localPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 
 				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -134,7 +132,7 @@ public:
 		}
 
 		commandList->Close();
-		return { commandList.Get()};
+		return { commandList.Get() };
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -145,8 +143,20 @@ private:
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;
+
+	uint16_t m_xRes;
+	uint16_t m_yRes;
+	size_t m_numPPLLNodes;
+
+	TextureHandle<PixelBuffer> m_PPLLHeadPointerTexture;
+	BufferHandle m_PPLLBuffer;
+	BufferHandle m_PPLLCounter;
+
+	// PPLL settings
+	static const size_t m_aveFragsPerPixel = 12;
+	static const size_t m_PPLLNodeSize = 16;
+
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
-
 };

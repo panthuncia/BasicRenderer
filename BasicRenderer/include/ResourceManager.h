@@ -79,15 +79,13 @@ public:
         return bufferHandle;
     }
 
-    template<typename T>
-    BufferHandle CreateIndexedStructuredBuffer(UINT numElements, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
+    BufferHandle CreateIndexedStructuredBuffer(size_t numElements, size_t elementSize, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        UINT elementSize = sizeof(T);
         UINT bufferSize = numElements * elementSize;
         unsigned int counterOffset = 0;
 		if (UAVCounter) {
             UINT requiredSize = (numElements * elementSize) + sizeof(UINT); // Add space for the counter
-            UINT alignment = sizeof(T); // Buffer should be a multiple of sizeof(T)
+            UINT alignment = elementSize; // Buffer should be a multiple of sizeof(T)
 
             // Ensure bufferSize is a multiple of typeSize and meets requiredSize
             bufferSize = ((requiredSize + alignment - 1) / alignment) * alignment;
@@ -130,7 +128,7 @@ public:
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
         srvDesc.Buffer.NumElements = numElements;
-        srvDesc.Buffer.StructureByteStride = sizeof(T);
+        srvDesc.Buffer.StructureByteStride = elementSize;
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
@@ -145,8 +143,8 @@ public:
 			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 			uavDesc.Format = DXGI_FORMAT_UNKNOWN;
 			uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-			uavDesc.Buffer.NumElements = bufferSize / sizeof(T); // We will have some wasted elements to allow the counter to be 4096-aligned
-			uavDesc.Buffer.StructureByteStride = sizeof(T);
+			uavDesc.Buffer.NumElements = bufferSize / elementSize; // We will have some wasted elements to allow the counter to be 4096-aligned
+			uavDesc.Buffer.StructureByteStride = elementSize;
 			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
             if (UAVCounter) {
                 uavDesc.Buffer.CounterOffsetInBytes = counterOffset;

@@ -32,6 +32,7 @@
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
+#include "RenderPasses/PPLLFillPassMS.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -568,7 +569,6 @@ void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t 
 
 void DX12Renderer::AdvanceFrameIndex() {
     m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
-    spdlog::info("Advanced to frame index {}", m_frameIndex);
 }
 
 void DX12Renderer::FlushCommandQueue() {
