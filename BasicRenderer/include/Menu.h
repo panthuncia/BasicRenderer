@@ -429,7 +429,8 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
         if (renderableObject) {
             // Display meshes
             ImGui::Text("Opaque Meshes: %d", renderableObject->GetOpaqueMeshes().size());
-            ImGui::Text("Transparent Meshes: %d", renderableObject->GetTransparentMeshes().size());
+            ImGui::Text("Transparent Meshes: %d", renderableObject->GetAlphaTestMeshes().size());
+			ImGui::Text("Blend Meshes: %d", renderableObject->GetBlendMeshes().size());
 
             if (renderableObject->GetSkin()) {
                 ImGui::Text("Has Skin: Yes");

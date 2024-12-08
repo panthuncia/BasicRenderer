@@ -284,6 +284,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
 		macro.Name = L"PSO_ALPHA_TEST";
 		defines.insert(defines.begin(), macro);
 	}
+	if (psoFlags & PSOFlags::PSO_BLEND) {
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_BLEND";
+		defines.insert(defines.begin(), macro);
+	}
     return defines;
 }
 
@@ -498,7 +504,7 @@ D3D12_BLEND_DESC PSOManager::GetBlendDesc(BlendState blendState) {
     }
     case BlendState::BLEND_STATE_MASK: {
         D3D12_BLEND_DESC maskBlendDesc = {};
-        maskBlendDesc.AlphaToCoverageEnable = TRUE; // Enable Alpha-to-Coverage for multi-sampling anti-aliasing.
+        maskBlendDesc.AlphaToCoverageEnable = FALSE;
         maskBlendDesc.IndependentBlendEnable = FALSE;
 
         for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {

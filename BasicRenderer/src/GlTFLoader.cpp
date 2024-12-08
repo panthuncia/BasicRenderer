@@ -687,7 +687,7 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
             }
             else if (alphaMode == "BLEND") {
                 blendMode = BlendState::BLEND_STATE_BLEND;
-				psoFlags |= PSOFlags::PSO_ALPHA_TEST;
+				psoFlags |= PSOFlags::PSO_BLEND;
             }
         }
         std::shared_ptr<Material> newMaterial = std::make_shared<Material>(gltfMaterial["name"],

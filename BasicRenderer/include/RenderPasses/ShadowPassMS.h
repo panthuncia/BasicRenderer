@@ -74,6 +74,7 @@ public:
 		//D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 
 		auto drawObjects = [&]() {
+			// Opaque objects
 			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
 			commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
 			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
@@ -97,12 +98,38 @@ public:
 				}
 			}
 
-			unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+			// Alpha test objects
+			unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
+			commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
 
-			for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
+			for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
-				auto& meshes = renderable->GetTransparentMeshes();
+				auto& meshes = renderable->GetAlphaTestMeshes();
+
+				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+				//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
+				//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
+
+				for (auto& pMesh : meshes) {
+					auto& mesh = *pMesh;
+					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+					commandList->SetPipelineState(pso.Get());
+					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+					//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
+					//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
+					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+				}
+			}
+
+			// Blend objects
+			unsigned int blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
+			commandList->SetGraphicsRoot32BitConstants(6, 1, &blendPerMeshBufferIndex, 0);
+
+			for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
+				auto& renderable = pair.second;
+				auto& meshes = renderable->GetBlendMeshes();
 
 				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);

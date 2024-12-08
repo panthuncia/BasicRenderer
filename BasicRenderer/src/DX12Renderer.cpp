@@ -725,9 +725,11 @@ void DX12Renderer::CreateRenderGraph() {
     auto& perObjectBuffer = currentScene->GetObjectManager()->GetPerObjectBuffers();
 	newGraph->AddResource(perObjectBuffer);
     auto& opaquePerMeshBuffer = currentScene->GetMeshManager()->GetOpaquePerMeshBuffers();
-	auto& transparentPerMeshBuffer = currentScene->GetMeshManager()->GetTransparentPerMeshBuffers();
+	auto& transparentPerMeshBuffer = currentScene->GetMeshManager()->GetAlphaTestPerMeshBuffers();
+	auto& blendPerMeshBuffer = currentScene->GetMeshManager()->GetBlendPerMeshBuffers();
 	newGraph->AddResource(opaquePerMeshBuffer);
 	newGraph->AddResource(transparentPerMeshBuffer);
+	newGraph->AddResource(blendPerMeshBuffer);
 
 	bool indirect = getIndirectDrawsEnabled();
 	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
@@ -845,10 +847,13 @@ void DX12Renderer::CreateRenderGraph() {
         auto shadowPassParameters = PassParameters();
 
         if (useMeshShaders) { 
-            shadowPass = std::make_shared<ShadowPassMSIndirect>(m_shadowMaps);
             shadowPassParameters.shaderResources.push_back(meshResourceGroup);
             if (indirect) {
+                shadowPass = std::make_shared<ShadowPassMSIndirect>(m_shadowMaps);
                 shadowPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+            }
+            else {
+				shadowPass = std::make_shared<ShadowPassMS>(m_shadowMaps);
             }
 		}
 		else {
@@ -857,6 +862,7 @@ void DX12Renderer::CreateRenderGraph() {
 		shadowPassParameters.constantBuffers.push_back(perObjectBuffer);
 		shadowPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
 		shadowPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+        shadowPassParameters.shaderResources.push_back(blendPerMeshBuffer);
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
@@ -897,8 +903,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto PPLLFillPassParameters = PassParameters();
 	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
 	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
-	PPLLFillPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
-	PPLLFillPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(blendPerMeshBuffer);
     PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);

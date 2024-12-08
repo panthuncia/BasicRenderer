@@ -111,12 +111,12 @@ public:
 			}
 		}
 
-		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+		unsigned int transparentPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
 		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
+		for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
-			auto& meshes = renderable->GetTransparentMeshes();
+			auto& meshes = renderable->GetAlphaTestMeshes();
 
 			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);

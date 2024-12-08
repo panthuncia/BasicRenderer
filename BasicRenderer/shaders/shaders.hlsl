@@ -136,9 +136,8 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
-    
 #if defined(PSO_SHADOW) // Alpha tested shadows
-    #ifndef PSO_DOUBLE_SIDED
+    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
         return float4(0, 0, 0, 0);
     #endif // DOUBLE_SIDED
     if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
@@ -146,9 +145,12 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
         float2 uv = input.texcoord;
         float4 baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
-        if (baseColor.a < 0.1){
+        if (baseColor.a*materialInfo.baseColorFactor.a < 0.1){
             discard;
         }
+    }
+    if (materialInfo.baseColorFactor.a < 0.1){
+        discard;
     }
     return float4(0, 0, 0, 0);
 #endif // SHADOW

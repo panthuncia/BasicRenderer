@@ -4,8 +4,8 @@
 
 enum class MaterialBuckets {
 	Opaque,
-	Transparent,
-	Hair
+	AlphaTest,
+	Blend
 };
 
-inline std::vector<MaterialBuckets> MaterialBucketTypes = {MaterialBuckets::Opaque, MaterialBuckets::Transparent};
+inline std::vector<MaterialBuckets> MaterialBucketTypes = {MaterialBuckets::Opaque, MaterialBuckets::AlphaTest, MaterialBuckets::Blend };

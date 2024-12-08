@@ -99,16 +99,16 @@ public:
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
 
-		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+		unsigned int transparentPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
 		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
 		// PPLL heads & buffer
 		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes};
 		commandList->SetGraphicsRoot32BitConstants(7, 3, &indices, 0);
 
-		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
+		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
-			auto& meshes = renderable->GetTransparentMeshes();
+			auto& meshes = renderable->GetBlendMeshes();
 
 			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);

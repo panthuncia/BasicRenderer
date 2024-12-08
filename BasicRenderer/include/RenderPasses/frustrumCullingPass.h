@@ -106,20 +106,20 @@ public:
 			}
 		}
 
-		// transparent buffer
-		auto numTransparentDraws = context.currentScene->GetNumTransparentDraws();
-		if (numTransparentDraws > 0) {
-			unsigned int numThreadGroups = std::ceil(context.currentScene->GetNumTransparentDraws() / 64.0);
-			auto resource = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
+		// alpha test buffer
+		auto numAlphaTestDraws = context.currentScene->GetNumAlphaTestDraws();
+		if (numAlphaTestDraws > 0) {
+			unsigned int numThreadGroups = std::ceil(numAlphaTestDraws / 64.0);
+			auto resource = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource();
 			auto apiResource = resource->GetAPIResource();
 			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
 			unsigned int bufferIndices[5] = {};
-			bufferIndices[0] = meshManager->GetTransparentPerMeshBufferSRVIndex();
-			bufferIndices[1] = objectManager->GetTransparentDrawSetCommandsBufferSRVIndex();
-			bufferIndices[2] = objectManager->GetActiveTransparentDrawSetIndicesBufferSRVIndex();
-			bufferIndices[3] = context.currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[4] = context.currentScene->GetNumTransparentDraws()-1;
+			bufferIndices[0] = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
+			bufferIndices[1] = objectManager->GetAlphaTestDrawSetCommandsBufferSRVIndex();
+			bufferIndices[2] = objectManager->GetActiveAlphaTestDrawSetIndicesBufferSRVIndex();
+			bufferIndices[3] = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[4] = context.currentScene->GetNumAlphaTestDraws()-1;
 
 			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
 			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -131,7 +131,43 @@ public:
 				auto& light = lightPair.second;
 				auto& lightViews = light->GetCameraBufferViews();
 				int i = 0;
-				for (auto& buffer : light->GetPerViewTransparentIndirectCommandBuffers()) {
+				for (auto& buffer : light->GetPerViewAlphaTestIndirectCommandBuffers()) {
+					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
+					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
+					i++;
+					commandList->Dispatch(numThreadGroups, 1, 1);
+				}
+			}
+		}
+
+		// blend buffer
+		auto numBlendDraws = context.currentScene->GetNumBlendDraws();
+		if (numBlendDraws > 0) {
+			unsigned int numThreadGroups = std::ceil(numBlendDraws / 64.0);
+			auto resource = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource();
+			auto apiResource = resource->GetAPIResource();
+			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
+			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
+			unsigned int bufferIndices[5] = {};
+			bufferIndices[0] = meshManager->GetBlendPerMeshBufferSRVIndex();
+			bufferIndices[1] = objectManager->GetBlendDrawSetCommandsBufferSRVIndex();
+			bufferIndices[2] = objectManager->GetActiveBlendDrawSetIndicesBufferSRVIndex();
+			bufferIndices[3] = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[4] = context.currentScene->GetNumBlendDraws() - 1;
+
+			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			commandList->SetComputeRoot32BitConstants(3, 1, &cameraIndex, 0);
+
+			commandList->Dispatch(numThreadGroups, 1, 1);
+
+			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
+				auto& light = lightPair.second;
+				auto& lightViews = light->GetCameraBufferViews();
+				int i = 0;
+				for (auto& buffer : light->GetPerViewBlendIndirectCommandBuffers()) {
 					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
 					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);

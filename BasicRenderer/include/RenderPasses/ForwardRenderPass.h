@@ -85,7 +85,6 @@ public:
 		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
 
 		D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
-		//D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
@@ -99,8 +98,6 @@ public:
 
 			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-			//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
-			//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
@@ -109,8 +106,6 @@ public:
 
 				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 				commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-				//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-				//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 
 				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 				commandList->IASetIndexBuffer(&indexBufferView);
@@ -118,16 +113,14 @@ public:
 				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 			}
 		}
-		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
-		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
-		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
+		unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
+		commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
+		for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
-			auto& meshes = renderable->GetTransparentMeshes();
+			auto& meshes = renderable->GetAlphaTestMeshes();
 
 			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-			//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
-			//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress+offset);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
@@ -136,8 +129,6 @@ public:
 
 				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 				commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-				//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-				//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 
 				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 				commandList->IASetIndexBuffer(&indexBufferView);

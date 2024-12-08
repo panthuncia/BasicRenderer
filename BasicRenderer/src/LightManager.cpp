@@ -137,7 +137,8 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 			views.push_back(view);
 			m_pointViewInfo->Add(view->GetOffset()/sizeof(CameraInfo));
 			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
-			node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
+			node->AddPerViewAlphaTestIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::AlphaTest));
+			node->AddPerViewBlendIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Blend));
 		}
 		node->SetCameraBufferViews(views);
 		break;
@@ -153,7 +154,8 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 		auto view = m_pCameraManager->AddCamera(camera);
 		m_spotViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
 		node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
-		node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
+		node->AddPerViewAlphaTestIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::AlphaTest));
+		node->AddPerViewBlendIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Blend));
 		node->SetCameraBufferViews({ view });
 		break;
 	}
@@ -177,7 +179,8 @@ unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
 			views.push_back(view);
 			m_directionalViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
 			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
-			node->AddPerViewTransparentIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Transparent));
+			node->AddPerViewAlphaTestIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::AlphaTest));
+			node->AddPerViewBlendIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Blend));
 		}
 		node->SetCameraBufferViews(views);
 		break;
