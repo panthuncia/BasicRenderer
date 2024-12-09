@@ -166,10 +166,7 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float3 lighting = reinhardJodie(lightingOutput.lighting);
     //lighting = toneMap_KhronosPbrNeutral(lighting);
     //lighting = toneMapACES_Hill(lighting);
-    if (materialInfo.materialFlags & MATERIAL_PBR) {
-    // Gamma correction
-        lighting = LinearToSRGB(lighting);
-    }
+    lighting = LinearToSRGB(lighting);
         
     float opacity = lightingOutput.baseColor.a;
     

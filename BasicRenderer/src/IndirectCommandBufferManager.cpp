@@ -184,6 +184,8 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 			case MaterialBuckets::AlphaTest:
 				commandBufferSize = m_alphaTestCommandBufferSize;
 				break;
+            case MaterialBuckets::Blend:
+				commandBufferSize = m_blendCommandBufferSize;
 			}
             auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(IndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
             buffer->SetResource(resource);

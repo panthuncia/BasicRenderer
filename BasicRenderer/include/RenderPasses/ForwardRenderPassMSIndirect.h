@@ -109,9 +109,9 @@ public:
 			unsigned int transparentPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
 			commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-			// Transparent objects
+			// Alpha tested objects
 			auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();
-			auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_MASK, m_wireframe);
+			auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED , BlendState::BLEND_STATE_MASK, m_wireframe);
 			commandList->SetPipelineState(pso.Get());
 			auto apiResource = indirectCommandBuffer->GetAPIResource();
 			commandList->ExecuteIndirect(commandSignature.Get(), numAlphaTest, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
