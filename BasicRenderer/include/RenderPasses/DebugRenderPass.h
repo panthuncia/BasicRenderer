@@ -131,7 +131,7 @@ private:
         CD3DX12_DESCRIPTOR_RANGE1 debugDescriptorRangeSRV;
         debugDescriptorRangeSRV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 in the shader
 
-        CD3DX12_ROOT_PARAMETER1 debugRootParameters[2];
+        CD3DX12_ROOT_PARAMETER1 debugRootParameters[2] = {};
         debugRootParameters[0].InitAsDescriptorTable(1, &debugDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
         debugRootParameters[1].InitAsConstants(16, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b0
 

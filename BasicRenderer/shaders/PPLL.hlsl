@@ -4,10 +4,12 @@
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
 #define FRAGMENT_LIST_NULL 0xffffffff
+#define KBUFFER_SIZE 8
+#define MAX_FRAGMENTS 512
 
 struct PPLL_STRUCT {
-    uint depth;
-    uint color;
+    float depth;
+    float4 color;
     uint uNext;
 };
 
@@ -29,26 +31,16 @@ int MakeFragmentLink(int2 vScreenAddress, int nNewHeadAddress, RWTexture2D<uint>
     return nOldHeadAddress;
 }
 
-// Pack a float4 into an uint
-uint PackFloat4IntoUint(float4 vValue) {
-    return (((uint) (vValue.x * 255)) << 24) | (((uint) (vValue.y * 255)) << 16) | (((uint) (vValue.z * 255)) << 8) | (uint) (vValue.w * 255);
-}
-
-// Pack a float3 and a uint8 into an uint
-uint PackFloat3ByteIntoUint(float3 vValue, uint uByteValue) {
-    return (((uint) (vValue.x * 255)) << 24) | (((uint) (vValue.y * 255)) << 16) | (((uint) (vValue.z * 255)) << 8) | uByteValue;
-}
-
 // Write fragment attributes to list location. 
 void WriteFragmentAttributes(int nAddress, int nPreviousLink, float4 vColor, float fDepth, RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV) {
     PPLL_STRUCT element;
-    element.color = PackFloat4IntoUint(vColor);
-    element.depth = asuint(saturate(fDepth));
+    element.color = vColor; //PackFloat4IntoUint(vColor);
+    element.depth = fDepth;
     element.uNext = nPreviousLink;
     LinkedListUAV[nAddress] = element;
 }
 
-//[earlydepthstencil]
+[earlydepthstencil]
 void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
@@ -76,4 +68,126 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     int nNewFragmentAddress = AllocateFragment(vScreenAddress, LinkedListCounter);
     int nOldFragmentAddress = MakeFragmentLink(vScreenAddress, nNewFragmentAddress, RWFragmentListHead);
     WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(lightingOutput.lighting.xyz, lightingOutput.baseColor.a), input.position.z, LinkedListUAV);
+}
+
+//Resolve vertex Shader
+struct VS_OUTPUT {
+    float4 position : SV_POSITION;
+    float2 uv : TEXCOORD1;
+};
+VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0) {
+    VS_OUTPUT output;
+    output.position = float4(pos, 1.0f);
+    output.uv = uv;
+    return output;
+}
+
+struct KBUFFER_STRUCT {
+    uint depth;
+    float4 color;
+};
+
+/*float4 GatherLinkedList(float2 vfScreenAddress) {
+    uint2 vScreenAddress = uint2(vfScreenAddress);
+    RWTexture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
+    RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
+    
+        // Convert SV_POSITION to pixel coordinates if necessary
+    // If the input.position.xy are already pixel coords, just cast.
+    uint2 pixelCoord = (uint2)input.position.xy;
+
+    // Get the head of the fragment list for this pixel
+    uint head = FragmentListHead[pixelCoord];
+    if (head == FRAGMENT_LIST_NULL)
+    {
+        // No fragments for this pixel
+        return float4(0,0,0,0);
+    }
+
+    // Gather the fragments
+    uint fragmentIndices[MAX_FRAGMENTS];
+    uint count = 0;
+
+    uint current = head;
+    while (current != FRAGMENT_LIST_NULL && count < MAX_FRAGMENTS)
+    {
+        fragmentIndices[count++] = current;
+        current = PPLLNodes[current].uNext;
+    }
+
+    // Sort the fragments by depth (front to back)
+    // Front-to-back means smallest depth first
+    for (uint i = 0; i < count; i++)
+    {
+        for (uint j = i + 1; j < count; j++)
+        {
+            if (PPLLNodes[fragmentIndices[j]].depth < PPLLNodes[fragmentIndices[i]].depth)
+            {
+                uint temp = fragmentIndices[i];
+                fragmentIndices[i] = fragmentIndices[j];
+                fragmentIndices[j] = temp;
+            }
+        }
+    }
+
+    // Blend fragments front-to-back using standard alpha compositing
+    float4 outColor = float4(0,0,0,0);
+    for (uint i = 0; i < count; i++)
+    {
+        float4 srcColor = PPLLNodes[fragmentIndices[i]].color;
+        // "over" operation: outColor = srcColor + (1 - srcColor.a)*outColor
+        // To handle this correctly: outColor = outColor + srcColor * (1 - outColor.a)
+        outColor = outColor + srcColor * (1.0f - outColor.a);
+    }
+
+    return outColor;
+}*/
+
+[earlydepthstencil]
+float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
+    Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
+    StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
+// Convert SV_POSITION to pixel coordinates if necessary
+    // If the input.position.xy are already pixel coords, just cast.
+    uint2 pixelCoord = (uint2) input.position.xy;
+
+    // Get the head of the fragment list for this pixel
+    uint head = RWFragmentListHead[pixelCoord];
+    if (head == FRAGMENT_LIST_NULL) {
+        // No fragments for this pixel
+        return float4(0, 0, 0, 0);
+    }
+
+    // Gather the fragments
+    uint fragmentIndices[MAX_FRAGMENTS];
+    uint count = 0;
+
+    uint current = head;
+    while (current != FRAGMENT_LIST_NULL && count < MAX_FRAGMENTS) {
+        fragmentIndices[count++] = current;
+        current = LinkedListUAV[current].uNext;
+    }
+
+    // Sort the fragments by depth (front to back)
+    // Front-to-back means smallest depth first
+    for (uint i = 0; i < count; i++) {
+        for (uint j = i + 1; j < count; j++) {
+            if (LinkedListUAV[fragmentIndices[j]].depth < LinkedListUAV[fragmentIndices[i]].depth) {
+                uint temp = fragmentIndices[i];
+                fragmentIndices[i] = fragmentIndices[j];
+                fragmentIndices[j] = temp;
+            }
+        }
+    }
+
+    // Blend fragments front-to-back using standard alpha compositing
+    float4 outColor = float4(0, 0, 0, 0);
+    for (uint i = 0; i < count; i++) {
+        float4 srcColor = LinkedListUAV[fragmentIndices[i]].color;
+        // "over" operation: outColor = srcColor + (1 - srcColor.a)*outColor
+        // To handle this correctly: outColor = outColor + srcColor * (1 - outColor.a)
+        outColor = outColor + srcColor * (1.0f - outColor.a);
+    }
+
+    return outColor;
 }

@@ -60,8 +60,11 @@ public:
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-		uint32_t clearValues[4] = { 0, 0, 0, 0 };
+		uint32_t clearValues[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
 		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo().cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
+		
+		D3D12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLHeadPointerTexture->GetAPIResource());
+		commandList->ResourceBarrier(1, &uavBarrier);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
@@ -104,7 +107,7 @@ public:
 
 		// PPLL heads & buffer
 		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes};
-		commandList->SetGraphicsRoot32BitConstants(7, 3, &indices, 0);
+		commandList->SetGraphicsRoot32BitConstants(7, 4, &indices, 0);
 
 		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
 			auto& renderable = pair.second;

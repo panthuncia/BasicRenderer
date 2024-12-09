@@ -33,6 +33,7 @@
 #include "RenderPasses/frustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
 #include "RenderPasses/PPLLFillPassMS.h"
+#include "RenderPasses/PPLLResolvePass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -819,7 +820,7 @@ void DX12Renderer::CreateRenderGraph() {
 
         newGraph->AddResource(m_currentEnvironmentTexture);
         newGraph->AddResource(m_currentSkybox);
-        newGraph->AddResource(m_environmentIrradiance);
+        //newGraph->AddResource(m_environmentIrradiance);
         auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
         auto environmentConversionPassParameters = PassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
@@ -827,7 +828,7 @@ void DX12Renderer::CreateRenderGraph() {
         environmentConversionPassParameters.renderTargets.push_back(m_environmentIrradiance);
         newGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
-        newGraph->AddResource(m_prefilteredEnvironment);
+        //newGraph->AddResource(m_prefilteredEnvironment);
 		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 		auto environmentFilterPassParameters = PassParameters();
 		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
@@ -838,6 +839,10 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_prefilteredEnvironment != nullptr) {
         newGraph->AddResource(m_prefilteredEnvironment);
 		forwardPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
+    }
+    if (m_environmentIrradiance != nullptr) {
+        newGraph->AddResource(m_environmentIrradiance);
+        forwardPassParameters.shaderResources.push_back(m_environmentIrradiance);
     }
 
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
@@ -877,9 +882,11 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddPass(skyboxPass, skyboxPassParameters);
     }
 
+    newGraph->AddPass(forwardPass, forwardPassParameters);
+
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
-    static const size_t PPLLNodeSize = 16;
+	static const size_t PPLLNodeSize = 24; // two uints, four floats
     TextureDescription desc;
     desc.width = m_xRes;
     desc.height = m_yRes;
@@ -905,13 +912,19 @@ void DX12Renderer::CreateRenderGraph() {
 	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
 	PPLLFillPassParameters.shaderResources.push_back(blendPerMeshBuffer);
     PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
+    PPLLFillPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
+	PPLLFillPassParameters.shaderResources.push_back(m_environmentIrradiance);
+    PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);
 	newGraph->AddPass(PPLLFillPass, PPLLFillPassParameters);
 
-
-    newGraph->AddPass(forwardPass, forwardPassParameters);
+	auto ResolvePass = std::make_shared<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
+	auto ResolvePassParameters = PassParameters();
+	ResolvePassParameters.shaderResources.push_back(PPLLHeadPointerTexture);
+	ResolvePassParameters.shaderResources.push_back(PPLLBuffer);
+	newGraph->AddPass(ResolvePass, ResolvePassParameters);
 
 	auto debugPass = std::make_shared<DebugRenderPass>();
     newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
