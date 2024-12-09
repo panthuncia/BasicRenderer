@@ -826,7 +826,7 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_currentEnvironmentTexture != nullptr && !skipEnvironmentPass) {
 
         newGraph->AddResource(m_currentEnvironmentTexture);
-        newGraph->AddResource(m_currentSkybox);
+        //newGraph->AddResource(m_currentSkybox);
         //newGraph->AddResource(m_environmentIrradiance);
         auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
         auto environmentConversionPassParameters = PassParameters();
