@@ -40,5 +40,9 @@ UINT DescriptorHeap::AllocateDescriptor() {
 }
 
 void DescriptorHeap::ReleaseDescriptor(UINT index) {
+#ifdef _DEBUG
+    int32_t signedValue = static_cast<int32_t>(index);
+	assert(signedValue >= 0 && signedValue < m_heap->GetDesc().NumDescriptors); // If this trggers, a descriptor is likely set but uninitialized
+#endif
     m_freeIndices.push(index);
 }

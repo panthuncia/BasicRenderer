@@ -31,7 +31,9 @@ public:
 	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_parentResourceGroup; }
 
 	std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
-	std::shared_ptr<Buffer>& GetTransparentClearBuffer() { return m_clearBufferTransparent; }
+	std::shared_ptr<Buffer>& GetAlphaTestClearBuffer() { return m_clearBufferAlphaTest; }
+	std::shared_ptr<Buffer>& GetBlendClearBuffer() { return m_clearBufferBlend; }
+
 
 	Microsoft::WRL::ComPtr<ID3D12CommandSignature> GetCommandSignature() { return m_commandSignature; }
 
@@ -39,12 +41,15 @@ private:
     IndirectCommandBufferManager();
     std::unordered_map<MaterialBuckets, std::unordered_map<int, std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>>> m_buffers;
 	unsigned int m_opaqueCommandBufferSize = 0;
-	unsigned int m_transparentCommandBufferSize = 0;
+	unsigned int m_alphaTestCommandBufferSize = 0;
+	unsigned int m_blendCommandBufferSize = 0;
     unsigned int m_incrementSize = 1; // TODO: Values are small for testing
-	std::shared_ptr<ResourceGroup> m_transparentResourceGroup;
+	std::shared_ptr<ResourceGroup> m_alphaTestResourceGroup;
 	std::shared_ptr<ResourceGroup> m_opaqueResourceGroup;
+	std::shared_ptr<ResourceGroup> m_blendResourceGroup;
 	std::shared_ptr<ResourceGroup> m_parentResourceGroup;
 	std::shared_ptr<Buffer> m_clearBufferOpaque;
-	std::shared_ptr<Buffer> m_clearBufferTransparent;
+	std::shared_ptr<Buffer> m_clearBufferAlphaTest;
+	std::shared_ptr<Buffer> m_clearBufferBlend;
 	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_commandSignature;
 };

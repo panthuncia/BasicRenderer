@@ -9,11 +9,11 @@
 #include "Texture.h"
 #include "SceneNode.h"
 #include "buffers.h"
-#include "BufferHandle.h"
 #include "PixelBuffer.h"
 
 class DynamicGloballyIndexedResource;
 class BufferView;
+class Buffer;
 
 enum LightType {
 	Point = 0,
@@ -86,21 +86,30 @@ public:
 		m_perViewOpaqueIndirectCommandBuffers.push_back(buffer);
 	}
 
-	void AddPerViewTransparentIndirectCommandBuffer(std::shared_ptr<DynamicGloballyIndexedResource> buffer) {
-		m_perViewTransparentIndirectCommandBuffers.push_back(buffer);
+	void AddPerViewAlphaTestIndirectCommandBuffer(std::shared_ptr<DynamicGloballyIndexedResource> buffer) {
+		m_perViewAlphaTestIndirectCommandBuffers.push_back(buffer);
+	}
+
+	void AddPerViewBlendIndirectCommandBuffer(std::shared_ptr<DynamicGloballyIndexedResource> buffer) {
+		m_perViewBlendIndirectCommandBuffers.push_back(buffer);
 	}
 
 	void DeleteAllIndirectCommandBuffers() {
 		m_perViewOpaqueIndirectCommandBuffers.clear();
-		m_perViewTransparentIndirectCommandBuffers.clear();
+		m_perViewAlphaTestIndirectCommandBuffers.clear();
+		m_perViewBlendIndirectCommandBuffers.clear();
 	}
 
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>& GetPerViewOpaqueIndirectCommandBuffers() {
 		return m_perViewOpaqueIndirectCommandBuffers;
 	}
 
-	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>& GetPerViewTransparentIndirectCommandBuffers() {
-		return m_perViewTransparentIndirectCommandBuffers;
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>& GetPerViewAlphaTestIndirectCommandBuffers() {
+		return m_perViewAlphaTestIndirectCommandBuffers;
+	}
+
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>& GetPerViewBlendIndirectCommandBuffers() {
+		return m_perViewBlendIndirectCommandBuffers;
 	}
 
 	void SetCameraBufferViews(std::vector<std::shared_ptr<BufferView>> cameraBufferViews);
@@ -118,7 +127,7 @@ private:
 	Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
 	Light(LightInfo& lightInfo);
 
-	std::vector<BufferHandle> m_lightFrameConstantHandles;
+	std::vector<std::shared_ptr<Buffer>> m_lightFrameConstantHandles;
 	LightInfo m_lightInfo;
 	int m_currentLightBufferIndex = -1;
 	int m_currentLightViewInfoIndex = -1;
@@ -126,7 +135,8 @@ private:
 	XMMATRIX m_lightProjection;
 	std::shared_ptr<Texture> m_shadowMap;
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewOpaqueIndirectCommandBuffers;
-	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewTransparentIndirectCommandBuffers;
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewAlphaTestIndirectCommandBuffers;
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewBlendIndirectCommandBuffers;
 	std::vector<std::shared_ptr<BufferView>> m_cameraBufferViews;
 	std::vector<std::array<ClippingPlane, 6>> m_frustumPlanes;
 

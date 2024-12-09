@@ -75,7 +75,7 @@ public:
 
 		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
 
-		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* transparentIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t transparentCommandCounterOffset) {
+		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* alphaTestIndirectCommandBuffer, ID3D12Resource* blendIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t alphaTestCommandCounterOffset, size_t blendIndirectCommandCounterOffset) {
 			auto numOpaque = context.currentScene->GetNumOpaqueDraws();
 			if (numOpaque != 0) {
 				unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
@@ -86,14 +86,24 @@ public:
 				commandList->ExecuteIndirect(commandSignature.Get(), numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
 			}
 
-			auto numTransparent = context.currentScene->GetNumTransparentDraws();
-			if (numTransparent != 0) {
-				unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
-				commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+			auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
+			if (numAlphaTest != 0) {
+				unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
+				commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
 
-				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST, BlendState::BLEND_STATE_MASK, false);
 				commandList->SetPipelineState(pso.Get());
-				commandList->ExecuteIndirect(commandSignature.Get(), numTransparent, transparentIndirectCommandBuffer, 0, transparentIndirectCommandBuffer, transparentCommandCounterOffset);
+				commandList->ExecuteIndirect(commandSignature.Get(), numAlphaTest, alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset);
+			}
+
+			auto numBlend = context.currentScene->GetNumBlendDraws();
+			if (numBlend != 0) {
+				unsigned int blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
+				commandList->SetGraphicsRoot32BitConstants(6, 1, &blendPerMeshBufferIndex, 0);
+
+				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
+				commandList->SetPipelineState(pso.Get());
+				commandList->ExecuteIndirect(commandSignature.Get(), numBlend, blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset);
 			}
 		};
 
@@ -114,8 +124,9 @@ public:
 					int lightViewIndex = light->GetCurrentviewInfoIndex();
 					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 					auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[0];
-					auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[0];
-					drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
+					auto& alphaTest = light->GetPerViewAlphaTestIndirectCommandBuffers()[0];
+					auto& blend = light->GetPerViewBlendIndirectCommandBuffers()[0];
+					drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
 					break;
 				}
 				case LightType::Point: {
@@ -123,7 +134,7 @@ public:
 					int lightViewIndex = light->GetCurrentviewInfoIndex()*6;
 					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					auto& opaqueBuffers = light->GetPerViewOpaqueIndirectCommandBuffers();
-					auto& transparentBuffers = light->GetPerViewTransparentIndirectCommandBuffers();
+					auto& transparentBuffers = light->GetPerViewAlphaTestIndirectCommandBuffers();
 					for (int i = 0; i < 6; i++) {
 						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
@@ -131,8 +142,9 @@ public:
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
 						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
-						auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[i];
-						drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
+						auto& alphaTest = light->GetPerViewAlphaTestIndirectCommandBuffers()[i];
+						auto& blend = light->GetPerViewBlendIndirectCommandBuffers()[i];
+						drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
 					}
 					break;
 				}
@@ -141,7 +153,7 @@ public:
 					int lightIndex = light->GetCurrentLightBufferIndex();
 					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
 					auto& opaqueBuffers = light->GetPerViewOpaqueIndirectCommandBuffers();
-					auto& transparentBuffers = light->GetPerViewTransparentIndirectCommandBuffers();
+					auto& transparentBuffers = light->GetPerViewAlphaTestIndirectCommandBuffers();
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
 						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
@@ -149,8 +161,9 @@ public:
 						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
 						lightViewIndex += 1;
 						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
-						auto& transparent = light->GetPerViewTransparentIndirectCommandBuffers()[i];
-						drawObjects(opaque->GetAPIResource(), transparent->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), transparent->GetResource()->GetUAVCounterOffset());
+						auto& alphaTest = light->GetPerViewAlphaTestIndirectCommandBuffers()[i];
+						auto& blend = light->GetPerViewBlendIndirectCommandBuffers()[i];
+						drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
 					}
 				}
 			}

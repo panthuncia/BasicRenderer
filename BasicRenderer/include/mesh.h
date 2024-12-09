@@ -8,7 +8,6 @@
 #include <atomic>
 
 #include "Vertex.h"
-#include "BufferHandle.h"
 #include "MeshData.h"
 #include "buffers.h"
 #include "meshoptimizer.h"
@@ -102,8 +101,8 @@ private:
 	std::unique_ptr<BufferView> m_meshletTrianglesBufferView = nullptr;
 
 	UINT m_indexCount = 0;
-    BufferHandle m_vertexBufferHandle;
-	BufferHandle m_indexBufferHandle;
+    std::shared_ptr<Buffer> m_vertexBufferHandle;
+	std::shared_ptr<Buffer> m_indexBufferHandle;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
     //BufferHandle m_pPerMeshBuffer;

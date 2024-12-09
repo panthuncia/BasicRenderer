@@ -39,6 +39,9 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
 
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
 
+    if (flags & VERTEX_TEXCOORDS) {
+        result.texcoord = vertex.texcoord;
+    }
     
 #if defined(PSO_SHADOW)
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
@@ -89,9 +92,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     if (flags & VERTEX_COLORS) {
         result.color = vertex.color;
     };
-    if (flags & VERTEX_TEXCOORDS) {
-        result.texcoord = vertex.texcoord;
-    }
+    
     result.meshletIndex = vGroupID.x;
     return result;
 }

@@ -11,46 +11,66 @@ RenderableObject::RenderableObject(std::wstring name) : SceneNode(name) {
 
 RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes) : SceneNode(name) {
     for (auto& mesh : meshes) {
-        if (mesh->material->m_blendState != BlendState::BLEND_STATE_OPAQUE) {
-            transparentMeshes.push_back(mesh);
-            m_hasTransparent = true;
-        }
-        else {
-            this->opaqueMeshes.push_back(mesh);
-            m_hasOpaque = true;
+        switch (mesh->material->m_blendState) {
+		case BlendState::BLEND_STATE_OPAQUE:
+			opaqueMeshes.push_back(mesh);
+			m_hasOpaque = true;
+			break;
+		case BlendState::BLEND_STATE_MASK:
+			alphaTestMeshes.push_back(mesh);
+			m_hasAlphaTest = true;
+			break;
+		case BlendState::BLEND_STATE_BLEND:
+			blendMeshes.push_back(mesh);
+			m_hasBlend = true;
+			break;
         }
     }
 }
 
-RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newTransparentMeshes) : SceneNode(name) {
+RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newAlphaTestMeshes, std::vector<std::shared_ptr<Mesh>>& newBlendMeshes) : SceneNode(name) {
     if (newOpaqueMeshes.size() > 0) {
         m_hasOpaque = true;
         for (auto& mesh : newOpaqueMeshes) {
             opaqueMeshes.push_back(mesh);
         }
     }
-    if (newTransparentMeshes.size() > 0) {
-        m_hasTransparent = true;
-        for (auto& mesh : newTransparentMeshes) {
-            transparentMeshes.push_back(mesh);
+    if (newAlphaTestMeshes.size() > 0) {
+        m_hasAlphaTest = true;
+        for (auto& mesh : newAlphaTestMeshes) {
+            alphaTestMeshes.push_back(mesh);
         }
     }
+	if (newBlendMeshes.size() > 0) {
+		m_hasBlend = true;
+		for (auto& mesh : newBlendMeshes) {
+			blendMeshes.push_back(mesh);
+		}
+	}
 }
 
 std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetOpaqueMeshes() {
 	return opaqueMeshes;
 }
 
-std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetTransparentMeshes() {
-    return transparentMeshes;
+std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetAlphaTestMeshes() {
+    return alphaTestMeshes;
+}
+
+std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetBlendMeshes() {
+	return blendMeshes;
 }
 
 bool RenderableObject::HasOpaque() const {
     return m_hasOpaque;
 }
 
-bool RenderableObject::HasTransparent() const {
-    return m_hasTransparent;
+bool RenderableObject::HasAlphaTest() const {
+    return m_hasAlphaTest;
+}
+
+bool RenderableObject::HasBlend() const {
+	return m_hasBlend;
 }
 
 void RenderableObject::UpdateBuffers() {
@@ -109,26 +129,42 @@ std::vector<unsigned int>& RenderableObject::GetCurrentOpaqueDrawSetIndices() {
 	return m_opaqueDrawSetIndices;
 }
 
-void RenderableObject::SetCurrentTransparentDrawSetIndices(const std::vector<unsigned int>& indices) {
-	m_transparentDrawSetIndices = indices;
+void RenderableObject::SetCurrentAlphaTestDrawSetIndices(const std::vector<unsigned int>& indices) {
+	m_alphaTestDrawSetIndices = indices;
 }
 
-std::vector<unsigned int>& RenderableObject::GetCurrentTransparentDrawSetIndices() {
-	return m_transparentDrawSetIndices;
+std::vector<unsigned int>& RenderableObject::GetCurrentAlphaTestDrawSetIndices() {
+	return m_alphaTestDrawSetIndices;
+}
+
+void RenderableObject::SetCurrentBlendDrawSetIndices(const std::vector<unsigned int>& indices) {
+	m_blendDrawSetIndices = indices;
+}
+
+std::vector<unsigned int>& RenderableObject::GetCurrentBlendDrawSetIndices() {
+	return m_blendDrawSetIndices;
 }
 
 void RenderableObject::SetCurrentOpaqueDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views) {
 	m_opaqueDrawSetCommandViews = views;
 }
 
-void RenderableObject::SetCurrentTransparentDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views) {
-	m_transparentDrawSetCommandViews = views;
+void RenderableObject::SetCurrentAlphaTestDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views) {
+	m_alphaTestDrawSetCommandViews = views;
+}
+
+void RenderableObject::SetCurrentBlendDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views) {
+	m_blendDrawSetCommandViews = views;
 }
 
 std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentOpaqueDrawSetCommandViews() {
 	return m_opaqueDrawSetCommandViews;
 }
 
-std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentTransparentDrawSetCommandViews() {
-	return m_transparentDrawSetCommandViews;
+std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentAlphaTestDrawSetCommandViews() {
+	return m_alphaTestDrawSetCommandViews;
+}
+
+std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentBlendDrawSetCommandViews() {
+	return m_blendDrawSetCommandViews;
 }

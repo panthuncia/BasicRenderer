@@ -36,7 +36,7 @@ void Mesh::CreateVertexBuffer(const std::vector<VertexType>& vertices) {
 
 	m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)vertices.data());
 
-    m_vertexBufferView.BufferLocation = m_vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+    m_vertexBufferView.BufferLocation = m_vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
     m_vertexBufferView.StrideInBytes = sizeof(VertexType);
     m_vertexBufferView.SizeInBytes = vertexBufferSize;
 }
@@ -128,7 +128,7 @@ void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<
 
 	m_indexBufferHandle = ResourceManager::GetInstance().CreateBuffer(indexBufferSize, ResourceState::INDEX, (void*)indices.data());
 
-    m_indexBufferView.BufferLocation = m_indexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+    m_indexBufferView.BufferLocation = m_indexBufferHandle->m_buffer->GetGPUVirtualAddress();
     m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
     m_indexBufferView.SizeInBytes = indexBufferSize;
 }

@@ -69,7 +69,8 @@ CD3DX12_RESOURCE_DESC CreateTextureResourceDesc(
     int mipLevels = 1,
     bool isCubemap = false,
     bool allowRTV = false,
-    bool allowDSV = false);
+    bool allowDSV = false,
+    bool allowUAV = false);
 
 ComPtr<ID3D12Resource> CreateCommittedTextureResource(
     ID3D12Device* device,
@@ -87,6 +88,28 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
     bool isCubemap = false,
     bool isArray = false,
     int arraySize = 1);
+
+ShaderVisibleIndexInfo CreateUnorderedAccessView(
+    ID3D12Device* device,
+    ID3D12Resource* resource,
+    DXGI_FORMAT format,
+    DescriptorHeap* uavHeap,
+    bool isArray,
+    int arraySize,
+    int mipSlice = 0,
+    int firstArraySlice = 0,
+    int planeSlice = 0);
+
+NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView(
+    ID3D12Device* device,
+    ID3D12Resource* resource,
+    DXGI_FORMAT format,
+    DescriptorHeap* uavHeap,
+    bool isArray,
+    int arraySize,
+    int mipSlice = 0,
+    int firstArraySlice = 0,
+    int planeSlice = 0);
 
 std::vector<NonShaderVisibleIndexInfo> CreateRenderTargetViews(
     ID3D12Device* device,

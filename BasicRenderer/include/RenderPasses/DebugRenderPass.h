@@ -82,7 +82,7 @@ public:
 
 private:
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    BufferHandle vertexBufferHandle;
+    std::shared_ptr<Buffer> vertexBufferHandle;
     Texture* m_texture = nullptr;
 
 	std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
@@ -116,11 +116,11 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenTriangleVertices);
-		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
+		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(DebugVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 
@@ -131,7 +131,7 @@ private:
         CD3DX12_DESCRIPTOR_RANGE1 debugDescriptorRangeSRV;
         debugDescriptorRangeSRV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 in the shader
 
-        CD3DX12_ROOT_PARAMETER1 debugRootParameters[2];
+        CD3DX12_ROOT_PARAMETER1 debugRootParameters[2] = {};
         debugRootParameters[0].InitAsDescriptorTable(1, &debugDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
         debugRootParameters[1].InitAsConstants(16, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b0
 

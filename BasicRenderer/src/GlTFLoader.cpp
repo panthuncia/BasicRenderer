@@ -678,14 +678,19 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
         if (gltfMaterial.contains("emissiveFactor")) {
             emissiveFactor = { gltfMaterial["emissiveFactor"][0], gltfMaterial["emissiveFactor"][1], gltfMaterial["emissiveFactor"][2], 1.0f };
         }
-
+        float alphaCutoff = 0.5f;
         if (gltfMaterial.contains("alphaMode")) {
             std::string alphaMode = gltfMaterial["alphaMode"];
+			if (gltfMaterial.contains("alphaCutoff")) {
+				alphaCutoff = gltfMaterial["alphaCutoff"];
+			}
             if (alphaMode == "MASK") {
                 blendMode = BlendState::BLEND_STATE_MASK;
+				psoFlags |= PSOFlags::PSO_ALPHA_TEST;
             }
             else if (alphaMode == "BLEND") {
                 blendMode = BlendState::BLEND_STATE_BLEND;
+				psoFlags |= PSOFlags::PSO_BLEND;
             }
         }
         std::shared_ptr<Material> newMaterial = std::make_shared<Material>(gltfMaterial["name"],
@@ -701,7 +706,8 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
             roughnessFactor,
             baseColorFactor,
             emissiveFactor,
-            blendMode);
+            blendMode,
+            alphaCutoff);
         materials.push_back(newMaterial);
     }
 

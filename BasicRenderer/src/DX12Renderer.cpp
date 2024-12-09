@@ -32,6 +32,10 @@
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
+#include "RenderPasses/PPLLFillPass.h"
+#include "RenderPasses/PPLLFillPassMS.h"
+#include "RenderPasses/PPLLFillPassMSIndirect.h"
+#include "RenderPasses/PPLLResolvePass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -149,6 +153,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
     settingsManager.registerSetting<bool>("allowTearing", false);
+	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
 	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
 		return currentScene->GetRenderableObjectIDMap();
@@ -179,6 +184,7 @@ void DX12Renderer::SetSettings() {
 	getMeshShadersEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
+	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 
     settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
@@ -201,6 +207,9 @@ void DX12Renderer::SetSettings() {
 		});
 	settingsManager.addObserver<bool>("allowTearing", [this](const bool& newValue) {
 		m_allowTearing = newValue;
+		});
+	settingsManager.addObserver<bool>("drawBoundingSpheres", [this](const bool& newValue) {
+		rebuildRenderGraph = true;
 		});
 
     m_numFramesInFlight = getNumFramesInFlight();
@@ -477,9 +486,10 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
 
     ThrowIfFailed(commandAllocator->Reset());
-
-    ResourceManager::GetInstance().UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
     auto& resourceManager = ResourceManager::GetInstance();
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
+
+	currentRenderGraph->Update();
 
 	updateManager.ResetAllocators(m_frameIndex); // Reset allocators to avoid leaking memory
     updateManager.ExecuteResourceCopies(m_frameIndex, commandQueue.Get());// copies come before uploads to avoid overwriting data
@@ -568,7 +578,6 @@ void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t 
 
 void DX12Renderer::AdvanceFrameIndex() {
     m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
-    spdlog::info("Advanced to frame index {}", m_frameIndex);
 }
 
 void DX12Renderer::FlushCommandQueue() {
@@ -724,9 +733,11 @@ void DX12Renderer::CreateRenderGraph() {
     auto& perObjectBuffer = currentScene->GetObjectManager()->GetPerObjectBuffers();
 	newGraph->AddResource(perObjectBuffer);
     auto& opaquePerMeshBuffer = currentScene->GetMeshManager()->GetOpaquePerMeshBuffers();
-	auto& transparentPerMeshBuffer = currentScene->GetMeshManager()->GetTransparentPerMeshBuffers();
+	auto& transparentPerMeshBuffer = currentScene->GetMeshManager()->GetAlphaTestPerMeshBuffers();
+	auto& blendPerMeshBuffer = currentScene->GetMeshManager()->GetBlendPerMeshBuffers();
 	newGraph->AddResource(opaquePerMeshBuffer);
 	newGraph->AddResource(transparentPerMeshBuffer);
+	newGraph->AddResource(blendPerMeshBuffer);
 
 	bool indirect = getIndirectDrawsEnabled();
 	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
@@ -816,7 +827,7 @@ void DX12Renderer::CreateRenderGraph() {
 
         newGraph->AddResource(m_currentEnvironmentTexture);
         newGraph->AddResource(m_currentSkybox);
-        newGraph->AddResource(m_environmentIrradiance);
+        //newGraph->AddResource(m_environmentIrradiance);
         auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
         auto environmentConversionPassParameters = PassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
@@ -824,7 +835,7 @@ void DX12Renderer::CreateRenderGraph() {
         environmentConversionPassParameters.renderTargets.push_back(m_environmentIrradiance);
         newGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
-        newGraph->AddResource(m_prefilteredEnvironment);
+        //newGraph->AddResource(m_prefilteredEnvironment);
 		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 		auto environmentFilterPassParameters = PassParameters();
 		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
@@ -836,6 +847,10 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddResource(m_prefilteredEnvironment);
 		forwardPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
     }
+    if (m_environmentIrradiance != nullptr) {
+        newGraph->AddResource(m_environmentIrradiance);
+        forwardPassParameters.shaderResources.push_back(m_environmentIrradiance);
+    }
 
     if (m_shadowMaps != nullptr && getShadowsEnabled()) {
         newGraph->AddResource(m_shadowMaps);
@@ -844,10 +859,13 @@ void DX12Renderer::CreateRenderGraph() {
         auto shadowPassParameters = PassParameters();
 
         if (useMeshShaders) { 
-            shadowPass = std::make_shared<ShadowPassMSIndirect>(m_shadowMaps);
             shadowPassParameters.shaderResources.push_back(meshResourceGroup);
             if (indirect) {
+                shadowPass = std::make_shared<ShadowPassMSIndirect>(m_shadowMaps);
                 shadowPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+            }
+            else {
+				shadowPass = std::make_shared<ShadowPassMS>(m_shadowMaps);
             }
 		}
 		else {
@@ -856,6 +874,7 @@ void DX12Renderer::CreateRenderGraph() {
 		shadowPassParameters.constantBuffers.push_back(perObjectBuffer);
 		shadowPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
 		shadowPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+        shadowPassParameters.shaderResources.push_back(blendPerMeshBuffer);
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
@@ -872,11 +891,67 @@ void DX12Renderer::CreateRenderGraph() {
 
     newGraph->AddPass(forwardPass, forwardPassParameters);
 
-	auto debugPass = std::make_shared<DebugRenderPass>();
-    newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+    static const size_t aveFragsPerPixel = 12;
+    auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
+	static const size_t PPLLNodeSize = 24; // two uints, four floats
+    TextureDescription desc;
+    desc.width = m_xRes;
+    desc.height = m_yRes;
+    desc.channels = 1;
+    desc.format = DXGI_FORMAT_R32_UINT;
+    desc.hasRTV = false;
+    desc.hasUAV = true;
+	desc.hasNonShaderVisibleUAV = true;
+    desc.initialState = ResourceState::PIXEL_SRV;
+	auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
+	PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
+    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, ResourceState::UNORDERED_ACCESS, false, true, false);
+	PPLLBuffer->SetName(L"PPLLBuffer");
+    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+	PPLLCounter->SetName(L"PPLLCounter");
+	newGraph->AddResource(PPLLHeadPointerTexture);
+	newGraph->AddResource(PPLLBuffer);
+	newGraph->AddResource(PPLLCounter);
 
-    auto debugSpherePass = std::make_shared<DebugSpherePass>();
-	newGraph->AddPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+    std::shared_ptr<RenderPass> pPPLLFillPass;
+    auto PPLLFillPassParameters = PassParameters();
+    if (indirect) {
+        pPPLLFillPass = std::make_shared<PPLLFillPassMSIndirect>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
+		PPLLFillPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+    }
+    else {
+        if (useMeshShaders) {
+            pPPLLFillPass = std::make_shared<PPLLFillPassMS>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
+        }
+        else {
+            pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
+        }
+    }
+	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
+	PPLLFillPassParameters.shaderResources.push_back(blendPerMeshBuffer);
+    PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
+    PPLLFillPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
+	PPLLFillPassParameters.shaderResources.push_back(m_environmentIrradiance);
+    PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
+	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
+	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
+	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);
+	newGraph->AddPass(pPPLLFillPass, PPLLFillPassParameters);
+
+	auto ResolvePass = std::make_shared<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
+	auto ResolvePassParameters = PassParameters();
+	ResolvePassParameters.shaderResources.push_back(PPLLHeadPointerTexture);
+	ResolvePassParameters.shaderResources.push_back(PPLLBuffer);
+	newGraph->AddPass(ResolvePass, ResolvePassParameters);
+
+	//auto debugPass = std::make_shared<DebugRenderPass>();
+    //newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+
+    if (getDrawBoundingSpheres()) {
+        auto debugSpherePass = std::make_shared<DebugSpherePass>();
+        newGraph->AddPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+    }
 
     newGraph->Compile();
     newGraph->Setup(commandQueue.Get());

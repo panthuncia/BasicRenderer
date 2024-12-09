@@ -13,7 +13,6 @@
 #include "DeviceManager.h"
 #include "Buffer.h"
 #include "Resource.h"
-#include "BufferHandle.h"
 #include "DynamicBufferBase.h"
 #include "Concepts/HasIsValid.h"
 #include "BufferView.h"

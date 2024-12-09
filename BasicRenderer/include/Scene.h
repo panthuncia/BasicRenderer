@@ -37,7 +37,8 @@ public:
 	void RemoveEntityByID(UINT id, bool recurse = false);
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetOpaqueRenderableObjectIDMap();
-    std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetTransparentRenderableObjectIDMap();
+    std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetAlphaTestRenderableObjectIDMap();
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetBlendRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<Light>>& GetLightIDMap();
     SceneNode& GetRoot();
     void Update();
@@ -56,10 +57,12 @@ public:
     const std::unique_ptr<MeshManager>& GetMeshManager();
 	const std::unique_ptr<ObjectManager>& GetObjectManager();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
-    std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraTransparentIndirectCommandBuffer();
+    std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
+	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
 	unsigned int GetNumDrawsInScene();
 	unsigned int GetNumOpaqueDraws();
-	unsigned int GetNumTransparentDraws();
+	unsigned int GetNumAlphaTestDraws();
+	unsigned int GetNumBlendDraws();
 	const std::unique_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
 	const std::unique_ptr<CameraManager>& GetCameraManager();
 
@@ -71,7 +74,8 @@ private:
     std::unordered_map<UINT, std::shared_ptr<SceneNode>> nodesByID;
     std::unordered_map<std::wstring, std::shared_ptr<SceneNode>> nodesByName;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> opaqueObjectsByID;
-    std::unordered_map<UINT, std::shared_ptr<RenderableObject>> transparentObjectsByID;
+    std::unordered_map<UINT, std::shared_ptr<RenderableObject>> alphaTestObjectsByID;
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> blendObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<Light>> lightsByID;
 	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;
 	UINT numObjects = 0;
@@ -85,14 +89,16 @@ private:
 	std::unique_ptr<ObjectManager> objectManager = nullptr;
 	std::unique_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
-	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraTransparentIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraBlendIndirectCommandBuffer;
 	std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
 
 
 
 	unsigned int m_numDrawsInScene = 0;
 	unsigned int m_numOpaqueDraws = 0;
-	unsigned int m_numTransparentDraws = 0;
+	unsigned int m_numAlphaTestDraws = 0;
+	unsigned int m_numBlendDraws = 0;
 
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;

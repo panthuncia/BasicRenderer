@@ -34,24 +34,37 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
             meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
         }
 	}
-    for (auto& mesh : object->GetTransparentMeshes()) {
+    for (auto& mesh : object->GetAlphaTestMeshes()) {
         meshesByID[mesh->GetGlobalID()] = mesh;
 		m_numDrawsInScene++;
-		m_numTransparentDraws++;
+		m_numAlphaTestDraws++;
         if (meshManager != nullptr) {
-            meshManager->AddMesh(mesh, MaterialBuckets::Transparent);
+            meshManager->AddMesh(mesh, MaterialBuckets::AlphaTest);
         }
     }
+	for (auto& mesh : object->GetBlendMeshes()) {
+		meshesByID[mesh->GetGlobalID()] = mesh;
+		m_numDrawsInScene++;
+		m_numBlendDraws++;
+		if (meshManager != nullptr) {
+			meshManager->AddMesh(mesh, MaterialBuckets::Blend);
+		}
+	}
 
     if (object->HasOpaque()) {
         opaqueObjectsByID[object->GetLocalID()] = object;
 		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
     }
 
-    if (object->HasTransparent()) {
-        transparentObjectsByID[object->GetLocalID()] = object;
-		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Transparent, m_numTransparentDraws);
+    if (object->HasAlphaTest()) {
+        alphaTestObjectsByID[object->GetLocalID()] = object;
+		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, m_numAlphaTestDraws);
     }
+
+	if (object->HasBlend()) {
+		blendObjectsByID[object->GetLocalID()] = object;
+		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
+	}
 
 	if (objectManager != nullptr) {
 		objectManager->AddObject(object);
@@ -143,7 +156,8 @@ void Scene::RemoveObjectByName(const std::wstring& name) {
         }
         objectsByName.erase(it);
         opaqueObjectsByID.erase(it->second->GetLocalID());
-        transparentObjectsByID.erase(it->second->GetLocalID());
+        alphaTestObjectsByID.erase(it->second->GetLocalID());
+		blendObjectsByID.erase(it->second->GetLocalID());
         std::shared_ptr<SceneNode> node = it->second;
         node->parent->RemoveChild(node->GetLocalID());
         if (objectManager != nullptr) {
@@ -155,11 +169,16 @@ void Scene::RemoveObjectByName(const std::wstring& name) {
 			m_numOpaqueDraws--;
 			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
         }
-        for (auto& mesh : it->second->GetTransparentMeshes()) {
+        for (auto& mesh : it->second->GetAlphaTestMeshes()) {
             m_numDrawsInScene--;
-			m_numTransparentDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Transparent, m_numTransparentDraws);
+			m_numAlphaTestDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, m_numAlphaTestDraws);
         }
+		for (auto& mesh : it->second->GetBlendMeshes()) {
+			m_numDrawsInScene--;
+			m_numBlendDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
+		}
     }
 }
 
@@ -172,7 +191,8 @@ void Scene::RemoveObjectByID(UINT id) {
             objectsByName.erase(nameIt);
         }
         opaqueObjectsByID.erase(it->second->GetLocalID());
-        transparentObjectsByID.erase(it->second->GetLocalID());
+        alphaTestObjectsByID.erase(it->second->GetLocalID());
+		blendObjectsByID.erase(it->second->GetLocalID());
 
         std::shared_ptr<SceneNode> node = it->second;
         node->parent->RemoveChild(node->GetLocalID());
@@ -185,12 +205,17 @@ void Scene::RemoveObjectByID(UINT id) {
 			m_numOpaqueDraws--;
 			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
         }
-        for (auto& mesh : it->second->GetTransparentMeshes()) {
+        for (auto& mesh : it->second->GetAlphaTestMeshes()) {
             m_numDrawsInScene--;
-			m_numTransparentDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Transparent, m_numTransparentDraws);
+			m_numAlphaTestDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, m_numAlphaTestDraws);
         }
-		DeletionManager::GetInstance().MarkForDelete(it->second); // defer deletion to the end of the frame
+		for (auto& mesh : it->second->GetBlendMeshes()) {
+			m_numDrawsInScene--;
+			m_numBlendDraws--;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
+		}
+        DeletionManager::GetInstance().MarkForDelete(it->second); // defer deletion to the end of the frame
         objectsByID.erase(it);
     }
 }
@@ -276,8 +301,12 @@ std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetOpaqueRen
     return opaqueObjectsByID;
 }
 
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetTransparentRenderableObjectIDMap() {
-    return transparentObjectsByID;
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetAlphaTestRenderableObjectIDMap() {
+    return alphaTestObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetBlendRenderableObjectIDMap() {
+	return blendObjectsByID;
 }
 
 std::unordered_map<UINT, std::shared_ptr<Light>>& Scene::GetLightIDMap() {
@@ -309,7 +338,8 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
     if (pCamera != nullptr) {
         indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
         m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
-		m_pPrimaryCameraTransparentIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
 
 		m_pCameraManager->RemoveCamera(pCamera->GetCameraBufferView());
 		pCamera->SetCameraBufferView(nullptr);
@@ -323,7 +353,8 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
     lightManager.SetCurrentCamera(pCamera.get());
     AddNode(pCamera);
     m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Opaque);
-	m_pPrimaryCameraTransparentIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Transparent);
+	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::AlphaTest);
+	m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Blend);
 }
 
 std::shared_ptr<Camera> Scene::GetCamera() {
@@ -400,7 +431,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     for (auto& objectPair : scene.objectsByID) {
         auto& object = objectPair.second;
         UINT oldID = object->GetLocalID();
-        auto newObject = std::make_shared<RenderableObject>(object->m_name, object->GetOpaqueMeshes(), object->GetTransparentMeshes());
+        auto newObject = std::make_shared<RenderableObject>(object->m_name, object->GetOpaqueMeshes(), object->GetAlphaTestMeshes(), object->GetBlendMeshes());
         for (auto& childPair : object->children) {
             auto& child = childPair.second;
             auto dummyNode = std::make_shared<SceneNode>();
@@ -506,8 +537,15 @@ void Scene::MakeResident() {
 		for (auto& mesh : object->GetOpaqueMeshes()) {
 			meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
 		}
-		for (auto& mesh : object->GetTransparentMeshes()) {
-            meshManager->AddMesh(mesh, MaterialBuckets::Transparent);
+		for (auto& mesh : object->GetAlphaTestMeshes()) {
+            meshManager->AddMesh(mesh, MaterialBuckets::AlphaTest);
+		}
+		for (auto& mesh : object->GetBlendMeshes()) {
+			meshManager->AddMesh(mesh, MaterialBuckets::Blend);
+		}
+		if (object->HasOpaque()) {
+			opaqueObjectsByID[object->GetLocalID()] = object;
+			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
 		}
 	}
 	objectManager = ObjectManager::CreateUnique();
@@ -517,7 +555,8 @@ void Scene::MakeResident() {
 	}
 	if (GetCamera() != nullptr) {
         m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Opaque);
-		m_pPrimaryCameraTransparentIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Transparent);
+		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::AlphaTest);
+		m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Blend);
     }
 
 	m_pCameraManager = CameraManager::CreateUnique();
@@ -531,7 +570,8 @@ void Scene::MakeNonResident() {
     if (GetCamera() != nullptr) {
         indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
         m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
-		m_pPrimaryCameraTransparentIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
     }
 
 	m_pCameraManager = nullptr;
@@ -553,8 +593,12 @@ std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraOpaqueInd
 	return m_pPrimaryCameraOpaqueIndirectCommandBuffer;
 }
 
-std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraTransparentIndirectCommandBuffer() {
-	return m_pPrimaryCameraTransparentIndirectCommandBuffer;
+std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraAlphaTestIndirectCommandBuffer() {
+	return m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+}
+
+std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraBlendIndirectCommandBuffer() {
+	return m_pPrimaryCameraBlendIndirectCommandBuffer;
 }
 
 unsigned int Scene::GetNumDrawsInScene() {
@@ -565,8 +609,12 @@ unsigned int Scene::GetNumOpaqueDraws() {
 	return m_numOpaqueDraws;
 }
 
-unsigned int Scene::GetNumTransparentDraws() {
-	return m_numTransparentDraws;
+unsigned int Scene::GetNumAlphaTestDraws() {
+	return m_numAlphaTestDraws;
+}
+
+unsigned int Scene::GetNumBlendDraws() {
+    return m_numBlendDraws;
 }
 
 const std::unique_ptr<IndirectCommandBufferManager>& Scene::GetIndirectCommandBufferManager() {

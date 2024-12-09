@@ -10,9 +10,11 @@
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_opaqueResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
-	m_transparentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+	m_alphaTestResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+	m_blendResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_parentResourceGroup->AddResource(m_opaqueResourceGroup);
-	m_parentResourceGroup->AddResource(m_transparentResourceGroup);
+	m_parentResourceGroup->AddResource(m_alphaTestResourceGroup);
+	m_parentResourceGroup->AddResource(m_blendResourceGroup);
     for (auto type : MaterialBucketTypes) {
 		m_buffers[type] = std::unordered_map<int, std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>>();
     }
@@ -41,7 +43,8 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 
     // Initialize with one dummy draw
 	UpdateBuffersForBucket(MaterialBuckets::Opaque, 1);
-	UpdateBuffersForBucket(MaterialBuckets::Transparent, 1);
+	UpdateBuffersForBucket(MaterialBuckets::AlphaTest, 1);
+	UpdateBuffersForBucket(MaterialBuckets::Blend, 1);
 }
 
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
@@ -52,11 +55,11 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 			}
 		}
 	}
-	DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(m_clearBufferTransparent); // Delay deletion until after the current frame
-	//DeletionManager::GetInstance().MarkForDelete(m_opaqueResourceGroup); // Delay deletion until after the current frame
-	//DeletionManager::GetInstance().MarkForDelete(m_transparentResourceGroup); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup); // Delay deletion until after the current frame
+    DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque);
+	DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest);
+	DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend);
+
+	DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup);
 }
 
 // Add a single buffer to an existing ID
@@ -70,13 +73,16 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 	case MaterialBuckets::Opaque:
 		commandBufferSize = m_opaqueCommandBufferSize;
 		break;
-	case MaterialBuckets::Transparent:
-		commandBufferSize = m_transparentCommandBufferSize;
+	case MaterialBuckets::AlphaTest:
+		commandBufferSize = m_alphaTestCommandBufferSize;
+		break;
+	case MaterialBuckets::Blend:
+		commandBufferSize = m_blendCommandBufferSize;
 		break;
 	}
-    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true, true);
-	resource.dataBuffer->SetName(L"IndirectCommandBuffer ("+std::to_wstring(entityID)+L")");
-    std::shared_ptr<DynamicGloballyIndexedResource> pResource = std::make_shared<DynamicGloballyIndexedResource>(resource.dataBuffer);
+    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(IndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
+	resource->SetName(L"IndirectCommandBuffer ("+std::to_wstring(entityID)+L")");
+    std::shared_ptr<DynamicGloballyIndexedResource> pResource = std::make_shared<DynamicGloballyIndexedResource>(resource);
     m_buffers[bucket][entityID].push_back(pResource);
 
     uint64_t naturalEntityID = entityID + 1; // 0 is not a natural number, might not work in Cantor pairing function
@@ -86,8 +92,11 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 	case MaterialBuckets::Opaque:
 		m_opaqueResourceGroup->AddIndexedResource(pResource, uniqueID);
 		break;
-    case MaterialBuckets::Transparent:
-		m_transparentResourceGroup->AddIndexedResource(pResource, uniqueID);
+    case MaterialBuckets::AlphaTest:
+		m_alphaTestResourceGroup->AddIndexedResource(pResource, uniqueID);
+		break;
+    case MaterialBuckets::Blend:
+		m_blendResourceGroup->AddIndexedResource(pResource, uniqueID);
 		break;
     }
     return pResource;
@@ -107,8 +116,12 @@ void IndirectCommandBufferManager::UnregisterBuffers(const int entityID) {
 			case MaterialBuckets::Opaque:
 				m_opaqueResourceGroup->RemoveIndexedResource(uniqueID);
 				break;
-			case MaterialBuckets::Transparent:
-                m_transparentResourceGroup->RemoveIndexedResource(uniqueID);
+			case MaterialBuckets::AlphaTest:
+                m_alphaTestResourceGroup->RemoveIndexedResource(uniqueID);
+                break;
+			case MaterialBuckets::Blend:
+				m_blendResourceGroup->RemoveIndexedResource(uniqueID);
+				break;
             }
         }
         m_buffers[type].erase(entityID);
@@ -126,22 +139,34 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             return;
         }
         m_opaqueCommandBufferSize = newSize;
-        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_opaqueCommandBufferSize, ResourceState::ALL_SRV, false, true, true);
-		DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
-        m_clearBufferOpaque = resource.dataBuffer;
-		m_clearBufferOpaque->SetName(L"ClearBufferOpaque");
+        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_opaqueCommandBufferSize, sizeof(IndirectCommand), ResourceState::ALL_SRV, false, true, true);
+        DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
+        m_clearBufferOpaque = resource;
+        m_clearBufferOpaque->SetName(L"ClearBufferOpaque");
         break;
     }
-    case MaterialBuckets::Transparent: {
+    case MaterialBuckets::AlphaTest: {
         unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
-        if (newSize == m_transparentCommandBufferSize) {
+        if (newSize == m_alphaTestCommandBufferSize) {
             return;
         }
-        m_transparentCommandBufferSize = newSize;
-        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(m_transparentCommandBufferSize, ResourceState::COPY_SOURCE, false, true, true);
-        DeletionManager::GetInstance().MarkForDelete(m_clearBufferTransparent); // Delay deletion until after the current frame
-        m_clearBufferTransparent = resource.dataBuffer;
-		m_clearBufferTransparent->SetName(L"ClearBufferTransparent");
+        m_alphaTestCommandBufferSize = newSize;
+        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_alphaTestCommandBufferSize, sizeof(IndirectCommand), ResourceState::COPY_SOURCE, false, true, true);
+        DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest); // Delay deletion until after the current frame
+        m_clearBufferAlphaTest = resource;
+        m_clearBufferAlphaTest->SetName(L"ClearBufferAlphaTest");
+        break;
+    }
+    case MaterialBuckets::Blend: {
+        unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
+        if (newSize == m_blendCommandBufferSize) {
+            return;
+        }
+        m_blendCommandBufferSize = newSize;
+        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(IndirectCommand), ResourceState::COPY_SOURCE, false, true, true);
+        DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend); // Delay deletion until after the current frame
+        m_clearBufferBlend = resource;
+        m_clearBufferBlend->SetName(L"ClearBufferBlend");
         break;
     }
     }
@@ -156,12 +181,14 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 			case MaterialBuckets::Opaque:
 				commandBufferSize = m_opaqueCommandBufferSize;
 				break;
-			case MaterialBuckets::Transparent:
-				commandBufferSize = m_transparentCommandBufferSize;
+			case MaterialBuckets::AlphaTest:
+				commandBufferSize = m_alphaTestCommandBufferSize;
 				break;
+            case MaterialBuckets::Blend:
+				commandBufferSize = m_blendCommandBufferSize;
 			}
-            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer<IndirectCommand>(commandBufferSize, ResourceState::UNORDERED_ACCESS, false, true, true);
-            buffer->SetResource(resource.dataBuffer);
+            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(IndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
+            buffer->SetResource(resource);
         }
     }
 }

@@ -68,7 +68,7 @@ struct MaterialInfo {
     float specularStrength;
     float textureScale;
     float heightMapScale;
-    float pad0;
+    float alphaCutoff;
     float4 baseColorFactor;
     float4 emissiveFactor;
 };

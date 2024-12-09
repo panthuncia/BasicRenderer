@@ -79,7 +79,16 @@ void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& reso
 }
 
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
-    resourcesByName[resource->GetName()] = resource;
+	auto& name = resource->GetName();
+#ifdef _DEBUG
+    if(name == L"") {
+		throw std::runtime_error("Resource name cannot be empty");
+	}
+	else if (resourcesByName.find(name) != resourcesByName.end()) {
+		throw std::runtime_error("Resource with name " + ws2s(name) + " already exists");
+	}
+#endif
+    resourcesByName[name] = resource;
 }
 
 std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::wstring& name) {
@@ -92,6 +101,14 @@ std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) 
     }
     else {
         return nullptr;
+    }
+}
+
+void RenderGraph::Update() {
+    for (auto& batch : batches) {
+        for (auto& passAndResources : batch.passes) {
+            passAndResources.pass->Update();
+        }
     }
 }
 

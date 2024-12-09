@@ -42,7 +42,8 @@ public:
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
         DirectX::XMFLOAT4 emissiveFactor,
-        BlendState blendState);
+        BlendState blendState,
+        float alphaCutoff);
 
     static std::shared_ptr<Texture> createDefaultTexture();
     UINT GetMaterialBufferIndex();
@@ -50,5 +51,5 @@ public:
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
 private:
-    BufferHandle m_perMaterialHandle;
+    std::shared_ptr<Buffer> m_perMaterialHandle;
 };

@@ -31,32 +31,48 @@ public:
 		return m_opaqueDrawSetCommandsBuffer->GetSRVInfo().index;
 	}
 	
-	unsigned int GetTransparentDrawSetCommandsBufferSRVIndex() const {
-		return m_transparentDrawSetCommandsBuffer->GetSRVInfo().index;
+	unsigned int GetAlphaTestDrawSetCommandsBufferSRVIndex() const {
+		return m_alphaTestDrawSetCommandsBuffer->GetSRVInfo().index;
+	}
+
+	unsigned int GetBlendDrawSetCommandsBufferSRVIndex() const {
+		return m_blendDrawSetCommandsBuffer->GetSRVInfo().index;
 	}
 
 	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const {
 		return m_activeOpaqueDrawSetIndices->GetSRVInfo().index;
 	}
 
-	unsigned int GetActiveTransparentDrawSetIndicesBufferSRVIndex() const {
-		return m_activeTransparentDrawSetIndices->GetSRVInfo().index;
+	unsigned int GetActiveAlphaTestDrawSetIndicesBufferSRVIndex() const {
+		return m_activeAlphaTestDrawSetIndices->GetSRVInfo().index;
+	}
+
+	unsigned int GetActiveBlendDrawSetIndicesBufferSRVIndex() const {
+		return m_activeBlendDrawSetIndices->GetSRVInfo().index;
 	}
 
 	std::shared_ptr<DynamicBuffer>& GetOpaqueDrawSetCommandsBuffer() {
 		return m_opaqueDrawSetCommandsBuffer;
 	}
 
-	std::shared_ptr<DynamicBuffer>& GetTransparentDrawSetCommandsBuffer() {
-		return m_transparentDrawSetCommandsBuffer;
+	std::shared_ptr<DynamicBuffer>& GetAlphaTestDrawSetCommandsBuffer() {
+		return m_alphaTestDrawSetCommandsBuffer;
+	}
+
+	std::shared_ptr<DynamicBuffer>& GetBlendDrawSetCommandsBuffer() {
+		return m_blendDrawSetCommandsBuffer;
 	}
 
 	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveOpaqueDrawSetIndices() {
 		return m_activeOpaqueDrawSetIndices;
 	}
 
-	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveTransparentDrawSetIndices() {
-		return m_activeTransparentDrawSetIndices;
+	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveAlphaTestDrawSetIndices() {
+		return m_activeAlphaTestDrawSetIndices;
+	}
+
+	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveBlendDrawSetIndices() {
+		return m_activeBlendDrawSetIndices;
 	}
 
 private:
@@ -64,7 +80,9 @@ private:
 	std::vector<std::shared_ptr<RenderableObject>> m_objects;
 	std::shared_ptr<DynamicBuffer> m_perObjectBuffers;
 	std::shared_ptr<DynamicBuffer> m_opaqueDrawSetCommandsBuffer;
-	std::shared_ptr<DynamicBuffer> m_transparentDrawSetCommandsBuffer;
+	std::shared_ptr<DynamicBuffer> m_alphaTestDrawSetCommandsBuffer;
+	std::shared_ptr<DynamicBuffer> m_blendDrawSetCommandsBuffer;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeOpaqueDrawSetIndices;
-	std::shared_ptr<SortedUnsignedIntBuffer> m_activeTransparentDrawSetIndices;
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeAlphaTestDrawSetIndices;
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeBlendDrawSetIndices;
 };

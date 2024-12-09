@@ -11,16 +11,25 @@
 #include "Scene.h"
 #include "Material.h"
 #include "SettingsManager.h"
+#include "ResourceManager.h"
+#include "TextureDescription.h"
+#include "ResourceHandles.h"
+#include "UploadManager.h"
 
-class ForwardRenderPassMSIndirect : public RenderPass {
+class PPLLFillPassMSIndirect : public RenderPass {
 public:
-	ForwardRenderPassMSIndirect(bool wireframe) {
+	PPLLFillPassMSIndirect(bool wireframe, std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer, std::shared_ptr<Buffer> PPLLCounter, size_t numPPLLNodes) {
 		m_wireframe = wireframe;
 
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
-		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");		
+		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+
+		m_PPLLHeadPointerTexture = PPLLHeads;
+		m_PPLLBuffer = PPLLBuffer;
+		m_PPLLCounter = PPLLCounter;
+		m_numPPLLNodes = numPPLLNodes;
 	}
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
@@ -35,10 +44,15 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
-
 	}
 
 	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
+
+		auto numBlend = context.currentScene->GetNumBlendDraws();
+		if (numBlend == 0) {
+			return {};
+		}
+
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = m_commandLists[context.frameIndex];
 		auto& allocator = m_allocators[context.frameIndex];
@@ -52,15 +66,20 @@ public:
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
+		uint32_t clearValues[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
+		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo().cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
+
+		D3D12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLHeadPointerTexture->GetAPIResource());
+		commandList->ResourceBarrier(1, &uavBarrier);
+
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
 		commandList->RSSetViewports(1, &viewport);
 		commandList->RSSetScissorRects(1, &scissorRect);
 
 		// Set the render target
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
 		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -89,37 +108,34 @@ public:
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
 
+		unsigned int blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
+		commandList->SetGraphicsRoot32BitConstants(6, 1, &blendPerMeshBufferIndex, 0);
+
+		// PPLL heads & buffer
+		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes };
+		commandList->SetGraphicsRoot32BitConstants(7, 4, &indices, 0);
+
+		auto pso = psoManager.GetMeshPPLLPSO(localPSOFlags | PSOFlags::PSO_ALPHA_TEST,  BLEND_STATE_BLEND, m_wireframe);
+		commandList->SetPipelineState(pso.Get());
+
 		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
 
-		auto numOpaque = context.currentScene->GetNumOpaqueDraws();
-		if (numOpaque != 0) {
-			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
-		
-			// Opaque objects
-			auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
-			auto pso = psoManager.GetMeshPSO(localPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
-			commandList->SetPipelineState(pso.Get());
-			auto apiResource = indirectCommandBuffer->GetAPIResource();
-			commandList->ExecuteIndirect(commandSignature.Get(), numOpaque, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
-		}
+		unsigned int transparentPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
+		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-		auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
-		if (numAlphaTest != 0) {
-			unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
+		// Blended objects
+		auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer();
+		auto apiResource = indirectCommandBuffer->GetAPIResource();
+		commandList->ExecuteIndirect(commandSignature.Get(), numBlend, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
-			// Alpha tested objects
-			auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();
-			auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED , BlendState::BLEND_STATE_MASK, m_wireframe);
-			commandList->SetPipelineState(pso.Get());
-			auto apiResource = indirectCommandBuffer->GetAPIResource();
-			commandList->ExecuteIndirect(commandSignature.Get(), numAlphaTest, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
-
-		}
 		commandList->Close();
+		return { commandList.Get() };
+	}
 
-		return { commandList.Get()};
+	virtual void Update() override {
+		// Reset UAV counter
+		uint32_t zero = 0;
+		UploadManager::GetInstance().UploadData(&zero, sizeof(uint32_t), m_PPLLCounter.get(), 0);
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -130,6 +146,13 @@ private:
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;
+
+	size_t m_numPPLLNodes;
+
+	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
+	std::shared_ptr<Buffer> m_PPLLBuffer;
+	std::shared_ptr<Buffer> m_PPLLCounter;
+
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;

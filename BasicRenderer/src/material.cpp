@@ -13,7 +13,7 @@ Material::Material(const std::string& name,
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
 	m_materialData.materialFlags = materialFlags;
-	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 Material::Material(const std::string& name,
@@ -28,7 +28,8 @@ Material::Material(const std::string& name,
     float roughnessFactor,
     DirectX::XMFLOAT4 baseColorFactor,
     DirectX::XMFLOAT4 emissiveFactor,
-    BlendState blendState)
+    BlendState blendState,
+    float alphaCutoff)
 	: m_name(name),
     m_psoFlags(psoFlags),
     m_baseColorTexture(baseColorTexture),
@@ -52,6 +53,7 @@ Material::Material(const std::string& name,
     m_materialData.emissiveFactor = emissiveFactor;
     m_materialData.metallicFactor = metallicFactor;
     m_materialData.roughnessFactor = roughnessFactor;
+	m_materialData.alphaCutoff = alphaCutoff;
     if (baseColorTexture != nullptr) {
         m_materialData.baseColorTextureIndex = baseColorTexture->GetBuffer()->GetSRVInfo().index;
         m_materialData.baseColorSamplerIndex = baseColorTexture->GetSamplerDescriptorIndex();
@@ -85,9 +87,9 @@ Material::Material(const std::string& name,
 
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
-	m_perMaterialHandle.dataBuffer->SetName(L"PerMaterialCB ("+s2ws(name)+L")");
+	m_perMaterialHandle->SetName(L"PerMaterialCB ("+s2ws(name)+L")");
 
-	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 std::shared_ptr<Texture> Material::createDefaultTexture() {
@@ -126,7 +128,7 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
 }
 
 UINT Material::GetMaterialBufferIndex() {
-    return m_perMaterialHandle.dataBuffer->GetCBVInfo().index;
+    return m_perMaterialHandle->GetCBVInfo().index;
 }
 
 void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
@@ -135,15 +137,15 @@ void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
 	heightmap->GetBuffer()->SetName(L"HeightMap");
 	m_materialData.heightMapIndex = heightmap->GetBuffer()->GetSRVInfo().index;
 	m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
-	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 void Material::SetTextureScale(float scale) {
 	m_materialData.textureScale = scale;
-	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 void Material::SetHeightmapScale(float scale) {
 	m_materialData.heightMapScale = scale;
-	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.dataBuffer.get(), 0);
+	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }

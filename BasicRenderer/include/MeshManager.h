@@ -41,12 +41,17 @@ public:
 	std::shared_ptr<DynamicBuffer>& GetOpaquePerMeshBuffers() {
 		return m_opaquePerMeshBuffers;
 	}
-
-	unsigned int GetTransparentPerMeshBufferSRVIndex() const {
-		return m_transparentPerMeshBuffers->GetSRVInfo().index;
+	unsigned int GetAlphaTestPerMeshBufferSRVIndex() const {
+		return m_alphaTestPerMeshBuffers->GetSRVInfo().index;
 	}
-	std::shared_ptr<DynamicBuffer>& GetTransparentPerMeshBuffers() {
-		return m_transparentPerMeshBuffers;
+	std::shared_ptr<DynamicBuffer>& GetAlphaTestPerMeshBuffers() {
+		return m_alphaTestPerMeshBuffers;
+	}
+	unsigned int GetBlendPerMeshBufferSRVIndex() const {
+		return m_blendPerMeshBuffers->GetSRVInfo().index;
+	}
+	std::shared_ptr<DynamicBuffer>& GetBlendPerMeshBuffers() {
+		return m_blendPerMeshBuffers;
 	}
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
@@ -58,7 +63,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
 
 	std::shared_ptr<DynamicBuffer> m_opaquePerMeshBuffers;
-	std::shared_ptr<DynamicBuffer> m_transparentPerMeshBuffers;
+	std::shared_ptr<DynamicBuffer> m_alphaTestPerMeshBuffers;
+	std::shared_ptr<DynamicBuffer> m_blendPerMeshBuffers;
 
 	std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

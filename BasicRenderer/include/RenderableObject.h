@@ -17,11 +17,13 @@ class RenderableObject : public SceneNode {
 public:
 	RenderableObject(std::wstring name);
 	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes);
-	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newTransparentMeshes);
+	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newAlphaTestMeshes, std::vector<std::shared_ptr<Mesh>>& newBlendMeshes);
 	std::vector<std::shared_ptr<Mesh>>& GetOpaqueMeshes();
-	std::vector<std::shared_ptr<Mesh>>& GetTransparentMeshes();
-	bool HasTransparent() const;
+	std::vector<std::shared_ptr<Mesh>>& GetAlphaTestMeshes();
+	std::vector<std::shared_ptr<Mesh>>& GetBlendMeshes();
+	bool HasAlphaTest() const;
 	bool HasOpaque() const;
+	bool HasBlend() const;
 	void SetSkin(std::shared_ptr<Skeleton> skeleton);
 	std::shared_ptr<Skeleton>& GetSkin();
 	PerObjectCB& GetPerObjectCBData();
@@ -30,25 +32,33 @@ public:
 
 	void SetCurrentManager(ObjectManager* manager);
 	void SetCurrentOpaqueDrawSetIndices(const std::vector<unsigned int>& indices);
-	void SetCurrentTransparentDrawSetIndices(const std::vector<unsigned int>& indices);
+	void SetCurrentAlphaTestDrawSetIndices(const std::vector<unsigned int>& indices);
+	void SetCurrentBlendDrawSetIndices(const std::vector<unsigned int>& indices);
 	void SetCurrentOpaqueDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views);
-	void SetCurrentTransparentDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views);
+	void SetCurrentAlphaTestDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& views);
+	void SetCurrentBlendDrawSetCommandViews(const std::vector<std::shared_ptr<BufferView>>& indices);
 	std::vector<unsigned int>& GetCurrentOpaqueDrawSetIndices();
-	std::vector<unsigned int>& GetCurrentTransparentDrawSetIndices();
+	std::vector<unsigned int>& GetCurrentAlphaTestDrawSetIndices();
+	std::vector<unsigned int>& GetCurrentBlendDrawSetIndices();
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentOpaqueDrawSetCommandViews();
-	std::vector<std::shared_ptr<BufferView>>& GetCurrentTransparentDrawSetCommandViews();
+	std::vector<std::shared_ptr<BufferView>>& GetCurrentAlphaTestDrawSetCommandViews();
+	std::vector<std::shared_ptr<BufferView>>& GetCurrentBlendDrawSetCommandViews();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
 	std::vector<std::shared_ptr<Mesh>> opaqueMeshes;
-	std::vector<std::shared_ptr<Mesh>> transparentMeshes;
+	std::vector<std::shared_ptr<Mesh>> alphaTestMeshes;
+	std::vector<std::shared_ptr<Mesh>> blendMeshes;
 	std::vector<unsigned int> m_opaqueDrawSetIndices;
-	std::vector<unsigned int> m_transparentDrawSetIndices;
+	std::vector<unsigned int> m_alphaTestDrawSetIndices;
+	std::vector<unsigned int> m_blendDrawSetIndices;
 	std::vector<std::shared_ptr<BufferView>> m_opaqueDrawSetCommandViews;
-	std::vector<std::shared_ptr<BufferView>> m_transparentDrawSetCommandViews;
+	std::vector<std::shared_ptr<BufferView>> m_alphaTestDrawSetCommandViews;
+	std::vector<std::shared_ptr<BufferView>> m_blendDrawSetCommandViews;
 	PerObjectCB perObjectCBData;
-	bool m_hasTransparent = false;
+	bool m_hasAlphaTest = false;
 	bool m_hasOpaque = false;
+	bool m_hasBlend = false;
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
 	std::shared_ptr<BufferView> m_perObjectCBView;
 	ObjectManager* m_currentManager = nullptr;

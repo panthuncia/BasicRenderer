@@ -19,7 +19,8 @@ MeshManager::MeshManager() {
 	m_resourceGroup->AddResource(m_meshletTriangles);
 
 	m_opaquePerMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"OpaquePerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
-	m_transparentPerMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"TransparentPerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
+	m_alphaTestPerMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"AlphaTestPerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
+	m_blendPerMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"BlendPerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
@@ -66,11 +67,17 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 		break;
 	}
-	case MaterialBuckets::Transparent: {
-		auto perMeshBufferView = m_transparentPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
+	case MaterialBuckets::AlphaTest: {
+		auto perMeshBufferView = m_alphaTestPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
 		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 		break;
 	}
+	case MaterialBuckets::Blend: {
+		auto perMeshBufferView = m_blendPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
+		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
+		break;
+	}
+
 	}
 	
 }

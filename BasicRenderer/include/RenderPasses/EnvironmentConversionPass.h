@@ -145,7 +145,7 @@ public:
 
 private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    BufferHandle vertexBufferHandle;
+    std::shared_ptr<Buffer> vertexBufferHandle;
 	std::wstring m_environmentName;
     std::shared_ptr<Texture> m_texture = nullptr;
 	std::shared_ptr<Texture> m_environmentCubeMap = nullptr;
@@ -227,11 +227,11 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
-		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.dataBuffer.get(), 0);
+		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
-        vertexBufferView.BufferLocation = vertexBufferHandle.dataBuffer->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.BufferLocation = vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
         vertexBufferView.StrideInBytes = sizeof(SkyboxVertex);
         vertexBufferView.SizeInBytes = vertexBufferSize;
 

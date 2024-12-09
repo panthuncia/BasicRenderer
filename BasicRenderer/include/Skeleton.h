@@ -6,7 +6,8 @@
 
 #include "Animation.h"
 #include "SceneNode.h"
-#include "BufferHandle.h"
+
+class Buffer;
 
 class Skeleton {
 public:
@@ -18,16 +19,16 @@ public:
     std::vector<int> userIDs;
 
     Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices);
-    Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, BufferHandle inverseBindMatricesHandle); // For copying, since bind matrices never change between instances
+    Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, std::shared_ptr<Buffer> inverseBindMatrices); // For copying, since bind matrices never change between instances
     ~Skeleton();
     void AddAnimation(const std::shared_ptr<Animation>& animation);
     void SetAnimation(size_t index);
     void UpdateTransforms();
-    UINT GetTransformsBufferIndex();
-    UINT GetInverseBindMatricesBufferIndex();
-    BufferHandle GetInverseBindMatricesHandle();
+    uint32_t GetTransformsBufferIndex();
+    uint32_t GetInverseBindMatricesBufferIndex();
+    std::shared_ptr<Buffer>& GetInverseBindMatricesBuffer();
 
 private:
-    BufferHandle m_transformsHandle;
-    BufferHandle m_inverseBindMatricesHandle;
+    std::shared_ptr<Buffer> m_transformsBuffer;
+    std::shared_ptr<Buffer> m_inverseBindMatricesBuffer;
 };

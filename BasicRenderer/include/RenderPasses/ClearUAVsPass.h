@@ -52,12 +52,12 @@ public:
 			}
 		}
 
-		// Transparent buffer
-		resource = currentScene->GetPrimaryCameraTransparentIndirectCommandBuffer()->GetResource();
+		// Alpha test buffer
+		resource = currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource();
 		counterOffset = resource->GetUAVCounterOffset();
 		apiResource = resource->GetAPIResource();
 
-		clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetTransparentClearBuffer();
+		clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetAlphaTestClearBuffer();
 		clearBufferAPIResource = clearBuffer->GetAPIResource();
 
 		//commandList->CopyResource(apiResource, clearBufferAPIResource);
@@ -65,7 +65,26 @@ public:
 
 		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
 			auto& light = lightPair.second;
-			for (auto& buffer : light->GetPerViewTransparentIndirectCommandBuffers()) {
+			for (auto& buffer : light->GetPerViewAlphaTestIndirectCommandBuffers()) {
+				apiResource = buffer->GetAPIResource();
+				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+			}
+		}
+
+		// Blende buffer
+		resource = currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource();
+		counterOffset = resource->GetUAVCounterOffset();
+		apiResource = resource->GetAPIResource();
+
+		clearBuffer = currentScene->GetIndirectCommandBufferManager()->GetBlendClearBuffer();
+		clearBufferAPIResource = clearBuffer->GetAPIResource();
+
+		//commandList->CopyResource(apiResource, clearBufferAPIResource);
+		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+
+		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
+			auto& light = lightPair.second;
+			for (auto& buffer : light->GetPerViewBlendIndirectCommandBuffers()) {
 				apiResource = buffer->GetAPIResource();
 				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 			}

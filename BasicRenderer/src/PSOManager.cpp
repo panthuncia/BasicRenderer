@@ -41,12 +41,28 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, Bl
     return m_psoCache[key];
 }
 
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+    PSOKey key(psoFlags, blendState, wireframe);
+    if (m_PPLLPSOCache.find(key) == m_PPLLPSOCache.end()) {
+        m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, blendState, wireframe);
+    }
+    return m_PPLLPSOCache[key];
+}
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPSOCache.find(key) == m_meshPSOCache.end()) {
         m_meshPSOCache[key] = CreateMeshPSO(psoFlags, blendState, wireframe);
     }
     return m_meshPSOCache[key];
+}
+
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+    PSOKey key(psoFlags, blendState, wireframe);
+    if (m_meshPPLLPSOCache.find(key) == m_meshPPLLPSOCache.end()) {
+        m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, blendState, wireframe);
+    }
+    return m_meshPPLLPSOCache[key];
 }
 
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe) {
@@ -64,9 +80,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
     psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
+    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
         psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    }
+    //}
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     if (wireframe) {
         psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
@@ -97,6 +113,55 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     return pso;
 }
 
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+    // Define shader macros
+    auto defines = GetShaderDefines(psoFlags);
+
+    // Compile shaders
+    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
+    CompileShader(L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6", defines, pixelShader);
+
+    // Create the pipeline state object
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
+    psoDesc.pRootSignature = rootSignature.Get();
+    psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
+    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
+    psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+    //}
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    if (wireframe) {
+        psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    }
+    psoDesc.RasterizerState.FrontCounterClockwise = true;
+    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
+        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    }
+    psoDesc.BlendState = GetBlendDesc(blendState);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    if (psoFlags & PSOFlags::PSO_SHADOW) {
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT;
+    }
+    else {
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
+
+    return pso;
+}
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
@@ -107,9 +172,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
     CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
-    if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
+    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
         CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
-    }
+    //}
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -177,6 +242,80 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     return pso;
 }
 
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
+    UINT psoFlags, BlendState blendState, bool wireframe) {
+    // Define shader macros
+    auto defines = GetShaderDefines(psoFlags);
+
+    // Compile shaders
+    Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+
+    CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
+    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
+    CompileShader(L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6", defines, pixelShader);
+    //}
+
+    // Create rasterizer state
+    CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    if (wireframe) {
+        rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    }
+    rasterizerState.FrontCounterClockwise = true;
+    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
+        rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    }
+
+    // Set up the blend state
+    CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(GetBlendDesc(blendState));
+
+    // Set up the depth stencil state
+    CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+    // Set the render target format
+    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+
+    // Define the pipeline state stream subobjects
+    struct PipelineStateStream {
+        CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
+        CD3DX12_PIPELINE_STATE_STREAM_MS MS;
+        CD3DX12_PIPELINE_STATE_STREAM_PS PS;
+        CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
+        CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
+        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
+        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
+    };
+
+    PipelineStateStream pipelineStateStream = {};
+    pipelineStateStream.RootSignature = rootSignature.Get();
+    pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
+
+    if (pixelShader) {
+        pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+    }
+
+    pipelineStateStream.RasterizerState = rasterizerState;
+    pipelineStateStream.BlendState = blendDesc;
+    pipelineStateStream.DepthStencilState = depthStencilState;
+
+    pipelineStateStream.DSVFormat = dsvFormat;
+
+    // Create the pipeline state stream descriptor
+    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
+    streamDesc.SizeInBytes = sizeof(PipelineStateStream);
+    streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
+
+    // Create the pipeline state
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    ID3D12Device2* device2 = nullptr;
+    ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
+    ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
+
+    return pso;
+}
+
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
     std::vector<DxcDefine> defines = {};
     if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
@@ -197,6 +336,18 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         macro.Name = L"PSO_IMAGE_BASED_LIGHTING";
         defines.insert(defines.begin(), macro);
     }
+	if (psoFlags & PSOFlags::PSO_ALPHA_TEST) {
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_ALPHA_TEST";
+		defines.insert(defines.begin(), macro);
+	}
+	if (psoFlags & PSOFlags::PSO_BLEND) {
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_BLEND";
+		defines.insert(defines.begin(), macro);
+	}
     return defines;
 }
 
@@ -310,7 +461,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[7] = {};
+    D3D12_ROOT_PARAMETER1 parameters[8] = {};
 
     // PerObject buffer index
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -361,6 +512,13 @@ void PSOManager::createRootSignature() {
     parameters[6].Constants.Num32BitValues = 5;
     parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+    // transparency info
+    parameters[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[7].Constants.ShaderRegister = 8;
+    parameters[7].Constants.RegisterSpace = 0;
+    parameters[7].Constants.Num32BitValues = 4;
+    parameters[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
     rootSignatureDesc.NumParameters = _countof(parameters);
@@ -404,7 +562,7 @@ D3D12_BLEND_DESC PSOManager::GetBlendDesc(BlendState blendState) {
     }
     case BlendState::BLEND_STATE_MASK: {
         D3D12_BLEND_DESC maskBlendDesc = {};
-        maskBlendDesc.AlphaToCoverageEnable = TRUE; // Enable Alpha-to-Coverage for multi-sampling anti-aliasing.
+        maskBlendDesc.AlphaToCoverageEnable = FALSE;
         maskBlendDesc.IndependentBlendEnable = FALSE;
 
         for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {

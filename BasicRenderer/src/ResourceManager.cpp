@@ -18,7 +18,7 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	m_samplerHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048, true);
 	m_rtvHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 10000, false);
 	m_dsvHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 10000, false);
-	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2000000, false);
+	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 100000, false);
 
 	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
@@ -86,7 +86,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UIN
 	perFrameCBData.spotLightMatrixBufferIndex = spotMatricesBufferIndex;
 	perFrameCBData.directionalLightCascadeBufferIndex = directionalCascadeMatricesBufferIndex;
 
-	UploadManager::GetInstance().UploadData(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.dataBuffer.get(), 0);
+	UploadManager::GetInstance().UploadData(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
 }
 
 void ResourceManager::WaitForCopyQueue() {
@@ -222,21 +222,20 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
 	ThrowIfFailed(commandAllocator->Reset());
 }
 
-BufferHandle ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData, bool UAV) {
+std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData, bool UAV) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
-	BufferHandle handle;
 	//handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-	handle.dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+	auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
 	if (pInitialData) {
-		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, handle.dataBuffer.get(), 0);
+		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}
 
-	ResourceTransition transition = { handle.dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
+	ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
 #if defined(_DEBUG)
 		transition.name = L"Buffer";
 #endif
 	QueueResourceTransition(transition);
-	return handle;
+	return dataBuffer;
 }
 
 void ResourceManager::QueueResourceTransition(const ResourceTransition& transition) {

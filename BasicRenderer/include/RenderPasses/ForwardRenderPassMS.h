@@ -88,9 +88,6 @@ public:
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
-
-		//D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
-		//D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
 		
 		unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
 		commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
@@ -101,8 +98,6 @@ public:
 
 			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-			/*size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
-			commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress+offset);*/
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
@@ -111,24 +106,20 @@ public:
 
 				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 				commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-				//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-				//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 
 				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
 		}
 
-		unsigned int transparentPerMeshBufferIndex = meshManager->GetTransparentPerMeshBufferSRVIndex();
+		unsigned int transparentPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
 		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
 
-		for (auto& pair : context.currentScene->GetTransparentRenderableObjectIDMap()) {
+		for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
-			auto& meshes = renderable->GetTransparentMeshes();
+			auto& meshes = renderable->GetAlphaTestMeshes();
 
 			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-			//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
-			//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh;
@@ -137,8 +128,6 @@ public:
 
 				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 				commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-				//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-				//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 
 				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}

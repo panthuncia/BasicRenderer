@@ -41,4 +41,11 @@ cbuffer variableBufferIndices : register(b7) {
     uint maxDrawIndex;
 }
 
+cbuffer transparencyBufferIndices : register(b8) {
+    uint PPLLHeadsDescriptorIndex;
+    uint PPLLNodesDescriptorIndex;
+    uint PPLLNodesCounterDescriptorIndex;
+    uint PPLLNodePoolSize;
+}
+
 #endif // __CBUFFERS_HLSL__
