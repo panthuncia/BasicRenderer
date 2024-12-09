@@ -41,6 +41,14 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, Bl
     return m_psoCache[key];
 }
 
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+    PSOKey key(psoFlags, blendState, wireframe);
+    if (m_PPLLPSOCache.find(key) == m_PPLLPSOCache.end()) {
+        m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, blendState, wireframe);
+    }
+    return m_PPLLPSOCache[key];
+}
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPSOCache.find(key) == m_meshPSOCache.end()) {
@@ -85,6 +93,55 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     }
     psoDesc.BlendState = GetBlendDesc(blendState);
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    if (psoFlags & PSOFlags::PSO_SHADOW) {
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT;
+    }
+    else {
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
+
+    return pso;
+}
+
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+    // Define shader macros
+    auto defines = GetShaderDefines(psoFlags);
+
+    // Compile shaders
+    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
+    CompileShader(L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6", defines, pixelShader);
+
+    // Create the pipeline state object
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
+    psoDesc.pRootSignature = rootSignature.Get();
+    psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
+    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
+    psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+    //}
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    if (wireframe) {
+        psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    }
+    psoDesc.RasterizerState.FrontCounterClockwise = true;
+    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
+        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    }
+    psoDesc.BlendState = GetBlendDesc(blendState);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;

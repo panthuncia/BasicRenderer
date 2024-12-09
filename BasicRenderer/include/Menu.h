@@ -106,6 +106,10 @@ private:
     bool allowTearing = false;
 	std::function<bool()> getAllowTearing;
     std::function<void(bool)> setAllowTearing;
+
+    bool drawBoundingSpheres = false;
+	std::function<bool()> getDrawBoundingSpheres;
+	std::function<void(bool)> setDrawBoundingSpheres;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -202,6 +206,9 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getAllowTearing = settingsManager.getSettingGetter<bool>("allowTearing");
 	allowTearing = getAllowTearing();
 
+	setDrawBoundingSpheres = settingsManager.getSettingSetter<bool>("drawBoundingSpheres");
+	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
+	drawBoundingSpheres = getDrawBoundingSpheres();
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -252,6 +259,9 @@ inline void Menu::Render(const RenderContext& context) {
         if (ImGui::Checkbox("Uncap framerate", &allowTearing)) {
 			setAllowTearing(allowTearing);
         }
+		if (ImGui::Checkbox("Draw Bounding Spheres", &drawBoundingSpheres)) {
+			setDrawBoundingSpheres(drawBoundingSpheres);
+		}
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();

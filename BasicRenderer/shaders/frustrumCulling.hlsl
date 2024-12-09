@@ -1,4 +1,5 @@
 #include "cbuffers.hlsli"
+#include "vertex.hlsli"
 
 struct IndirectCommand {
     uint perObjectBufferIndex;
@@ -40,17 +41,21 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
     float scaledBoundingRadius = perMesh.boundingSphere.radius * maxScale;
     
-    bool bCulled = false;
+    // Disable culling for skinned meshes for now, as the bounding sphere is not updated
+    if (!(perMesh.vertexFlags & VERTEX_SKINNED)) { // TODO: Implement skinned mesh culling
     
-    for (uint i = 0; i < 6; i++) {
-        float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
-        float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
-        float boundingRadius = perMesh.boundingSphere.radius;
-        bCulled |= distance < -scaledBoundingRadius; // Can I just exit here?
-    }
+        bool bCulled = false;
     
-    if (bCulled) {
-        return;
+        for (uint i = 0; i < 6; i++) {
+            float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
+            float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
+            float boundingRadius = perMesh.boundingSphere.radius;
+            bCulled |= distance < -scaledBoundingRadius; // Can I just exit here?
+        }
+    
+        if (bCulled) {
+            return;
+        }
     }
     
     indirectCommandOutputBuffer.Append(command);

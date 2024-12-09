@@ -132,6 +132,7 @@ private:
 	std::function<bool()> getMeshShadersEnabled;
     std::function<bool()> getIndirectDrawsEnabled;
 	std::function<uint8_t()> getNumFramesInFlight;
+    std::function<bool()> getDrawBoundingSpheres;
 };
 
 #endif //DX12RENDERER_H

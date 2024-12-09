@@ -32,7 +32,9 @@
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
+#include "RenderPasses/PPLLFillPass.h"
 #include "RenderPasses/PPLLFillPassMS.h"
+#include "RenderPasses/PPLLFillPassMSIndirect.h"
 #include "RenderPasses/PPLLResolvePass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
@@ -151,6 +153,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
     settingsManager.registerSetting<bool>("allowTearing", false);
+	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
 	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
 		return currentScene->GetRenderableObjectIDMap();
@@ -181,6 +184,7 @@ void DX12Renderer::SetSettings() {
 	getMeshShadersEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
+	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 
     settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
@@ -203,6 +207,9 @@ void DX12Renderer::SetSettings() {
 		});
 	settingsManager.addObserver<bool>("allowTearing", [this](const bool& newValue) {
 		m_allowTearing = newValue;
+		});
+	settingsManager.addObserver<bool>("drawBoundingSpheres", [this](const bool& newValue) {
+		rebuildRenderGraph = true;
 		});
 
     m_numFramesInFlight = getNumFramesInFlight();
@@ -906,8 +913,20 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(PPLLBuffer);
 	newGraph->AddResource(PPLLCounter);
 
-	auto PPLLFillPass = std::make_shared<PPLLFillPassMS>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
-	auto PPLLFillPassParameters = PassParameters();
+    std::shared_ptr<RenderPass> pPPLLFillPass;
+    auto PPLLFillPassParameters = PassParameters();
+    if (indirect) {
+        pPPLLFillPass = std::make_shared<PPLLFillPassMSIndirect>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
+		PPLLFillPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+    }
+    else {
+        if (useMeshShaders) {
+            pPPLLFillPass = std::make_shared<PPLLFillPassMS>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
+        }
+        else {
+            pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
+        }
+    }
 	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
 	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
 	PPLLFillPassParameters.shaderResources.push_back(blendPerMeshBuffer);
@@ -918,7 +937,7 @@ void DX12Renderer::CreateRenderGraph() {
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);
-	newGraph->AddPass(PPLLFillPass, PPLLFillPassParameters);
+	newGraph->AddPass(pPPLLFillPass, PPLLFillPassParameters);
 
 	auto ResolvePass = std::make_shared<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
 	auto ResolvePassParameters = PassParameters();
@@ -926,11 +945,13 @@ void DX12Renderer::CreateRenderGraph() {
 	ResolvePassParameters.shaderResources.push_back(PPLLBuffer);
 	newGraph->AddPass(ResolvePass, ResolvePassParameters);
 
-	auto debugPass = std::make_shared<DebugRenderPass>();
-    newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+	//auto debugPass = std::make_shared<DebugRenderPass>();
+    //newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
 
-    auto debugSpherePass = std::make_shared<DebugSpherePass>();
-	newGraph->AddPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+    if (getDrawBoundingSpheres()) {
+        auto debugSpherePass = std::make_shared<DebugSpherePass>();
+        newGraph->AddPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+    }
 
     newGraph->Compile();
     newGraph->Setup(commandQueue.Get());
