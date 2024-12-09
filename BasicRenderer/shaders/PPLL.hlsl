@@ -1,6 +1,7 @@
 #include "vertex.hlsli"
 #include "cbuffers.hlsli"
 #include "lighting.hlsli"
+#include "tonemapping.hlsli"
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
 #define FRAGMENT_LIST_NULL 0xffffffff
@@ -87,68 +88,11 @@ struct KBUFFER_STRUCT {
     float4 color;
 };
 
-/*float4 GatherLinkedList(float2 vfScreenAddress) {
-    uint2 vScreenAddress = uint2(vfScreenAddress);
-    RWTexture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
-    RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
-    
-        // Convert SV_POSITION to pixel coordinates if necessary
-    // If the input.position.xy are already pixel coords, just cast.
-    uint2 pixelCoord = (uint2)input.position.xy;
-
-    // Get the head of the fragment list for this pixel
-    uint head = FragmentListHead[pixelCoord];
-    if (head == FRAGMENT_LIST_NULL)
-    {
-        // No fragments for this pixel
-        return float4(0,0,0,0);
-    }
-
-    // Gather the fragments
-    uint fragmentIndices[MAX_FRAGMENTS];
-    uint count = 0;
-
-    uint current = head;
-    while (current != FRAGMENT_LIST_NULL && count < MAX_FRAGMENTS)
-    {
-        fragmentIndices[count++] = current;
-        current = PPLLNodes[current].uNext;
-    }
-
-    // Sort the fragments by depth (front to back)
-    // Front-to-back means smallest depth first
-    for (uint i = 0; i < count; i++)
-    {
-        for (uint j = i + 1; j < count; j++)
-        {
-            if (PPLLNodes[fragmentIndices[j]].depth < PPLLNodes[fragmentIndices[i]].depth)
-            {
-                uint temp = fragmentIndices[i];
-                fragmentIndices[i] = fragmentIndices[j];
-                fragmentIndices[j] = temp;
-            }
-        }
-    }
-
-    // Blend fragments front-to-back using standard alpha compositing
-    float4 outColor = float4(0,0,0,0);
-    for (uint i = 0; i < count; i++)
-    {
-        float4 srcColor = PPLLNodes[fragmentIndices[i]].color;
-        // "over" operation: outColor = srcColor + (1 - srcColor.a)*outColor
-        // To handle this correctly: outColor = outColor + srcColor * (1 - outColor.a)
-        outColor = outColor + srcColor * (1.0f - outColor.a);
-    }
-
-    return outColor;
-}*/
-
 [earlydepthstencil]
 float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
     Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
     StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
-// Convert SV_POSITION to pixel coordinates if necessary
-    // If the input.position.xy are already pixel coords, just cast.
+
     uint2 pixelCoord = (uint2) input.position.xy;
 
     // Get the head of the fragment list for this pixel
@@ -169,7 +113,6 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
     }
 
     // Sort the fragments by depth (front to back)
-    // Front-to-back means smallest depth first
     for (uint i = 0; i < count; i++) {
         for (uint j = i + 1; j < count; j++) {
             if (LinkedListUAV[fragmentIndices[j]].depth < LinkedListUAV[fragmentIndices[i]].depth) {
@@ -184,10 +127,11 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
     float4 outColor = float4(0, 0, 0, 0);
     for (uint i = 0; i < count; i++) {
         float4 srcColor = LinkedListUAV[fragmentIndices[i]].color;
-        // "over" operation: outColor = srcColor + (1 - srcColor.a)*outColor
-        // To handle this correctly: outColor = outColor + srcColor * (1 - outColor.a)
+        // "over" operation: outColor = outColor + srcColor * (1 - outColor.a)
         outColor = outColor + srcColor * (1.0f - outColor.a);
     }
 
+    outColor.xyz = reinhardJodie(outColor.xyz);
+    outColor.xyz = LinearToSRGB(outColor.xyz);
     return outColor;
 }
