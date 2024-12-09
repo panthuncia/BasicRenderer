@@ -28,7 +28,8 @@ Material::Material(const std::string& name,
     float roughnessFactor,
     DirectX::XMFLOAT4 baseColorFactor,
     DirectX::XMFLOAT4 emissiveFactor,
-    BlendState blendState)
+    BlendState blendState,
+    float alphaCutoff)
 	: m_name(name),
     m_psoFlags(psoFlags),
     m_baseColorTexture(baseColorTexture),
@@ -52,6 +53,7 @@ Material::Material(const std::string& name,
     m_materialData.emissiveFactor = emissiveFactor;
     m_materialData.metallicFactor = metallicFactor;
     m_materialData.roughnessFactor = roughnessFactor;
+	m_materialData.alphaCutoff = alphaCutoff;
     if (baseColorTexture != nullptr) {
         m_materialData.baseColorTextureIndex = baseColorTexture->GetBuffer()->GetSRVInfo().index;
         m_materialData.baseColorSamplerIndex = baseColorTexture->GetSamplerDescriptorIndex();

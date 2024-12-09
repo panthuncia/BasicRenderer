@@ -2,6 +2,7 @@
 #include "cbuffers.hlsli"
 #include "lighting.hlsli"
 #include "tonemapping.hlsli"
+#include "outputTypes.hlsli"
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
 #define FRAGMENT_LIST_NULL 0xffffffff
@@ -68,7 +69,69 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     // Allocate a new fragment
     int nNewFragmentAddress = AllocateFragment(vScreenAddress, LinkedListCounter);
     int nOldFragmentAddress = MakeFragmentLink(vScreenAddress, nNewFragmentAddress, RWFragmentListHead);
-    WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(lightingOutput.lighting.xyz, lightingOutput.baseColor.a), input.position.z, LinkedListUAV);
+    
+    float4 finalOutput;
+    switch (perFrameBuffer.outputType) {
+        case OUTPUT_COLOR:
+            finalOutput = float4(lightingOutput.lighting.xyz, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_NORMAL: // Normal
+            finalOutput = float4(lightingOutput.normalWS * 0.5 + 0.5, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_ALBEDO:
+            finalOutput = float4(lightingOutput.baseColor.rgb, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_METALLIC:
+            finalOutput = float4(lightingOutput.metallic, lightingOutput.metallic, lightingOutput.metallic, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_ROUGHNESS:
+            finalOutput = float4(lightingOutput.roughness, lightingOutput.roughness, lightingOutput.roughness, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_EMISSIVE:{
+                if (materialInfo.materialFlags & MATERIAL_EMISSIVE_TEXTURE) {
+                    float3 srgbEmissive = LinearToSRGB(lightingOutput.emissive);
+                    finalOutput = float4(srgbEmissive, lightingOutput.baseColor.a);
+                }
+                else {
+                    finalOutput = float4(materialInfo.emissiveFactor.rgb, lightingOutput.baseColor.a);
+                }
+                break;
+            }
+        case OUTPUT_AO:
+            finalOutput = float4(lightingOutput.ao, lightingOutput.ao, lightingOutput.ao, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_DEPTH:{
+                float depth = abs(input.positionViewSpace.z) * 0.1;
+                finalOutput = float4(depth, depth, depth, lightingOutput.baseColor.a);
+                break;
+            }
+#if defined(PSO_IMAGE_BASED_LIGHTING)
+        case OUTPUT_METAL_BRDF_IBL:
+            finalOutput = float4(lightingOutput.f_metal_brdf_ibl, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_DIELECTRIC_BRDF_IBL:
+            finalOutput = float4(lightingOutput.f_dielectric_brdf_ibl, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_SPECULAR_IBL:
+            finalOutput = float4(lightingOutput.f_specular_metal, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_METAL_FRESNEL_IBL:
+            finalOutput = float4(lightingOutput.f_metal_fresnel_ibl, lightingOutput.baseColor.a);
+            break;
+        case OUTPUT_DIELECTRIC_FRESNEL_IBL:
+            finalOutput = float4(lightingOutput.f_dielectric_fresnel_ibl, lightingOutput.baseColor.a);
+            break;
+#endif // IMAGE_BASED_LIGHTING
+        case OUTPUT_MESHLETS:{
+                finalOutput = lightMeshlets(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
+                break;
+            }
+        default:
+            finalOutput = float4(1.0, 0.0, 0.0, 1.0);
+            break;
+    }
+    
+    WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(finalOutput.rgb, finalOutput.a), input.position.z, LinkedListUAV);
 }
 
 //Resolve vertex Shader

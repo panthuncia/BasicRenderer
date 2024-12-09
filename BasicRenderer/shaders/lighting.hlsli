@@ -181,8 +181,8 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
         SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
         baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
-#if defined(PSO_ALPHA_TEST)
-        if (baseColor.a < 0.5){
+#if defined(PSO_ALPHA_TEST) || defined (PSO_BLEND)
+        if (baseColor.a < materialInfo.alphaCutoff){
             discard;
         }
 #endif // ALPHA_TEST
