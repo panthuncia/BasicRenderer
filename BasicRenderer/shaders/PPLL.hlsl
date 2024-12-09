@@ -6,7 +6,7 @@
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
 #define FRAGMENT_LIST_NULL 0xffffffff
-#define KBUFFER_SIZE 8
+#define K_NEAREST 8 // must be a power of 2
 #define MAX_FRAGMENTS 512
 
 struct PPLL_STRUCT {
@@ -147,9 +147,32 @@ VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0) {
 }
 
 struct KBUFFER_STRUCT {
-    uint depth;
+    float depth;
     float4 color;
 };
+
+
+void SortNearest(inout KBUFFER_STRUCT fragments[K_NEAREST]) {
+    // Bitonic sort- requires power of 2 kbuffer
+    [loop]
+    for (uint k = 2; k <= K_NEAREST; k <<= 1) {
+        [loop]
+        for (uint j = k >> 1; j > 0; j >>= 1) {
+            [loop]
+            for (uint i = 0; i < K_NEAREST; i++) {
+                uint ixj = i ^ j;
+                if (ixj > i && ixj < K_NEAREST) {
+                    // Compare and swap based on depth
+                    if (fragments[i].depth > fragments[ixj].depth) {
+                        KBUFFER_STRUCT temp = fragments[i];
+                        fragments[i] = fragments[ixj];
+                        fragments[ixj] = temp;
+                    }
+                }
+            }
+        }
+    }
+}
 
 [earlydepthstencil]
 float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
@@ -165,32 +188,81 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
         return float4(0, 0, 0, 0);
     }
 
-    // Gather the fragments
     uint fragmentIndices[MAX_FRAGMENTS];
     uint count = 0;
 
+    // Gather all fragments
     uint current = head;
     while (current != FRAGMENT_LIST_NULL && count < MAX_FRAGMENTS) {
         fragmentIndices[count++] = current;
         current = LinkedListUAV[current].uNext;
     }
 
-    // Sort the fragments by depth (front to back)
+    KBUFFER_STRUCT nearestFragments[K_NEAREST];
+    uint nearestCount = 0;
+
+    uint otherFragments[MAX_FRAGMENTS - K_NEAREST];
+    uint otherCount = 0;
+
+    // Separate the fragments into "nearest" and "others"
     for (uint i = 0; i < count; i++) {
-        for (uint j = i + 1; j < count; j++) {
-            if (LinkedListUAV[fragmentIndices[j]].depth < LinkedListUAV[fragmentIndices[i]].depth) {
-                uint temp = fragmentIndices[i];
-                fragmentIndices[i] = fragmentIndices[j];
-                fragmentIndices[j] = temp;
+        uint fragIndex = fragmentIndices[i];
+        float depth = LinkedListUAV[fragIndex].depth;
+
+        if (nearestCount < K_NEAREST) {
+            // We still have room in the nearestFragments array
+            nearestFragments[nearestCount].depth = depth;
+            nearestFragments[nearestCount].color = LinkedListUAV[fragIndex].color;
+            nearestCount++;
+        }
+        else {
+            // Find the farthest fragment in nearestFragments
+            float farthestDepth = 0;
+            uint farthestIndex = 0;
+            for (uint fi = 0; fi < nearestCount; fi++) {
+                float fd = nearestFragments[fi].depth;
+                if (fd > farthestDepth) {
+                    farthestDepth = fd;
+                    farthestIndex = fi;
+                }
+            }
+
+            if (depth < farthestDepth) {
+                // Replace the farthest one
+                nearestFragments[farthestIndex].depth = depth;
+                nearestFragments[farthestIndex].color = LinkedListUAV[fragIndex].color;
+            }
+            else {
+                // Put it into otherFragments for later blending
+                otherFragments[otherCount++] = fragIndex;
             }
         }
     }
+        
+    // Fill unused entries in nearestFragments with dummy values
+    // so the entire array has K_NEAREST entries.
+    for (uint i = nearestCount; i < K_NEAREST; i++) {
+        // Large depth so these dummy entries sort to the back.
+        nearestFragments[i].depth = 0xFFFFFFFF;
+        nearestFragments[i].color = float4(0, 0, 0, 0);
+    }
 
-    // Blend fragments front-to-back using standard alpha compositing
+    SortNearest(nearestFragments);
+
+    // Blend nearestFragments first (front-to-back)
     float4 outColor = float4(0, 0, 0, 0);
-    for (uint i = 0; i < count; i++) {
-        float4 srcColor = LinkedListUAV[fragmentIndices[i]].color;
-        // "over" operation: outColor = outColor + srcColor * (1 - outColor.a)
+    for (uint i = 0; i < K_NEAREST; i++) {
+        // Skip dummy fragments (if depth == 0xFFFFFFFF, it's dummy)
+        if (nearestFragments[i].depth == 0xFFFFFFFF)
+            break;
+        float4 srcColor = nearestFragments[i].color;
+        // "over" operation: outColor = outColor + srcColor * (1.0f - outColor.a)
+        outColor = outColor + srcColor * (1.0f - outColor.a);
+    }
+
+    // Blend the remaining fragments without sorting
+    for (uint i = 0; i < otherCount; i++) {
+        float4 srcColor = LinkedListUAV[otherFragments[i]].color;
         outColor = outColor + srcColor * (1.0f - outColor.a);
     }
 
