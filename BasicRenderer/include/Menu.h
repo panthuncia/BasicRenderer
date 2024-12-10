@@ -63,6 +63,7 @@ private:
     void DisplaySceneGraph();
     void DisplaySelectedNode();
 
+	bool m_meshShadersSupported = false;
     
     std::filesystem::path environmentsDir;
 
@@ -209,6 +210,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setDrawBoundingSpheres = settingsManager.getSettingSetter<bool>("drawBoundingSpheres");
 	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 	drawBoundingSpheres = getDrawBoundingSpheres();
+
+    m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 }
 
 inline void Menu::Render(const RenderContext& context) {
@@ -232,19 +235,24 @@ inline void Menu::Render(const RenderContext& context) {
 		if (ImGui::Checkbox("Shadows", &shadowsEnabled)) {
 			setShadowsEnabled(shadowsEnabled);
 		}
-		if (ImGui::Checkbox("Use Mesh Shaders", &meshShaderEnabled)) {
-            if (!meshShaderEnabled) {
-				if (indirectDrawsEnabled) {
-                    setIndirectDrawsEnabled(false);
-				}
-            }
-            else {
-                if (indirectDrawsEnabled) {
-                    setIndirectDrawsEnabled(true);
+        if (m_meshShadersSupported) {
+            if (ImGui::Checkbox("Use Mesh Shaders", &meshShaderEnabled)) {
+                if (!meshShaderEnabled) {
+                    if (indirectDrawsEnabled) {
+                        setIndirectDrawsEnabled(false);
+                    }
                 }
+                else {
+                    if (indirectDrawsEnabled) {
+                        setIndirectDrawsEnabled(true);
+                    }
+                }
+                setMeshShaderEnabled(meshShaderEnabled);
             }
-			setMeshShaderEnabled(meshShaderEnabled);
-		}
+        }
+        else {
+            ImGui::Text("Your GPU does not support mesh shaders!");
+        }
 		if (!meshShaderEnabled) {
 			ImGui::Text("Mesh Shaders must be enabled to use Indirect Draws.");
 		}

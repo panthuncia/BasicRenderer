@@ -243,6 +243,8 @@ void ResourceManager::QueueResourceTransition(const ResourceTransition& transiti
 }
 
 void ResourceManager::ExecuteResourceTransitions() {
+	queuedResourceTransitions.clear();
+	return;
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	auto& commandList = transitionCommandList;
 	auto& commandAllocator = transitionCommandAllocator;

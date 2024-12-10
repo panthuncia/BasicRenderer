@@ -39,10 +39,11 @@ float4 LoadFloat4(uint offset, ByteAddressBuffer buffer) {
 }
 
 matrix loadMatrixFromBuffer(StructuredBuffer<float4> matrixBuffer, uint matrixIndex) {
-    float4 bone1Row1 = matrixBuffer[matrixIndex * 4];
-    float4 bone1Row2 = matrixBuffer[matrixIndex * 4 + 1];
-    float4 bone1Row3 = matrixBuffer[matrixIndex * 4 + 2];
-    float4 bone1Row4 = matrixBuffer[matrixIndex * 4 + 3];
+    uint offset = matrixIndex * 4;
+    float4 bone1Row1 = matrixBuffer[offset];
+    float4 bone1Row2 = matrixBuffer[offset + 1];
+    float4 bone1Row3 = matrixBuffer[offset + 2];
+    float4 bone1Row4 = matrixBuffer[offset + 3];
     return float4x4(bone1Row1, bone1Row2, bone1Row3, bone1Row4);
 }
 

@@ -118,11 +118,17 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_xRes = x_res;
     m_yRes = y_res;
-    SetSettings();
+    auto& settingsManager = SettingsManager::GetInstance();
+    settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
+    getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     LoadPipeline(hwnd, x_res, y_res);
+    SetSettings();
+    ResourceManager::GetInstance().Initialize(commandQueue.Get());
+    PSOManager::GetInstance().initialize();
+    UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();
+    Menu::GetInstance().Initialize(hwnd, device, commandQueue, swapChain);
     CreateGlobalResources();
-	Menu::GetInstance().Initialize(hwnd, device, commandQueue, swapChain);
     
 }
 
@@ -167,9 +173,9 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<void(std::shared_ptr<void>)>>("markForDelete", [this](std::shared_ptr<void> node) {
 		MarkForDelete(node);
         });
-	settingsManager.registerSetting<bool>("enableMeshShader", true);
-	settingsManager.registerSetting<bool>("enableIndirectDraws", true);
-	settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
+    bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
+	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
+	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -183,7 +189,6 @@ void DX12Renderer::SetSettings() {
 	setEnvironment = settingsManager.getSettingSetter<std::string>("environmentName");
 	getMeshShadersEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
-	getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
 	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 
     settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
@@ -243,7 +248,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     ThrowIfFailed(D3D12CreateDevice(
         bestAdapter.Get(),
-        D3D_FEATURE_LEVEL_12_1,
+        D3D_FEATURE_LEVEL_12_0,
         IID_PPV_ARGS(&device)));
 
 #if defined(_DEBUG)
@@ -270,9 +275,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     // Initialize device manager and PSO manager
     DeviceManager::GetInstance().Initialize(device, commandQueue);
-    PSOManager::GetInstance().initialize();
-    UploadManager::GetInstance().Initialize();
-
 
     // Describe and create the swap chain
     auto numFramesInFlight = getNumFramesInFlight();
@@ -339,8 +341,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         m_commandLists.push_back(commandList);
     }
 
-
-    ResourceManager::GetInstance().Initialize(commandQueue.Get());
 
     // Create the depth stencil buffer
     D3D12_RESOURCE_DESC depthStencilDesc = CD3DX12_RESOURCE_DESC::Tex2D(
@@ -739,7 +739,15 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(transparentPerMeshBuffer);
 	newGraph->AddResource(blendPerMeshBuffer);
 
+    bool useMeshShaders = getMeshShadersEnabled();
+    if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
+        useMeshShaders = false;
+    }
+
 	bool indirect = getIndirectDrawsEnabled();
+	if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
+		indirect = false;
+	}
 	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
     if (indirect) {
         // Clear UAVs
@@ -760,8 +768,6 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
     }
 
-    
-    bool useMeshShaders = getMeshShadersEnabled();
     auto forwardPassParameters = PassParameters();
 	forwardPassParameters.constantBuffers.push_back(perObjectBuffer);
 	forwardPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
@@ -852,7 +858,8 @@ void DX12Renderer::CreateRenderGraph() {
         forwardPassParameters.shaderResources.push_back(m_environmentIrradiance);
     }
 
-    if (m_shadowMaps != nullptr && getShadowsEnabled()) {
+    auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
+    if (drawShadows) {
         newGraph->AddResource(m_shadowMaps);
 
         std::shared_ptr<RenderPass> shadowPass = nullptr;
@@ -930,7 +937,9 @@ void DX12Renderer::CreateRenderGraph() {
 	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
 	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
 	PPLLFillPassParameters.shaderResources.push_back(blendPerMeshBuffer);
-    PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
+    if (drawShadows) {
+        PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
+    }
     PPLLFillPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
 	PPLLFillPassParameters.shaderResources.push_back(m_environmentIrradiance);
     PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);

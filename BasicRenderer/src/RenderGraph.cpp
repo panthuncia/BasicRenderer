@@ -200,6 +200,9 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
 
 void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates) {
     for (const auto& [resourceName, requiredState] : batch.resourceStates) {
+        if (resourceName == L"AlphaTestPerMeshBuffers") {
+            print("?");
+        }
         ResourceState previousState = ResourceState::UNKNOWN;
         auto it = previousStates.find(resourceName);
         std::shared_ptr<Resource> resource = GetResourceByName(resourceName);

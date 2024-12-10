@@ -54,9 +54,14 @@ Buffer::Buffer(
 }
 
 std::vector<D3D12_RESOURCE_BARRIER>& Buffer::GetTransitions(ResourceState fromState, ResourceState toState) {
-	if (fromState == toState) {
-		return m_emptyTransitions;
+#if defined(_DEBUG)
+	if (fromState != currentState) {
+		throw(std::runtime_error("Buffer state mismatch"));
 	}
+	if (fromState == toState) {
+		throw(std::runtime_error("Useless transition"));
+	}
+#endif
 
 	D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
 	D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);

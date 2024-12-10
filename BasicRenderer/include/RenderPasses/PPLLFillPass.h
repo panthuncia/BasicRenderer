@@ -131,6 +131,11 @@ public:
 			}
 		}
 
+		//D3D12_RESOURCE_BARRIER uavBarrier1 = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLHeadPointerTexture->GetAPIResource());
+		//D3D12_RESOURCE_BARRIER uavBarrier2 = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLBuffer->GetAPIResource());
+		//D3D12_RESOURCE_BARRIER barriers[2] = {uavBarrier1, uavBarrier2};
+		//commandList->ResourceBarrier(2, barriers);
+
 		commandList->Close();
 		return { commandList.Get() };
 	}

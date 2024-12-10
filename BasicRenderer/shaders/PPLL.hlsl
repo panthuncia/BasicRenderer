@@ -195,7 +195,8 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
     uint current = head;
     while (current != FRAGMENT_LIST_NULL && count < MAX_FRAGMENTS) {
         fragmentIndices[count++] = current;
-        current = LinkedListUAV[current].uNext;
+        PPLL_STRUCT node = LinkedListUAV[current];
+        current = node.uNext;
     }
 
     KBUFFER_STRUCT nearestFragments[K_NEAREST];
