@@ -769,7 +769,7 @@ void DX12Renderer::CreateRenderGraph() {
     }
 
     auto forwardPassParameters = PassParameters();
-	forwardPassParameters.constantBuffers.push_back(perObjectBuffer);
+	forwardPassParameters.shaderResources.push_back(perObjectBuffer);
 	forwardPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
 	forwardPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
 
@@ -878,7 +878,7 @@ void DX12Renderer::CreateRenderGraph() {
 		else {
 			shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
 		}
-		shadowPassParameters.constantBuffers.push_back(perObjectBuffer);
+		shadowPassParameters.shaderResources.push_back(perObjectBuffer);
 		shadowPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
 		shadowPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
         shadowPassParameters.shaderResources.push_back(blendPerMeshBuffer);
