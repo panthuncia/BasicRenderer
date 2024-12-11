@@ -174,7 +174,6 @@ void SortNearest(inout KBUFFER_STRUCT fragments[K_NEAREST]) {
     }
 }
 
-[earlydepthstencil]
 float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
     Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
     StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
