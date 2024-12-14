@@ -179,10 +179,6 @@ private:
 
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
-        // Create a default heap for the vertex buffer
-        CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
-
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
 		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
@@ -202,7 +198,7 @@ private:
         CD3DX12_ROOT_PARAMETER1 environmentRootParameters[3];
         environmentRootParameters[0].InitAsDescriptorTable(1, &environmentDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
         environmentRootParameters[1].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b1)
-        environmentRootParameters[2].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Roughness
+        environmentRootParameters[2].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL);
 
         D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
         samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -280,16 +276,6 @@ private:
         blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
         blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-        //blendDesc.RenderTarget[1].BlendEnable = TRUE;
-        //blendDesc.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
-        //blendDesc.RenderTarget[1].DestBlend = D3D12_BLEND_ONE;
-        //blendDesc.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
-        //blendDesc.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
-        //blendDesc.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ZERO;
-        //blendDesc.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        //blendDesc.RenderTarget[1].LogicOpEnable = FALSE;
-        //blendDesc.RenderTarget[1].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
         D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
         depthStencilDesc.DepthEnable = FALSE;
         depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
@@ -298,7 +284,7 @@ private:
         DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = inputLayoutDesc;   // No input layout needed for full-screen triangle
+        psoDesc.InputLayout = inputLayoutDesc;
         psoDesc.pRootSignature = rootSignature.Get();
         psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
         psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
@@ -309,8 +295,6 @@ private:
         psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         psoDesc.NumRenderTargets = 1;
         psoDesc.RTVFormats[0] = renderTargetFormat;
-        //psoDesc.RTVFormats[1] = renderTargetFormat;
-        //psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
         psoDesc.SampleDesc.Count = 1;
         psoDesc.SampleDesc.Quality = 0;
         psoDesc.InputLayout = inputLayoutDesc;

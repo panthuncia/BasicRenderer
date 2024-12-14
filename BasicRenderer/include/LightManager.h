@@ -40,7 +40,6 @@ private:
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_spotViewInfo; // Indices into camera buffer
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_pointViewInfo;
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_directionalViewInfo;
-    //std::unordered_map<int, unsigned int> lightIndexMap; // Maps localID to buffer index
     std::vector<Light*> m_lights; // Active light IDs
     std::vector<Light*> m_spotLights;
 	std::vector<Light*> m_pointLights;

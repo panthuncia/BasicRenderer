@@ -70,9 +70,6 @@ public:
 
 		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
 
-		//D3D12_GPU_VIRTUAL_ADDRESS objectBufferAddress = context.currentScene->GetObjectManager()->GetPerObjectBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
-		//D3D12_GPU_VIRTUAL_ADDRESS perMeshBufferAddress = context.currentScene->GetMeshManager()->GetPerMeshBuffers()->GetBuffer()->m_buffer->GetGPUVirtualAddress();
-
 		auto drawObjects = [&]() {
 			// Opaque objects
 			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
@@ -83,8 +80,6 @@ public:
 
 				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-				//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
-				//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
@@ -92,8 +87,6 @@ public:
 					commandList->SetPipelineState(pso.Get());
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-					//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-					//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}
@@ -108,8 +101,6 @@ public:
 
 				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-				//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
-				//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
@@ -117,8 +108,6 @@ public:
 					commandList->SetPipelineState(pso.Get());
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-					//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-					//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}
@@ -133,8 +122,6 @@ public:
 
 				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
-				//size_t offset = renderable->GetCurrentPerObjectCBView()->GetOffset();
-				//commandList->SetGraphicsRootConstantBufferView(0, objectBufferAddress + offset);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
@@ -142,8 +129,6 @@ public:
 					commandList->SetPipelineState(pso.Get());
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
-					//auto offset = mesh.GetPerMeshBufferView()->GetOffset();
-					//commandList->SetGraphicsRootConstantBufferView(1, perMeshBufferAddress + offset);
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}

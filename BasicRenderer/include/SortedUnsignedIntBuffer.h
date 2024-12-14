@@ -30,7 +30,6 @@ public:
         auto it = std::lower_bound(m_data.begin(), m_data.end(), element);
         size_t index = std::distance(m_data.begin(), it);
 
-        // Insert the element
         m_data.insert(it, element);
 
         // Update the earliest modified index
@@ -49,7 +48,6 @@ public:
         if (it != m_data.end() && *it == element) {
             size_t index = std::distance(m_data.begin(), it);
 
-            // Remove the element
             m_data.erase(it);
 
             // Update the earliest modified index
@@ -67,32 +65,6 @@ public:
     const unsigned int& operator[](UINT index) const {
         return m_data[index];
     }
-
-    // Update only the modified portion of the buffer
-    //bool UpdateUploadBuffer() {
-    //    if (m_earliestModifiedIndex < m_data.size()) {
-    //        // Calculate the byte offset and size to update
-    //        size_t offset = m_earliestModifiedIndex * sizeof(unsigned int);
-    //        size_t dataSize = (m_data.size() - m_earliestModifiedIndex) * sizeof(unsigned int);
-
-    //        // Map the buffer
-    //        unsigned int* pData = nullptr;
-    //        D3D12_RANGE readRange = { 0, 0 };
-    //        m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pData));
-
-    //        // Copy the modified data
-    //        memcpy(reinterpret_cast<unsigned char*>(pData) + offset, m_data.data() + m_earliestModifiedIndex, dataSize);
-
-    //        // Unmap the buffer
-    //        m_uploadBuffer->m_buffer->Unmap(0, nullptr);
-
-    //        // Reset the earliest modified index
-    //        //m_earliestModifiedIndex = m_data.size();
-
-    //        return true;
-    //    }
-    //    return false;
-    //}
 
     void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
         onResized = callback;
@@ -145,7 +117,6 @@ private:
 
 	bool m_UAV = false;
 
-    // Create the GPU buffers
     void CreateBuffer(size_t capacity) {
 		auto& device = DeviceManager::GetInstance().GetDevice();
 		m_capacity = capacity;

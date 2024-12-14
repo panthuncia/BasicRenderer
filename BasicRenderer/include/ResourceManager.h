@@ -90,7 +90,7 @@ public:
             bufferSize = ((requiredSize + alignment - 1) / alignment) * alignment;
 
             // Find the next 4096-aligned address after requiredSize
-            UINT potentialCounterOffset = (requiredSize + 4095) & ~4095; // Round up to nearest multiple of 4096
+            UINT potentialCounterOffset = (requiredSize + 4095) & ~4095;
 
             // If the 4096-aligned address is within the buffer, we can use it
             if (potentialCounterOffset + sizeof(UINT) <= bufferSize) {
@@ -105,12 +105,6 @@ public:
             assert(counterOffset % 4096 == 0);
 		}
 
-		//if (hasUploadBuffer) {
-		//	handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-		//}
-		//else {
-		//	handle.uploadBuffer = nullptr;
-		//}
         auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
         
         ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
@@ -348,9 +342,6 @@ public:
 		// Calculate the size of the buffer to be 256-byte aligned
 		UINT bufferSize = (sizeof(T) + 255) & ~255;
 
-
-		// Create the upload and data buffers
-        //handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
         auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
 		dataBuffer->SetName(name);
         ResourceTransition transition;

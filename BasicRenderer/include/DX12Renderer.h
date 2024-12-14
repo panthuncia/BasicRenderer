@@ -45,10 +45,6 @@ public:
     void SubmitReadbackRequest(ReadbackRequest&& request);
     std::vector<ReadbackRequest>& GetPendingReadbackRequests();
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
-    template <typename T>
-    void MarkForDelete(const std::shared_ptr<T>& ptr) {
-        m_stuffToDelete.push_back(std::static_pointer_cast<void>(ptr));
-    }
 
 private:
     ComPtr<IDXGIFactory7> factory;
@@ -96,8 +92,6 @@ private:
 
     std::mutex readbackRequestsMutex;
 	std::vector<ReadbackRequest> m_readbackRequests;
-
-    std::vector<std::shared_ptr<void>> m_stuffToDelete; // Some things need deferred deletion
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();

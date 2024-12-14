@@ -6,8 +6,6 @@ using namespace DirectX;
 
 Camera::Camera(std::wstring name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) : lookAt(lookAt), up(up), fieldOfView(fov), aspectRatio(aspect), zNear(zNear), zFar(zFar), SceneNode(name) {
     m_cameraInfo.view = XMMatrixIdentity();
-    //viewMatrixInverse = XMMatrixIdentity();
-    //viewProjectionMatrixInverse = XMMatrixIdentity();
 
     m_cameraInfo.projection = XMMatrixPerspectiveFovRH(fieldOfView, aspectRatio, zNear, zFar);
 	m_cameraInfo.viewProjection = m_cameraInfo.projection;
@@ -22,7 +20,6 @@ Camera::Camera(std::wstring name, XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float
 }
 
 void Camera::OnUpdate() {
-    //viewMatrixInverse = transform.modelMatrix;
     auto inverseMatrix = XMMatrixInverse(nullptr, transform.modelMatrix);
     m_cameraInfo.view = RemoveScalingFromMatrix(inverseMatrix);
     UpdateViewProjectionMatrix();

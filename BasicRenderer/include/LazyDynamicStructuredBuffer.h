@@ -26,7 +26,7 @@ public:
 	virtual size_t GetElementSize() const = 0;
 };
 
-template <typename T>  // Enforce the concept at the template parameter level
+template <typename T>
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 

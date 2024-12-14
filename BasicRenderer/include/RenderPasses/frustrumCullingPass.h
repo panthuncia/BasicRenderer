@@ -178,7 +178,6 @@ public:
 			}
 		}
 
-		// Close the command list
 		ThrowIfFailed(commandList->Close());
 
 		//invalidated = false;
@@ -197,7 +196,6 @@ private:
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
 		PSOManager::GetInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
 
-		// Define the pipeline state stream subobjects for compute
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
 			CD3DX12_PIPELINE_STATE_STREAM_CS CS;
@@ -207,12 +205,10 @@ private:
 		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetRootSignature().Get();
 		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 
-		// Create the pipeline state stream descriptor
 		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
 		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
 		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
 
-		// Create the pipeline state
 		auto& device = DeviceManager::GetInstance().GetDevice();
 		ID3D12Device2* device2 = nullptr;
 		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));

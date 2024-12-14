@@ -170,9 +170,6 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene", [this](Scene& scene) -> std::shared_ptr<SceneNode> {
 		return AppendScene(scene);
 		});
-    settingsManager.registerSetting<std::function<void(std::shared_ptr<void>)>>("markForDelete", [this](std::shared_ptr<void> node) {
-		MarkForDelete(node);
-        });
     bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
@@ -563,7 +560,6 @@ void DX12Renderer::Render() {
 
 	ProcessReadbackRequests(); // Save images to disk if requested
 
-    m_stuffToDelete.clear(); // Deferred deletion
     DeletionManager::GetInstance().ProcessDeletions();
 }
 
@@ -823,7 +819,7 @@ void DX12Renderer::CreateRenderGraph() {
         if (currentEnvironmentPass != nullptr) {
             if (!currentEnvironmentPass->IsInvalidated()) {
                 skipEnvironmentPass = true;
-				MarkForDelete(m_currentEnvironmentTexture);
+                DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
                 m_currentEnvironmentTexture = nullptr;
             }
         }
@@ -977,7 +973,7 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
 	auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
     if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
         if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
-            MarkForDelete(m_currentEnvironmentTexture);
+            DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
             m_currentEnvironmentTexture = nullptr;
         }
 		// Load the cached environment
@@ -1005,7 +1001,7 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
 void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName) {
 	m_environmentName = environmentName;
 	if (m_currentEnvironmentTexture != nullptr) { // Don't delete resources mid-frame
-		MarkForDelete(m_currentEnvironmentTexture);
+        DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
 	}
     m_currentEnvironmentTexture = texture;
     m_currentEnvironmentTexture->SetName(L"EnvironmentTexture");
@@ -1066,7 +1062,7 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 
 void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
     if (m_currentSkybox != nullptr) { // Don't delete resources mid-frame
-        MarkForDelete(m_currentSkybox);
+        DeletionManager::GetInstance().MarkForDelete(m_currentSkybox);
     }
     m_currentSkybox = texture;
     m_currentSkybox->SetName(L"Skybox");
@@ -1075,7 +1071,7 @@ void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
 
 void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
     if (m_environmentIrradiance != nullptr) { // Don't delete resources mid-frame
-        MarkForDelete(m_environmentIrradiance);
+        DeletionManager::GetInstance().MarkForDelete(m_environmentIrradiance);
     }
 	m_environmentIrradiance = texture;
     m_environmentIrradiance->SetName(L"EnvironmentRadiance");
@@ -1087,7 +1083,7 @@ void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
 
 void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	if (m_prefilteredEnvironment != nullptr) { // Don't delete resources mid-frame
-		MarkForDelete(m_prefilteredEnvironment);
+        DeletionManager::GetInstance().MarkForDelete(m_prefilteredEnvironment);
 	}
 	m_prefilteredEnvironment = texture;
 	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");

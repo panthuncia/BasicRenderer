@@ -17,13 +17,11 @@ public:
 
     void UpdateViewMatrix(XMFLOAT3 eye, XMFLOAT3 target, XMFLOAT3 upVec) {
         m_cameraInfo.view = XMMatrixLookAtRH(XMLoadFloat3(&eye), XMLoadFloat3(&target), XMLoadFloat3(&upVec));
-        //viewMatrixInverse = XMMatrixInverse(nullptr, viewMatrix);
         UpdateViewProjectionMatrix();
     }
 
     void UpdateViewProjectionMatrix() {
 		m_cameraInfo.viewProjection = XMMatrixMultiply(m_cameraInfo.view, m_cameraInfo.projection);
-        //viewProjectionMatrixInverse = XMMatrixInverse(nullptr, viewProjectionMatrix);
     }
 
     DirectX::XMMATRIX GetViewMatrix() const {

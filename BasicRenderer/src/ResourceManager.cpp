@@ -224,7 +224,6 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
 
 std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData, bool UAV) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
-	//handle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
 	auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
 	if (pInitialData) {
 		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, dataBuffer.get(), 0);

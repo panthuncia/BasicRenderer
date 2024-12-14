@@ -24,7 +24,6 @@ public:
     }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
-    //BufferHandle& GetPerMeshBuffer();
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
 	int GetGlobalID() const;
@@ -105,7 +104,6 @@ private:
 	std::shared_ptr<Buffer> m_indexBufferHandle;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
-    //BufferHandle m_pPerMeshBuffer;
     PerMeshCB m_perMeshBufferData = { 0 };
 	std::unique_ptr<BufferView> m_perMeshBufferView;
 	MeshManager* m_pCurrentMeshManager = nullptr;

@@ -63,7 +63,6 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
     RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[PPLLNodesCounterDescriptorIndex];
     
-    // Screen address
     uint2 vScreenAddress = uint2(input.position.xy);
     
     // Allocate a new fragment

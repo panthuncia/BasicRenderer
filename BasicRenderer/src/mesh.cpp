@@ -160,8 +160,6 @@ void Mesh::SetVertexBufferView(std::unique_ptr<BufferView> view) {
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
-	//auto& resourceManager = ResourceManager::GetInstance();
-	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletBufferView = std::move(view);
@@ -170,8 +168,6 @@ void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
-	//auto& resourceManager = ResourceManager::GetInstance();
-	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 void Mesh::SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletVerticesBufferView = std::move(view);
@@ -180,8 +176,6 @@ void Mesh::SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
-	//auto& resourceManager = ResourceManager::GetInstance();
-	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletTrianglesBufferView = std::move(view);
@@ -190,8 +184,6 @@ void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
-	//auto& resourceManager = ResourceManager::GetInstance();
-	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }
 
 void Mesh::SetBufferViews(std::unique_ptr<BufferView> vertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView) {
@@ -207,6 +199,4 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> vertexBufferView, std::uni
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
-	//auto& resourceManager = ResourceManager::GetInstance();
-	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
 }

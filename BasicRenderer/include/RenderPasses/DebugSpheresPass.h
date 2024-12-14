@@ -148,23 +148,18 @@ private:
 		manager.CompileShader(L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6", {}, meshShader);
 		manager.CompileShader(L"shaders/sphere.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
-		// Create rasterizer state
 		CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 		rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
 		rasterizerState.FrontCounterClockwise = true;
 		rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 
-		// Set up the blend state
 		CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
-		// Set up the depth stencil state
 		CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 
-		// Set the render target format
 		DXGI_FORMAT rtvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 		DXGI_FORMAT dsvFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 
-		// Define the pipeline state stream subobjects
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
 			CD3DX12_PIPELINE_STATE_STREAM_MS MS;
@@ -195,12 +190,10 @@ private:
 
 		pipelineStateStream.DSVFormat = dsvFormat;
 
-		// Create the pipeline state stream descriptor
 		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
 		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
 		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
 
-		// Create the pipeline state
 		auto& device = DeviceManager::GetInstance().GetDevice();
 		ID3D12Device2* device2 = nullptr;
 		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));

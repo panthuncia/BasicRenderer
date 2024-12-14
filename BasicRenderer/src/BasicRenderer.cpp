@@ -22,6 +22,7 @@
 #include "Menu.h"
 #include "MaterialFlags.h"
 #include "PSOFlags.h"
+#include "DeletionManager.h"
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
@@ -253,10 +254,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
-	renderer.MarkForDelete(carScene);
-	renderer.MarkForDelete(dragonScene);
-	renderer.MarkForDelete(tigerScene);
-	renderer.MarkForDelete(mountainScene);
+	DeletionManager::GetInstance().MarkForDelete(carScene);
+    DeletionManager::GetInstance().MarkForDelete(dragonScene);
+    DeletionManager::GetInstance().MarkForDelete(tigerScene);
+    DeletionManager::GetInstance().MarkForDelete(mountainScene);
 	carScene.reset();
 	dragonScene.reset();
 	tigerScene.reset();

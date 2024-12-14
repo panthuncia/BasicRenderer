@@ -191,7 +191,7 @@ private:
         DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16_FLOAT;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = inputLayoutDesc;   // No input layout needed for full-screen triangle
+        psoDesc.InputLayout = inputLayoutDesc;
         psoDesc.pRootSignature = rootSignature.Get();
         psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
         psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
