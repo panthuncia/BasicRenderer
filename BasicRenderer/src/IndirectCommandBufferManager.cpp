@@ -85,18 +85,15 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
     std::shared_ptr<DynamicGloballyIndexedResource> pResource = std::make_shared<DynamicGloballyIndexedResource>(resource);
     m_buffers[bucket][entityID].push_back(pResource);
 
-    uint64_t naturalEntityID = entityID + 1; // 0 is not a natural number, might not work in Cantor pairing function
-    uint64_t bufferIndex = m_buffers[bucket][entityID].size(); // 1-indexed
-    uint64_t uniqueID = ((uint64_t)(naturalEntityID + bufferIndex) * (naturalEntityID + bufferIndex + 1)) / 2 + bufferIndex; // Cantor pairing function
     switch (bucket) {
 	case MaterialBuckets::Opaque:
-		m_opaqueResourceGroup->AddIndexedResource(pResource, uniqueID);
+		m_opaqueResourceGroup->AddResource(pResource);
 		break;
     case MaterialBuckets::AlphaTest:
-		m_alphaTestResourceGroup->AddIndexedResource(pResource, uniqueID);
+		m_alphaTestResourceGroup->AddResource(pResource);
 		break;
     case MaterialBuckets::Blend:
-		m_blendResourceGroup->AddIndexedResource(pResource, uniqueID);
+		m_blendResourceGroup->AddResource(pResource);
 		break;
     }
     return pResource;
@@ -106,21 +103,17 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 void IndirectCommandBufferManager::UnregisterBuffers(const int entityID) {
 
     for (auto type : MaterialBucketTypes) {
-        uint64_t bufferIndex = 0;
-        uint64_t naturalEntityID = entityID + 1; // 0 is not a natural number, might not work in Cantor pairing function
         for (std::shared_ptr<DynamicGloballyIndexedResource> buffer : m_buffers[type][entityID]) {
-            bufferIndex++;
             DeletionManager::GetInstance().MarkForDelete(buffer); // Delay deletion until after the current frame
-            uint64_t uniqueID = ((uint64_t)(naturalEntityID + bufferIndex) * (naturalEntityID + bufferIndex + 1)) / 2 + bufferIndex; // Cantor pairing function
             switch (type) {
 			case MaterialBuckets::Opaque:
-				m_opaqueResourceGroup->RemoveIndexedResource(uniqueID);
+				m_opaqueResourceGroup->RemoveResource(buffer.get());
 				break;
 			case MaterialBuckets::AlphaTest:
-                m_alphaTestResourceGroup->RemoveIndexedResource(uniqueID);
+                m_alphaTestResourceGroup->RemoveResource(buffer.get());
                 break;
 			case MaterialBuckets::Blend:
-				m_blendResourceGroup->RemoveIndexedResource(uniqueID);
+				m_blendResourceGroup->RemoveResource(buffer.get());
 				break;
             }
         }
