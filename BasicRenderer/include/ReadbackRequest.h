@@ -12,4 +12,5 @@ struct ReadbackRequest {
     UINT64 totalSize;
     std::wstring outputFile;
     std::function<void()> callback;
+	UINT64 fenceValue;
 };

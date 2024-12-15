@@ -33,7 +33,7 @@ public:
 		CreatePSO();
 	}
 
-	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
+	PassReturn Execute(RenderContext& context) override {
 		auto& commandList = m_commandLists[context.frameIndex];
 		auto& allocator = m_allocators[context.frameIndex];
 		ThrowIfFailed(allocator->Reset());
@@ -182,7 +182,7 @@ public:
 
 		//invalidated = false;
 
-		return { commandList.Get()};
+		return { { commandList.Get()} };
 	}
 
 	void Cleanup(RenderContext& context) override {

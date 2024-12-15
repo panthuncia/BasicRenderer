@@ -19,13 +19,19 @@ struct PassParameters {
 	std::vector<std::shared_ptr<Resource>> indirectArgumentBuffers;
 };
 
+struct PassReturn {
+	std::vector<ID3D12GraphicsCommandList*> commandLists;
+	ID3D12Fence* fence = nullptr;
+	uint64_t fenceValue = 0;
+};
+
 class RenderPass {
 public:
     virtual ~RenderPass() = default;
 
     virtual void Setup() = 0;
 	virtual void Update() {};
-    virtual std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) = 0;
+    virtual PassReturn Execute(RenderContext& context) = 0;
     virtual void Cleanup(RenderContext& context) = 0;
 
 	void Invalidate() { invalidated = true; }

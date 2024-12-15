@@ -140,10 +140,6 @@ void UploadTextureData(
 
 std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(XMFLOAT3 pos);
 
-void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* cubemap, const std::wstring& outputFile);
-
-void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile);
-
 std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& directory);
 
 inline uint16_t CalculateMipLevels(uint16_t width, uint16_t height) {

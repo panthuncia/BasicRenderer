@@ -139,9 +139,12 @@ void RenderGraph::Execute(RenderContext& context) {
         // Execute all passes in the batch
         for (auto& passAndResources : batch.passes) {
 			if (passAndResources.pass->IsInvalidated()) {
-                auto list = passAndResources.pass->Execute(context);
-				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(list.data());
-				queue->ExecuteCommandLists(static_cast<UINT>(list.size()), ppCommandLists);
+                auto passReturn = passAndResources.pass->Execute(context);
+				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
+				queue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
+                if (passReturn.fence != nullptr) {
+					queue->Signal(passReturn.fence, passReturn.fenceValue);
+                }
 			}
         }
     }

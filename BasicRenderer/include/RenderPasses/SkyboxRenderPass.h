@@ -32,7 +32,7 @@ public:
 		CreateSkyboxPSO();
     }
 
-    std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
 
         auto& commandList = m_commandLists[context.frameIndex];
         auto& allocator = m_allocators[context.frameIndex];
@@ -70,7 +70,7 @@ public:
 		commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
 
 		commandList->Close();
-		return { commandList.Get() };
+        return { { commandList.Get() } };
     }
 
     void Cleanup(RenderContext& context) override {

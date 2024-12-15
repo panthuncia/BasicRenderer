@@ -40,6 +40,7 @@
 #include "Menu.h"
 #include "DeletionManager.h"
 #include "UploadManager.h"
+#include "RendererUtils.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -384,6 +385,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
     }
 
+    ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
@@ -721,6 +723,9 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
+    RendererUtils utils([this](ReadbackRequest&& request) {
+        SubmitReadbackRequest(std::move(request));
+        }, m_readbackFence);
     auto newGraph = std::make_unique<RenderGraph>();
 
 	auto meshResourceGroup = currentScene->GetMeshManager()->GetResourceGroup();
@@ -803,7 +808,7 @@ void DX12Renderer::CreateRenderGraph() {
         ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo().index);
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
-		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
+		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(utils, m_lutTexture);
 		auto brdfIntegrationPassParameters = PassParameters();
 		brdfIntegrationPassParameters.renderTargets.push_back(m_lutTexture);
         newGraph->AddPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
@@ -830,7 +835,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddResource(m_currentEnvironmentTexture);
         //newGraph->AddResource(m_currentSkybox);
         //newGraph->AddResource(m_environmentIrradiance);
-        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
+        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(utils, m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
         auto environmentConversionPassParameters = PassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
@@ -838,7 +843,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
         //newGraph->AddResource(m_prefilteredEnvironment);
-		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
+		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(utils, m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 		auto environmentFilterPassParameters = PassParameters();
 		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
 		environmentFilterPassParameters.renderTargets.push_back(m_prefilteredEnvironment);
@@ -1104,10 +1109,21 @@ std::vector<ReadbackRequest>& DX12Renderer::GetPendingReadbackRequests() {
 
 void DX12Renderer::ProcessReadbackRequests() {
     std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+
+    std::vector<ReadbackRequest> remainingRequests;
     for (auto& request : m_readbackRequests) {
-        request.callback();
+        // Check if the GPU has completed the work for this readback
+        if (m_readbackFence->GetCompletedValue() >= request.fenceValue) {
+            request.callback();
+        }
+        else {
+            // Keep the request in the queue for the next frame
+            remainingRequests.push_back(std::move(request));
+        }
     }
-    m_readbackRequests.clear();
+
+    // Update the queue with remaining requests
+    m_readbackRequests = std::move(remainingRequests);
 }
 
 void DX12Renderer::SetDebugTexture(Texture* texture) {

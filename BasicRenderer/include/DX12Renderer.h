@@ -66,6 +66,8 @@ private:
     HANDLE m_frameFenceEvent;
     UINT64 m_currentFrameFenceValue = 0;
 
+	ComPtr<ID3D12Fence> m_readbackFence;
+
     InputManager inputManager;
     MovementState movementState;
     float verticalAngle = 0;

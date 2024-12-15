@@ -46,7 +46,7 @@ public:
 		}
 	}
 
-	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
+	PassReturn Execute(RenderContext& context) override {
 
 		auto numBlend = context.currentScene->GetNumBlendDraws();
 		if (numBlend == 0) {
@@ -138,7 +138,7 @@ public:
 		}
 
 		commandList->Close();
-		return { commandList.Get() };
+		return { { commandList.Get() } };
 	}
 
 	virtual void Update() override {

@@ -10,16 +10,18 @@
 #include "ResourceHandles.h"
 #include "Utilities.h"
 #include "UploadManager.h"
+#include "RendererUtils.h"
 
 class EnvironmentConversionPass : public RenderPass {
 public:
-    EnvironmentConversionPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance, std::string environmentName) {
+    EnvironmentConversionPass(RendererUtils utils, std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance, std::string environmentName) : m_utils(utils) {
 		m_environmentName = s2ws(environmentName);
         m_texture = environmentTexture;
 		m_environmentCubeMap = environmentCubeMap;
 		m_environmentRadiance = environmentRadiance;
         m_viewMatrices = GetCubemapViewMatrices({0.0, 0.0, 0.0});
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
+		m_readbackFence = utils.GetReadbackFence();
     }
 
     void Setup() override {
@@ -58,7 +60,7 @@ public:
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
 
 		uint16_t skyboxRes = getSkyboxResolution();
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
@@ -124,21 +126,27 @@ public:
 			commandLists.push_back(commandList);
         }
         // We can reuse the results of this pass
+		PassReturn passReturn;
         if (m_currentPass == m_numPasses) {
             
             invalidated = false;
 			m_currentPass = 0;
 
             m_copyCommandList->Reset(m_allocators.back().Get(), nullptr);
+            UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
             auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds", L"environments");
-            SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentRadiance.get(), path);
+            m_utils.SaveCubemapToDDS(context.device, m_copyCommandList.Get(), m_environmentRadiance.get(), path, fenceValue);
             path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
-            SaveCubemapToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_environmentCubeMap.get(), path);
+            m_utils.SaveCubemapToDDS(context.device, m_copyCommandList.Get(), m_environmentCubeMap.get(), path, fenceValue);
             m_copyCommandList->Close();
             commandLists.push_back(m_copyCommandList.Get());
+            
+            passReturn.fence = m_readbackFence;
+			passReturn.fenceValue = fenceValue;
         }
 
-		return commandLists;
+		passReturn.commandLists = std::move(commandLists);
+		return passReturn;
     }
 
     void Cleanup(RenderContext& context) override {
@@ -146,6 +154,9 @@ public:
     }
 
 private:
+	RendererUtils m_utils;
+	ID3D12Fence* m_readbackFence = nullptr;
+
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
 	std::wstring m_environmentName;

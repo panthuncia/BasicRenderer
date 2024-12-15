@@ -22,10 +22,8 @@ if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET BasicRenderer PROPERTY CXX_STANDARD 20)
 endif()
 
-# Define _DEBUG in Debug builds
-#target_compile_definitions(BasicRenderer PRIVATE
-#    $<$<CONFIG:Debug>:_DEBUG>
-#)
+#set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi") # For MSVC
+#set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")
 
 function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_name)
     # Default target name if not provided

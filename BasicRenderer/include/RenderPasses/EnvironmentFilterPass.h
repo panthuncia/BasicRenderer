@@ -10,15 +10,17 @@
 #include "ResourceHandles.h"
 #include "Utilities.h"
 #include "UploadManager.h"
+#include "RendererUtils.h"
 
 class EnvironmentFilterPass : public RenderPass {
 public:
-    EnvironmentFilterPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> preFilteredEnvironment, std::string environmentName) {
+    EnvironmentFilterPass(RendererUtils utils, std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> preFilteredEnvironment, std::string environmentName) : m_utils(utils){
         m_environmentName = s2ws(environmentName);
         m_texture = environmentTexture;
 		m_prefilteredEnvironment = preFilteredEnvironment;
         m_viewMatrices = GetCubemapViewMatrices({ 0.0, 0.0, 0.0 });
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
+		m_readbackFence = utils.GetReadbackFence();
     }
 
     void Setup() override {
@@ -37,7 +39,7 @@ public:
     }
 
     // This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
 
         uint16_t skyboxRes = getSkyboxResolution();
 
@@ -96,12 +98,14 @@ public:
 
             invalidated = false;
 
+            UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
+
             auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds", L"environments");
-            SaveCubemapToDDS(context.device, m_commandList.Get(), context.commandQueue, m_prefilteredEnvironment.get(), path);
+            m_utils.SaveCubemapToDDS(context.device, m_commandList.Get(), m_prefilteredEnvironment.get(), path, fenceValue);
             m_commandList->Close();
             commandLists.push_back(m_commandList.Get());
 
-        return commandLists;
+            return { commandLists, m_readbackFence, fenceValue };
     }
 
     void Cleanup(RenderContext& context) override {
@@ -109,6 +113,9 @@ public:
     }
 
 private:
+	RendererUtils m_utils;
+	ID3D12Fence* m_readbackFence;
+
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
     std::wstring m_environmentName;

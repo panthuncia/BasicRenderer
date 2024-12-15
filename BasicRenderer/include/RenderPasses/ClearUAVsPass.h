@@ -22,7 +22,7 @@ public:
 		m_commandList->Close();
 	}
 
-	std::vector<ID3D12GraphicsCommandList*> Execute(RenderContext& context) override {
+	PassReturn Execute(RenderContext& context) override {
 		auto commandList = m_commandList.Get();
 		ThrowIfFailed(m_commandAllocator->Reset());
 		ThrowIfFailed(commandList->Reset(m_commandAllocator.Get(), nullptr));
@@ -95,7 +95,7 @@ public:
 
 		//invalidated = false;
 
-		return { commandList };
+		return { { commandList } };
 	}
 
 	void Cleanup(RenderContext& context) override {
