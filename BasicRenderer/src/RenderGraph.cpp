@@ -141,7 +141,9 @@ void RenderGraph::Execute(RenderContext& context) {
 			if (passAndResources.pass->IsInvalidated()) {
                 auto passReturn = passAndResources.pass->Execute(context);
 				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
-				queue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
+                queue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
+                DeviceManager::GetInstance().DiagnoseDeviceRemoval();
+
                 if (passReturn.fence != nullptr) {
 					queue->Signal(passReturn.fence, passReturn.fenceValue);
                 }

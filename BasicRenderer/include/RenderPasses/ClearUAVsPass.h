@@ -71,7 +71,7 @@ public:
 			}
 		}
 
-		// Blende buffer
+		// Blend buffer
 		resource = currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource();
 		counterOffset = resource->GetUAVCounterOffset();
 		apiResource = resource->GetAPIResource();

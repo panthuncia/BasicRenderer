@@ -89,6 +89,7 @@ public:
 			commandList->SetComputeRoot32BitConstants(3, 1, &cameraIndex, 0);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
+			DeviceManager::GetInstance().DiagnoseDeviceRemoval();
 
 			//  Then, process buffer for each light
 			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
@@ -101,11 +102,10 @@ public:
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
 					i++;
-					commandList->Dispatch(numThreadGroups, 1, 1);
+					//commandList->Dispatch(numThreadGroups, 1, 1);
 				}
 			}
 		}
-
 		// alpha test buffer
 		auto numAlphaTestDraws = context.currentScene->GetNumAlphaTestDraws();
 		if (numAlphaTestDraws > 0) {

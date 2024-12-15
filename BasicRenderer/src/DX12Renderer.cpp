@@ -173,7 +173,7 @@ void DX12Renderer::SetSettings() {
 		});
     bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
-	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
+	settingsManager.registerSetting<bool>("enableIndirectDraws", false);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");

@@ -43,7 +43,7 @@ private:
 	unsigned int m_opaqueCommandBufferSize = 0;
 	unsigned int m_alphaTestCommandBufferSize = 0;
 	unsigned int m_blendCommandBufferSize = 0;
-    unsigned int m_incrementSize = 1; // TODO: Values are small for testing
+    unsigned int m_incrementSize = 1000; // TODO: Values are small for testing
 	std::shared_ptr<ResourceGroup> m_alphaTestResourceGroup;
 	std::shared_ptr<ResourceGroup> m_opaqueResourceGroup;
 	std::shared_ptr<ResourceGroup> m_blendResourceGroup;

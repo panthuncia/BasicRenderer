@@ -35,7 +35,7 @@ public:
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = m_commandList;
         ThrowIfFailed(m_allocator->Reset());
-		commandList->Reset(m_allocator.Get(), nullptr);
+        commandList->Reset(m_allocator.Get(), nullptr);
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
@@ -44,7 +44,7 @@ public:
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lutTexture->GetBuffer()->GetRTVInfos()[0].cpuHandle;
+        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lutTexture->GetBuffer()->GetRTVInfos()[0].cpuHandle;
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         commandList->SetPipelineState(PSO.Get());
@@ -53,15 +53,15 @@ public:
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
 
-		commandList->Close();
+        commandList->Close();
 
-		invalidated = false;
+        invalidated = false;
 
         m_copyCommandList->Reset(m_allocator.Get(), nullptr);
         auto path = GetCacheFilePath(L"lut.dds", L"luts");
         UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
         m_utils.SaveTextureToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_lutTexture.get(), path, fenceValue);
-		m_copyCommandList->Close();
+        m_copyCommandList->Close();
 
         return { { commandList.Get() }, m_readbackFence, fenceValue };
     }

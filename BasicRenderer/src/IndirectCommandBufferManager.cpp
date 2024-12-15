@@ -42,9 +42,9 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 	ThrowIfFailed(device->CreateCommandSignature(&commandSignatureDesc, rootSignature.Get(), IID_PPV_ARGS(&m_commandSignature)));
 
     // Initialize with one dummy draw
-	UpdateBuffersForBucket(MaterialBuckets::Opaque, 1);
-	UpdateBuffersForBucket(MaterialBuckets::AlphaTest, 1);
-	UpdateBuffersForBucket(MaterialBuckets::Blend, 1);
+	UpdateBuffersForBucket(MaterialBuckets::Opaque, 1000);
+	UpdateBuffersForBucket(MaterialBuckets::AlphaTest, 1000);
+	UpdateBuffersForBucket(MaterialBuckets::Blend, 1000);
 }
 
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
@@ -128,7 +128,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
     switch (bucket) {
     case MaterialBuckets::Opaque: {
         unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
-        if (newSize == m_opaqueCommandBufferSize) {
+        if (newSize <= m_opaqueCommandBufferSize) {
             return;
         }
         m_opaqueCommandBufferSize = newSize;
@@ -140,7 +140,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
     }
     case MaterialBuckets::AlphaTest: {
         unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
-        if (newSize == m_alphaTestCommandBufferSize) {
+        if (newSize <= m_alphaTestCommandBufferSize) {
             return;
         }
         m_alphaTestCommandBufferSize = newSize;
@@ -152,7 +152,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
     }
     case MaterialBuckets::Blend: {
         unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
-        if (newSize == m_blendCommandBufferSize) {
+        if (newSize <= m_blendCommandBufferSize) {
             return;
         }
         m_blendCommandBufferSize = newSize;

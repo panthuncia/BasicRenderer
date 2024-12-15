@@ -135,7 +135,7 @@ public:
 			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 			uavDesc.Format = DXGI_FORMAT_UNKNOWN;
 			uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-			uavDesc.Buffer.NumElements = bufferSize / elementSize; // We will have some wasted elements to allow the counter to be 4096-aligned
+			uavDesc.Buffer.NumElements = numElements; // We will have some wasted memory to allow the counter to be 4096-aligned
 			uavDesc.Buffer.StructureByteStride = elementSize;
 			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
             if (UAVCounter) {

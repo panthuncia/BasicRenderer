@@ -3,13 +3,17 @@
 #include <directx/d3d12.h>
 #include <wrl.h>
 #include <memory>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+
+using Microsoft::WRL::ComPtr;
 
 class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
     void Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue);
-
+	void DiagnoseDeviceRemoval();
     Microsoft::WRL::ComPtr<ID3D12Device>& GetDevice() {
         return device;
     }
@@ -23,6 +27,8 @@ public:
 	}
 
 private:
+	ComPtr<ID3D12DeviceRemovedExtendedData> dred;
+
     DeviceManager() = default;
     Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
@@ -41,6 +47,12 @@ inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> devic
     this->device = device;
 	this->commandQueue = queue;
 	CheckGPUFeatures();
+
+	if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dred)))) {
+	}
+	else {
+		spdlog::warn("Failed to get DRED interface");
+	}
 }
 
 inline void DeviceManager::CheckGPUFeatures() {
