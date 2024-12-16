@@ -41,6 +41,9 @@ UINT DescriptorHeap::AllocateDescriptor() {
 
 void DescriptorHeap::ReleaseDescriptor(UINT index) {
 #ifdef _DEBUG
+    if (index == 0) {
+		spdlog::error("DescriptorHeap::ReleaseDescriptor: Attempting to release descriptor 0");
+    }
     int32_t signedValue = static_cast<int32_t>(index);
 	assert(signedValue >= 0 && signedValue < m_heap->GetDesc().NumDescriptors); // If this trggers, a descriptor is likely set but uninitialized
 #endif

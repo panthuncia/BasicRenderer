@@ -18,6 +18,7 @@ struct TextureHandle {
     std::vector<NonShaderVisibleIndexInfo> RTVInfo;
     std::vector<NonShaderVisibleIndexInfo> DSVInfo;
     std::shared_ptr<DescriptorHeap> srvUavHeap;
+    std::shared_ptr<DescriptorHeap> uavCPUHeap;
     std::shared_ptr<DescriptorHeap> rtvHeap;
     std::shared_ptr<DescriptorHeap> dsvHeap;
 };

@@ -17,7 +17,7 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
     if(desc.hasUAV)
         SetUAVGPUDescriptor(handle.srvUavHeap, handle.UAVInfo);
     if(desc.hasNonShaderVisibleUAV)
-        SetUAVCPUDescriptor(handle.srvUavHeap, handle.NSVUAVInfo);
+        SetUAVCPUDescriptor(handle.uavCPUHeap, handle.NSVUAVInfo);
 	if (desc.hasRTV)
 		SetRTVDescriptors(handle.rtvHeap, handle.RTVInfo);
 	if (desc.hasDSV)

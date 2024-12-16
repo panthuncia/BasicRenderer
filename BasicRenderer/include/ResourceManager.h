@@ -582,13 +582,22 @@ public:
         TextureHandle<PixelBuffer> handle;
         handle.texture = textureResource;
         handle.SRVInfo = srvInfo;
-		handle.UAVInfo = uavInfo;
-		handle.NSVUAVInfo = nonShaderUavInfo;
-        handle.RTVInfo = rtvInfos;
-        handle.DSVInfo = dsvInfos;
-		handle.srvUavHeap = m_cbvSrvUavHeap;
-		handle.rtvHeap = m_rtvHeap;
-		handle.dsvHeap = m_dsvHeap;
+        handle.srvUavHeap = m_cbvSrvUavHeap;
+
+		if (desc.hasUAV) {
+			handle.UAVInfo = uavInfo;
+			handle.NSVUAVInfo = nonShaderUavInfo;
+			handle.uavCPUHeap = m_nonShaderVisibleHeap;
+		}
+		if (desc.hasRTV) {
+			handle.rtvHeap = m_rtvHeap;
+			handle.RTVInfo = rtvInfos;
+		}
+		if (desc.hasDSV) {
+			handle.dsvHeap = m_dsvHeap;
+			handle.DSVInfo = dsvInfos;
+		}
+
 
         return handle;
     }
