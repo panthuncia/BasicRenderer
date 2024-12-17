@@ -28,7 +28,10 @@ public:
 
     void SetIncrementSize(unsigned int incrementSize);
 
-	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_parentResourceGroup; }
+	std::shared_ptr<ResourceGroup> GetPerViewResourceGroup() { return m_parentResourceGroup; }
+	std::shared_ptr<ResourceGroup> GetAlphaTestResourceGroup() { return m_alphaTestResourceGroup; }
+	std::shared_ptr<ResourceGroup> GetOpaqueResourceGroup() { return m_opaqueResourceGroup; }
+	std::shared_ptr<ResourceGroup> GetBlendResourceGroup() { return m_blendResourceGroup; }
 
 	std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
 	std::shared_ptr<Buffer>& GetAlphaTestClearBuffer() { return m_clearBufferAlphaTest; }

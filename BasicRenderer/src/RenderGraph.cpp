@@ -66,6 +66,14 @@ void RenderGraph::Setup(ID3D12CommandQueue* queue) {
         m_commandAllocators.push_back(allocator);
         m_transitionCommandLists.push_back(commandList);
     }
+
+#if defined (_DEBUG)
+    ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_debugFence)));
+    HANDLE debugFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (!debugFenceEvent) {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+    }
+#endif
 }
 
 void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name) {
@@ -142,7 +150,16 @@ void RenderGraph::Execute(RenderContext& context) {
                 auto passReturn = passAndResources.pass->Execute(context);
 				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
                 queue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
-                DeviceManager::GetInstance().DiagnoseDeviceRemoval();
+
+#if defined(_DEBUG)
+                // Signal the debug fence to mark GPU completion after these command lists.
+                m_debugFenceValue++;
+                ThrowIfFailed(queue->Signal(m_debugFence.Get(), m_debugFenceValue));
+
+                // Wait on the CPU until the GPU has reached this fence value.
+                ThrowIfFailed(m_debugFence->SetEventOnCompletion(m_debugFenceValue, m_debugFenceEvent));
+                WaitForSingleObject(m_debugFenceEvent, INFINITE);
+#endif
 
                 if (passReturn.fence != nullptr) {
 					queue->Signal(passReturn.fence, passReturn.fenceValue);

@@ -7,6 +7,18 @@
 #include "IndirectCommand.h"
 #include "PSOManager.h"
 
+std::wstring BucketToString(MaterialBuckets bucket) {
+	switch (bucket) {
+	case MaterialBuckets::Opaque:
+		return L"Opaque";
+	case MaterialBuckets::AlphaTest:
+		return L"AlphaTest";
+	case MaterialBuckets::Blend:
+		return L"Blend";
+	}
+	return L"Unknown";
+}
+
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_opaqueResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
@@ -81,7 +93,7 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 		break;
 	}
     auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(IndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
-	resource->SetName(L"IndirectCommandBuffer ("+std::to_wstring(entityID)+L")");
+	resource->SetName(L"IndirectCommandBuffer ("+std::to_wstring(entityID)+L", "+BucketToString(bucket)+L")");
     std::shared_ptr<DynamicGloballyIndexedResource> pResource = std::make_shared<DynamicGloballyIndexedResource>(resource);
     m_buffers[bucket][entityID].push_back(pResource);
 

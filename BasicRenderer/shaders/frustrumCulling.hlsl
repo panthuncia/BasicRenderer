@@ -4,8 +4,12 @@
 struct IndirectCommand {
     uint perObjectBufferIndex;
     uint perMeshBufferIndex;
-    uint3 dispatchMeshArguments;
+    uint dispatchMeshX;
+    uint dispatchMeshY;
+    uint DispatchMeshZ;
 };
+
+AppendStructuredBuffer<IndirectCommand> indirectCommandOutputBuffer : register(u0); // UAV: Processed indirect commands
 
 [numthreads(64, 1, 1)]
 void CSMain(uint dispatchID : SV_DispatchThreadID) {
@@ -14,7 +18,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     }
     StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
     StructuredBuffer<IndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];
-    AppendStructuredBuffer<IndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
+    //AppendStructuredBuffer<IndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     

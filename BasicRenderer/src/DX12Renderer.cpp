@@ -749,22 +749,45 @@ void DX12Renderer::CreateRenderGraph() {
 	if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
 		indirect = false;
 	}
+
+    auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
+
 	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
-    if (indirect) {
+    if (true) {
         // Clear UAVs
-        indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
+        indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetPerViewResourceGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
         auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
         PassParameters clearUAVsPassParameters;
         clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
         newGraph->AddPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
 
+        auto opaqueDrawSet = currentScene->GetObjectManager()->GetOpaqueDrawSetCommandsBuffer();
+		auto alphaTestDrawSet = currentScene->GetObjectManager()->GetAlphaTestDrawSetCommandsBuffer();
+		auto blendDrawSet = currentScene->GetObjectManager()->GetBlendDrawSetCommandsBuffer();
+        auto opaqueIndices = currentScene->GetObjectManager()->GetActiveOpaqueDrawSetIndices();
+		auto alphaTestIndices = currentScene->GetObjectManager()->GetActiveAlphaTestDrawSetIndices();
+		auto blendIndices = currentScene->GetObjectManager()->GetActiveBlendDrawSetIndices();
+		newGraph->AddResource(opaqueDrawSet);
+		newGraph->AddResource(alphaTestDrawSet);
+		newGraph->AddResource(blendDrawSet);
+		newGraph->AddResource(opaqueIndices);
+		newGraph->AddResource(alphaTestIndices);
+		newGraph->AddResource(blendIndices);
         // Compute pass
-        auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
+        auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>(drawShadows);
         PassParameters frustrumCullingPassParameters;
         frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+		frustrumCullingPassParameters.shaderResources.push_back(blendPerMeshBuffer);
+		//frustrumCullingPassParameters.shaderResources.push_back(meshResourceGroup);
+		frustrumCullingPassParameters.shaderResources.push_back(opaqueDrawSet);
+		frustrumCullingPassParameters.shaderResources.push_back(alphaTestDrawSet);
+		frustrumCullingPassParameters.shaderResources.push_back(blendDrawSet);
+		frustrumCullingPassParameters.shaderResources.push_back(opaqueIndices);
+		frustrumCullingPassParameters.shaderResources.push_back(alphaTestIndices);
+		frustrumCullingPassParameters.shaderResources.push_back(blendIndices);
         frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
         newGraph->AddPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
     }
@@ -859,7 +882,6 @@ void DX12Renderer::CreateRenderGraph() {
         forwardPassParameters.shaderResources.push_back(m_environmentIrradiance);
     }
 
-    auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
     if (drawShadows) {
         newGraph->AddResource(m_shadowMaps);
 

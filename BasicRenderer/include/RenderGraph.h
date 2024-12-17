@@ -49,6 +49,12 @@ private:
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_transitionCommandLists;
 
+#if defined (_DEBUG)
+	Microsoft::WRL::ComPtr<ID3D12Fence> m_debugFence;
+	UINT64 m_debugFenceValue = 0;
+	HANDLE m_debugFenceEvent;
+#endif
+
 	void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
 	void UpdateDesiredResourceStates(PassBatch& batch, PassAndResources& passAndResources);
 	void ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates);
