@@ -20,6 +20,7 @@
 #include "RenderPasses/ForwardRenderPass.h"
 #include "RenderPasses/ForwardRenderPassMS.h"
 #include "RenderPasses/ForwardRenderPassMSIndirect.h"
+#include "RenderPasses/ForwardRenderPassUnified.h"
 #include "RenderPasses/ShadowPass.h"
 #include "RenderPasses/ShadowPassMS.h"
 #include "RenderPasses/ShadowPassMSIndirect.h"
@@ -779,15 +780,15 @@ void DX12Renderer::CreateRenderGraph() {
     if (useMeshShaders) {
         forwardPassParameters.shaderResources.push_back(meshResourceGroup);
 		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-            forwardPass = std::make_shared<ForwardRenderPassMSIndirect>(getWireframeEnabled());
+            forwardPass = std::make_shared<ForwardRenderPassUnified>(getWireframeEnabled(), true, true);
             forwardPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
         }
         else {
-            forwardPass = std::make_shared<ForwardRenderPassMS>(getWireframeEnabled());
+            forwardPass = std::make_shared<ForwardRenderPassUnified>(getWireframeEnabled(), true, false);
         }
 	}
     else {
-        forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled());
+        forwardPass = std::make_shared<ForwardRenderPassUnified>(getWireframeEnabled(), false, false);
     }
 
     auto debugPassParameters = PassParameters();

@@ -39,9 +39,6 @@ public:
 		ThrowIfFailed(allocator->Reset());
 		commandList->Reset(allocator.Get(), nullptr);
 
-		auto rootSignature = PSOManager::GetInstance().GetRootSignature();
-		commandList->SetComputeRootSignature(rootSignature.Get());
-
 		// Set the descriptor heaps
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
 			ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(),
@@ -49,6 +46,9 @@ public:
 		};
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+		auto rootSignature = PSOManager::GetInstance().GetRootSignature();
+		commandList->SetComputeRootSignature(rootSignature.Get());
 
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
