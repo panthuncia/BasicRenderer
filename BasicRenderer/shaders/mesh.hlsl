@@ -147,7 +147,41 @@ void MSMain(
     SetMeshOutputCounts(meshlet.VertCount, meshlet.TriCount);
     
     uint triOffset = meshBuffer.meshletTrianglesBufferOffset + meshlet.TriOffset + uGroupThreadID * 3;
-    uint3 meshletIndices = uint3(LoadByte(meshletTrianglesBuffer, triOffset), LoadByte(meshletTrianglesBuffer, triOffset + 1), LoadByte(meshletTrianglesBuffer, triOffset+2)); // Local indices into meshletVerticesBuffer
+    
+    
+    //uint3 meshletIndices = uint3(LoadByte(meshletTrianglesBuffer, triOffset), LoadByte(meshletTrianglesBuffer, triOffset + 1), LoadByte(meshletTrianglesBuffer, triOffset+2)); // Local indices into meshletVerticesBuffer
+    uint alignedOffset = (triOffset / 4) * 4;
+    uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
+
+    // Calculate the starting byte offset within firstWord
+    uint byteOffset = triOffset % 4;
+
+    // Extract the first byte
+    uint b0 = (firstWord >> (byteOffset * 8)) & 0xFF;
+
+    // For the second and third bytes, we may still be within the same 4-byte word or we may cross over.
+    uint b1, b2;
+
+    if (byteOffset <= 1) {
+        // All three bytes are within the same word
+        b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
+        b2 = (firstWord >> ((byteOffset + 2) * 8)) & 0xFF;
+    } else if (byteOffset == 2) {
+        // The second byte is in this word, but the third byte spills into the next word
+        b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
+        b2 = secondWord & 0xFF; // The first byte of the next word
+    } else {
+        // byteOffset == 3
+        // The first byte is at the last position in firstWord,
+        // The next two bytes must come from the next word.
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
+        b1 = secondWord & 0xFF;               // first byte of the next word
+        b2 = (secondWord >> 8) & 0xFF;        // second byte of the next word
+    }
+
+    uint3 meshletIndices = uint3(b0, b1, b2);
+    
     uint vertOffset = meshlet.VertOffset + meshBuffer.meshletVerticesBufferOffset;
     
     if (uGroupThreadID < meshlet.VertCount) {
