@@ -4,7 +4,9 @@
 struct IndirectCommand {
     uint perObjectBufferIndex;
     uint perMeshBufferIndex;
-    uint3 dispatchMeshArguments;
+    uint dispatchMeshX;
+    uint dispatchMeshY;
+    uint dispatchMeshZ;
 };
 
 [numthreads(64, 1, 1)]
