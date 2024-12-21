@@ -94,7 +94,7 @@ public:
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& cameraManager = context.currentScene->GetCameraManager();
-		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
+		staticBufferIndices[0] = meshManager->GetPostSkinningVertexBufferIndex();
 		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
 		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
 		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();

@@ -83,8 +83,17 @@ void RenderableObject::UpdateBuffers() {
         0.0f, 0.0f, 0.0f, 1.0f
     );
 
-    perObjectCBData.normalMatrix = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
     m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
+
+	// TODO: Any way to do this math without transforming to 4x4 and then back?
+	XMFLOAT3X3 normalMat = GetUpperLeft3x3(XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3)));
+	if (preSkinningNormalMatrixIndex.has_value()) {
+		m_currentManager->UpdatePreSkinningNormalMatrixBuffer(preSkinningNormalMatrixIndex.value(), normalMat);
+	}
+	else {
+		m_currentManager->UpdatePostSkinningNormalMatrixBuffer(postSkinningNormalMatrixIndex, normalMat);
+	}
+	
 }
 
 void RenderableObject::OnUpdate() {
@@ -167,4 +176,20 @@ std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentAlphaTestD
 
 std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentBlendDrawSetCommandViews() {
 	return m_blendDrawSetCommandViews;
+}
+
+void RenderableObject::SetPreSkinningNormalMatrixIndex(unsigned int index) {
+	preSkinningNormalMatrixIndex = index;
+}
+
+std::optional<unsigned int> RenderableObject::GetPreSkinningNormalMatrixIndex() const {
+	return preSkinningNormalMatrixIndex;
+}
+
+void RenderableObject::SetPostSkinningNormalMatrixIndex(unsigned int index) {
+	postSkinningNormalMatrixIndex = index;
+}
+
+unsigned int RenderableObject::GetPostSkinningNormalMatrixIndex() const {
+	return postSkinningNormalMatrixIndex;
 }

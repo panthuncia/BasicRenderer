@@ -69,6 +69,11 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
 	if (objectManager != nullptr) {
 		objectManager->AddObject(object);
 	}
+
+	if (object->GetSkin() != nullptr) {
+		skinnedObjectsByID[object->GetLocalID()] = object;
+	}
+
     return object->GetLocalID();
 }
 
@@ -148,38 +153,7 @@ std::shared_ptr<SceneNode> Scene::GetEntityByID(UINT id) {
 
 void Scene::RemoveObjectByName(const std::wstring& name) {
     auto it = objectsByName.find(name);
-    if (it != objectsByName.end()) {
-        auto idIt = std::find_if(objectsByID.begin(), objectsByID.end(),
-            [&](const auto& pair) { return pair.second == it->second; });
-        if (idIt != objectsByID.end()) {
-            objectsByID.erase(idIt);
-        }
-        objectsByName.erase(it);
-        opaqueObjectsByID.erase(it->second->GetLocalID());
-        alphaTestObjectsByID.erase(it->second->GetLocalID());
-		blendObjectsByID.erase(it->second->GetLocalID());
-        std::shared_ptr<SceneNode> node = it->second;
-        node->parent->RemoveChild(node->GetLocalID());
-        if (objectManager != nullptr) {
-            objectManager->RemoveObject(it->second);
-        }
-        for (auto& mesh : it->second->GetOpaqueMeshes()) {
-			// TODO: Remove mesh from mesh manager, handling the case where the mesh is used by multiple objects
-			m_numDrawsInScene--;
-			m_numOpaqueDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
-        }
-        for (auto& mesh : it->second->GetAlphaTestMeshes()) {
-            m_numDrawsInScene--;
-			m_numAlphaTestDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, m_numAlphaTestDraws);
-        }
-		for (auto& mesh : it->second->GetBlendMeshes()) {
-			m_numDrawsInScene--;
-			m_numBlendDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
-		}
-    }
+	RemoveObjectByID(it->second->GetLocalID());
 }
 
 void Scene::RemoveObjectByID(UINT id) {
@@ -214,6 +188,9 @@ void Scene::RemoveObjectByID(UINT id) {
 			m_numDrawsInScene--;
 			m_numBlendDraws--;
 			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
+		}
+		if (it->second->GetSkin() != nullptr) {
+			skinnedObjectsByID.erase(it->second->GetLocalID());
 		}
         DeletionManager::GetInstance().MarkForDelete(it->second); // defer deletion to the end of the frame
         objectsByID.erase(it);

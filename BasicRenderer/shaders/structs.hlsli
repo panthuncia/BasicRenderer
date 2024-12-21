@@ -86,7 +86,8 @@ struct Meshlet {
 
 struct PerObjectBuffer {
     row_major matrix model;
-    row_major float4x4 normalMatrix;
+    uint preSkinningNormalMatrixBufferIndex;
+    uint postSkinningNormalMatrixBufferIndex;
     uint boneTransformBufferIndex;
     uint inverseBindMatricesBufferIndex;
     uint isValid;
@@ -102,7 +103,8 @@ struct PerMeshBuffer {
     uint materialDataIndex;
     uint vertexFlags;
     uint vertexByteSize;
-    uint vertexBufferOffset;
+    uint preSkinningVertexBufferOffset;
+    uint postSkinningVertexBufferOffset;
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
     uint meshletTrianglesBufferOffset;

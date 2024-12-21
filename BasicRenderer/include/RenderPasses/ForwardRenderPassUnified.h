@@ -112,7 +112,7 @@ private:
         auto& cameraManager = context.currentScene->GetCameraManager();
 
         unsigned int staticBufferIndices[6] = {
-            meshManager->GetVertexBufferIndex(),
+            meshManager->GetPostSkinningVertexBufferIndex(),
             meshManager->GetMeshletOffsetBufferIndex(),
             meshManager->GetMeshletIndexBufferIndex(),
             meshManager->GetMeshletTriangleBufferIndex(),

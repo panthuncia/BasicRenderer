@@ -58,8 +58,10 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
 std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, std::type_index type) {
 	std::unique_ptr<BufferView> view = Allocate(size, type);
     
-    auto& uploadManager = UploadManager::GetInstance();
-	uploadManager.UploadData(data, size, this, view->GetOffset());
+	if (data != nullptr) {
+		auto& uploadManager = UploadManager::GetInstance();
+		uploadManager.UploadData(data, size, this, view->GetOffset());
+	}
 
 	return std::move(view);
 }
@@ -69,7 +71,7 @@ void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
 	uploadManager.UploadData(data, view->GetSize(), this, view->GetOffset());
 }
 
-void DynamicBuffer::Deallocate(const std::shared_ptr<BufferView>& view) {
+void DynamicBuffer::Deallocate(BufferView* view) {
     size_t offset = view->GetOffset();
     size_t size = view->GetSize();
 

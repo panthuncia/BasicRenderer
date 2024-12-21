@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 
 #include "SceneNode.h"
 #include "Mesh.h"
@@ -10,7 +11,6 @@
 #include "ResourceHandles.h"
 #include "Skeleton.h"
 #include "BufferView.h"
-
 class ObjectManager;
 
 class RenderableObject : public SceneNode {
@@ -43,6 +43,10 @@ public:
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentOpaqueDrawSetCommandViews();
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentAlphaTestDrawSetCommandViews();
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentBlendDrawSetCommandViews();
+	void SetPreSkinningNormalMatrixIndex(unsigned int index);
+	std::optional<unsigned int> GetPreSkinningNormalMatrixIndex() const;
+	void SetPostSkinningNormalMatrixIndex(unsigned int index);
+	unsigned int GetPostSkinningNormalMatrixIndex() const;
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
@@ -55,6 +59,8 @@ private:
 	std::vector<std::shared_ptr<BufferView>> m_opaqueDrawSetCommandViews;
 	std::vector<std::shared_ptr<BufferView>> m_alphaTestDrawSetCommandViews;
 	std::vector<std::shared_ptr<BufferView>> m_blendDrawSetCommandViews;
+	std::optional<unsigned int> preSkinningNormalMatrixIndex = -1;
+	unsigned int postSkinningNormalMatrixIndex;
 	PerObjectCB perObjectCBData;
 	bool m_hasAlphaTest = false;
 	bool m_hasOpaque = false;

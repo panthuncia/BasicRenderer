@@ -37,6 +37,7 @@
 #include "RenderPasses/PPLLFillPassMS.h"
 #include "RenderPasses/PPLLFillPassMSIndirect.h"
 #include "RenderPasses/PPLLResolvePass.h"
+#include "RenderPasses/SkinningPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"

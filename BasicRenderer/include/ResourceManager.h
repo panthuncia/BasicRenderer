@@ -177,14 +177,14 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "") {
+    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
-        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name);
+        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, UAV);
         ResourceTransition transition;
         transition.resource = pDynamicBuffer.get();
 		transition.beforeState = ResourceState::UNKNOWN;
@@ -262,7 +262,7 @@ public:
         return pDynamicBuffer;
     }
 
-    std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false);
+    std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false, bool UAV = false);
 	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, std::wstring name = L"");
 
     UINT GetNextResizableBufferID() {

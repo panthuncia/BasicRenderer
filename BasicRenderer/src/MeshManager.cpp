@@ -8,12 +8,13 @@
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_vertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"vertices", true);
+	m_preSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"preSkinnedVertices", true);
+	m_postSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"vertices", true, true);
 	m_meshletOffsets = resourceManager.CreateIndexedDynamicBuffer(sizeof(meshopt_Meshlet), 1, ResourceState::ALL_SRV, L"meshletOffsets");
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, ResourceState::ALL_SRV, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"meshletTriangles", true);
 	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
-	m_resourceGroup->AddResource(m_vertices);
+	m_resourceGroup->AddResource(m_postSkinningVertices);
 	m_resourceGroup->AddResource(m_meshletOffsets);
 	m_resourceGroup->AddResource(m_meshletIndices);
 	m_resourceGroup->AddResource(m_meshletTriangles);
@@ -31,7 +32,8 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
     }
 
 	auto& manager = ResourceManager::GetInstance();
-	std::unique_ptr<BufferView> view = nullptr;
+	std::unique_ptr<BufferView> postSkinningView = nullptr;
+	std::unique_ptr<BufferView> preSkinningView = nullptr;
     // Use std::visit to determine the concrete vertex type
     std::visit([&](auto&& vertexSample) {
         using VertexType = std::decay_t<decltype(vertexSample)>;
@@ -42,7 +44,13 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 		}
         // Allocate buffer view
         size_t size = vertices.size() * sizeof(VertexType);
-		view = m_vertices->AddData(specificVertices.data(), size, typeid(VertexType));
+		if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
+			preSkinningView = m_preSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
+			postSkinningView = m_postSkinningVertices->AddData(nullptr, size, typeid(VertexType));
+		}
+		else {
+			postSkinningView = m_postSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
+		}
 
         }, vertices.front());
 
@@ -58,7 +66,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	auto& meshletTriangles = mesh->GetMeshletTriangles();
 	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), typeid(unsigned char));
 
-	mesh->SetBufferViews(std::move(view), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
+	mesh->SetBufferViews(std::move(postSkinningView), std::move(preSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
 
 	// Per mesh buffer
 	switch (bucket){
@@ -83,8 +91,12 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 }
 
 // TODO: finish
-void MeshManager::RemoveMesh(std::shared_ptr<BufferView> view) {
-	m_vertices->Deallocate(view);
+void MeshManager::RemoveMesh(Mesh* mesh) {
+	m_postSkinningVertices->Deallocate(mesh->GetPostSkinningVertexBufferView());
+	auto preSkinningView = mesh->GetPreSkinningVertexBufferView();
+	if (preSkinningView != nullptr) {
+		m_preSkinningVertices->Deallocate(preSkinningView);
+	}
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

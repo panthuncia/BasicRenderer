@@ -25,11 +25,11 @@ class DynamicBuffer : public ViewedDynamicBufferBase {
 public:
 
     static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name));
+        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name, UAV));
     }
 
     std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
-    void Deallocate(const std::shared_ptr<BufferView>& view);
+    void Deallocate(BufferView* view);
 	std::unique_ptr<BufferView> AddData(const void* data, size_t size, std::type_index type);
 	void UpdateView(BufferView* view, const void* data);
 

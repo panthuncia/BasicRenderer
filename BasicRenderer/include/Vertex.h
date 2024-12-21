@@ -28,14 +28,6 @@ struct VertexTextured {
     XMFLOAT2 texcoord;
 };
 
-struct VertexSkinned {
-    XMFLOAT3 position;
-    XMFLOAT3 normal;
-    XMFLOAT2 texcoord;
-    XMUINT4 joints;
-    XMFLOAT4 weights;
-};
-
 struct VertexNormalMapped {
     XMFLOAT3 position;
     XMFLOAT3 normal;
@@ -44,17 +36,11 @@ struct VertexNormalMapped {
     XMFLOAT3 bitangent;
 };
 
-struct VertexNormalMappedSkinned {
+struct SkinningVertex {
     XMFLOAT3 position;
-    XMFLOAT3 normal;
-    XMFLOAT2 texcoord;
-    XMFLOAT3 tangent;
-    XMFLOAT3 bitangent;
     XMUINT4 joints;
     XMFLOAT4 weights;
 };
-
-using Vertex = std::variant<VertexBasic, VertexColored, VertexTextured, VertexSkinned, VertexNormalMapped, VertexNormalMappedSkinned>;
 
 enum VertexFlags {
     VERTEX_COLORS = 1 << 0,

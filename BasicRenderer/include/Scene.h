@@ -76,6 +76,7 @@ private:
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> opaqueObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> alphaTestObjectsByID;
 	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> blendObjectsByID;
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> skinnedObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<Light>> lightsByID;
 	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;
 	UINT numObjects = 0;

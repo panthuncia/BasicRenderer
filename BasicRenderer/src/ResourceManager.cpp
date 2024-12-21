@@ -280,7 +280,7 @@ void ResourceManager::ExecuteResourceTransitions() {
 	queuedResourceTransitions.clear();
 }
 
-std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress) {
+std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress, bool UAV) {
 #if defined(_DEBUG)
 	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
 	assert(byteAddress ? numElements % 4 == 0 : true);

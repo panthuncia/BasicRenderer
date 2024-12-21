@@ -23,6 +23,8 @@ public:
 		return m_perObjectBuffers->GetSRVInfo().index;
 	}
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
+	void UpdatePreSkinningNormalMatrixBuffer(unsigned int index, DirectX::XMFLOAT3X3& data);
+	void UpdatePostSkinningNormalMatrixBuffer(unsigned int index, DirectX::XMFLOAT3X3& data);
 	std::shared_ptr<DynamicBuffer>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}
@@ -82,6 +84,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_opaqueDrawSetCommandsBuffer;
 	std::shared_ptr<DynamicBuffer> m_alphaTestDrawSetCommandsBuffer;
 	std::shared_ptr<DynamicBuffer> m_blendDrawSetCommandsBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<DirectX::XMFLOAT3X3>> m_preSkinningNormalMatrixBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<DirectX::XMFLOAT3X3>> m_postSkinningNormalMatrixBuffer;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeOpaqueDrawSetIndices;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeAlphaTestDrawSetIndices;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeBlendDrawSetIndices;

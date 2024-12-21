@@ -19,9 +19,9 @@ public:
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
 	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket);
-	void RemoveMesh(std::shared_ptr<BufferView> view);
-	unsigned int GetVertexBufferIndex() const {
-		return m_vertices->GetSRVInfo().index;
+	void RemoveMesh(Mesh* mesh);
+	unsigned int GetPostSkinningVertexBufferIndex() const {
+		return m_postSkinningVertices->GetSRVInfo().index;
 	}
 	unsigned int GetMeshletOffsetBufferIndex() const {
 		return m_meshletOffsets->GetSRVInfo().index;
@@ -57,7 +57,8 @@ public:
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 private:
 	MeshManager();
-	std::shared_ptr<DynamicBuffer> m_vertices;
+	std::shared_ptr<DynamicBuffer> m_preSkinningVertices;
+	std::shared_ptr<DynamicBuffer> m_postSkinningVertices;
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets;
 	std::shared_ptr<DynamicBuffer> m_meshletIndices;
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;

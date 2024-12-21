@@ -13,7 +13,7 @@
 
 std::atomic<int> Mesh::globalMeshCount = 0;
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
     m_vertices = vertices;
     CreateBuffers(vertices, indices);
     this->material = material;
@@ -153,14 +153,32 @@ int Mesh::GetGlobalID() const {
 	return m_globalMeshID;
 }
 
-void Mesh::SetVertexBufferView(std::unique_ptr<BufferView> view) {
-	m_vertexBufferView2 = std::move(view);
-	m_perMeshBufferData.vertexBufferOffset = m_vertexBufferView2->GetOffset();
+void Mesh::SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
+	m_postSkinningVertexBufferView = std::move(view);
+	m_perMeshBufferData.postSkinningVertexBufferOffset = m_postSkinningVertexBufferView->GetOffset();
 
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
 }
+
+void Mesh::SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
+	m_preSkinningVertexBufferView = std::move(view);
+	m_perMeshBufferData.preSkinningVertexBufferOffset = m_preSkinningVertexBufferView->GetOffset();
+
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+}
+
+BufferView* Mesh::GetPostSkinningVertexBufferView() {
+	return m_postSkinningVertexBufferView.get();
+}
+
+BufferView* Mesh::GetPreSkinningVertexBufferView() {
+	return m_preSkinningVertexBufferView.get();
+}
+
 void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletBufferView = std::move(view);
 	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset();
@@ -186,12 +204,16 @@ void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 	}
 }
 
-void Mesh::SetBufferViews(std::unique_ptr<BufferView> vertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView) {
-	m_vertexBufferView2 = std::move(vertexBufferView);
+void Mesh::SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView) {
+	m_postSkinningVertexBufferView = std::move(postSkinningVertexBufferView);
+	m_preSkinningVertexBufferView = std::move(preSkinningVertexBufferView);
 	m_meshletBufferView = std::move(meshletBufferView);
 	m_meshletVerticesBufferView = std::move(meshletVerticesBufferView);
 	m_meshletTrianglesBufferView = std::move(meshletTrianglesBufferView);
-	m_perMeshBufferData.vertexBufferOffset = m_vertexBufferView2->GetOffset();
+	m_perMeshBufferData.postSkinningVertexBufferOffset = m_postSkinningVertexBufferView->GetOffset();
+	if (m_preSkinningVertexBufferView != nullptr) {
+		m_perMeshBufferData.preSkinningVertexBufferOffset = m_preSkinningVertexBufferView->GetOffset();
+	}
 	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset() / sizeof(meshopt_Meshlet);
 	m_perMeshBufferData.meshletVerticesBufferOffset = m_meshletVerticesBufferView->GetOffset() / 4;
 	m_perMeshBufferData.meshletTrianglesBufferOffset = m_meshletTrianglesBufferView->GetOffset();

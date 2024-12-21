@@ -35,7 +35,8 @@ struct PerFrameCB {
 
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
-    DirectX::XMMATRIX normalMatrix;
+    unsigned int preSkinningNormalMatrixBufferIndex;
+    unsigned int postSkinningNormalMatrixBufferIndex;
     unsigned int boneTransformBufferIndex;
     unsigned int inverseBindMatricesBufferIndex;
     unsigned int isValid = 1;
@@ -51,7 +52,8 @@ struct PerMeshCB {
     unsigned int materialDataIndex;
     unsigned int vertexFlags;
 	unsigned int vertexByteSize;
-    unsigned int vertexBufferOffset;
+	unsigned int preSkinningVertexBufferOffset;
+    unsigned int postSkinningVertexBufferOffset;
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
     unsigned int meshletTrianglesBufferOffset;
