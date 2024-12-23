@@ -14,8 +14,8 @@
 std::atomic<int> Mesh::globalMeshCount = 0;
 
 Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
-    m_vertices = vertices;
-    CreateBuffers(vertices, indices);
+    m_vertices = std::move(vertices);
+    CreateBuffers(indices);
     this->material = material;
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
@@ -109,7 +109,7 @@ void Mesh::ComputeBoundingSphere(const std::vector<VertexType>& vertices, const 
 	m_perMeshBufferData.boundingSphere = sphere;
 }
 
-void Mesh::CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices) {
+void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
 
     std::visit([&](auto&& vertex) {
         using T = std::decay_t<decltype(vertex)>;
