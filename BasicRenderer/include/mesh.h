@@ -19,8 +19,8 @@ class MeshManager;
 
 class Mesh {
 public:
-    static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
-		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), std::move(skinningVertices), indices, material, flags));
+    static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), indices, material, flags));
     }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
@@ -77,16 +77,12 @@ public:
 	}
 
 private:
-    Mesh(std::unique_ptr<std::vector<std::byte>> vertices, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
-    template <typename VertexType>
-    void CreateVertexBuffer(const std::vector<VertexType>& vertices);
-    template <typename VertexType>
-    void CreateMeshlets(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices);
-    void CreateBuffers(const std::vector<std::byte>& vertices, const std::vector<UINT32>& indices);
-	template <typename VertexType>
-	void ComputeBoundingSphere(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices);
-	template <typename VertexType>
-	void ComputeAABB(const std::vector<VertexType>& vertices, DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
+    Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
+    void CreateVertexBuffer();
+    void CreateMeshlets(const std::vector<UINT32>& indices);
+    void CreateBuffers(const std::vector<UINT32>& indices);
+	void ComputeBoundingSphere(const std::vector<UINT32>& indices);
+	void ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
     static int GetNextGlobalIndex();
 
     static std::atomic<int> globalMeshCount;

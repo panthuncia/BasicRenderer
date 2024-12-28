@@ -28,9 +28,9 @@ public:
         return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name, UAV));
     }
 
-    std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
+    std::unique_ptr<BufferView> Allocate(size_t size, size_t elementSize);
     void Deallocate(BufferView* view);
-	std::unique_ptr<BufferView> AddData(const void* data, size_t size, std::type_index type);
+	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize);
 	void UpdateView(BufferView* view, const void* data);
 
     void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*)>& callback) {

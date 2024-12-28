@@ -27,7 +27,7 @@ ObjectManager::ObjectManager() {
 }
 void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	object->SetCurrentManager(this);
-	std::shared_ptr<BufferView> view = m_perObjectBuffers->AddData(&object->GetPerObjectCBData(), sizeof(PerObjectCB), typeid(PerObjectCB));
+	std::shared_ptr<BufferView> view = m_perObjectBuffers->AddData(&object->GetPerObjectCBData(), sizeof(PerObjectCB), sizeof(PerObjectCB));
 	// m_perObjectBuffers->UpdateView(view.get(), &object->GetPerObjectCBData());
 	object->SetCurrentPerObjectCBView(view);
 
@@ -42,7 +42,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			std::shared_ptr<BufferView> view = m_opaqueDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), typeid(IndirectCommand));
+			std::shared_ptr<BufferView> view = m_opaqueDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), sizeof(IndirectCommand));
 			views.push_back(view);
 			//m_opaqueDrawSetCommandsBuffer->UpdateView(view.get(), &command);
 			unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
@@ -64,7 +64,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			std::shared_ptr<BufferView> view = m_alphaTestDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), typeid(IndirectCommand));
+			std::shared_ptr<BufferView> view = m_alphaTestDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), sizeof(IndirectCommand));
 			views.push_back(view);
 			//m_transparentDrawSetCommandsBuffer->UpdateView(view.get(), &command);
 			unsigned int index = view->GetOffset() / sizeof(IndirectCommand);
@@ -85,7 +85,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			std::shared_ptr<BufferView> view = m_blendDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), typeid(IndirectCommand));
+			std::shared_ptr<BufferView> view = m_blendDrawSetCommandsBuffer->AddData(&command, sizeof(IndirectCommand), sizeof(IndirectCommand));
 			views.push_back(view);
 
 			unsigned int index = view->GetOffset() / sizeof(IndirectCommand);

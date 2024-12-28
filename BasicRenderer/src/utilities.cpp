@@ -83,7 +83,7 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
 			}
         }
 
-        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), std::move(skinningData), geom.indices, geom.material, geom.flags);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), geom.indices, geom.material, geom.flags);
         meshes.push_back(std::move(mesh));
     }
 

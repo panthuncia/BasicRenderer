@@ -35,53 +35,61 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
     // Use std::visit to determine the concrete vertex type
-    std::visit([&](auto&& vertexSample) {
-        using VertexType = std::decay_t<decltype(vertexSample)>;
-		std::vector<VertexType> specificVertices;
-		specificVertices.reserve(vertices.size());
-		for (const auto& v : vertices) {
-			specificVertices.push_back(std::get<VertexType>(v));
-		}
-        // Allocate buffer view
-        size_t size = vertices.size() * sizeof(VertexType);
-		if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
-			preSkinningView = m_preSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
-			postSkinningView = m_postSkinningVertices->AddData(nullptr, size, typeid(VertexType));
-		}
-		else {
-			postSkinningView = m_postSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
-		}
+  //  std::visit([&](auto&& vertexSample) {
+  //      using VertexType = std::decay_t<decltype(vertexSample)>;
+		//std::vector<VertexType> specificVertices;
+		//specificVertices.reserve(vertices.size());
+		//for (const auto& v : vertices) {
+		//	specificVertices.push_back(std::get<VertexType>(v));
+		//}
+  //      // Allocate buffer view
+  //      size_t size = vertices.size() * sizeof(VertexType);
+		//if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
+		//	preSkinningView = m_preSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
+		//	postSkinningView = m_postSkinningVertices->AddData(nullptr, size, typeid(VertexType));
+		//}
+		//else {
+		//	postSkinningView = m_postSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
+		//}
 
-        }, vertices.front());
+  //      }, vertices.front());
+
+	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
+		preSkinningView = m_preSkinningVertices->AddData(vertices.data(), vertices.size() * sizeof(VertexTextured), sizeof(VertexTextured));
+		postSkinningView = m_postSkinningVertices->AddData(nullptr, vertices.size() * sizeof(VertexTextured), sizeof(VertexTextured));
+	}
+	else {
+		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), vertices.size() * sizeof(VertexTextured), sizeof(VertexTextured));
+	}
 
 	int size = sizeof(VertexTextured);
 	auto& meshlets = mesh->GetMeshlets();
 	//auto test = vertices[0];
 	spdlog::info("Adding {} meshlets, allocating {} bytes", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));
-	auto meshletOffsetsView = m_meshletOffsets->AddData(meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet), typeid(meshopt_Meshlet));
+	auto meshletOffsetsView = m_meshletOffsets->AddData(meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
 
 	auto& meshletVertices = mesh->GetMeshletVertices();
-	auto meshletIndicesView = m_meshletIndices->AddData(meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int), typeid(unsigned int));
+	auto meshletIndicesView = m_meshletIndices->AddData(meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int), sizeof(unsigned int));
 
 	auto& meshletTriangles = mesh->GetMeshletTriangles();
-	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), typeid(unsigned char));
+	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), sizeof(unsigned char));
 
 	mesh->SetBufferViews(std::move(postSkinningView), std::move(preSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
 
 	// Per mesh buffer
 	switch (bucket){
 	case MaterialBuckets::Opaque: {
-		auto perMeshBufferView = m_opaquePerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
+		auto perMeshBufferView = m_opaquePerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 		break;
 	}
 	case MaterialBuckets::AlphaTest: {
-		auto perMeshBufferView = m_alphaTestPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
+		auto perMeshBufferView = m_alphaTestPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 		break;
 	}
 	case MaterialBuckets::Blend: {
-		auto perMeshBufferView = m_blendPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), typeid(PerMeshCB));
+		auto perMeshBufferView = m_blendPerMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 		mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 		break;
 	}

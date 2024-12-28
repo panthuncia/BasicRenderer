@@ -38,7 +38,7 @@ public:
 		if (!m_freeIndices.empty()) { // Reuse a free index
 			unsigned int index = m_freeIndices.front();
 			m_freeIndices.pop_front();
-            return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
+            return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T)));
         }
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
@@ -46,7 +46,7 @@ public:
             onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this);
         }
 		unsigned int index = m_usedCapacity - 1;
-        return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, typeid(T)));
+        return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T)));
     }
 
 	std::shared_ptr<BufferView> Add(const T& data) {
