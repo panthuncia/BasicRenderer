@@ -10,8 +10,8 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
 
-    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)objectBuffer.normalMatrix;
-    
+    StructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
+    float3x3 normalMatrixSkinnedIfNecessary = (float3x3) postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex];
     if (flags & VERTEX_SKINNED) {
         StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
         StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
@@ -131,7 +131,7 @@ void MSMain(
     out vertices PSInput outputVertices[64],
     out indices uint3 outputTriangles[64]) {
 
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferDescriptorIndex]; // Base vertex buffer
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex]; // Base vertex buffer
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferDescriptorIndex]; // Meshlets, containing vertex & primitive offset & num
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferDescriptorIndex]; // Meshlet vertices, as indices into base vertex buffer
     ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferDescriptorIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
@@ -186,7 +186,7 @@ void MSMain(
     
     if (uGroupThreadID < meshlet.VertCount) {
         uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshBuffer.vertexBufferOffset, thisVertex, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, vGroupID, objectBuffer);
+        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshBuffer.postSkinningVertexBufferOffset, thisVertex, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, vGroupID, objectBuffer);
     }
     if (uGroupThreadID < meshlet.TriCount) {
         outputTriangles[uGroupThreadID] = meshletIndices;

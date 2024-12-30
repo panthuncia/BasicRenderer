@@ -10,20 +10,21 @@
 
 PSInput VSMain(uint vertexID : SV_VertexID) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[vertexBufferDescriptorIndex];
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex];
     
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
     
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
-    
-    uint byteOffset = meshBuffer.vertexBufferOffset + vertexID * meshBuffer.vertexByteSize;
+        
+    uint byteOffset = meshBuffer.postSkinningVertexBufferOffset + vertexID * meshBuffer.vertexByteSize;
     Vertex input = LoadVertex(byteOffset, vertexBuffer, meshBuffer.vertexFlags);
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
-    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)objectBuffer.normalMatrix;
+    StructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
+    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex];
     
     if (meshBuffer.vertexFlags & VERTEX_SKINNED) {
         StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];

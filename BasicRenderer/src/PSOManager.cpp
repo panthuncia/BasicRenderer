@@ -384,7 +384,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 #if defined(_DEBUG)
     arguments.push_back(DXC_ARG_DEBUG); //-Zi
     arguments.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE); //-Zss
-    //arguments.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
+    arguments.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
 #endif
 
     for (const auto& define : defines)

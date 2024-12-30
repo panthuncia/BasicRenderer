@@ -86,12 +86,13 @@ void RenderableObject::UpdateBuffers() {
     m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
 
 	// TODO: Any way to do this math without transforming to 4x4 and then back?
-	XMFLOAT3X3 normalMat = GetUpperLeft3x3(XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3)));
+	//XMFLOAT3X3 normalMat = GetUpperLeft3x3(XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3)));
+	XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
 	if (preSkinningNormalMatrixView != nullptr) {
-		m_currentManager->UpdatePreSkinningNormalMatrixBuffer(preSkinningNormalMatrixView.get(), normalMat);
+		m_currentManager->UpdatePreSkinningNormalMatrixBuffer(preSkinningNormalMatrixView.get(), &normalMat);
 	}
 	else {
-		m_currentManager->UpdatePostSkinningNormalMatrixBuffer(postSkinningNormalMatrixView.get(), normalMat);
+		m_currentManager->UpdatePostSkinningNormalMatrixBuffer(postSkinningNormalMatrixView.get(), &normalMat);
 	}
 	
 }
@@ -180,6 +181,8 @@ std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentBlendDrawS
 
 void RenderableObject::SetPreSkinningNormalMatrixView(std::shared_ptr<BufferView> view) {
 	preSkinningNormalMatrixView = view;
+	perObjectCBData.preSkinningNormalMatrixBufferIndex = preSkinningNormalMatrixView->GetOffset() / sizeof(XMFLOAT4X4);
+	m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
 }
 
 BufferView* RenderableObject::GetPreSkinningNormalMatrixView() {
@@ -188,6 +191,8 @@ BufferView* RenderableObject::GetPreSkinningNormalMatrixView() {
 
 void RenderableObject::SetPostSkinningNormalMatrixView(std::shared_ptr<BufferView> view) {
 	postSkinningNormalMatrixView = view;
+	perObjectCBData.postSkinningNormalMatrixBufferIndex = postSkinningNormalMatrixView->GetOffset()/sizeof(XMFLOAT4X4);
+	m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
 }
 
 BufferView* RenderableObject::GetPostSkinningNormalMatrixView() {

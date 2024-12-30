@@ -39,8 +39,6 @@ struct PerObjectCB {
     unsigned int postSkinningNormalMatrixBufferIndex;
     unsigned int boneTransformBufferIndex;
     unsigned int inverseBindMatricesBufferIndex;
-    unsigned int isValid = 1;
-    unsigned int pad0;
 };
 
 struct BoundingSphere {

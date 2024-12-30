@@ -90,8 +90,6 @@ struct PerObjectBuffer {
     uint postSkinningNormalMatrixBufferIndex;
     uint boneTransformBufferIndex;
     uint inverseBindMatricesBufferIndex;
-    uint isValid;
-    uint pad0;
 };
 
 struct BoundingSphere {
