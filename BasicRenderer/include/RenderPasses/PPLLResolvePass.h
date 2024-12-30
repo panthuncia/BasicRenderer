@@ -85,20 +85,21 @@ public:
 
 		unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() }; // HLSL bools are 32 bits
 		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
-		commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
+		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
 
-		unsigned int staticBufferIndices[6] = {};
+		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& cameraManager = context.currentScene->GetCameraManager();
-		staticBufferIndices[0] = meshManager->GetPostSkinningVertexBufferIndex();
-		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
-		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
-		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
-		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[PostSkinningNormalMatrixBufferDescriptorIndex] = objectManager->GetPostSkinningNormalMatrixBufferSRVIndex();
+		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
+		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
+		staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletIndexBufferSRVIndex();
+		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
+		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
 
-		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
+		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
@@ -106,11 +107,11 @@ public:
 		}
 
 		unsigned int transparentPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
-		commandList->SetGraphicsRoot32BitConstants(6, 1, &transparentPerMeshBufferIndex, 0);
+		commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &transparentPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
 		// PPLL heads & buffer
 		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo().index, m_PPLLBuffer->GetSRVInfo().index };
-		commandList->SetGraphicsRoot32BitConstants(7, 2, &indices, 0);
+		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 2, &indices, 0);
 
 		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
 

@@ -51,7 +51,7 @@ public:
 
 	std::shared_ptr<BufferView> Add(const T& data) {
 		auto view = Add();
-		UpdateAt(view.get(), data);
+		UpdateView(view.get(), &data);
 		return view;
 	}
 

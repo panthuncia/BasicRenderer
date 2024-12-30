@@ -23,8 +23,8 @@ public:
 		return m_perObjectBuffers->GetSRVInfo().index;
 	}
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
-	void UpdatePreSkinningNormalMatrixBuffer(unsigned int index, DirectX::XMFLOAT3X3& data);
-	void UpdatePostSkinningNormalMatrixBuffer(unsigned int index, DirectX::XMFLOAT3X3& data);
+	void UpdatePreSkinningNormalMatrixBuffer(BufferView* view, DirectX::XMFLOAT3X3& data);
+	void UpdatePostSkinningNormalMatrixBuffer(BufferView* view, DirectX::XMFLOAT3X3& data);
 	std::shared_ptr<DynamicBuffer>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}
@@ -53,6 +53,18 @@ public:
 		return m_activeBlendDrawSetIndices->GetSRVInfo().index;
 	}
 
+	unsigned int GetPreSkinningNormalMatrixBufferSRVIndex() const {
+		return m_preSkinningNormalMatrixBuffer->GetSRVInfo().index;
+	}
+
+	unsigned int GetPostSkinningNormalMatrixBufferSRVIndex() const {
+		return m_postSkinningNormalMatrixBuffer->GetSRVInfo().index;
+	}
+
+	unsigned int GetPostSkinningNormalMatrixBufferUAVIndex() const {
+		return m_postSkinningNormalMatrixBuffer->GetUAVShaderVisibleInfo().index;
+	}
+
 	std::shared_ptr<DynamicBuffer>& GetOpaqueDrawSetCommandsBuffer() {
 		return m_opaqueDrawSetCommandsBuffer;
 	}
@@ -77,6 +89,14 @@ public:
 		return m_activeBlendDrawSetIndices;
 	}
 
+	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT3X3>>& GetPreSkinningNormalMatrixBuffer() {
+		return m_preSkinningNormalMatrixBuffer;
+	}
+
+	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT3X3>>& GetPostSkinningNormalMatrixBuffer() {
+		return m_postSkinningNormalMatrixBuffer;
+	}
+
 private:
 	ObjectManager();
 	std::vector<std::shared_ptr<RenderableObject>> m_objects;
@@ -84,8 +104,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_opaqueDrawSetCommandsBuffer;
 	std::shared_ptr<DynamicBuffer> m_alphaTestDrawSetCommandsBuffer;
 	std::shared_ptr<DynamicBuffer> m_blendDrawSetCommandsBuffer;
-	std::shared_ptr<DynamicStructuredBuffer<DirectX::XMFLOAT3X3>> m_preSkinningNormalMatrixBuffer;
-	std::shared_ptr<DynamicStructuredBuffer<DirectX::XMFLOAT3X3>> m_postSkinningNormalMatrixBuffer;
+	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT3X3>> m_preSkinningNormalMatrixBuffer;
+	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT3X3>> m_postSkinningNormalMatrixBuffer;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeOpaqueDrawSetIndices;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeAlphaTestDrawSetIndices;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeBlendDrawSetIndices;

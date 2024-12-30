@@ -71,7 +71,13 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
 	}
 
 	if (object->GetSkin() != nullptr) {
-		skinnedObjectsByID[object->GetLocalID()] = object;
+		if (object->HasOpaque()) {
+			opaqueSkinnedObjectsByID[object->GetLocalID()] = object;
+		} if (object->HasAlphaTest()) {
+			alphaTestSkinnedObjectsByID[object->GetLocalID()] = object;
+		} if (object->HasBlend()) {
+			blendSkinnedObjectsByID[object->GetLocalID()] = object;
+		}
 	}
 
     return object->GetLocalID();
@@ -190,7 +196,13 @@ void Scene::RemoveObjectByID(UINT id) {
 			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
 		}
 		if (it->second->GetSkin() != nullptr) {
-			skinnedObjectsByID.erase(it->second->GetLocalID());
+			if (it->second->HasOpaque()) {
+				opaqueSkinnedObjectsByID.erase(it->second->GetLocalID());
+			} if (it->second->HasAlphaTest()) {
+				alphaTestSkinnedObjectsByID.erase(it->second->GetLocalID());
+            } if (it->second->HasBlend()) {
+                blendSkinnedObjectsByID.erase(it->second->GetLocalID());
+            }
 		}
         DeletionManager::GetInstance().MarkForDelete(it->second); // defer deletion to the end of the frame
         objectsByID.erase(it);
@@ -284,6 +296,18 @@ std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetAlphaTest
 
 std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetBlendRenderableObjectIDMap() {
 	return blendObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetOpaqueSkinnedRenderableObjectIDMap() {
+	return opaqueSkinnedObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetAlphaTestSkinnedRenderableObjectIDMap() {
+	return alphaTestSkinnedObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetBlendSkinnedRenderableObjectIDMap() {
+	return blendSkinnedObjectsByID;
 }
 
 std::unordered_map<UINT, std::shared_ptr<Light>>& Scene::GetLightIDMap() {

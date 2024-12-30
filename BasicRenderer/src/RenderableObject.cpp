@@ -87,11 +87,11 @@ void RenderableObject::UpdateBuffers() {
 
 	// TODO: Any way to do this math without transforming to 4x4 and then back?
 	XMFLOAT3X3 normalMat = GetUpperLeft3x3(XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3)));
-	if (preSkinningNormalMatrixIndex.has_value()) {
-		m_currentManager->UpdatePreSkinningNormalMatrixBuffer(preSkinningNormalMatrixIndex.value(), normalMat);
+	if (preSkinningNormalMatrixView != nullptr) {
+		m_currentManager->UpdatePreSkinningNormalMatrixBuffer(preSkinningNormalMatrixView.get(), normalMat);
 	}
 	else {
-		m_currentManager->UpdatePostSkinningNormalMatrixBuffer(postSkinningNormalMatrixIndex, normalMat);
+		m_currentManager->UpdatePostSkinningNormalMatrixBuffer(postSkinningNormalMatrixView.get(), normalMat);
 	}
 	
 }
@@ -178,18 +178,18 @@ std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentBlendDrawS
 	return m_blendDrawSetCommandViews;
 }
 
-void RenderableObject::SetPreSkinningNormalMatrixIndex(unsigned int index) {
-	preSkinningNormalMatrixIndex = index;
+void RenderableObject::SetPreSkinningNormalMatrixView(std::shared_ptr<BufferView> view) {
+	preSkinningNormalMatrixView = view;
 }
 
-std::optional<unsigned int> RenderableObject::GetPreSkinningNormalMatrixIndex() const {
-	return preSkinningNormalMatrixIndex;
+BufferView* RenderableObject::GetPreSkinningNormalMatrixView() {
+	return preSkinningNormalMatrixView.get();
 }
 
-void RenderableObject::SetPostSkinningNormalMatrixIndex(unsigned int index) {
-	postSkinningNormalMatrixIndex = index;
+void RenderableObject::SetPostSkinningNormalMatrixView(std::shared_ptr<BufferView> view) {
+	postSkinningNormalMatrixView = view;
 }
 
-unsigned int RenderableObject::GetPostSkinningNormalMatrixIndex() const {
-	return postSkinningNormalMatrixIndex;
+BufferView* RenderableObject::GetPostSkinningNormalMatrixView() {
+	return postSkinningNormalMatrixView.get();
 }

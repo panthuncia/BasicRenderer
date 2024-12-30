@@ -28,7 +28,6 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
-		CreateRootSignature();
 		CreatePSO();
 	}
 
@@ -46,12 +45,40 @@ public:
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-		auto rootSignature = m_rootSignature;
-		commandList->SetComputeRootSignature(rootSignature.Get());
+		auto rootSignature = PSOManager::GetInstance().GetRootSignature().Get();
+		commandList->SetComputeRootSignature(rootSignature);
 
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
+		auto& meshManager = context.currentScene->GetMeshManager();
+		auto& objectManager = context.currentScene->GetObjectManager();
+
+		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
+		staticBufferIndices[PreSkinningVertexBufferDescriptorIndex] = meshManager->GetPreSkinningVertexBufferSRVIndex();
+		staticBufferIndices[PreSkinningNormalMatrixBufferDescriptorIndex] = objectManager->GetPreSkinningNormalMatrixBufferSRVIndex();
+		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferUAVIndex();
+		staticBufferIndices[PostSkinningNormalMatrixBufferDescriptorIndex] = objectManager->GetPostSkinningNormalMatrixBufferUAVIndex();
+
+		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
+
+		auto opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
+		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
+		for (auto& pair : context.currentScene->GetOpaqueSkinnedRenderableObjectIDMap()) {
+			auto& renderable = pair.second;
+			auto& meshes = renderable->GetOpaqueMeshes();
+
+			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+			commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+
+			for (auto& pMesh : meshes) {
+				auto& mesh = *pMesh;
+				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+
+				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
+			}
+		}
 
 
 		ThrowIfFailed(commandList->Close());
@@ -78,7 +105,7 @@ private:
 		};
 
 		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = m_rootSignature.Get();
+		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetRootSignature().Get();
 		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 
 		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
@@ -91,38 +118,7 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
-	void CreateRootSignature() {
-		// Root parameters
-		D3D12_ROOT_PARAMETER1 parameters[1] = {};
-
-		// PerObject buffer index
-		parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-		parameters[0].Constants.ShaderRegister = 1;
-		parameters[0].Constants.RegisterSpace = 0;
-		parameters[0].Constants.Num32BitValues = 1;
-		parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-		// Root Signature Description
-		D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
-		rootSignatureDesc.NumParameters = _countof(parameters);
-		rootSignatureDesc.pParameters = parameters;
-		rootSignatureDesc.NumStaticSamplers = 0;
-		rootSignatureDesc.pStaticSamplers = nullptr;
-		rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
-
-		// Serialize and create the root signature
-		ComPtr<ID3DBlob> signature;
-		ComPtr<ID3DBlob> error;
-		D3D12_VERSIONED_ROOT_SIGNATURE_DESC versionedDesc;
-		versionedDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-		versionedDesc.Desc_1_1 = rootSignatureDesc;
-		ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &signature, &error));
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
-	}
-
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> m_PSO;
-	ComPtr<ID3D12RootSignature> m_rootSignature;
 };

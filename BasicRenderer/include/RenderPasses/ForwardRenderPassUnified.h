@@ -104,23 +104,23 @@ private:
     }
 
     void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
-        unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() };
-        commandList->SetGraphicsRoot32BitConstants(4, 2, &settings, 0);
+        unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
+        commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
         auto& meshManager = context.currentScene->GetMeshManager();
         auto& objectManager = context.currentScene->GetObjectManager();
         auto& cameraManager = context.currentScene->GetCameraManager();
 
-        unsigned int staticBufferIndices[6] = {
-            meshManager->GetPostSkinningVertexBufferIndex(),
-            meshManager->GetMeshletOffsetBufferIndex(),
-            meshManager->GetMeshletIndexBufferIndex(),
-            meshManager->GetMeshletTriangleBufferIndex(),
-            objectManager->GetPerObjectBufferSRVIndex(),
-            cameraManager->GetCameraBufferSRVIndex()
-        };
+        unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
+        staticBufferIndices[PostSkinningNormalMatrixBufferDescriptorIndex] = objectManager->GetPostSkinningNormalMatrixBufferSRVIndex();
+        staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
+        staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
+        staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletIndexBufferSRVIndex();
+        staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
+        staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
+        staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
 
-        commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
+        commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
     }
 
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
@@ -135,13 +135,13 @@ private:
 
         // Opaque objects
         unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-        commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
+        commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
         for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
             auto& renderable = pair.second;
             auto& meshes = renderable->GetOpaqueMeshes();
 
             auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh;
@@ -149,7 +149,7 @@ private:
                 commandList->SetPipelineState(pso.Get());
 
                 auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-                commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
                 D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
                 commandList->IASetIndexBuffer(&indexBufferView);
@@ -159,13 +159,13 @@ private:
 
         // Alpha test objects
         unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-        commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
+        commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
         for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
             auto& renderable = pair.second;
             auto& meshes = renderable->GetAlphaTestMeshes();
 
             auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh;
@@ -173,7 +173,7 @@ private:
                 commandList->SetPipelineState(pso.Get());
 
                 auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-                commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
                 D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
                 commandList->IASetIndexBuffer(&indexBufferView);
@@ -194,13 +194,13 @@ private:
 
         // Opaque objects
         unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-        commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
+        commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
         for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
             auto& renderable = pair.second;
             auto& meshes = renderable->GetOpaqueMeshes();
 
             auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh;
@@ -208,7 +208,7 @@ private:
                 commandList->SetPipelineState(pso.Get());
 
                 auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-                commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
                 // Mesh shaders use DispatchMesh
                 commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
@@ -217,13 +217,13 @@ private:
 
         // Alpha test objects
         unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-        commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
+        commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
         for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
             auto& renderable = pair.second;
             auto& meshes = renderable->GetAlphaTestMeshes();
 
             auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh;
@@ -231,7 +231,7 @@ private:
                 commandList->SetPipelineState(pso.Get());
 
                 auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-                commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
                 commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
@@ -253,7 +253,7 @@ private:
         auto numOpaque = context.currentScene->GetNumOpaqueDraws();
         if (numOpaque > 0) {
             unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-            commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
+            commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
             auto opaqueIndirectBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
             auto pso = psoManager.GetMeshPSO(localPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
@@ -273,7 +273,7 @@ private:
         auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
         if (numAlphaTest > 0) {
             unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-            commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
+            commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
             auto alphaTestIndirectBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();
             auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,

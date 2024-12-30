@@ -15,14 +15,14 @@ std::atomic<int> Mesh::globalMeshCount = 0;
 
 Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
     m_vertices = std::move(vertices);
-    CreateBuffers(indices);
-    this->material = material;
-    auto& resourceManager = ResourceManager::GetInstance();
-    m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
+	m_skinningVertices = std::move(skinningVertices);
+	m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
-    //m_pPerMeshBuffer = resourceManager.CreateConstantBuffer<PerMeshCB>(L"PerMeshCB");
-	//resourceManager.UpdateConstantBuffer(m_pPerMeshBuffer, m_perMeshBufferData);
+
+	CreateBuffers(indices);
+    this->material = material;
+
 	m_globalMeshID = GetNextGlobalIndex();
 }
 

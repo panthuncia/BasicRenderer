@@ -14,7 +14,6 @@ MeshManager::MeshManager() {
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, ResourceState::ALL_SRV, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"meshletTriangles", true);
 	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
-	m_resourceGroup->AddResource(m_postSkinningVertices);
 	m_resourceGroup->AddResource(m_meshletOffsets);
 	m_resourceGroup->AddResource(m_meshletIndices);
 	m_resourceGroup->AddResource(m_meshletTriangles);
@@ -26,6 +25,7 @@ MeshManager::MeshManager() {
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	auto& vertices = mesh->GetVertices();
+	auto& skinningVertices = mesh->GetSkinningVertices();
     if (vertices.empty()) {
         // Handle empty vertices case
 		throw std::runtime_error("Mesh vertices are empty");
@@ -54,12 +54,13 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 
   //      }, vertices.front());
 
+	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
-		preSkinningView = m_preSkinningVertices->AddData(vertices.data(), vertices.size() * sizeof(VertexTextured), sizeof(VertexTextured));
-		postSkinningView = m_postSkinningVertices->AddData(nullptr, vertices.size() * sizeof(VertexTextured), sizeof(VertexTextured));
+		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), skinningVertices.size() * sizeof(SkinningVertex), sizeof(SkinningVertex));
+		postSkinningView = m_postSkinningVertices->AddData(nullptr, mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
 	}
 	else {
-		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), vertices.size() * sizeof(VertexTextured), sizeof(VertexTextured));
+		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
 	}
 
 	int size = sizeof(VertexTextured);

@@ -41,6 +41,6 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     
     postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex] = mul(preSkinningNormalMatrixBuffer[objectBuffer.preSkinningNormalMatrixBufferIndex], (float3x3) skinMatrix);
     
-    pos = mul(pos, skinMatrix);
-    
+    float3 skinnedPosition = mul(pos, skinMatrix).xyz;
+    postSkinningVertexBuffer.Store3(postSkinnedByteOffset, skinnedPosition);
 }

@@ -103,3 +103,66 @@ struct LightInfo {
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
 };
+
+enum RootSignatureLayout {
+    PerObjectRootSignatureIndex,
+    PerMeshRootSignatureIndex,
+	ShadowRootSignatureIndex,
+	SettingsRootSignatureIndex,
+	StaticBufferRootSignatureIndex,
+	VariableBufferRootSignatureIndex,
+	TransparencyInfoRootSignatureIndex,
+	NumRootSignatureParameters
+};
+
+enum PerObjectRootConstants {
+	PerObjectBufferIndex,
+	NumPerObjectRootConstants
+};
+
+enum PerMeshRootConstants {
+	PerMeshBufferIndex,
+	NumPerMeshRootConstants
+};
+
+enum ShadowRootConstants {
+	CurrentLightID,
+    LightViewIndex,
+	NumShadowRootConstants
+};
+
+enum SettingsRootConstants {
+	EnableShadows,
+	EnablePunctualLights,
+	NumSettingsRootConstants
+};
+
+enum StaticBufferRootConstants {
+    PreSkinningNormalMatrixBufferDescriptorIndex,
+    PostSkinningNormalMatrixBufferDescriptorIndex,
+    PreSkinningVertexBufferDescriptorIndex,
+    PostSkinningVertexBufferDescriptorIndex,
+    MeshletBufferDescriptorIndex,
+    MeshletVerticesBufferDescriptorIndex,
+    MeshletTrianglesBufferDescriptorIndex,
+    PerObjectBufferDescriptorIndex,
+    CameraBufferDescriptorIndex,
+	NumStaticBufferRootConstants
+};
+
+enum VariableBufferRootConstants {
+    PerMeshBufferDescriptorIndex,
+    DrawSetCommandBufferDescriptorIndex,
+    ActiveDrawSetIndicesBufferDescriptorIndex,
+    IndirectCommandBufferDescriptorIndex,
+    MaxDrawIndex,
+	NumVariableBufferRootConstants
+};
+
+enum TransparencyInfoRootConstants {
+	PPLLHeadBufferDescriptorIndex,
+	PPLLNodeBufferDescriptorIndex,
+	PPLLCounterBufferDescriptorIndex,
+	PPLLNodeSize,
+	NumTransparencyInfoRootConstants
+};

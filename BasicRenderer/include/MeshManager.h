@@ -20,16 +20,23 @@ public:
 	}
 	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket);
 	void RemoveMesh(Mesh* mesh);
-	unsigned int GetPostSkinningVertexBufferIndex() const {
+
+	unsigned int GetPreSkinningVertexBufferSRVIndex() const {
+		return m_preSkinningVertices->GetSRVInfo().index;
+	}
+	unsigned int GetPostSkinningVertexBufferSRVIndex() const {
 		return m_postSkinningVertices->GetSRVInfo().index;
 	}
-	unsigned int GetMeshletOffsetBufferIndex() const {
+	unsigned int GetPostSkinningVertexBufferUAVIndex() const {
+		return m_postSkinningVertices->GetUAVShaderVisibleInfo().index;
+	}
+	unsigned int GetMeshletOffsetBufferSRVIndex() const {
 		return m_meshletOffsets->GetSRVInfo().index;
 	}
-	unsigned int GetMeshletIndexBufferIndex() const {
+	unsigned int GetMeshletIndexBufferSRVIndex() const {
 		return m_meshletIndices->GetSRVInfo().index;
 	}
-	unsigned int GetMeshletTriangleBufferIndex() const {
+	unsigned int GetMeshletTriangleBufferSRVIndex() const {
 		return m_meshletTriangles->GetSRVInfo().index;
 	}
 	std::shared_ptr<ResourceGroup> GetResourceGroup() {
@@ -52,6 +59,12 @@ public:
 	}
 	std::shared_ptr<DynamicBuffer>& GetBlendPerMeshBuffers() {
 		return m_blendPerMeshBuffers;
+	}
+	std::shared_ptr<DynamicBuffer>& GetPreSkinningVertices() {
+		return m_preSkinningVertices;
+	}
+	std::shared_ptr<DynamicBuffer>& GetPostSkinningVertices() {
+		return m_postSkinningVertices;
 	}
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);

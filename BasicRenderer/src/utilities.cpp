@@ -54,32 +54,32 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
             }
         }
 
-        std::vector<std::byte> rawData;
+        std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
 		unsigned int numVertices = geom.positions.size() / 3;
 		                    // position,        normal,            texcoord,                                tangent, bitangent
 		uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0) + (hasTangents ? sizeof(XMFLOAT3) * 2 : 0);
-		rawData.resize(numVertices * vertexSize);
+		rawData->resize(numVertices * vertexSize);
 
         for (unsigned int i = 0; i < numVertices; i++) {
 			size_t offset = i * vertexSize;
-			memcpy(rawData.data() + offset, &geom.positions[i * 3], sizeof(XMFLOAT3));
-			memcpy(rawData.data() + offset + sizeof(XMFLOAT3), &geom.normals[i * 3], sizeof(XMFLOAT3));
+			memcpy(rawData->data() + offset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+			memcpy(rawData->data() + offset + sizeof(XMFLOAT3), &geom.normals[i * 3], sizeof(XMFLOAT3));
 			if (hasTexcoords) {
-				memcpy(rawData.data() + offset + sizeof(XMFLOAT3) * 2, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
+				memcpy(rawData->data() + offset + sizeof(XMFLOAT3) * 2, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
 			}
 			if (hasTangents) {
-				memcpy(rawData.data() + offset + sizeof(XMFLOAT3) * 2 + sizeof(XMFLOAT2), &tanbit.tangents[i], sizeof(XMFLOAT3));
-				memcpy(rawData.data() + offset + sizeof(XMFLOAT3) * 3 + sizeof(XMFLOAT2), &tanbit.bitangents[i], sizeof(XMFLOAT3));
+				memcpy(rawData->data() + offset + sizeof(XMFLOAT3) * 2 + sizeof(XMFLOAT2), &tanbit.tangents[i], sizeof(XMFLOAT3));
+				memcpy(rawData->data() + offset + sizeof(XMFLOAT3) * 3 + sizeof(XMFLOAT2), &tanbit.bitangents[i], sizeof(XMFLOAT3));
 			}
         }
 
-        std::optional<std::vector<SkinningVertex>> skinningData;
+        std::unique_ptr<std::vector<SkinningVertex>> skinningData = std::make_unique<std::vector<SkinningVertex>>();
         if (hasJoints) {
-			skinningData = std::vector<SkinningVertex>(numVertices);
+			skinningData->resize(numVertices);
 			for (unsigned int i = 0; i < numVertices; i++) {
-				skinningData.value()[i].position = XMFLOAT3(geom.positions[i * 3], geom.positions[i * 3 + 1], geom.positions[i * 3 + 2]);
-				skinningData.value()[i].joints = XMUINT4(geom.joints[i * 4], geom.joints[i * 4 + 1], geom.joints[i * 4 + 2], geom.joints[i * 4 + 3]);
-				skinningData.value()[i].weights = XMFLOAT4(geom.weights[i * 4], geom.weights[i * 4 + 1], geom.weights[i * 4 + 2], geom.weights[i * 4 + 3]);
+				(*skinningData)[i].position = XMFLOAT3(geom.positions[i * 3], geom.positions[i * 3 + 1], geom.positions[i * 3 + 2]);
+                (*skinningData)[i].joints = XMUINT4(geom.joints[i * 4], geom.joints[i * 4 + 1], geom.joints[i * 4 + 2], geom.joints[i * 4 + 3]);
+                (*skinningData)[i].weights = XMFLOAT4(geom.weights[i * 4], geom.weights[i * 4 + 1], geom.weights[i * 4 + 2], geom.weights[i * 4 + 3]);
 			}
         }
 

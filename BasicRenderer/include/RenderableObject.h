@@ -43,10 +43,10 @@ public:
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentOpaqueDrawSetCommandViews();
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentAlphaTestDrawSetCommandViews();
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentBlendDrawSetCommandViews();
-	void SetPreSkinningNormalMatrixIndex(unsigned int index);
-	std::optional<unsigned int> GetPreSkinningNormalMatrixIndex() const;
-	void SetPostSkinningNormalMatrixIndex(unsigned int index);
-	unsigned int GetPostSkinningNormalMatrixIndex() const;
+	void SetPreSkinningNormalMatrixView(std::shared_ptr<BufferView> view);
+	BufferView* GetPreSkinningNormalMatrixView();
+	void SetPostSkinningNormalMatrixView(std::shared_ptr<BufferView> view);
+	BufferView* GetPostSkinningNormalMatrixView();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
@@ -59,8 +59,8 @@ private:
 	std::vector<std::shared_ptr<BufferView>> m_opaqueDrawSetCommandViews;
 	std::vector<std::shared_ptr<BufferView>> m_alphaTestDrawSetCommandViews;
 	std::vector<std::shared_ptr<BufferView>> m_blendDrawSetCommandViews;
-	std::optional<unsigned int> preSkinningNormalMatrixIndex = -1;
-	unsigned int postSkinningNormalMatrixIndex;
+	std::shared_ptr<BufferView> preSkinningNormalMatrixView = nullptr;
+	std::shared_ptr<BufferView> postSkinningNormalMatrixView = nullptr;
 	PerObjectCB perObjectCBData;
 	bool m_hasAlphaTest = false;
 	bool m_hasOpaque = false;

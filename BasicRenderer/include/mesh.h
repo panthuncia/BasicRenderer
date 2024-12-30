@@ -22,12 +22,14 @@ public:
     static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
 		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), indices, material, flags));
     }
+	uint32_t GetNumVertices() const { return m_vertices->size() / m_perMeshBufferData.vertexByteSize; }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
 	int GetGlobalID() const;
 	std::vector<std::byte>& GetVertices() { return *m_vertices; }
+	std::vector<SkinningVertex>& GetSkinningVertices() { return *m_skinningVertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
 	std::vector<unsigned int>& GetMeshletVertices() { return m_meshletVertices; }
 	std::vector<unsigned char>& GetMeshletTriangles() { return m_meshletTriangles; }
