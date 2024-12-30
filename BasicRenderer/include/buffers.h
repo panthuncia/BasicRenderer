@@ -107,7 +107,7 @@ struct LightInfo {
 enum RootSignatureLayout {
     PerObjectRootSignatureIndex,
     PerMeshRootSignatureIndex,
-	ShadowRootSignatureIndex,
+	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
 	StaticBufferRootSignatureIndex,
 	VariableBufferRootSignatureIndex,
@@ -125,10 +125,10 @@ enum PerMeshRootConstants {
 	NumPerMeshRootConstants
 };
 
-enum ShadowRootConstants {
+enum ViewRootConstants {
 	CurrentLightID,
     LightViewIndex,
-	NumShadowRootConstants
+	NumViewRootConstants
 };
 
 enum SettingsRootConstants {

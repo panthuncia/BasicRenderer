@@ -477,11 +477,11 @@ void PSOManager::createRootSignature() {
     parameters[1].Constants.Num32BitValues = 1;
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    // First integer root constant, used for shadow light ID
+    // shadow info
     parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[2].Constants.ShaderRegister = 3; // b3 for first integer root constant
     parameters[2].Constants.RegisterSpace = 0;
-    parameters[2].Constants.Num32BitValues = 1;
+    parameters[2].Constants.Num32BitValues = 2;
     parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Third integer root constant, used for settings
@@ -495,7 +495,7 @@ void PSOManager::createRootSignature() {
 	parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[4].Constants.ShaderRegister = 5;
 	parameters[4].Constants.RegisterSpace = 0;
-	parameters[4].Constants.Num32BitValues = 6;
+	parameters[4].Constants.Num32BitValues = 9;
 	parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Variable buffer indices

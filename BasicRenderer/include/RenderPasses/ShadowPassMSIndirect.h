@@ -57,18 +57,20 @@ public:
 
 		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
 
-		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& cameraManager = context.currentScene->GetCameraManager();
-		staticBufferIndices[0] = meshManager->GetPostSkinningVertexBufferSRVIndex();
-		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferSRVIndex();
-		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferSRVIndex();
-		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferSRVIndex();
-		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
 
-		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
+		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
+		staticBufferIndices[PostSkinningNormalMatrixBufferDescriptorIndex] = objectManager->GetPostSkinningNormalMatrixBufferSRVIndex();
+		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
+		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
+		staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletIndexBufferSRVIndex();
+		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
+		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+
+		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
 
@@ -76,7 +78,7 @@ public:
 			auto numOpaque = context.currentScene->GetNumOpaqueDraws();
 			if (numOpaque != 0) {
 				unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-				commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
+				commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
 				commandList->SetPipelineState(pso.Get());
@@ -86,7 +88,7 @@ public:
 			auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
 			if (numAlphaTest != 0) {
 				unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-				commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
+				commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST, BlendState::BLEND_STATE_MASK, false);
 				commandList->SetPipelineState(pso.Get());
@@ -96,7 +98,7 @@ public:
 			auto numBlend = context.currentScene->GetNumBlendDraws();
 			if (numBlend != 0) {
 				unsigned int blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
-				commandList->SetGraphicsRoot32BitConstants(6, 1, &blendPerMeshBufferIndex, 0);
+				commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &blendPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
 				commandList->SetPipelineState(pso.Get());

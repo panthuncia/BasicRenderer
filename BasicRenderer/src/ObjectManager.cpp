@@ -19,7 +19,7 @@ ObjectManager::ObjectManager() {
 	m_blendDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"blendDrawSetCommandsBuffer<IndirectCommand>");
 	
 	m_preSkinningNormalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT3X3>(ResourceState::ALL_SRV, 1, L"preSkinningNormalMatrixBuffer");
-	m_postSkinningNormalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT3X3>(ResourceState::ALL_SRV, 1, L"postSkinningNormalMatrixBuffer", true);
+	m_postSkinningNormalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT3X3>(ResourceState::ALL_SRV, 1, L"postSkinningNormalMatrixBuffer", 1, true);
 
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
 	m_activeAlphaTestDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeTransparentDrawSetIndices");

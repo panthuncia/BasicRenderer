@@ -6,7 +6,8 @@
 void CSMain(uint dispatchID : SV_DispatchThreadID) {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
-    PerObjectBuffer objectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
     
     ByteAddressBuffer preSkinningVertexBuffer = ResourceDescriptorHeap[preSkinningVertexBufferDescriptorIndex];
     RWByteAddressBuffer postSkinningVertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex];

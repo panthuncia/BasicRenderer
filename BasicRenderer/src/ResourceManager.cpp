@@ -291,7 +291,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	bufferSize += bufferSize % 4; // Align to 4 bytes
 	// Create the dynamic structured buffer instance
 	UINT bufferID = GetNextResizableBufferID();
-	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name);
+	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name, UAV);
 	ResourceTransition transition;
 	transition.resource = pDynamicBuffer.get();
 	transition.beforeState = ResourceState::UNKNOWN;

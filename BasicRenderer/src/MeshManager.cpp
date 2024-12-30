@@ -9,7 +9,7 @@
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_preSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"preSkinnedVertices", true);
-	m_postSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"vertices", true, true);
+	m_postSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"PostSkinnedvertices", true, true);
 	m_meshletOffsets = resourceManager.CreateIndexedDynamicBuffer(sizeof(meshopt_Meshlet), 1, ResourceState::ALL_SRV, L"meshletOffsets");
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, ResourceState::ALL_SRV, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, ResourceState::ALL_SRV, L"meshletTriangles", true);
@@ -57,7 +57,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), skinningVertices.size() * sizeof(SkinningVertex), sizeof(SkinningVertex));
-		postSkinningView = m_postSkinningVertices->AddData(nullptr, mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
+		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
 	}
 	else {
 		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);

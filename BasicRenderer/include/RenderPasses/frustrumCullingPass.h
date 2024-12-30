@@ -53,18 +53,20 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& cameraManager = context.currentScene->GetCameraManager();
-		staticBufferIndices[0] = meshManager->GetPostSkinningVertexBufferSRVIndex();
-		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferSRVIndex();
-		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferSRVIndex();
-		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferSRVIndex();
-		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
 
-		commandList->SetComputeRoot32BitConstants(5, 6, &staticBufferIndices, 0);
+		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
+		staticBufferIndices[PostSkinningNormalMatrixBufferDescriptorIndex] = objectManager->GetPostSkinningNormalMatrixBufferSRVIndex();
+		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
+		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
+		staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletIndexBufferSRVIndex();
+		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
+		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+
+		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int numCascades = getNumDirectionalLightCascades();
 
@@ -77,19 +79,18 @@ public:
 			auto apiResource = resource->GetAPIResource();
 			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
-			unsigned int bufferIndices[5] = {};
-			bufferIndices[0] = meshManager->GetOpaquePerMeshBufferSRVIndex();
-			bufferIndices[1] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
-			bufferIndices[2] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
-			bufferIndices[3] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[4] = context.currentScene->GetNumOpaqueDraws()-1;
+			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
+			bufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetOpaquePerMeshBufferSRVIndex();
+			bufferIndices[DrawSetCommandBufferDescriptorIndex] = objectManager->GetOpaqueDrawSetCommandsBufferSRVIndex();
+			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
+			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumOpaqueDraws()-1;
 
-			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
-			commandList->SetComputeRoot32BitConstants(3, 1, &cameraIndex, 0);
+			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
-			DeviceManager::GetInstance().DiagnoseDeviceRemoval();
 
 			//  Then, process buffer for each light
 			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
@@ -97,10 +98,10 @@ public:
 				auto& lightViews = light->GetCameraBufferViews();
 				int i = 0;
 				for (auto& buffer : light->GetPerViewOpaqueIndirectCommandBuffers()) {
-					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
-					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
-					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
+					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
 					//commandList->Dispatch(numThreadGroups, 1, 1);
 				}
@@ -114,16 +115,16 @@ public:
 			auto apiResource = resource->GetAPIResource();
 			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
-			unsigned int bufferIndices[5] = {};
-			bufferIndices[0] = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-			bufferIndices[1] = objectManager->GetAlphaTestDrawSetCommandsBufferSRVIndex();
-			bufferIndices[2] = objectManager->GetActiveAlphaTestDrawSetIndicesBufferSRVIndex();
-			bufferIndices[3] = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[4] = context.currentScene->GetNumAlphaTestDraws()-1;
+			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
+			bufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
+			bufferIndices[DrawSetCommandBufferDescriptorIndex] = objectManager->GetAlphaTestDrawSetCommandsBufferSRVIndex();
+			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveAlphaTestDrawSetIndicesBufferSRVIndex();
+			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumAlphaTestDraws()-1;
 
-			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
-			commandList->SetComputeRoot32BitConstants(3, 1, &cameraIndex, 0);
+			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 		
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
@@ -133,9 +134,9 @@ public:
 				int i = 0;
 				for (auto& buffer : light->GetPerViewAlphaTestIndirectCommandBuffers()) {
 					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
-					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
-					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
+					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
 				}
@@ -150,16 +151,16 @@ public:
 			auto apiResource = resource->GetAPIResource();
 			auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
-			unsigned int bufferIndices[5] = {};
-			bufferIndices[0] = meshManager->GetBlendPerMeshBufferSRVIndex();
-			bufferIndices[1] = objectManager->GetBlendDrawSetCommandsBufferSRVIndex();
-			bufferIndices[2] = objectManager->GetActiveBlendDrawSetIndicesBufferSRVIndex();
-			bufferIndices[3] = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[4] = context.currentScene->GetNumBlendDraws() - 1;
+			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
+			bufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetBlendPerMeshBufferSRVIndex();
+			bufferIndices[DrawSetCommandBufferDescriptorIndex] = objectManager->GetBlendDrawSetCommandsBufferSRVIndex();
+			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveBlendDrawSetIndicesBufferSRVIndex();
+			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumBlendDraws() - 1;
 
-			commandList->SetComputeRoot32BitConstants(6, 5, bufferIndices, 0);
+			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
-			commandList->SetComputeRoot32BitConstants(3, 1, &cameraIndex, 0);
+			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
@@ -169,9 +170,9 @@ public:
 				int i = 0;
 				for (auto& buffer : light->GetPerViewBlendIndirectCommandBuffers()) {
 					bufferIndices[3] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
-					commandList->SetComputeRoot32BitConstants(6, 1, &bufferIndices[3], 3);
+					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
-					commandList->SetComputeRoot32BitConstants(3, 1, &lightCameraIndex, 0);
+					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
 				}

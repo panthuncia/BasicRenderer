@@ -220,14 +220,14 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", size_t alignment = 1) {
+    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", size_t alignment = 1, bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
-        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, alignment);
+        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, alignment, UAV);
         ResourceTransition transition;
         transition.resource = pDynamicBuffer.get();
         transition.beforeState = ResourceState::UNKNOWN;
