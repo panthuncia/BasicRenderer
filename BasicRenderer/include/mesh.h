@@ -19,8 +19,8 @@ class MeshManager;
 
 class Mesh {
 public:
-    static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
-		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), indices, material, flags));
+    static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<std::byte>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags));
     }
 	uint32_t GetNumVertices() const { return m_vertices->size() / m_perMeshBufferData.vertexByteSize; }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
@@ -29,7 +29,7 @@ public:
     UINT GetIndexCount() const;
 	int GetGlobalID() const;
 	std::vector<std::byte>& GetVertices() { return *m_vertices; }
-	std::vector<SkinningVertex>& GetSkinningVertices() { return *m_skinningVertices; }
+	std::vector<std::byte>& GetSkinningVertices() { return *m_skinningVertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
 	std::vector<unsigned int>& GetMeshletVertices() { return m_meshletVertices; }
 	std::vector<unsigned char>& GetMeshletTriangles() { return m_meshletTriangles; }
@@ -78,8 +78,12 @@ public:
 		m_pCurrentMeshManager = manager;
 	}
 
+	unsigned int GetSkinningVertexSize() const {
+		return m_skinningVertexSize;
+	}
+
 private:
-    Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
+    Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<std::byte>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
     void CreateVertexBuffer();
     void CreateMeshlets(const std::vector<UINT32>& indices);
     void CreateBuffers(const std::vector<UINT32>& indices);
@@ -91,7 +95,7 @@ private:
     int m_globalMeshID;
 
 	std::unique_ptr<std::vector<std::byte>> m_vertices;
-	std::unique_ptr<std::vector<SkinningVertex>> m_skinningVertices;
+	std::unique_ptr<std::vector<std::byte>> m_skinningVertices;
 	std::vector<meshopt_Meshlet> m_meshlets;
 	std::vector<unsigned int> m_meshletVertices;
     std::vector<unsigned char> m_meshletTriangles;
@@ -108,6 +112,7 @@ private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
     PerMeshCB m_perMeshBufferData = { 0 };
+	unsigned int m_skinningVertexSize = 0;
 	std::unique_ptr<BufferView> m_perMeshBufferView;
 	MeshManager* m_pCurrentMeshManager = nullptr;
 };

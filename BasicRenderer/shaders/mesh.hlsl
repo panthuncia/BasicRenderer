@@ -10,8 +10,6 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
 
-    StructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
-    float3x3 normalMatrixSkinnedIfNecessary = (float3x3) postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex];
     /*if (flags & VERTEX_SKINNED) {
         StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
         StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
@@ -81,12 +79,27 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     result.positionViewSpace = viewPosition;
     result.position = mul(viewPosition, mainCamera.projection);
     
-    result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
+    if (flags & VERTEX_SKINNED) {
+        result.normalWorldSpace = normalize(vertex.normal);
     
-    if (flags & VERTEX_TANBIT) {
-        result.TBN_T = normalize(mul(vertex.tangent, normalMatrixSkinnedIfNecessary));
-        result.TBN_B = normalize(mul(vertex.bitangent, normalMatrixSkinnedIfNecessary));
-        result.TBN_N = normalize(mul(vertex.normal, normalMatrixSkinnedIfNecessary));
+        if (flags & VERTEX_TANBIT)
+        {
+            result.TBN_T = normalize(vertex.tangent);
+            result.TBN_B = normalize(vertex.bitangent);
+            result.TBN_N = normalize(vertex.normal);
+        }
+    }
+    else {
+        StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
+        float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
+        result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
+    
+        if (flags & VERTEX_TANBIT)
+        {
+            result.TBN_T = normalize(mul(vertex.tangent, normalMatrix));
+            result.TBN_B = normalize(mul(vertex.bitangent, normalMatrix));
+            result.TBN_N = normalize(mul(vertex.normal, normalMatrix));
+        }
     }
     
     if (flags & VERTEX_COLORS) {

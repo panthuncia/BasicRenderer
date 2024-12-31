@@ -86,10 +86,10 @@ struct Meshlet {
 
 struct PerObjectBuffer {
     row_major matrix model;
-    uint preSkinningNormalMatrixBufferIndex;
-    uint postSkinningNormalMatrixBufferIndex;
+    uint normalMatrixBufferIndex;
     uint boneTransformBufferIndex;
     uint inverseBindMatricesBufferIndex;
+    uint pad0;
 };
 
 struct BoundingSphere {

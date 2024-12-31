@@ -35,10 +35,10 @@ struct PerFrameCB {
 
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
-    unsigned int preSkinningNormalMatrixBufferIndex;
-    unsigned int postSkinningNormalMatrixBufferIndex;
+    unsigned int normalMatrixBufferIndex;
     unsigned int boneTransformBufferIndex;
     unsigned int inverseBindMatricesBufferIndex;
+    unsigned int pad0;
 };
 
 struct BoundingSphere {
@@ -138,8 +138,7 @@ enum SettingsRootConstants {
 };
 
 enum StaticBufferRootConstants {
-    PreSkinningNormalMatrixBufferDescriptorIndex,
-    PostSkinningNormalMatrixBufferDescriptorIndex,
+    NormalMatrixBufferDescriptorIndex,
     PreSkinningVertexBufferDescriptorIndex,
     PostSkinningVertexBufferDescriptorIndex,
     MeshletBufferDescriptorIndex,

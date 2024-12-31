@@ -18,8 +18,7 @@ ObjectManager::ObjectManager() {
 	m_alphaTestDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"alphaTestDrawSetCommandsBuffer<IndirectCommand>");
 	m_blendDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(IndirectCommand), 1, ResourceState::ALL_SRV, L"blendDrawSetCommandsBuffer<IndirectCommand>");
 	
-	m_preSkinningNormalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(ResourceState::ALL_SRV, 1, L"preSkinningNormalMatrixBuffer");
-	m_postSkinningNormalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(ResourceState::ALL_SRV, 1, L"postSkinningNormalMatrixBuffer", 1, true);
+	m_normalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(ResourceState::ALL_SRV, 1, L"preSkinningNormalMatrixBuffer");
 
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
 	m_activeAlphaTestDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeTransparentDrawSetIndices");
@@ -96,13 +95,8 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 		object->SetCurrentBlendDrawSetCommandViews(views);
 	}
 
-	if (object->GetSkin() != nullptr) {
-		auto preSkinView = m_preSkinningNormalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
-		object->SetPreSkinningNormalMatrixView(preSkinView);
-	}
-
-	auto postSkinView = m_postSkinningNormalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
-	object->SetPostSkinningNormalMatrixView(postSkinView);
+	auto normalMatrixView = m_normalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
+	object->SetNormalMatrixView(normalMatrixView);
 	//m_objects.push_back(object);
 }
 
@@ -141,29 +135,13 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 	}
 	object->SetCurrentBlendDrawSetIndices({});
 
-	auto preSkinView = object->GetPreSkinningNormalMatrixView();
-	if (preSkinView != nullptr) {
-		m_preSkinningNormalMatrixBuffer->Remove(preSkinView);
-	}
-	m_postSkinningNormalMatrixBuffer->Remove(object->GetPostSkinningNormalMatrixView());
+	m_normalMatrixBuffer->Remove(object->GetNormalMatrixView());
 }
 
 void ObjectManager::UpdatePerObjectBuffer(BufferView* view, PerObjectCB& data) {
 	m_perObjectBuffers->UpdateView(view, &data);
 }
 
-void ObjectManager::UpdatePreSkinningNormalMatrixBuffer(BufferView* view, void* data) {
-	m_preSkinningNormalMatrixBuffer->UpdateView(view, data);
-}
-
-void ObjectManager::UpdatePostSkinningNormalMatrixBuffer(BufferView* view, void* data) {
-	m_postSkinningNormalMatrixBuffer->UpdateView(view, data);
-}
-
-void ObjectManager::UpdateSkinning(RenderableObject* object) {
-	auto preSkinningView = object->GetPreSkinningNormalMatrixView();
-	if (preSkinningView == nullptr) {
-		auto skinningView = m_preSkinningNormalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
-		object->SetPreSkinningNormalMatrixView(skinningView);
-	}
+void ObjectManager::UpdateNormalMatrixBuffer(BufferView* view, void* data) {
+	m_normalMatrixBuffer->UpdateView(view, data);
 }

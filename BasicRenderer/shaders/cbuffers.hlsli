@@ -22,8 +22,7 @@ cbuffer Settings : register(b4) {
 }
 
 cbuffer StaticBufferInfo : register(b5) {
-    uint preSkinningNormalMatrixBufferDescriptorIndex;
-    uint postSkinningNormalMatrixBufferDescriptorIndex;
+    uint normalMatrixBufferDescriptorIndex;
     uint preSkinningVertexBufferDescriptorIndex;
     uint postSkinningVertexBufferDescriptorIndex;
     uint meshletBufferDescriptorIndex;

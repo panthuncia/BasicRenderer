@@ -43,10 +43,8 @@ public:
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentOpaqueDrawSetCommandViews();
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentAlphaTestDrawSetCommandViews();
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentBlendDrawSetCommandViews();
-	void SetPreSkinningNormalMatrixView(std::shared_ptr<BufferView> view);
-	BufferView* GetPreSkinningNormalMatrixView();
-	void SetPostSkinningNormalMatrixView(std::shared_ptr<BufferView> view);
-	BufferView* GetPostSkinningNormalMatrixView();
+	void SetNormalMatrixView(std::shared_ptr<BufferView> view);
+	BufferView* GetNormalMatrixView();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
@@ -59,8 +57,7 @@ private:
 	std::vector<std::shared_ptr<BufferView>> m_opaqueDrawSetCommandViews;
 	std::vector<std::shared_ptr<BufferView>> m_alphaTestDrawSetCommandViews;
 	std::vector<std::shared_ptr<BufferView>> m_blendDrawSetCommandViews;
-	std::shared_ptr<BufferView> preSkinningNormalMatrixView = nullptr;
-	std::shared_ptr<BufferView> postSkinningNormalMatrixView = nullptr;
+	std::shared_ptr<BufferView> normalMatrixView = nullptr;
 	PerObjectCB perObjectCBData;
 	bool m_hasAlphaTest = false;
 	bool m_hasOpaque = false;

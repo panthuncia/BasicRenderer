@@ -61,29 +61,49 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
 		rawData->resize(numVertices * vertexSize);
 
         for (unsigned int i = 0; i < numVertices; i++) {
-			size_t offset = i * vertexSize;
-			memcpy(rawData->data() + offset, &geom.positions[i * 3], sizeof(XMFLOAT3));
-			memcpy(rawData->data() + offset + sizeof(XMFLOAT3), &geom.normals[i * 3], sizeof(XMFLOAT3));
+            size_t baseOffset = i * vertexSize;
+			memcpy(rawData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+            size_t offset = sizeof(XMFLOAT3);
+			memcpy(rawData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+			offset += sizeof(XMFLOAT3);
 			if (hasTexcoords) {
-				memcpy(rawData->data() + offset + sizeof(XMFLOAT3) * 2, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
+				memcpy(rawData->data() + baseOffset + offset, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
+				offset += sizeof(XMFLOAT2);
 			}
 			if (hasTangents) {
-				memcpy(rawData->data() + offset + sizeof(XMFLOAT3) * 2 + sizeof(XMFLOAT2), &tanbit.tangents[i], sizeof(XMFLOAT3));
-				memcpy(rawData->data() + offset + sizeof(XMFLOAT3) * 3 + sizeof(XMFLOAT2), &tanbit.bitangents[i], sizeof(XMFLOAT3));
+				memcpy(rawData->data() + baseOffset + offset, &tanbit.tangents[i], sizeof(XMFLOAT3));
+				offset += sizeof(XMFLOAT3);
+				memcpy(rawData->data() + baseOffset + offset, &tanbit.bitangents[i], sizeof(XMFLOAT3));
 			}
         }
-
-        std::unique_ptr<std::vector<SkinningVertex>> skinningData = std::make_unique<std::vector<SkinningVertex>>();
+		                                  // position,       normal                           tangent            bitangent              joints,           weights
+		unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTangents ? sizeof(XMFLOAT3) + sizeof(XMFLOAT3) : 0) + sizeof(XMUINT4) + sizeof(XMFLOAT4);
+        std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
         if (hasJoints) {
-			skinningData->resize(numVertices);
+			skinningData->resize(numVertices * skinningVertexSize);
 			for (unsigned int i = 0; i < numVertices; i++) {
-				(*skinningData)[i].position = XMFLOAT3(geom.positions[i * 3], geom.positions[i * 3 + 1], geom.positions[i * 3 + 2]);
+				/*(*skinningData)[i].position = XMFLOAT3(geom.positions[i * 3], geom.positions[i * 3 + 1], geom.positions[i * 3 + 2]);
                 (*skinningData)[i].joints = XMUINT4(geom.joints[i * 4], geom.joints[i * 4 + 1], geom.joints[i * 4 + 2], geom.joints[i * 4 + 3]);
-                (*skinningData)[i].weights = XMFLOAT4(geom.weights[i * 4], geom.weights[i * 4 + 1], geom.weights[i * 4 + 2], geom.weights[i * 4 + 3]);
+                (*skinningData)[i].weights = XMFLOAT4(geom.weights[i * 4], geom.weights[i * 4 + 1], geom.weights[i * 4 + 2], geom.weights[i * 4 + 3]);*/
+                
+				size_t baseOffset = i * skinningVertexSize;
+				memcpy(skinningData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+                size_t offset = sizeof(XMFLOAT3);
+				memcpy(skinningData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+				offset += sizeof(XMFLOAT3);
+				if (hasTangents) {
+					memcpy(skinningData->data() + baseOffset + offset, &tanbit.tangents[i], sizeof(XMFLOAT3));
+					offset += sizeof(XMFLOAT3);
+					memcpy(skinningData->data() + baseOffset + offset, &tanbit.bitangents[i], sizeof(XMFLOAT3));
+					offset += sizeof(XMFLOAT3);
+				}
+				memcpy(skinningData->data() + baseOffset + offset, &geom.joints[i * 4], sizeof(XMUINT4));
+				offset += sizeof(XMUINT4);
+				memcpy(skinningData->data() + baseOffset + offset, &geom.weights[i * 4], sizeof(XMFLOAT4));
 			}
         }
 
-        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), geom.indices, geom.material, geom.flags);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, geom.indices, geom.material, geom.flags);
         meshes.push_back(std::move(mesh));
     }
 

@@ -13,7 +13,7 @@
 
 std::atomic<int> Mesh::globalMeshCount = 0;
 
-Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<SkinningVertex>> skinningVertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<std::byte>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
     m_vertices = std::move(vertices);
 	m_skinningVertices = std::move(skinningVertices);
 	m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
@@ -21,6 +21,7 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	m_perMeshBufferData.vertexByteSize = vertexSize;
 	m_perMeshBufferData.numVertices = m_vertices->size() / vertexSize;
 
+	m_skinningVertexSize = skinningVertexSize;
 	CreateBuffers(indices);
     this->material = material;
 

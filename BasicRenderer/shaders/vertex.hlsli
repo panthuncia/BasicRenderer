@@ -59,6 +59,34 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
         vertex.bitangent = LoadFloat3(byteOffset, buffer);
         byteOffset += 12;
     }
+    
+    vertex.color = float3(1.0, 1.0, 1.0);
+
+    return vertex;
+}
+
+Vertex LoadSkinningVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags)
+{
+    Vertex vertex;
+
+    // Load position (float3, 12 bytes)
+    vertex.position = LoadFloat3(byteOffset, buffer);
+    byteOffset += 12;
+
+    // Load normal (float3, 12 bytes)
+    vertex.normal = LoadFloat3(byteOffset, buffer);
+    byteOffset += 12;
+
+    if (flags & VERTEX_TANBIT)
+    {
+        // Load tangent (float3, 12 bytes)
+        vertex.tangent = LoadFloat3(byteOffset, buffer);
+        byteOffset += 12;
+
+        // Load bitangent (float3, 12 bytes)
+        vertex.bitangent = LoadFloat3(byteOffset, buffer);
+        byteOffset += 12;
+    }
 
     if (flags & VERTEX_SKINNED) {
         // Load joints (uint4, 16 bytes)
@@ -70,8 +98,6 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
         byteOffset += 16;
     }
     
-    vertex.color = float3(1.0, 1.0, 1.0);
-
     return vertex;
 }
 

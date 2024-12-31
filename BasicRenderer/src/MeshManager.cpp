@@ -56,14 +56,14 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
-		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), skinningVertices.size() * sizeof(SkinningVertex), sizeof(SkinningVertex));
+		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
+		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), mesh->GetNumVertices() * skinningVertexByteSize, skinningVertexByteSize);
 		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
 	}
 	else {
 		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
 	}
 
-	int size = sizeof(VertexTextured);
 	auto& meshlets = mesh->GetMeshlets();
 	//auto test = vertices[0];
 	spdlog::info("Adding {} meshlets, allocating {} bytes", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));

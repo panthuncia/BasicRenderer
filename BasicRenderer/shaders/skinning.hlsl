@@ -17,13 +17,12 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     ByteAddressBuffer preSkinningVertexBuffer = ResourceDescriptorHeap[preSkinningVertexBufferDescriptorIndex];
     RWByteAddressBuffer postSkinningVertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex];
     
-    StructuredBuffer<float4x4> preSkinningNormalMatrixBuffer = ResourceDescriptorHeap[preSkinningNormalMatrixBufferDescriptorIndex];
-    RWStructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
+    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
     
     uint preSkinnedByteOffset = meshBuffer.preSkinningVertexBufferOffset + dispatchID * meshBuffer.vertexByteSize;
     uint postSkinnedByteOffset = meshBuffer.postSkinningVertexBufferOffset + dispatchID * meshBuffer.vertexByteSize;
     
-    Vertex input = LoadVertex(preSkinnedByteOffset, preSkinningVertexBuffer, meshBuffer.vertexFlags);
+    Vertex input = LoadSkinningVertex(preSkinnedByteOffset, preSkinningVertexBuffer, meshBuffer.vertexFlags);
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
@@ -45,8 +44,21 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
                          input.weights.z * mul(bone3, bindMatrix3) +
                          input.weights.w * mul(bone4, bindMatrix4));
     
-    postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex] = mul(preSkinningNormalMatrixBuffer[objectBuffer.preSkinningNormalMatrixBufferIndex], skinMatrix);
+    float3x3 normalMatrix = (float3x3)mul(normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex], skinMatrix);
     
     float3 skinnedPosition = mul(pos, skinMatrix).xyz;
+    float3 skinnedNormal = mul(input.normal, normalMatrix);
     postSkinningVertexBuffer.Store3(postSkinnedByteOffset, skinnedPosition);
+    uint byteOffset = 12;
+    postSkinningVertexBuffer.Store3(postSkinnedByteOffset + byteOffset, skinnedNormal);
+    byteOffset += 12 + 8; // float3 normal, float2 texcoord
+    if (meshBuffer.vertexFlags & VERTEX_TANBIT)
+    {
+        float3 skinnedTangent = mul(input.tangent, normalMatrix);
+        float3 skinnedBitangent = mul(input.bitangent, normalMatrix);
+        postSkinningVertexBuffer.Store3(postSkinnedByteOffset + byteOffset, skinnedTangent);
+        byteOffset += 12;
+        postSkinningVertexBuffer.Store3(postSkinnedByteOffset + byteOffset, skinnedBitangent);
+
+    }
 }

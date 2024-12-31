@@ -23,32 +23,6 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
-    StructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
-    float3x3 normalMatrixSkinnedIfNecessary = (float3x3)postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex];
-    
-    /*if (meshBuffer.vertexFlags & VERTEX_SKINNED) {
-        StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
-        StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
-    
-        matrix bone1 = (boneTransformsBuffer[input.joints.x]);
-        matrix bone2 = (boneTransformsBuffer[input.joints.y]);
-        matrix bone3 = (boneTransformsBuffer[input.joints.z]);
-        matrix bone4 = (boneTransformsBuffer[input.joints.w]);
-        
-        matrix bindMatrix1 = (inverseBindMatricesBuffer[input.joints.x]);
-        matrix bindMatrix2 = (inverseBindMatricesBuffer[input.joints.y]);
-        matrix bindMatrix3 = (inverseBindMatricesBuffer[input.joints.z]);
-        matrix bindMatrix4 = (inverseBindMatricesBuffer[input.joints.w]);
-        
-        float4x4 skinMatrix = transpose(input.weights.x * mul(bone1, bindMatrix1) +
-                             input.weights.y * mul(bone2, bindMatrix2) +
-                             input.weights.z * mul(bone3, bindMatrix3) +
-                             input.weights.w * mul(bone4, bindMatrix4));
-    
-        pos = mul(pos, skinMatrix);
-        normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3) skinMatrix);
-    }*/
-    
     PSInput output;
     float4 worldPosition = mul(pos, objectBuffer.model);
 
@@ -101,10 +75,30 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
     
-    if (materialFlags & MATERIAL_NORMAL_MAP || materialFlags & MATERIAL_PARALLAX) {
-        output.TBN_T = normalize(mul(input.tangent, normalMatrixSkinnedIfNecessary));
-        output.TBN_B = normalize(mul(input.bitangent, normalMatrixSkinnedIfNecessary));
-        output.TBN_N = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
+    uint vertexFlags = meshBuffer.vertexFlags;
+    if (vertexFlags & VERTEX_SKINNED)
+    {
+        output.normalWorldSpace = normalize(input.normal);
+    
+        if (vertexFlags & VERTEX_TANBIT)
+        {
+            output.TBN_T = normalize(input.tangent);
+            output.TBN_B = normalize(input.bitangent);
+            output.TBN_N = normalize(input.normal);
+        }
+    }
+    else
+    {
+        StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
+        float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
+        output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
+    
+        if (vertexFlags & VERTEX_TANBIT)
+        {
+            output.TBN_T = normalize(mul(input.tangent, normalMatrix));
+            output.TBN_B = normalize(mul(input.bitangent, normalMatrix));
+            output.TBN_N = normalize(mul(input.normal, normalMatrix));
+        }
     }
 
     output.color = input.color;
