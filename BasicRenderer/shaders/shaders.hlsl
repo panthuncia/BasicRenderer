@@ -72,9 +72,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     float4 viewPosition = mul(worldPosition, mainCamera.view);
     output.positionViewSpace = viewPosition;
     output.position = mul(viewPosition, mainCamera.projection);
-    
-    output.normalWorldSpace = normalize(mul(input.normal, normalMatrixSkinnedIfNecessary));
-    
+        
     uint vertexFlags = meshBuffer.vertexFlags;
     if (vertexFlags & VERTEX_SKINNED)
     {

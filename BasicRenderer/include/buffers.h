@@ -50,6 +50,7 @@ struct PerMeshCB {
     unsigned int materialDataIndex;
     unsigned int vertexFlags;
 	unsigned int vertexByteSize;
+    unsigned int skinningVertexByteSize;
 	unsigned int preSkinningVertexBufferOffset;
     unsigned int postSkinningVertexBufferOffset;
     unsigned int meshletBufferOffset;
@@ -57,7 +58,7 @@ struct PerMeshCB {
     unsigned int meshletTrianglesBufferOffset;
 	BoundingSphere boundingSphere;
 	unsigned int numVertices;
-    unsigned int pad[2];
+    unsigned int pad[1];
 };
 
 struct PerMaterialCB {

@@ -82,10 +82,6 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
         if (hasJoints) {
 			skinningData->resize(numVertices * skinningVertexSize);
 			for (unsigned int i = 0; i < numVertices; i++) {
-				/*(*skinningData)[i].position = XMFLOAT3(geom.positions[i * 3], geom.positions[i * 3 + 1], geom.positions[i * 3 + 2]);
-                (*skinningData)[i].joints = XMUINT4(geom.joints[i * 4], geom.joints[i * 4 + 1], geom.joints[i * 4 + 2], geom.joints[i * 4 + 3]);
-                (*skinningData)[i].weights = XMFLOAT4(geom.weights[i * 4], geom.weights[i * 4 + 1], geom.weights[i * 4 + 2], geom.weights[i * 4 + 3]);*/
-                
 				size_t baseOffset = i * skinningVertexSize;
 				memcpy(skinningData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
                 size_t offset = sizeof(XMFLOAT3);

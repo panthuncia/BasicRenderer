@@ -10,28 +10,6 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
 
-    /*if (flags & VERTEX_SKINNED) {
-        StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
-        StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
-    
-        matrix bone1 = (boneTransformsBuffer[vertex.joints.x]);
-        matrix bone2 = (boneTransformsBuffer[vertex.joints.y]);
-        matrix bone3 = (boneTransformsBuffer[vertex.joints.z]);
-        matrix bone4 = (boneTransformsBuffer[vertex.joints.w]);
-        
-        matrix bindMatrix1 = (inverseBindMatricesBuffer[vertex.joints.x]);
-        matrix bindMatrix2 = (inverseBindMatricesBuffer[vertex.joints.y]);
-        matrix bindMatrix3 = (inverseBindMatricesBuffer[vertex.joints.z]);
-        matrix bindMatrix4 = (inverseBindMatricesBuffer[vertex.joints.w]);
-        
-        float4x4 skinMatrix = transpose(vertex.weights.x * mul(bone1, bindMatrix1) +
-                             vertex.weights.y * mul(bone2, bindMatrix2) +
-                             vertex.weights.z * mul(bone3, bindMatrix3) +
-                             vertex.weights.w * mul(bone4, bindMatrix4));
-    
-        pos = mul(pos, skinMatrix);
-        normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3) skinMatrix);
-    }*/
     float4 worldPosition = mul(pos, objectBuffer.model);
     PSInput result;
 

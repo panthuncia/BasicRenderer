@@ -20,6 +20,7 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
 	m_perMeshBufferData.numVertices = m_vertices->size() / vertexSize;
+	m_perMeshBufferData.skinningVertexByteSize = skinningVertexSize;
 
 	m_skinningVertexSize = skinningVertexSize;
 	CreateBuffers(indices);

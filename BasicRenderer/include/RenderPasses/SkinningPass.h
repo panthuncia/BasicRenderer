@@ -80,6 +80,41 @@ public:
 			}
 		}
 
+		auto alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
+		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
+		for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
+			auto& renderable = pair.second;
+			auto& meshes = renderable->GetAlphaTestMeshes();
+
+			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+
+			for (auto& pMesh : meshes) {
+				auto& mesh = *pMesh;
+				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+
+				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
+			}
+		}
+
+		auto blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
+		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &blendPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
+		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
+			auto& renderable = pair.second;
+			auto& meshes = renderable->GetBlendMeshes();
+
+			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+
+			for (auto& pMesh : meshes) {
+				auto& mesh = *pMesh;
+				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+
+				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
+			}
+		}
 
 		ThrowIfFailed(commandList->Close());
 
