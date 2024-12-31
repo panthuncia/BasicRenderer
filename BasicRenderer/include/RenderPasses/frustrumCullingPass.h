@@ -103,7 +103,7 @@ public:
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
-					//commandList->Dispatch(numThreadGroups, 1, 1);
+					commandList->Dispatch(numThreadGroups, 1, 1);
 				}
 			}
 		}
