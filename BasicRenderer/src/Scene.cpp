@@ -69,6 +69,17 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
 	if (objectManager != nullptr) {
 		objectManager->AddObject(object);
 	}
+
+	if (object->GetSkin() != nullptr) {
+		if (object->HasOpaque()) {
+			opaqueSkinnedObjectsByID[object->GetLocalID()] = object;
+		} if (object->HasAlphaTest()) {
+			alphaTestSkinnedObjectsByID[object->GetLocalID()] = object;
+		} if (object->HasBlend()) {
+			blendSkinnedObjectsByID[object->GetLocalID()] = object;
+		}
+	}
+
     return object->GetLocalID();
 }
 
@@ -148,38 +159,7 @@ std::shared_ptr<SceneNode> Scene::GetEntityByID(UINT id) {
 
 void Scene::RemoveObjectByName(const std::wstring& name) {
     auto it = objectsByName.find(name);
-    if (it != objectsByName.end()) {
-        auto idIt = std::find_if(objectsByID.begin(), objectsByID.end(),
-            [&](const auto& pair) { return pair.second == it->second; });
-        if (idIt != objectsByID.end()) {
-            objectsByID.erase(idIt);
-        }
-        objectsByName.erase(it);
-        opaqueObjectsByID.erase(it->second->GetLocalID());
-        alphaTestObjectsByID.erase(it->second->GetLocalID());
-		blendObjectsByID.erase(it->second->GetLocalID());
-        std::shared_ptr<SceneNode> node = it->second;
-        node->parent->RemoveChild(node->GetLocalID());
-        if (objectManager != nullptr) {
-            objectManager->RemoveObject(it->second);
-        }
-        for (auto& mesh : it->second->GetOpaqueMeshes()) {
-			// TODO: Remove mesh from mesh manager, handling the case where the mesh is used by multiple objects
-			m_numDrawsInScene--;
-			m_numOpaqueDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
-        }
-        for (auto& mesh : it->second->GetAlphaTestMeshes()) {
-            m_numDrawsInScene--;
-			m_numAlphaTestDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, m_numAlphaTestDraws);
-        }
-		for (auto& mesh : it->second->GetBlendMeshes()) {
-			m_numDrawsInScene--;
-			m_numBlendDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
-		}
-    }
+	RemoveObjectByID(it->second->GetLocalID());
 }
 
 void Scene::RemoveObjectByID(UINT id) {
@@ -214,6 +194,15 @@ void Scene::RemoveObjectByID(UINT id) {
 			m_numDrawsInScene--;
 			m_numBlendDraws--;
 			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
+		}
+		if (it->second->GetSkin() != nullptr) {
+			if (it->second->HasOpaque()) {
+				opaqueSkinnedObjectsByID.erase(it->second->GetLocalID());
+			} if (it->second->HasAlphaTest()) {
+				alphaTestSkinnedObjectsByID.erase(it->second->GetLocalID());
+            } if (it->second->HasBlend()) {
+                blendSkinnedObjectsByID.erase(it->second->GetLocalID());
+            }
 		}
         DeletionManager::GetInstance().MarkForDelete(it->second); // defer deletion to the end of the frame
         objectsByID.erase(it);
@@ -307,6 +296,18 @@ std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetAlphaTest
 
 std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetBlendRenderableObjectIDMap() {
 	return blendObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetOpaqueSkinnedRenderableObjectIDMap() {
+	return opaqueSkinnedObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetAlphaTestSkinnedRenderableObjectIDMap() {
+	return alphaTestSkinnedObjectsByID;
+}
+
+std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetBlendSkinnedRenderableObjectIDMap() {
+	return blendSkinnedObjectsByID;
 }
 
 std::unordered_map<UINT, std::shared_ptr<Light>>& Scene::GetLightIDMap() {
@@ -489,6 +490,14 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         // Remap skeleton & users to their correct IDs
         for (auto& oldID : skeleton->userIDs) {
             GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
+			// Add to correct skinned object map
+            if (GetObjectByID(idMap[oldID])->HasOpaque()) {
+				opaqueSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+			} if (GetObjectByID(idMap[oldID])->HasAlphaTest()) {
+				alphaTestSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+			} if (GetObjectByID(idMap[oldID])->HasBlend()) {
+				blendSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+            }
         }
         AddSkeleton(newSkeleton);
     }

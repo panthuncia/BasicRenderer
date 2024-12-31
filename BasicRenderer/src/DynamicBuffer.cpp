@@ -7,7 +7,7 @@
 #include "DeletionManager.h"
 #include "UploadManager.h"
 
-std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index type) {
+std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
     size_t requiredSize = size;
 
     // Search for a free block
@@ -28,7 +28,7 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
             }
 
             // Return BufferView
-            return std::move(BufferView::CreateUnique(this, offset, requiredSize, type));
+            return std::move(BufferView::CreateUnique(this, offset, requiredSize, elementSize));
         }
     }
 
@@ -52,14 +52,16 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, std::type_index
     m_memoryBlocks.push_back(newBlock);
 	spdlog::info("Growing buffer to {} bytes", newCapacity);
     // Try allocating again
-    return Allocate(size, type);
+    return Allocate(size, elementSize);
 }
 
-std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, std::type_index type) {
-	std::unique_ptr<BufferView> view = Allocate(size, type);
+std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, size_t elementSize) {
+	std::unique_ptr<BufferView> view = Allocate(size, elementSize);
     
-    auto& uploadManager = UploadManager::GetInstance();
-	uploadManager.UploadData(data, size, this, view->GetOffset());
+	if (data != nullptr) {
+		auto& uploadManager = UploadManager::GetInstance();
+		uploadManager.UploadData(data, size, this, view->GetOffset());
+	}
 
 	return std::move(view);
 }
@@ -69,7 +71,7 @@ void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
 	uploadManager.UploadData(data, view->GetSize(), this, view->GetOffset());
 }
 
-void DynamicBuffer::Deallocate(const std::shared_ptr<BufferView>& view) {
+void DynamicBuffer::Deallocate(BufferView* view) {
     size_t offset = view->GetOffset();
     size_t size = view->GetSize();
 
@@ -128,6 +130,6 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     size_t oldCapacity = m_capacity;
     size_t sizeDiff = newSize - m_capacity;
     m_capacity = newSize;
-    onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, this);
+    onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, this, m_UAV);
 	SetName(m_name);
 }

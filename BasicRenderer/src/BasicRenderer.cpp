@@ -177,16 +177,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     spdlog::info("Renderer initialized.");
     renderer.SetInputMode(InputMode::wasd);
 
-    std::vector<Vertex> vertices = {
-    VertexColored{{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-    VertexColored{{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-    VertexColored{{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-    VertexColored{{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-    VertexColored{{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-    VertexColored{{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
-    VertexColored{{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
-    VertexColored{{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    };
+    //std::vector<std::byte> vertices = {
+    //{{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+    //{{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+    //{{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+    //{{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
+    //{{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
+    //{{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
+    //{{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
+    //{{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    //};
 
     std::vector<UINT32> indices = {
         3, 1, 0, 2, 1, 3,
@@ -249,7 +249,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     renderer.GetCurrentScene()->AppendScene(*tigerScene);
     renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
 	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
@@ -281,13 +281,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
 
     auto cubeMaterial = std::make_shared<Material>("cubeMaterial", MaterialFlags::MATERIAL_FLAGS_NONE, PSOFlags::PSO_FLAGS_NONE);
-    auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, VertexFlags::VERTEX_COLORS);
-    std::vector<std::shared_ptr<Mesh>> vec = { cubeMesh };
-    std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>(L"CubeObject", vec);
-    auto cubeScaleNode = std::make_shared<SceneNode>();
-    cubeScaleNode->transform.setLocalScale({ 0.1, 0.1, 0.1 });
+    //auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, VertexFlags::VERTEX_COLORS);
+    //std::vector<std::shared_ptr<Mesh>> vec = { cubeMesh };
+    //std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>(L"CubeObject", vec);
+    //auto cubeScaleNode = std::make_shared<SceneNode>();
+    //cubeScaleNode->transform.setLocalScale({ 0.1, 0.1, 0.1 });
     //cubeScaleNode->AddChild(cubeObject);
-    scene->AddNode(cubeScaleNode);
+    //scene->AddNode(cubeScaleNode);
     //scene->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
@@ -303,7 +303,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	auto light1 = Light::CreatePointLight(L"light1", XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032);
     light1->animationController->setAnimationClip(animation);
-    cubeScaleNode->AddChild(light1);
     //scene->AddLight(light1, true);
 	//scene->RemoveLightByID(light1->GetLocalID());
 	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));

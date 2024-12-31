@@ -35,10 +35,9 @@ struct PerFrameCB {
 
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
-    DirectX::XMMATRIX normalMatrix;
+    unsigned int normalMatrixBufferIndex;
     unsigned int boneTransformBufferIndex;
     unsigned int inverseBindMatricesBufferIndex;
-    unsigned int isValid = 1;
     unsigned int pad0;
 };
 
@@ -51,11 +50,15 @@ struct PerMeshCB {
     unsigned int materialDataIndex;
     unsigned int vertexFlags;
 	unsigned int vertexByteSize;
-    unsigned int vertexBufferOffset;
+    unsigned int skinningVertexByteSize;
+	unsigned int preSkinningVertexBufferOffset;
+    unsigned int postSkinningVertexBufferOffset;
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
     unsigned int meshletTrianglesBufferOffset;
 	BoundingSphere boundingSphere;
+	unsigned int numVertices;
+    unsigned int pad[1];
 };
 
 struct PerMaterialCB {
@@ -100,4 +103,66 @@ struct LightInfo {
     float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
+};
+
+enum RootSignatureLayout {
+    PerObjectRootSignatureIndex,
+    PerMeshRootSignatureIndex,
+	ViewRootSignatureIndex,
+	SettingsRootSignatureIndex,
+	StaticBufferRootSignatureIndex,
+	VariableBufferRootSignatureIndex,
+	TransparencyInfoRootSignatureIndex,
+	NumRootSignatureParameters
+};
+
+enum PerObjectRootConstants {
+	PerObjectBufferIndex,
+	NumPerObjectRootConstants
+};
+
+enum PerMeshRootConstants {
+	PerMeshBufferIndex,
+	NumPerMeshRootConstants
+};
+
+enum ViewRootConstants {
+	CurrentLightID,
+    LightViewIndex,
+	NumViewRootConstants
+};
+
+enum SettingsRootConstants {
+	EnableShadows,
+	EnablePunctualLights,
+	NumSettingsRootConstants
+};
+
+enum StaticBufferRootConstants {
+    NormalMatrixBufferDescriptorIndex,
+    PreSkinningVertexBufferDescriptorIndex,
+    PostSkinningVertexBufferDescriptorIndex,
+    MeshletBufferDescriptorIndex,
+    MeshletVerticesBufferDescriptorIndex,
+    MeshletTrianglesBufferDescriptorIndex,
+    PerObjectBufferDescriptorIndex,
+    CameraBufferDescriptorIndex,
+	NumStaticBufferRootConstants
+};
+
+enum VariableBufferRootConstants {
+    PerMeshBufferDescriptorIndex,
+    DrawSetCommandBufferDescriptorIndex,
+    ActiveDrawSetIndicesBufferDescriptorIndex,
+    IndirectCommandBufferDescriptorIndex,
+    MaxDrawIndex,
+	NumVariableBufferRootConstants
+};
+
+enum TransparencyInfoRootConstants {
+	PPLLHeadBufferDescriptorIndex,
+	PPLLNodeBufferDescriptorIndex,
+	PPLLCounterBufferDescriptorIndex,
+	PPLLNodeSize,
+	NumTransparencyInfoRootConstants
 };

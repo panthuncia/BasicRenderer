@@ -38,15 +38,6 @@ float4 LoadFloat4(uint offset, ByteAddressBuffer buffer) {
     return result;
 }
 
-matrix loadMatrixFromBuffer(StructuredBuffer<float4> matrixBuffer, uint matrixIndex) {
-    uint offset = matrixIndex * 4;
-    float4 bone1Row1 = matrixBuffer[offset];
-    float4 bone1Row2 = matrixBuffer[offset + 1];
-    float4 bone1Row3 = matrixBuffer[offset + 2];
-    float4 bone1Row4 = matrixBuffer[offset + 3];
-    return float4x4(bone1Row1, bone1Row2, bone1Row3, bone1Row4);
-}
-
 // Basic blinn-phong for meshlet visualization
 float4 lightMeshlets(uint meshletIndex, float3 normal, float3 viewDir) {
     float ambientIntensity = 0.3;

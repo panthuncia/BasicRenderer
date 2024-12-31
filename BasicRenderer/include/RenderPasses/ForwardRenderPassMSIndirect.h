@@ -75,10 +75,10 @@ public:
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& cameraManager = context.currentScene->GetCameraManager();
-		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
-		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
-		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
-		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
+		staticBufferIndices[0] = meshManager->GetPostSkinningVertexBufferSRVIndex();
+		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferSRVIndex();
+		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferSRVIndex();
+		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferSRVIndex();
 		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
 		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
 

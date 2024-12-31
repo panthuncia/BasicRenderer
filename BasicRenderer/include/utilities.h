@@ -167,3 +167,5 @@ DirectX::XMFLOAT3 Subtract(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& 
 DirectX::XMFLOAT3 Add(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b);
 
 DirectX::XMFLOAT3 Scale(const DirectX::XMFLOAT3& a, const float scalar);
+
+XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix);

@@ -57,30 +57,32 @@ public:
 
 		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
 
-		unsigned int staticBufferIndices[6] = {};
 		auto& meshManager = context.currentScene->GetMeshManager();
 		auto& objectManager = context.currentScene->GetObjectManager();
 		auto& cameraManager = context.currentScene->GetCameraManager();
-		staticBufferIndices[0] = meshManager->GetVertexBufferIndex();
-		staticBufferIndices[1] = meshManager->GetMeshletOffsetBufferIndex();
-		staticBufferIndices[2] = meshManager->GetMeshletIndexBufferIndex();
-		staticBufferIndices[3] = meshManager->GetMeshletTriangleBufferIndex();
-		staticBufferIndices[4] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[5] = cameraManager->GetCameraBufferSRVIndex();
 
-		commandList->SetGraphicsRoot32BitConstants(5, 6, &staticBufferIndices, 0);
+		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
+		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
+		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
+		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
+		staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletIndexBufferSRVIndex();
+		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
+		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+
+		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		auto drawObjects = [&]() {
 
 			// Opaque objects
 			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &opaquePerMeshBufferIndex, 0);
+			commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetOpaqueMeshes();
 
 				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
@@ -88,7 +90,7 @@ public:
 					commandList->SetPipelineState(pso.Get());
 
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
 					D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 					commandList->IASetIndexBuffer(&indexBufferView);
@@ -99,13 +101,13 @@ public:
 
 			// Alpha test objects
 			unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &alphaTestPerMeshBufferIndex, 0);
+			commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 			for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetAlphaTestMeshes();
 
 				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
@@ -113,7 +115,7 @@ public:
 					commandList->SetPipelineState(pso.Get());
 
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
 					D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 					commandList->IASetIndexBuffer(&indexBufferView);
@@ -124,13 +126,13 @@ public:
 
 			// Blend objects
 			unsigned int blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(6, 1, &blendPerMeshBufferIndex, 0);
+			commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &blendPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 			for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetBlendMeshes();
 
 				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh;
@@ -138,7 +140,7 @@ public:
 					commandList->SetPipelineState(pso.Get());
 
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-					commandList->SetGraphicsRoot32BitConstants(1, 1, &perMeshIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
 					D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
 					commandList->IASetIndexBuffer(&indexBufferView);
@@ -156,40 +158,39 @@ public:
 			}
 			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
 			switch (light->GetLightType()) {
-				case LightType::Spot: {
-					auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
+			case LightType::Spot: {
+				auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
+				commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+				commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+				int lightInfo[2] = { light->GetCurrentLightBufferIndex(), light->GetCurrentviewInfoIndex() };
+				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				drawObjects();
+				break;
+			}
+			case LightType::Point: {
+				int lightViewIndex = light->GetCurrentviewInfoIndex() * 6;
+				int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
+				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				for (int i = 0; i < 6; i++) {
+					D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-					int lightIndex = light->GetCurrentLightBufferIndex();
-					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
-					int lightViewIndex = light->GetCurrentviewInfoIndex();
-					commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
+					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+					lightViewIndex += 1;
 					drawObjects();
-					break;
 				}
-				case LightType::Point: {
-					int lightIndex = light->GetCurrentLightBufferIndex();
-					int lightViewIndex = light->GetCurrentviewInfoIndex()*6;
-					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
-					for (int i = 0; i < 6; i++) {
-						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
-						lightViewIndex += 1;
-						drawObjects();
-					}
-					break;
-				}
-					case LightType::Directional: {
-					int lightViewIndex = light->GetCurrentviewInfoIndex()*getNumDirectionalLightCascades();
-					int lightIndex = light->GetCurrentLightBufferIndex();
-					commandList->SetGraphicsRoot32BitConstants(2, 1, &lightIndex, 0);
+				break;
+			}
+				case LightType::Directional: {
+					int lightViewIndex = light->GetCurrentviewInfoIndex() * getNumDirectionalLightCascades();
+					int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
+					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
 					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
 						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(3, 1, &lightViewIndex, 0);
+						commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
 						lightViewIndex += 1;
 						drawObjects();
 

@@ -25,15 +25,15 @@ class DynamicBuffer : public ViewedDynamicBufferBase {
 public:
 
     static std::shared_ptr<DynamicBuffer> CreateShared(bool byteAddress, size_t elementSize, UINT id = 0, size_t capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name));
+        return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, id, capacity, name, UAV));
     }
 
-    std::unique_ptr<BufferView> Allocate(size_t size, std::type_index type);
-    void Deallocate(const std::shared_ptr<BufferView>& view);
-	std::unique_ptr<BufferView> AddData(const void* data, size_t size, std::type_index type);
+    std::unique_ptr<BufferView> Allocate(size_t size, size_t elementSize);
+    void Deallocate(BufferView* view);
+	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize);
 	void UpdateView(BufferView* view, const void* data);
 
-    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*)>& callback) {
+    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*, bool)>& callback) {
         onResized = callback;
     }
 
@@ -87,7 +87,7 @@ private:
 
     std::vector<MemoryBlock> m_memoryBlocks;
 
-    std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase* buffer)> onResized;
+    std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase* buffer, bool)> onResized;
     inline static std::wstring m_baseName = L"DynamicBuffer";
 	std::wstring m_name = m_baseName;
 

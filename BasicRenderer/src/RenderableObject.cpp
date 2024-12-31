@@ -83,8 +83,13 @@ void RenderableObject::UpdateBuffers() {
         0.0f, 0.0f, 0.0f, 1.0f
     );
 
-    perObjectCBData.normalMatrix = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
     m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
+
+	// TODO: Any way to do this math without transforming to 4x4 and then back?
+	//XMFLOAT3X3 normalMat = GetUpperLeft3x3(XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3)));
+	XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
+	m_currentManager->UpdateNormalMatrixBuffer(normalMatrixView.get(), &normalMat);
+	
 }
 
 void RenderableObject::OnUpdate() {
@@ -167,4 +172,14 @@ std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentAlphaTestD
 
 std::vector<std::shared_ptr<BufferView>>& RenderableObject::GetCurrentBlendDrawSetCommandViews() {
 	return m_blendDrawSetCommandViews;
+}
+
+void RenderableObject::SetNormalMatrixView(std::shared_ptr<BufferView> view) {
+	normalMatrixView = view;
+	perObjectCBData.normalMatrixBufferIndex = normalMatrixView->GetOffset() / sizeof(XMFLOAT4X4);
+	m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
+}
+
+BufferView* RenderableObject::GetNormalMatrixView() {
+	return normalMatrixView.get();
 }

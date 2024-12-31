@@ -86,10 +86,9 @@ struct Meshlet {
 
 struct PerObjectBuffer {
     row_major matrix model;
-    row_major float4x4 normalMatrix;
+    uint normalMatrixBufferIndex;
     uint boneTransformBufferIndex;
     uint inverseBindMatricesBufferIndex;
-    uint isValid;
     uint pad0;
 };
 
@@ -102,11 +101,15 @@ struct PerMeshBuffer {
     uint materialDataIndex;
     uint vertexFlags;
     uint vertexByteSize;
-    uint vertexBufferOffset;
+    uint skinningVertexByteSize;
+    uint preSkinningVertexBufferOffset;
+    uint postSkinningVertexBufferOffset;
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
     uint meshletTrianglesBufferOffset;
     BoundingSphere boundingSphere;
+    uint numVertices;
+    uint pad[1];
 };
 
 #endif // __STRUCTS_HLSL__

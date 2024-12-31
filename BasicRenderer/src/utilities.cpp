@@ -11,6 +11,7 @@
 #include <fstream>
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <optional>
 
 #include "MeshUtilities.h"
 #include "PSOFlags.h"
@@ -53,34 +54,52 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
             }
         }
 
-        std::vector<Vertex> vertices;
-        for (size_t i = 0; i < geom.positions.size() / 3; ++i) {
-            XMFLOAT3 position = XMFLOAT3(geom.positions[i * 3], geom.positions[i * 3 + 1], geom.positions[i * 3 + 2]);
-            XMFLOAT3 normal = XMFLOAT3(geom.normals[i * 3], geom.normals[i * 3 + 1], geom.normals[i * 3 + 2]);
-            XMFLOAT2 texcoord = hasTexcoords ? XMFLOAT2(geom.texcoords[i * 2], geom.texcoords[i * 2 + 1]) : XMFLOAT2(0.0f, 0.0f);
-            XMFLOAT3 tangent = hasTangents ? tanbit.tangents[i] : XMFLOAT3(0.0f, 0.0f, 0.0f);
-            XMFLOAT3 bitangent = hasTangents ? tanbit.bitangents[i] : XMFLOAT3(0.0f, 0.0f, 0.0f);
-            XMUINT4 joints = hasJoints ? XMUINT4(geom.joints[i * 4], geom.joints[i * 4 + 1], geom.joints[i * 4 + 2], geom.joints[i * 4 + 3]) : XMUINT4(0, 0, 0, 0);
-            XMFLOAT4 weights = hasJoints ? XMFLOAT4(geom.weights[i * 4], geom.weights[i * 4 + 1], geom.weights[i * 4 + 2], geom.weights[i * 4 + 3]) : XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+        std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
+		unsigned int numVertices = geom.positions.size() / 3;
+		                    // position,        normal,            texcoord,                                tangent, bitangent
+		uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0) + (hasTangents ? sizeof(XMFLOAT3) * 2 : 0);
+		rawData->resize(numVertices * vertexSize);
 
-            if (hasJoints && hasTangents) {
-                vertices.push_back(VertexNormalMappedSkinned{ position, normal, texcoord, tangent, bitangent, joints, weights });
-            }
-            else if (hasJoints) {
-                vertices.push_back(VertexSkinned{ position, normal, texcoord, joints, weights });
-            }
-            else if (hasTangents) {
-                vertices.push_back(VertexNormalMapped{ position, normal, texcoord, tangent, bitangent });
-            }
-            else if (hasTexcoords) {
-                vertices.push_back(VertexTextured{ position, normal, texcoord });
-            }
-            else {
-                vertices.push_back(VertexBasic{ position, normal });
-            }
+        for (unsigned int i = 0; i < numVertices; i++) {
+            size_t baseOffset = i * vertexSize;
+			memcpy(rawData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+            size_t offset = sizeof(XMFLOAT3);
+			memcpy(rawData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+			offset += sizeof(XMFLOAT3);
+			if (hasTexcoords) {
+				memcpy(rawData->data() + baseOffset + offset, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
+				offset += sizeof(XMFLOAT2);
+			}
+			if (hasTangents) {
+				memcpy(rawData->data() + baseOffset + offset, &tanbit.tangents[i], sizeof(XMFLOAT3));
+				offset += sizeof(XMFLOAT3);
+				memcpy(rawData->data() + baseOffset + offset, &tanbit.bitangents[i], sizeof(XMFLOAT3));
+			}
+        }
+		                                  // position,       normal                           tangent            bitangent              joints,           weights
+		unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTangents ? sizeof(XMFLOAT3) + sizeof(XMFLOAT3) : 0) + sizeof(XMUINT4) + sizeof(XMFLOAT4);
+        std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
+        if (hasJoints) {
+			skinningData->resize(numVertices * skinningVertexSize);
+			for (unsigned int i = 0; i < numVertices; i++) {
+				size_t baseOffset = i * skinningVertexSize;
+				memcpy(skinningData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+                size_t offset = sizeof(XMFLOAT3);
+				memcpy(skinningData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+				offset += sizeof(XMFLOAT3);
+				if (hasTangents) {
+					memcpy(skinningData->data() + baseOffset + offset, &tanbit.tangents[i], sizeof(XMFLOAT3));
+					offset += sizeof(XMFLOAT3);
+					memcpy(skinningData->data() + baseOffset + offset, &tanbit.bitangents[i], sizeof(XMFLOAT3));
+					offset += sizeof(XMFLOAT3);
+				}
+				memcpy(skinningData->data() + baseOffset + offset, &geom.joints[i * 4], sizeof(XMUINT4));
+				offset += sizeof(XMUINT4);
+				memcpy(skinningData->data() + baseOffset + offset, &geom.weights[i * 4], sizeof(XMFLOAT4));
+			}
         }
 
-        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(vertices, geom.indices, geom.material, geom.flags);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, geom.indices, geom.material, geom.flags);
         meshes.push_back(std::move(mesh));
     }
 
@@ -817,4 +836,23 @@ DirectX::XMFLOAT3 Add(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b) {
 
 DirectX::XMFLOAT3 Scale(const DirectX::XMFLOAT3& a, const float scale) {
 	return DirectX::XMFLOAT3(a.x * scale, a.y * scale, a.z * scale);
+}
+
+XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix) {
+    XMFLOAT3X3 result;
+
+    // Extract the upper-left 3x3 part of the XMMATRIX
+    result.m[0][0] = matrix.r[0].m128_f32[0]; // Row 0, Col 0
+    result.m[0][1] = matrix.r[0].m128_f32[1]; // Row 0, Col 1
+    result.m[0][2] = matrix.r[0].m128_f32[2]; // Row 0, Col 2
+
+    result.m[1][0] = matrix.r[1].m128_f32[0]; // Row 1, Col 0
+    result.m[1][1] = matrix.r[1].m128_f32[1]; // Row 1, Col 1
+    result.m[1][2] = matrix.r[1].m128_f32[2]; // Row 1, Col 2
+
+    result.m[2][0] = matrix.r[2].m128_f32[0]; // Row 2, Col 0
+    result.m[2][1] = matrix.r[2].m128_f32[1]; // Row 2, Col 1
+    result.m[2][2] = matrix.r[2].m128_f32[2]; // Row 2, Col 2
+
+    return result;
 }

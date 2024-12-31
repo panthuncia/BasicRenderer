@@ -19,30 +19,35 @@ class MeshManager;
 
 class Mesh {
 public:
-    static std::shared_ptr<Mesh> CreateShared(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
-		return std::shared_ptr<Mesh>(new Mesh(vertices, indices, material, flags));
+    static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<std::byte>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags));
     }
+	uint32_t GetNumVertices() const { return m_vertices->size() / m_perMeshBufferData.vertexByteSize; }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
 	int GetGlobalID() const;
-	std::vector<Vertex>& GetVertices() { return m_vertices; }
+	std::vector<std::byte>& GetVertices() { return *m_vertices; }
+	std::vector<std::byte>& GetSkinningVertices() { return *m_skinningVertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
 	std::vector<unsigned int>& GetMeshletVertices() { return m_meshletVertices; }
 	std::vector<unsigned char>& GetMeshletTriangles() { return m_meshletTriangles; }
 
     std::shared_ptr<Material> material;
 
-	void SetVertexBufferView(std::unique_ptr<BufferView> view);
+	void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
+	void SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view);
+	BufferView* GetPostSkinningVertexBufferView();
+	BufferView* GetPreSkinningVertexBufferView();
 	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view);
 
-	void SetBufferViews(std::unique_ptr<BufferView> vertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
+	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
 
-	unsigned int GetVertexBufferOffset() const {
-		return m_vertexBufferView2->GetOffset();
+	unsigned int GetPostSkinningVertexBufferOffset() const {
+		return m_postSkinningVertexBufferView->GetOffset();
 	}
 
 	unsigned int GetMeshletBufferOffset() const {
@@ -73,28 +78,30 @@ public:
 		m_pCurrentMeshManager = manager;
 	}
 
+	unsigned int GetSkinningVertexSize() const {
+		return m_skinningVertexSize;
+	}
+
 private:
-    Mesh(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
-    template <typename VertexType>
-    void CreateVertexBuffer(const std::vector<VertexType>& vertices);
-    template <typename VertexType>
-    void CreateMeshlets(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices);
-    void CreateBuffers(const std::vector<Vertex>& vertices, const std::vector<UINT32>& indices);
-	template <typename VertexType>
-	void ComputeBoundingSphere(const std::vector<VertexType>& vertices, const std::vector<UINT32>& indices);
-	template <typename VertexType>
-	void ComputeAABB(const std::vector<VertexType>& vertices, DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
+    Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<std::byte>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
+    void CreateVertexBuffer();
+    void CreateMeshlets(const std::vector<UINT32>& indices);
+    void CreateBuffers(const std::vector<UINT32>& indices);
+	void ComputeBoundingSphere(const std::vector<UINT32>& indices);
+	void ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
     static int GetNextGlobalIndex();
 
     static std::atomic<int> globalMeshCount;
     int m_globalMeshID;
 
-	std::vector<Vertex> m_vertices;
+	std::unique_ptr<std::vector<std::byte>> m_vertices;
+	std::unique_ptr<std::vector<std::byte>> m_skinningVertices;
 	std::vector<meshopt_Meshlet> m_meshlets;
 	std::vector<unsigned int> m_meshletVertices;
     std::vector<unsigned char> m_meshletTriangles;
 
-    std::unique_ptr<BufferView> m_vertexBufferView2 = nullptr;
+    std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
+	std::unique_ptr<BufferView> m_preSkinningVertexBufferView = nullptr;
 	std::unique_ptr<BufferView> m_meshletBufferView = nullptr;
 	std::unique_ptr<BufferView> m_meshletVerticesBufferView = nullptr;
 	std::unique_ptr<BufferView> m_meshletTrianglesBufferView = nullptr;
@@ -105,6 +112,7 @@ private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
     PerMeshCB m_perMeshBufferData = { 0 };
+	unsigned int m_skinningVertexSize = 0;
 	std::unique_ptr<BufferView> m_perMeshBufferView;
 	MeshManager* m_pCurrentMeshManager = nullptr;
 };

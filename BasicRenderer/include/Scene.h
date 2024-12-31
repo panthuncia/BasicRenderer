@@ -39,6 +39,9 @@ public:
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetOpaqueRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetAlphaTestRenderableObjectIDMap();
 	std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetBlendRenderableObjectIDMap();
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetOpaqueSkinnedRenderableObjectIDMap();
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetAlphaTestSkinnedRenderableObjectIDMap();
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetBlendSkinnedRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<Light>>& GetLightIDMap();
     SceneNode& GetRoot();
     void Update();
@@ -76,6 +79,9 @@ private:
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> opaqueObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<RenderableObject>> alphaTestObjectsByID;
 	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> blendObjectsByID;
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> opaqueSkinnedObjectsByID;
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> alphaTestSkinnedObjectsByID;
+	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> blendSkinnedObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<Light>> lightsByID;
 	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;
 	UINT numObjects = 0;

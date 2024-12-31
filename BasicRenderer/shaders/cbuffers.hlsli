@@ -11,21 +11,20 @@ cbuffer PerMesh : register(b2) {
     uint perMeshBufferIndex;
 };
 
-cbuffer RootConstants1 : register(b3) {
+cbuffer ShadowInfo : register(b3) {
     int currentLightID; // Used for shadow mapping, global light index
+    int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
 };
 
-cbuffer RootConstants2 : register(b4) {
-    int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
-}
-
-cbuffer Settings : register(b5) {
+cbuffer Settings : register(b4) {
     bool enableShadows;
     bool enablePunctualLights;
 }
 
-cbuffer StaticBufferIndices : register(b6) {
-    uint vertexBufferDescriptorIndex;
+cbuffer StaticBufferInfo : register(b5) {
+    uint normalMatrixBufferDescriptorIndex;
+    uint preSkinningVertexBufferDescriptorIndex;
+    uint postSkinningVertexBufferDescriptorIndex;
     uint meshletBufferDescriptorIndex;
     uint meshletVerticesBufferDescriptorIndex;
     uint meshletTrianglesBufferDescriptorIndex;
@@ -33,7 +32,7 @@ cbuffer StaticBufferIndices : register(b6) {
     uint cameraBufferDescriptorIndex;
 }
 
-cbuffer variableBufferIndices : register(b7) {
+cbuffer variableBufferInfo : register(b6) {
     uint perMeshBufferDescriptorIndex; // Variable between opaque vs. transparent
     uint drawSetCommandBufferDescriptorIndex;
     uint activeDrawSetIndicesBufferDescriptorIndex;
@@ -41,7 +40,7 @@ cbuffer variableBufferIndices : register(b7) {
     uint maxDrawIndex;
 }
 
-cbuffer transparencyBufferIndices : register(b8) {
+cbuffer transparencyInfo : register(b7) {
     uint PPLLHeadsDescriptorIndex;
     uint PPLLNodesDescriptorIndex;
     uint PPLLNodesCounterDescriptorIndex;

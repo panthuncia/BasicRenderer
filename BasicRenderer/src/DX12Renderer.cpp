@@ -37,6 +37,7 @@
 #include "RenderPasses/PPLLFillPassMS.h"
 #include "RenderPasses/PPLLFillPassMSIndirect.h"
 #include "RenderPasses/PPLLResolvePass.h"
+#include "RenderPasses/SkinningPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -729,23 +730,45 @@ void DX12Renderer::CreateRenderGraph() {
         }, m_readbackFence);
     auto newGraph = std::make_unique<RenderGraph>();
 
-	auto meshResourceGroup = currentScene->GetMeshManager()->GetResourceGroup();
+    auto& meshManager = currentScene->GetMeshManager();
+    auto& objectManager = currentScene->GetObjectManager();
+	auto meshResourceGroup = meshManager->GetResourceGroup();
 	newGraph->AddResource(meshResourceGroup);
 
-    auto& perObjectBuffer = currentScene->GetObjectManager()->GetPerObjectBuffers();
+    auto& perObjectBuffer = objectManager->GetPerObjectBuffers();
 	newGraph->AddResource(perObjectBuffer);
-    auto& opaquePerMeshBuffer = currentScene->GetMeshManager()->GetOpaquePerMeshBuffers();
-	auto& transparentPerMeshBuffer = currentScene->GetMeshManager()->GetAlphaTestPerMeshBuffers();
-	auto& blendPerMeshBuffer = currentScene->GetMeshManager()->GetBlendPerMeshBuffers();
+    auto& opaquePerMeshBuffer = meshManager->GetOpaquePerMeshBuffers();
+	auto& transparentPerMeshBuffer = meshManager->GetAlphaTestPerMeshBuffers();
+	auto& blendPerMeshBuffer = meshManager->GetBlendPerMeshBuffers();
 	newGraph->AddResource(opaquePerMeshBuffer);
 	newGraph->AddResource(transparentPerMeshBuffer);
 	newGraph->AddResource(blendPerMeshBuffer);
+
+	auto& preSkinningVertices = meshManager->GetPreSkinningVertices();
+	auto& postSkinningVertices = meshManager->GetPostSkinningVertices();
+	auto& normalMatrixBuffer = objectManager->GetNormalMatrixBuffer();
+	newGraph->AddResource(preSkinningVertices);
+	newGraph->AddResource(postSkinningVertices);
+	newGraph->AddResource(normalMatrixBuffer);
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
         useMeshShaders = false;
     }
 
+    // Skinning
+	auto skinningPass = std::make_shared<SkinningPass>();
+	PassParameters skinningPassParameters;
+	skinningPassParameters.shaderResources.push_back(perObjectBuffer);
+	skinningPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
+	skinningPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+	skinningPassParameters.shaderResources.push_back(blendPerMeshBuffer);
+	skinningPassParameters.shaderResources.push_back(preSkinningVertices);
+    skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
+	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
+	newGraph->AddPass(skinningPass, skinningPassParameters, "SkinningPass");
+
+    // Frustrum culling
 	bool indirect = getIndirectDrawsEnabled();
 	if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
 		indirect = false;
@@ -774,6 +797,8 @@ void DX12Renderer::CreateRenderGraph() {
 	forwardPassParameters.shaderResources.push_back(perObjectBuffer);
 	forwardPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
 	forwardPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+    //forwardPassParameters.shaderResources.push_back(normalMatrixBuffer);
+	forwardPassParameters.shaderResources.push_back(postSkinningVertices);
 
     std::shared_ptr<RenderPass> forwardPass = nullptr;
 
@@ -866,6 +891,8 @@ void DX12Renderer::CreateRenderGraph() {
 
         std::shared_ptr<RenderPass> shadowPass = nullptr;
         auto shadowPassParameters = PassParameters();
+        //shadowPassParameters.shaderResources.push_back(normalMatrixBuffer);
+		shadowPassParameters.shaderResources.push_back(postSkinningVertices);
 
         if (useMeshShaders) { 
             shadowPassParameters.shaderResources.push_back(meshResourceGroup);
@@ -924,6 +951,8 @@ void DX12Renderer::CreateRenderGraph() {
 
     std::shared_ptr<RenderPass> pPPLLFillPass;
     auto PPLLFillPassParameters = PassParameters();
+    //PPLLFillPassParameters.shaderResources.push_back(normalMatrixBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(postSkinningVertices);
     if (indirect) {
         pPPLLFillPass = std::make_shared<PPLLFillPassMSIndirect>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
 		PPLLFillPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
