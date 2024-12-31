@@ -194,7 +194,7 @@ public:
 #endif
 		QueueResourceTransition(transition);
         pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
-            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
+            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, false);
             });
 
         // Create an SRV for the buffer
@@ -236,8 +236,8 @@ public:
         transition.name = L"LazyDynamicStructuredBuffer";
 #endif
         QueueResourceTransition(transition);
-        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
-            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer);
+        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer, bool uav) {
+            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, uav);
             });
 
         // Create an SRV for the buffer
@@ -259,6 +259,26 @@ public:
 		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
 		pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
+        if (UAV) {
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+            uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            uavDesc.Buffer.NumElements = capacity;
+            uavDesc.Buffer.StructureByteStride = sizeof(T);
+            uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+            uavDesc.Buffer.CounterOffsetInBytes = 0;
+
+            // Shader visible UAV
+            unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
+            device->CreateUnorderedAccessView(pDynamicBuffer->GetAPIResource(), nullptr, &uavDesc, uavShaderVisibleHandle);
+
+            ShaderVisibleIndexInfo uavInfo;
+            uavInfo.index = uavShaderVisibleIndex;
+            uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
+            pDynamicBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, 0);
+        }
+
         return pDynamicBuffer;
     }
 
@@ -271,7 +291,7 @@ public:
         return val;
     }
 
-    void onDynamicStructuredBufferResized(UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
+    void onDynamicStructuredBufferResized(UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer, bool UAV) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -281,13 +301,27 @@ public:
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-		srvDesc.Buffer.FirstElement = 0;
+        srvDesc.Buffer.FirstElement = 0;
         srvDesc.Buffer.NumElements = capacity;
         srvDesc.Buffer.StructureByteStride = typeSize;
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
         device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
-        
+
+        if (UAV){
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+            uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            uavDesc.Buffer.NumElements = capacity;
+            uavDesc.Buffer.StructureByteStride = typeSize;
+            uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+            uavDesc.Buffer.CounterOffsetInBytes = 0;
+
+            // Shader visible UAV
+            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo().index);
+
+            device->CreateUnorderedAccessView(buffer->GetAPIResource() , nullptr, &uavDesc, uavShaderVisibleHandle);
+        }
 		auto bufferState = buffer->GetState();
 		// After resize, internal buffer state will not match the wrapper state
 		if (bufferState != ResourceState::UNKNOWN) {
@@ -302,7 +336,7 @@ public:
 		}
     }
 
-    void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer) {
+    void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -318,6 +352,21 @@ public:
         srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
         device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
+
+        if (UAV) {
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+            uavDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            uavDesc.Buffer.NumElements = byteAddress ? numElements / 4 : numElements;
+            uavDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
+            uavDesc.Buffer.CounterOffsetInBytes = 0;
+            uavDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_UAV_FLAG_RAW : D3D12_BUFFER_UAV_FLAG_NONE;
+
+            // Shader visible UAV
+            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo().index);
+
+            device->CreateUnorderedAccessView(buffer->GetAPIResource(), nullptr, &uavDesc, uavShaderVisibleHandle);
+        }
 
         auto bufferState = buffer->GetState();
         // After resize, internal buffer state will not match the wrapper state

@@ -300,8 +300,8 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	transition.name = name;
 #endif
 	QueueResourceTransition(transition);
-	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer) {
-		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer);
+	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
+		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer, UAV);
 		});
 
 	// Create an SRV for the buffer
@@ -326,6 +326,26 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 
 	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
 
+	if (UAV) {
+		D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+		uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+		uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+		uavDesc.Buffer.NumElements = numElements;
+		uavDesc.Buffer.StructureByteStride = elementSize;
+		uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+		uavDesc.Buffer.CounterOffsetInBytes = 0;
+
+		// Shader visible UAV
+		unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+		D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
+		device->CreateUnorderedAccessView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), pDynamicBuffer->GetBuffer()->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
+
+		ShaderVisibleIndexInfo uavInfo;
+		uavInfo.index = uavShaderVisibleIndex;
+		uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
+		pDynamicBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, 0);
+	}
+
 	return pDynamicBuffer;
 }
 
@@ -343,7 +363,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 #endif
 	QueueResourceTransition(transition);
 	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
-		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer);
+		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer, false);
 		});
 
 	// Create an SRV for the buffer

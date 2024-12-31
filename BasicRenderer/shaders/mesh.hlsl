@@ -12,7 +12,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
 
     StructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3) postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex];
-    if (flags & VERTEX_SKINNED) {
+    /*if (flags & VERTEX_SKINNED) {
         StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
         StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
     
@@ -33,7 +33,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     
         pos = mul(pos, skinMatrix);
         normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3) skinMatrix);
-    }
+    }*/
     float4 worldPosition = mul(pos, objectBuffer.model);
     PSInput result;
 

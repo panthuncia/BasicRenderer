@@ -26,7 +26,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     StructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
     float3x3 normalMatrixSkinnedIfNecessary = (float3x3)postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex];
     
-    if (meshBuffer.vertexFlags & VERTEX_SKINNED) {
+    /*if (meshBuffer.vertexFlags & VERTEX_SKINNED) {
         StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
         StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
     
@@ -47,7 +47,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
         pos = mul(pos, skinMatrix);
         normalMatrixSkinnedIfNecessary = mul(normalMatrixSkinnedIfNecessary, (float3x3) skinMatrix);
-    }
+    }*/
     
     PSInput output;
     float4 worldPosition = mul(pos, objectBuffer.model);

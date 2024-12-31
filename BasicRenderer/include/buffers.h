@@ -56,6 +56,8 @@ struct PerMeshCB {
     unsigned int meshletVerticesBufferOffset;
     unsigned int meshletTrianglesBufferOffset;
 	BoundingSphere boundingSphere;
+	unsigned int numVertices;
+    unsigned int pad[2];
 };
 
 struct PerMaterialCB {

@@ -107,6 +107,7 @@ void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
     perObjectCBData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
     if (m_currentManager != nullptr) {
         m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
+		m_currentManager->UpdateSkinning(this);
     }
     skeleton->userIDs.push_back(localID);
 }

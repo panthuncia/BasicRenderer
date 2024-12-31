@@ -107,6 +107,8 @@ struct PerMeshBuffer {
     uint meshletVerticesBufferOffset;
     uint meshletTrianglesBufferOffset;
     BoundingSphere boundingSphere;
+    uint numVertices;
+    uint pad[2];
 };
 
 #endif // __STRUCTS_HLSL__

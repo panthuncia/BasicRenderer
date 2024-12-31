@@ -159,3 +159,11 @@ void ObjectManager::UpdatePreSkinningNormalMatrixBuffer(BufferView* view, void* 
 void ObjectManager::UpdatePostSkinningNormalMatrixBuffer(BufferView* view, void* data) {
 	m_postSkinningNormalMatrixBuffer->UpdateView(view, data);
 }
+
+void ObjectManager::UpdateSkinning(RenderableObject* object) {
+	auto preSkinningView = object->GetPreSkinningNormalMatrixView();
+	if (preSkinningView == nullptr) {
+		auto skinningView = m_preSkinningNormalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
+		object->SetPreSkinningNormalMatrixView(skinningView);
+	}
+}

@@ -490,6 +490,14 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         // Remap skeleton & users to their correct IDs
         for (auto& oldID : skeleton->userIDs) {
             GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
+			// Add to correct skinned object map
+            if (GetObjectByID(idMap[oldID])->HasOpaque()) {
+				opaqueSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+			} if (GetObjectByID(idMap[oldID])->HasAlphaTest()) {
+				alphaTestSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+			} if (GetObjectByID(idMap[oldID])->HasBlend()) {
+				blendSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+            }
         }
         AddSkeleton(newSkeleton);
     }

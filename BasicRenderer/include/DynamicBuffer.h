@@ -33,7 +33,7 @@ public:
 	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize);
 	void UpdateView(BufferView* view, const void* data);
 
-    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*)>& callback) {
+    void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*, bool)>& callback) {
         onResized = callback;
     }
 
@@ -87,7 +87,7 @@ private:
 
     std::vector<MemoryBlock> m_memoryBlocks;
 
-    std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase* buffer)> onResized;
+    std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase* buffer, bool)> onResized;
     inline static std::wstring m_baseName = L"DynamicBuffer";
 	std::wstring m_name = m_baseName;
 

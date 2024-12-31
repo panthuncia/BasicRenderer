@@ -19,6 +19,7 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
+	m_perMeshBufferData.numVertices = m_vertices->size() / vertexSize;
 
 	CreateBuffers(indices);
     this->material = material;

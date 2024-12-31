@@ -6,14 +6,19 @@
 void CSMain(uint dispatchID : SV_DispatchThreadID) {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    
+    if (dispatchID >= meshBuffer.numVertices) {
+        return;
+    }
+    
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
     
     ByteAddressBuffer preSkinningVertexBuffer = ResourceDescriptorHeap[preSkinningVertexBufferDescriptorIndex];
     RWByteAddressBuffer postSkinningVertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex];
     
-    StructuredBuffer<float3x3> preSkinningNormalMatrixBuffer = ResourceDescriptorHeap[preSkinningNormalMatrixBufferDescriptorIndex];
-    RWStructuredBuffer<float3x3> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
+    StructuredBuffer<float4x4> preSkinningNormalMatrixBuffer = ResourceDescriptorHeap[preSkinningNormalMatrixBufferDescriptorIndex];
+    RWStructuredBuffer<float4x4> postSkinningNormalMatrixBuffer = ResourceDescriptorHeap[postSkinningNormalMatrixBufferDescriptorIndex];
     
     uint preSkinnedByteOffset = meshBuffer.preSkinningVertexBufferOffset + dispatchID * meshBuffer.vertexByteSize;
     uint postSkinnedByteOffset = meshBuffer.postSkinningVertexBufferOffset + dispatchID * meshBuffer.vertexByteSize;
@@ -40,7 +45,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
                          input.weights.z * mul(bone3, bindMatrix3) +
                          input.weights.w * mul(bone4, bindMatrix4));
     
-    postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex] = mul(preSkinningNormalMatrixBuffer[objectBuffer.preSkinningNormalMatrixBufferIndex], (float3x3) skinMatrix);
+    postSkinningNormalMatrixBuffer[objectBuffer.postSkinningNormalMatrixBufferIndex] = mul(preSkinningNormalMatrixBuffer[objectBuffer.preSkinningNormalMatrixBufferIndex], skinMatrix);
     
     float3 skinnedPosition = mul(pos, skinMatrix).xyz;
     postSkinningVertexBuffer.Store3(postSkinnedByteOffset, skinnedPosition);

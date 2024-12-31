@@ -43,7 +43,7 @@ public:
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this);
+            onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this, m_UAV);
         }
 		unsigned int index = m_usedCapacity - 1;
         return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T)));
@@ -73,7 +73,7 @@ public:
     }
 
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
+    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer, bool)>& callback) {
         onResized = callback;
     }
 
@@ -122,7 +122,7 @@ private:
     UINT m_globalResizableBufferID;
     size_t m_elementSize = 0;
 
-    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)> onResized;
+    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer, bool)> onResized;
     inline static std::wstring m_name = L"LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;

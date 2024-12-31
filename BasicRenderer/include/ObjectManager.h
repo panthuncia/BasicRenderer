@@ -22,6 +22,7 @@ public:
 	unsigned int GetPerObjectBufferSRVIndex() const {
 		return m_perObjectBuffers->GetSRVInfo().index;
 	}
+	void UpdateSkinning(RenderableObject* object);
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
 	void UpdatePreSkinningNormalMatrixBuffer(BufferView* view, void* data);
 	void UpdatePostSkinningNormalMatrixBuffer(BufferView* view, void* data);
