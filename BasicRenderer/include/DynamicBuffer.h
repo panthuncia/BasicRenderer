@@ -75,6 +75,11 @@ private:
         }
     }
 
+    void SetState(ResourceState state) override {
+        currentState = state;
+        m_dataBuffer->SetState(state);
+    }
+
 	size_t m_elementSize;
 	bool m_byteAddress;
 

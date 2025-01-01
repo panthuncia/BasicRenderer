@@ -23,16 +23,20 @@ public:
 protected:
     virtual std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) = 0;
     virtual void OnSetName() {}
+    virtual void SetState(ResourceState state) { currentState = state; }
+
     ResourceState currentState;
     std::wstring name;
 private:
+    bool m_uploadInProgress = false;
     inline static std::atomic<uint32_t> globalResourceCount;
     uint32_t m_globalResourceID;
 
-	void SetState(ResourceState state) { currentState = state; }
     friend class RenderGraph;
     friend class ResourceGroup;
     friend class ResourceManager;
     friend class DynamicResource;
     friend class DynamicGloballyIndexedResource;
+    friend class DynamicBuffer;
+    friend class UploadManager; // Kinda a hack, for deduplicating transition lists
 };
