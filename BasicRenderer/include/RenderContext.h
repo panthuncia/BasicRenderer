@@ -19,6 +19,7 @@ public:
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;
     UINT frameIndex;
+	UINT64 frameFenceValue;
     UINT xRes;
     UINT yRes;
 };

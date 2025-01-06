@@ -39,7 +39,7 @@ public:
     }
 
     // This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    PassReturn Execute(RenderContext& context) override {
+    RenderPassReturn Execute(RenderContext& context) override {
 
         uint16_t skyboxRes = getSkyboxResolution();
 

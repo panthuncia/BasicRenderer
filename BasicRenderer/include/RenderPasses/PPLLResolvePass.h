@@ -46,7 +46,7 @@ public:
 		CreatePSO();
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	RenderPassReturn Execute(RenderContext& context) override {
 
 		auto numBlend = context.currentScene->GetNumBlendDraws();
 		if (numBlend == 0) {

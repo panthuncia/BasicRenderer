@@ -39,7 +39,7 @@ public:
         }
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    RenderPassReturn Execute(RenderContext& context) override {
         auto& psoManager = PSOManager::GetInstance();
 
         // Reset and get the appropriate command list

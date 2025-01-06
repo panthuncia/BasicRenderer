@@ -1,4 +1,5 @@
 #include "RenderGraph.h"
+
 #include "RenderContext.h"
 #include "utilities.h"
 #include "SettingsManager.h"
@@ -7,34 +8,72 @@ static bool mapHasResourceNotInState(std::unordered_map<std::wstring, ResourceSt
     return mapHasKeyNotAsValue<std::wstring, ResourceState>(map, resourceName, state);
 }
 
+static bool mapHasResourceInUAVState(std::unordered_map<std::wstring, ResourceState>& map, std::wstring resourceName) {
+	bool a = mapHasKeyAsValue<std::wstring, ResourceState>(map, resourceName, ResourceState::ALL_SRV);
+}
+
 void RenderGraph::Compile() {
     batches.clear();
     auto currentBatch = PassBatch();
     //std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
     std::unordered_map<std::wstring, ResourceState> finalResourceStates;
 
+	std::unordered_set<std::wstring> computeUAVs;
+	std::unordered_set<std::wstring> renderUAVs;
+
+    std::unordered_map<std::wstring, unsigned int>  batchOfLastRenderQueueTransition;
+	std::unordered_map<std::wstring, unsigned int>  batchOfLastComputeQueueTransition;
+
+	std::unordered_map<std::wstring, unsigned int>  batchOfLastRenderQueueProducer;
+	std::unordered_map<std::wstring, unsigned int>  batchOfLastComputeQueueProducer;
+
+	unsigned int currentBatchIndex = 0;
     for (auto& passAndResources : passes) {
         bool needsNewBatch = false;
 
         // Determine if a new batch is needed based on resource state conflicts
-        if (IsNewBatchNeeded(currentBatch, passAndResources)) {
-            // Compute transitions for the current batch
-            // During execution, finalResourceStates contains the state of
-            // each resource before the current batch, if it has been used
-            ComputeTransitionsForBatch(currentBatch, finalResourceStates);
-            for (const auto& [resourceName, state] : currentBatch.resourceStates) {
-                finalResourceStates[resourceName] = state;
+        switch (passAndResources.type) {
+            case PassType::Render: {
+                if (IsNewBatchNeeded(currentBatch, passAndResources.renderPass, computeUAVs)) {
+                    // Compute transitions for the current batch
+                    // During execution, finalResourceStates contains the state of
+                    // each resource before the current batch, if it has been used
+                    //ComputeTransitionsForBatch(currentBatch, finalResourceStates);
+                    for (const auto& [resourceName, state] : currentBatch.resourceStates) {
+                        finalResourceStates[resourceName] = state;
+                    }
+                    batches.push_back(std::move(currentBatch));
+                    currentBatch = PassBatch();
+                    currentBatchIndex++;
+                    // Update final resource states
+                }
+				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, batchOfLastRenderQueueTransition, batchOfLastRenderQueueProducer, passAndResources.renderPass, currentBatchIndex);
+				currentBatch.renderTransitions.insert(currentBatch.renderTransitions.end(), transitions.begin(), transitions.end());
+                currentBatch.renderPasses.push_back(passAndResources.renderPass);
+                // Update desired resource states
+                UpdateDesiredResourceStates(currentBatch, passAndResources.renderPass, renderUAVs);
+                break;
             }
-            batches.push_back(std::move(currentBatch));
-            currentBatch = PassBatch();
-            //previousBatchResourceStates = batches.back().resourceStates;
-            // Update final resource states
+            case PassType::Compute: {
+				if (IsNewBatchNeeded(currentBatch, passAndResources.computePass, renderUAVs)) {
+					// Compute transitions for the current batch
+					//ComputeTransitionsForBatch(currentBatch, finalResourceStates);
+					for (const auto& [resourceName, state] : currentBatch.resourceStates) {
+						finalResourceStates[resourceName] = state;
+					}
+					batches.push_back(std::move(currentBatch));
+					currentBatch = PassBatch();
+                    currentBatchIndex++;
+				}
+				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, batchOfLastComputeQueueTransition, batchOfLastComputeQueueProducer, passAndResources.computePass, currentBatchIndex);
+				currentBatch.computePasses.push_back(passAndResources.computePass);
+				currentBatch.computeTransitions.insert(currentBatch.computeTransitions.end(), transitions.begin(), transitions.end());
+				// Update desired resource states
+				UpdateDesiredResourceStates(currentBatch, passAndResources.computePass, computeUAVs);
+				break;
+            }
         }
 
-        currentBatch.passes.push_back(passAndResources);
-
-        // Update desired resource states
-        UpdateDesiredResourceStates(currentBatch, passAndResources);
 
     }
 
@@ -49,9 +88,125 @@ void RenderGraph::Compile() {
     ComputeResourceLoops(finalResourceStates);
 }
 
+std::pair<int, int> RenderGraph::GetFencesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory) {
+	int latestTransition = -1;
+	int latestProducer = -1;
+
+    auto processResource = [&](const std::shared_ptr<Resource>& resource) {
+        if (transitionHistory.contains(resource->GetName())) {
+            latestTransition = (std::max)(latestTransition, transitionHistory.at(resource->GetName()));
+        }
+        if (producerHistory.contains(resource->GetName())) {
+            latestProducer = (std::max)(latestProducer, producerHistory.at(resource->GetName()));
+        }
+        };
+
+	for (const auto& resource : pass.resources.unorderedAccessViews) {
+		processResource(resource);
+	}
+	for (const auto& resource : pass.resources.constantBuffers) {
+		processResource(resource);
+	}
+	for (const auto& resource : pass.resources.shaderResources) {
+		processResource(resource);
+	}
+}
+
+std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, ComputePassAndResources pass, unsigned int batchIndex) {
+	std::vector<ResourceTransition> transitions;
+
+    auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState) {
+		ResourceState initialState = ResourceState::UNKNOWN;
+        if (finalResourceStates.contains(resource->GetName())) {
+            initialState = finalResourceStates[resource->GetName()];
+        }
+		if (initialState != finalState) {
+			transitions.push_back(ResourceTransition(resource, initialState, finalState));
+			transitionHistory[resource->GetName()] = batchIndex;
+		}
+        };
+
+    for(auto& resource : pass.resources.shaderResources) {
+		addTransition(resource, ResourceState::ALL_SRV);
+        finalResourceStates[resource->GetName()] = ResourceState::ALL_SRV;
+    }
+	for (auto& resource : pass.resources.constantBuffers) {
+		addTransition(resource, ResourceState::CONSTANT);
+		finalResourceStates[resource->GetName()] = ResourceState::CONSTANT;
+	}
+	for (auto& resource : pass.resources.unorderedAccessViews) {
+		addTransition(resource, ResourceState::UNORDERED_ACCESS);
+		finalResourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
+		producerHistory[resource->GetName()] = batchIndex;
+	}
+	return transitions;
+}
+
+std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, RenderPassAndResources pass, unsigned int batchIndex) {
+    std::vector<ResourceTransition> transitions;
+
+    auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState) {
+        ResourceState initialState = ResourceState::UNKNOWN;
+        if (finalResourceStates.contains(resource->GetName())) {
+            initialState = finalResourceStates[resource->GetName()];
+        }
+        if (initialState != finalState) {
+            transitions.push_back(ResourceTransition(resource, initialState, finalState));
+			transitionHistory[resource->GetName()] = batchIndex;
+        }
+        };
+
+    for (auto& resource : pass.resources.shaderResources) {
+		addTransition(resource, ResourceState::ALL_SRV);
+		finalResourceStates[resource->GetName()] = ResourceState::ALL_SRV;
+	}
+	for (auto& resource : pass.resources.renderTargets) {
+		addTransition(resource, ResourceState::RENDER_TARGET);
+		finalResourceStates[resource->GetName()] = ResourceState::RENDER_TARGET;
+		producerHistory[resource->GetName()] = batchIndex;
+	}
+	for (auto& resource : pass.resources.depthTextures) {
+		addTransition(resource, ResourceState::DEPTH_WRITE);
+		finalResourceStates[resource->GetName()] = ResourceState::DEPTH_WRITE;
+		producerHistory[resource->GetName()] = batchIndex;
+	}
+	for (auto& resource : pass.resources.constantBuffers) {
+		addTransition(resource, ResourceState::CONSTANT);
+		finalResourceStates[resource->GetName()] = ResourceState::CONSTANT;
+	}
+	for (auto& resource : pass.resources.unorderedAccessViews) {
+		addTransition(resource, ResourceState::UNORDERED_ACCESS);
+		finalResourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
+		producerHistory[resource->GetName()] = batchIndex;
+	}
+	for (auto& resource : pass.resources.copyTargets) {
+		addTransition(resource, ResourceState::COPY_DEST);
+		finalResourceStates[resource->GetName()] = ResourceState::COPY_DEST;
+		producerHistory[resource->GetName()] = batchIndex;
+	}
+	for (auto& resource : pass.resources.copySources) {
+		addTransition(resource, ResourceState::COPY_SOURCE);
+		finalResourceStates[resource->GetName()] = ResourceState::COPY_SOURCE;
+	}
+	for (auto& resource : pass.resources.indirectArgumentBuffers) {
+		addTransition(resource, ResourceState::INDIRECT_ARGUMENT);
+		finalResourceStates[resource->GetName()] = ResourceState::INDIRECT_ARGUMENT;
+	}
+	return transitions;
+}
+
+
+
 void RenderGraph::Setup(ID3D12CommandQueue* queue) {
     for (auto& pass : passes) {
-        pass.pass->Setup();
+        switch (pass.type) {
+        case PassType::Render:
+            pass.renderPass.pass->Setup();
+            break;
+        case PassType::Compute:
+            pass.computePass.pass->Setup();
+            break;
+        }
     }
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
@@ -68,14 +223,30 @@ void RenderGraph::Setup(ID3D12CommandQueue* queue) {
     }
 }
 
-void RenderGraph::AddPass(std::shared_ptr<RenderPass> pass, PassParameters& resources, std::string name) {
-    PassAndResources passAndResources;
+void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name) {
+    RenderPassAndResources passAndResources;
     passAndResources.pass = pass;
     passAndResources.resources = resources;
-	passes.push_back(passAndResources);
+	AnyPassAndResources passAndResourcesAny;
+	passAndResourcesAny.type = PassType::Render;
+	passAndResourcesAny.renderPass = passAndResources;
+	passes.push_back(passAndResourcesAny);
     if (name != "") {
-        passesByName[name] = pass;
+        renderPassesByName[name] = pass;
     }
+}
+
+void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name) {
+	ComputePassAndResources passAndResources;
+	passAndResources.pass = pass;
+	passAndResources.resources = resources;
+	AnyPassAndResources passAndResourcesAny;
+	passAndResourcesAny.type = PassType::Compute;
+	passAndResourcesAny.computePass = passAndResources;
+	passes.push_back(passAndResourcesAny);
+	if (name != "") {
+		computePassesByName[name] = pass;
+	}
 }
 
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource) {
@@ -95,18 +266,30 @@ std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::wstring& nam
 	return resourcesByName[name];
 }
 
-std::shared_ptr<RenderPass> RenderGraph::GetPassByName(const std::string& name) {
-    if (passesByName.find(name)!= passesByName.end()) {
-        return passesByName[name];
+std::shared_ptr<RenderPass> RenderGraph::GetRenderPassByName(const std::string& name) {
+    if (renderPassesByName.find(name)!= renderPassesByName.end()) {
+        return renderPassesByName[name];
     }
     else {
         return nullptr;
     }
 }
 
+std::shared_ptr<ComputePass> RenderGraph::GetComputePassByName(const std::string& name) {
+	if (computePassesByName.find(name) != computePassesByName.end()) {
+		return computePassesByName[name];
+	}
+	else {
+		return nullptr;
+	}
+}
+
 void RenderGraph::Update() {
     for (auto& batch : batches) {
-        for (auto& passAndResources : batch.passes) {
+        for (auto& passAndResources : batch.renderPasses) {
+            passAndResources.pass->Update();
+        }
+        for (auto& passAndResources : batch.computePasses) {
             passAndResources.pass->Update();
         }
     }
@@ -123,7 +306,7 @@ void RenderGraph::Execute(RenderContext& context) {
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
         transitionCommandList->Reset(commandAllocator.Get(), NULL);
 		std::vector<D3D12_RESOURCE_BARRIER> barriers;
-        for (auto& transition : batch.transitions) {
+        for (auto& transition : batch.renderTransitions) {
             auto& transitions = transition.pResource->GetTransitions(transition.fromState, transition.toState);
             for (auto& barrier : transitions) {
 				barriers.push_back(barrier);
@@ -137,22 +320,24 @@ void RenderGraph::Execute(RenderContext& context) {
         queue->ExecuteCommandLists(1, ppCommandLists);
 
         // Execute all passes in the batch
-        for (auto& passAndResources : batch.passes) {
+        for (auto& passAndResources : batch.renderPasses) {
 			if (passAndResources.pass->IsInvalidated()) {
+
                 auto passReturn = passAndResources.pass->Execute(context);
 				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
                 queue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
-                //DeviceManager::GetInstance().DiagnoseDeviceRemoval();
 
                 if (passReturn.fence != nullptr) {
-					queue->Signal(passReturn.fence, passReturn.fenceValue);
+					queue->Signal(passReturn.fence, passReturn.fenceValue); // External fences for readback: TODO merge with new fence system
                 }
 			}
         }
     }
 }
 
-bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResources& passAndResources) {
+bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<std::wstring>& computeUAVs) {
+	// New batch is needed if (a) current batch has a resource we need for this pass in a different state
+	// Or (b) if this pass would use a resource in a manner that would cause a cross-queue read/write hazard
     for (auto& resource : passAndResources.resources.shaderResources) {
         if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::ALL_SRV)) {
             return true;
@@ -161,53 +346,70 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const PassAndResourc
     for (auto& resource : passAndResources.resources.renderTargets) {
         if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::RENDER_TARGET)) {
             return true;
-            break;
         }
     }
     for (auto& resource : passAndResources.resources.depthTextures) {
         if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::DEPTH_WRITE)) {
             return true;
-            break;
         }
     }
     for (auto& resource : passAndResources.resources.constantBuffers) {
         if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::CONSTANT)) {
             return true;
-            break;
         }
     }
 	for (auto& resource : passAndResources.resources.unorderedAccessViews) {
 		if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::UNORDERED_ACCESS)) {
 			return true;
-			break;
+		}
+		if (computeUAVs.contains(resource->GetName())) {
+			return true;
 		}
 	}
 	for (auto& resource : passAndResources.resources.copySources) {
 		if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::COPY_SOURCE)) {
 			return true;
-			break;
 		}
 	}
     for (auto& resource : passAndResources.resources.copyTargets) {
         if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::COPY_DEST)) {
             return true;
-            break;
         }
     }
 	for (auto& resource : passAndResources.resources.indirectArgumentBuffers) {
 		if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::INDIRECT_ARGUMENT)) {
 			return true;
-			break;
 		}
 	}
     return false;
 }
 
+bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<std::wstring>& renderUAVs) {
+    // New batch is needed if (a) current batch has a resource we need for this pass in a different state
+    // Or (b) if this pass would use a resource in a manner that would cause a cross-queue read/write hazard
+    for (auto& resource : passAndResources.resources.shaderResources) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::ALL_SRV)) {
+            return true;
+        }
+    }
+    for (auto& resource : passAndResources.resources.constantBuffers) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::CONSTANT)) {
+            return true;
+        }
+    }
+    for (auto& resource : passAndResources.resources.unorderedAccessViews) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::UNORDERED_ACCESS)) {
+            return true;
+        }
+		if (renderUAVs.contains(resource->GetName())) {
+			return true;
+		}
+    }
+    return false;
+}
+
 void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates) {
     for (const auto& [resourceName, requiredState] : batch.resourceStates) {
-        if (resourceName == L"AlphaTestPerMeshBuffers") {
-            print("?");
-        }
         ResourceState previousState = ResourceState::UNKNOWN;
         auto it = previousStates.find(resourceName);
         std::shared_ptr<Resource> resource = GetResourceByName(resourceName);
@@ -225,12 +427,12 @@ void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unorde
             }
         }
         if (previousState != requiredState) {
-            batch.transitions.push_back({ resource, previousState, requiredState });
+            batch.renderTransitions.push_back({ resource, previousState, requiredState });
         }
     }
 }
 
-void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources& passAndResources) {
+void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<std::wstring>& renderUAVs) {
     // Update batch.resourceStates based on the resources used in passAndResources
     for (auto& resource : passAndResources.resources.shaderResources) {
         batch.resourceStates[resource->GetName()] = ResourceState::ALL_SRV;
@@ -246,6 +448,7 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
     }
     for (auto& resource : passAndResources.resources.unorderedAccessViews) {
 		batch.resourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
+		renderUAVs.insert(resource->GetName());
     }
 	for (auto& resource : passAndResources.resources.copySources) {
 		batch.resourceStates[resource->GetName()] = ResourceState::COPY_SOURCE;
@@ -257,6 +460,21 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, PassAndResources
 		batch.resourceStates[resource->GetName()] = ResourceState::INDIRECT_ARGUMENT;
 	}
 }
+
+void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<std::wstring>& computeUAVs) {
+    // Update batch.resourceStates based on the resources used in passAndResources
+    for (auto& resource : passAndResources.resources.shaderResources) {
+        batch.resourceStates[resource->GetName()] = ResourceState::ALL_SRV;
+    }
+    for (auto& resource : passAndResources.resources.constantBuffers) {
+        batch.resourceStates[resource->GetName()] = ResourceState::CONSTANT;
+    }
+    for (auto& resource : passAndResources.resources.unorderedAccessViews) {
+        batch.resourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
+        computeUAVs.insert(resource->GetName());
+    }
+}
+
 
 void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates) {
 	PassBatch loopBatch;
@@ -270,7 +488,7 @@ void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::wstring, Re
         if (finalState != initialState) {
             // Insert a transition to bring the resource back to its initial state
             ResourceTransition transition = { resource, finalState, initialState };
-            loopBatch.transitions.push_back(transition);
+            loopBatch.renderTransitions.push_back(transition);
         }
     }
 	batches.push_back(std::move(loopBatch));

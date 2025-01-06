@@ -38,6 +38,7 @@
 #include "RenderPasses/PPLLFillPassMSIndirect.h"
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/SkinningPass.h"
+#include "ComputePass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -517,6 +518,7 @@ void DX12Renderer::Render() {
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
+    m_context.frameFenceValue = m_currentFrameFenceValue;
     m_context.xRes = m_xRes;
     m_context.yRes = m_yRes;
 
@@ -758,7 +760,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     // Skinning
 	auto skinningPass = std::make_shared<SkinningPass>();
-	PassParameters skinningPassParameters;
+	RenderPassParameters skinningPassParameters;
 	skinningPassParameters.shaderResources.push_back(perObjectBuffer);
 	skinningPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
 	skinningPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
@@ -766,7 +768,7 @@ void DX12Renderer::CreateRenderGraph() {
 	skinningPassParameters.shaderResources.push_back(preSkinningVertices);
     skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
-	newGraph->AddPass(skinningPass, skinningPassParameters, "SkinningPass");
+	newGraph->AddRenderPass(skinningPass, skinningPassParameters, "SkinningPass");
 
     // Frustrum culling
 	bool indirect = getIndirectDrawsEnabled();
@@ -779,21 +781,21 @@ void DX12Renderer::CreateRenderGraph() {
         indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
         auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
-        PassParameters clearUAVsPassParameters;
+        RenderPassParameters clearUAVsPassParameters;
         clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
-        newGraph->AddPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
+        newGraph->AddRenderPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
 
         // Compute pass
         auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
-        PassParameters frustrumCullingPassParameters;
+        RenderPassParameters frustrumCullingPassParameters;
         frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
         frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
-        newGraph->AddPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
+        newGraph->AddRenderPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
     }
 
-    auto forwardPassParameters = PassParameters();
+    auto forwardPassParameters = RenderPassParameters();
 	forwardPassParameters.shaderResources.push_back(perObjectBuffer);
 	forwardPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
 	forwardPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
@@ -816,7 +818,7 @@ void DX12Renderer::CreateRenderGraph() {
         forwardPass = std::make_shared<ForwardRenderPassUnified>(getWireframeEnabled(), false, false);
     }
 
-    auto debugPassParameters = PassParameters();
+    auto debugPassParameters = RenderPassParameters();
 
     if (m_lutTexture == nullptr) {
 		TextureDescription lutDesc;
@@ -835,9 +837,9 @@ void DX12Renderer::CreateRenderGraph() {
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
 		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(utils, m_lutTexture);
-		auto brdfIntegrationPassParameters = PassParameters();
+		auto brdfIntegrationPassParameters = RenderPassParameters();
 		brdfIntegrationPassParameters.renderTargets.push_back(m_lutTexture);
-        newGraph->AddPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
+        newGraph->AddRenderPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
     }
 
     newGraph->AddResource(m_lutTexture);
@@ -846,7 +848,7 @@ void DX12Renderer::CreateRenderGraph() {
     // Check if we've already computed this environment
     bool skipEnvironmentPass = false;
     if (currentRenderGraph != nullptr) {
-        auto currentEnvironmentPass = currentRenderGraph->GetPassByName("EnvironmentConversionPass");
+        auto currentEnvironmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
         if (currentEnvironmentPass != nullptr) {
             if (!currentEnvironmentPass->IsInvalidated()) {
                 skipEnvironmentPass = true;
@@ -862,18 +864,18 @@ void DX12Renderer::CreateRenderGraph() {
         //newGraph->AddResource(m_currentSkybox);
         //newGraph->AddResource(m_environmentIrradiance);
         auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(utils, m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
-        auto environmentConversionPassParameters = PassParameters();
+        auto environmentConversionPassParameters = RenderPassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
         environmentConversionPassParameters.renderTargets.push_back(m_environmentIrradiance);
-        newGraph->AddPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
+        newGraph->AddRenderPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
         //newGraph->AddResource(m_prefilteredEnvironment);
 		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(utils, m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
-		auto environmentFilterPassParameters = PassParameters();
+		auto environmentFilterPassParameters = RenderPassParameters();
 		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
 		environmentFilterPassParameters.renderTargets.push_back(m_prefilteredEnvironment);
-        newGraph->AddPass(environmentFilterPass, environmentFilterPassParameters, "EnvironmentFilterPass");
+        newGraph->AddRenderPass(environmentFilterPass, environmentFilterPassParameters, "EnvironmentFilterPass");
     }
 
     if (m_prefilteredEnvironment != nullptr) {
@@ -890,7 +892,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddResource(m_shadowMaps);
 
         std::shared_ptr<RenderPass> shadowPass = nullptr;
-        auto shadowPassParameters = PassParameters();
+        auto shadowPassParameters = RenderPassParameters();
         //shadowPassParameters.shaderResources.push_back(normalMatrixBuffer);
 		shadowPassParameters.shaderResources.push_back(postSkinningVertices);
 
@@ -914,18 +916,18 @@ void DX12Renderer::CreateRenderGraph() {
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
-        newGraph->AddPass(shadowPass, shadowPassParameters);
+        newGraph->AddRenderPass(shadowPass, shadowPassParameters);
     }
 
     if (m_currentSkybox != nullptr) {
         newGraph->AddResource(m_currentSkybox);
         auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
-        auto skyboxPassParameters = PassParameters();
+        auto skyboxPassParameters = RenderPassParameters();
         skyboxPassParameters.shaderResources.push_back(m_currentSkybox);
-        newGraph->AddPass(skyboxPass, skyboxPassParameters);
+        newGraph->AddRenderPass(skyboxPass, skyboxPassParameters);
     }
 
-    newGraph->AddPass(forwardPass, forwardPassParameters);
+    newGraph->AddRenderPass(forwardPass, forwardPassParameters);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
@@ -950,7 +952,7 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(PPLLCounter);
 
     std::shared_ptr<RenderPass> pPPLLFillPass;
-    auto PPLLFillPassParameters = PassParameters();
+    auto PPLLFillPassParameters = RenderPassParameters();
     //PPLLFillPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	PPLLFillPassParameters.shaderResources.push_back(postSkinningVertices);
     if (indirect) {
@@ -977,20 +979,20 @@ void DX12Renderer::CreateRenderGraph() {
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);
-	newGraph->AddPass(pPPLLFillPass, PPLLFillPassParameters);
+	newGraph->AddRenderPass(pPPLLFillPass, PPLLFillPassParameters);
 
 	auto ResolvePass = std::make_shared<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
-	auto ResolvePassParameters = PassParameters();
+	auto ResolvePassParameters = RenderPassParameters();
 	ResolvePassParameters.shaderResources.push_back(PPLLHeadPointerTexture);
 	ResolvePassParameters.shaderResources.push_back(PPLLBuffer);
-	newGraph->AddPass(ResolvePass, ResolvePassParameters);
+	newGraph->AddRenderPass(ResolvePass, ResolvePassParameters);
 
 	//auto debugPass = std::make_shared<DebugRenderPass>();
     //newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
 
     if (getDrawBoundingSpheres()) {
         auto debugSpherePass = std::make_shared<DebugSpherePass>();
-        newGraph->AddPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+        newGraph->AddRenderPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
     }
 
     newGraph->Compile();
@@ -1083,11 +1085,11 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	SetPrefilteredEnvironment(prefilteredEnvironment);
 
     if (currentRenderGraph != nullptr) {
-        auto environmentPass = currentRenderGraph->GetPassByName("EnvironmentConversionPass");
+        auto environmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
         if (environmentPass != nullptr) {
             environmentPass->Invalidate();
         }
-		auto environmentFilterPass = currentRenderGraph->GetPassByName("EnvironmentFilterPass");
+		auto environmentFilterPass = currentRenderGraph->GetRenderPassByName("EnvironmentFilterPass");
         if (environmentFilterPass != nullptr) {
             environmentFilterPass->Invalidate();
         }
@@ -1161,7 +1163,7 @@ void DX12Renderer::SetDebugTexture(Texture* texture) {
         spdlog::warn("Cannot set debug texture before render graph exists");
         return;
     }
-    auto pPass = currentRenderGraph->GetPassByName("DebugPass");
+    auto pPass = currentRenderGraph->GetRenderPassByName("DebugPass");
     if (pPass != nullptr) {
         auto pDebugPass = std::dynamic_pointer_cast<DebugRenderPass>(pPass);
         pDebugPass->SetTexture(texture);

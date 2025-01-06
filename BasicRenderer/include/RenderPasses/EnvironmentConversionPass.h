@@ -60,7 +60,7 @@ public:
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    PassReturn Execute(RenderContext& context) override {
+    RenderPassReturn Execute(RenderContext& context) override {
 
 		uint16_t skyboxRes = getSkyboxResolution();
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
@@ -126,7 +126,7 @@ public:
 			commandLists.push_back(commandList);
         }
         // We can reuse the results of this pass
-		PassReturn passReturn;
+		RenderPassReturn passReturn;
         if (m_currentPass == m_numPasses) {
             
             invalidated = false;
