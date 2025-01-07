@@ -63,11 +63,11 @@ inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 	throw std::runtime_error("Invalid Resource State");
 }
 
-//struct ResourceTransition {
-//	Resource* resource = nullptr;
-//	ResourceState beforeState;
-//	ResourceState afterState;
-//#if defined(_DEBUG)
-//	std::wstring name;
-//#endif // DEBUG
-//};
+struct ResourceTransition {
+	Resource* resource = nullptr;
+	ResourceState beforeState;
+	ResourceState afterState;
+#if defined(_DEBUG)
+	std::wstring name;
+#endif // DEBUG
+};

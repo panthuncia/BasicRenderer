@@ -28,7 +28,6 @@ public:
         auto& device = manager.GetDevice();
         m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
 
-        auto& queue = manager.GetCommandQueue();
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
 
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));

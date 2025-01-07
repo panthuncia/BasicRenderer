@@ -127,11 +127,11 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     LoadPipeline(hwnd, x_res, y_res);
     SetSettings();
-    ResourceManager::GetInstance().Initialize(commandQueue.Get());
+    ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
     PSOManager::GetInstance().initialize();
     UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();
-    Menu::GetInstance().Initialize(hwnd, device, commandQueue, swapChain);
+    Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
     CreateGlobalResources();
     
 }
@@ -272,10 +272,16 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
-    ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue)));
+    ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&graphicsQueue)));
+
+	// Compute queue
+	D3D12_COMMAND_QUEUE_DESC computeQueueDesc = {};
+	computeQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+	ThrowIfFailed(device->CreateCommandQueue(&computeQueueDesc, IID_PPV_ARGS(&computeQueue)));
 
     // Initialize device manager and PSO manager
-    DeviceManager::GetInstance().Initialize(device, commandQueue);
+    DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue);
 
     // Describe and create the swap chain
     auto numFramesInFlight = getNumFramesInFlight();
@@ -291,7 +297,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     ComPtr<IDXGISwapChain1> swapChainTemp;
     ThrowIfFailed(factory->CreateSwapChainForHwnd(
-        commandQueue.Get(),
+        graphicsQueue.Get(),
         hwnd,
         &swapChainDesc,
         nullptr,
@@ -494,8 +500,8 @@ void DX12Renderer::Update(double elapsedSeconds) {
 	currentRenderGraph->Update();
 
 	updateManager.ResetAllocators(m_frameIndex); // Reset allocators to avoid leaking memory
-    updateManager.ExecuteResourceCopies(m_frameIndex, commandQueue.Get());// copies come before uploads to avoid overwriting data
-	updateManager.ProcessUploads(m_frameIndex, commandQueue.Get());
+    updateManager.ExecuteResourceCopies(m_frameIndex, graphicsQueue.Get());// copies come before uploads to avoid overwriting data
+	updateManager.ProcessUploads(m_frameIndex, graphicsQueue.Get());
 
     resourceManager.ExecuteResourceTransitions();
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
@@ -509,7 +515,7 @@ void DX12Renderer::Render() {
     m_context.currentScene = currentScene.get();
 	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
     m_context.commandList = commandList.Get();
-	m_context.commandQueue = commandQueue.Get();
+	m_context.commandQueue = graphicsQueue.Get();
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
@@ -539,7 +545,7 @@ void DX12Renderer::Render() {
 
     // Execute the command list
     ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
-    commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    graphicsQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
 	currentRenderGraph->Execute(m_context); // Main render graph execution
 
@@ -555,14 +561,14 @@ void DX12Renderer::Render() {
 
     // Execute the command list
     ppCommandLists[0] = commandList.Get();
-    commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    graphicsQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Present the frame
     ThrowIfFailed(swapChain->Present(0, m_allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
 
     AdvanceFrameIndex();
 
-    SignalFence(commandQueue, m_frameIndex);
+    SignalFence(graphicsQueue, m_frameIndex);
 
 	ProcessReadbackRequests(); // Save images to disk if requested
 
@@ -594,7 +600,7 @@ void DX12Renderer::FlushCommandQueue() {
 
     // Signal the fence and wait
     const UINT64 flushValue = 1;
-    ThrowIfFailed(commandQueue->Signal(flushFence.Get(), flushValue));
+    ThrowIfFailed(graphicsQueue->Signal(flushFence.Get(), flushValue));
     if (flushFence->GetCompletedValue() < flushValue) {
         ThrowIfFailed(flushFence->SetEventOnCompletion(flushValue, flushEvent));
         WaitForSingleObject(flushEvent, INFINITE);
@@ -996,7 +1002,7 @@ void DX12Renderer::CreateRenderGraph() {
     }
 
     newGraph->Compile();
-    newGraph->Setup(commandQueue.Get());
+    newGraph->Setup();
 
 	currentRenderGraph = std::move(newGraph);
 

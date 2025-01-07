@@ -38,7 +38,6 @@ public:
         m_numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
         m_phiBatchSize = totalPhiSamples / m_numPasses;
 
-        auto& queue = manager.GetCommandQueue();
         for (int i = 0; i < m_numPasses; i++) {
 			ComPtr<ID3D12CommandAllocator> allocator;
             ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));

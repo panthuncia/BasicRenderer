@@ -34,7 +34,8 @@ void RenderGraph::Compile() {
         // Determine if a new batch is needed based on resource state conflicts
         switch (passAndResources.type) {
             case PassType::Render: {
-                if (IsNewBatchNeeded(currentBatch, passAndResources.renderPass, computeUAVs)) {
+            auto& renderPass = std::get<RenderPassAndResources>(passAndResources.pass);
+                if (IsNewBatchNeeded(currentBatch, renderPass, computeUAVs)) {
                     // Compute transitions for the current batch
                     // During execution, finalResourceStates contains the state of
                     // each resource before the current batch, if it has been used
@@ -51,13 +52,13 @@ void RenderGraph::Compile() {
                     currentBatchIndex++;
                     // Update final resource states
                 }
-				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, batchOfLastRenderQueueTransition, batchOfLastRenderQueueProducer, passAndResources.renderPass, currentBatchIndex);
+				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, batchOfLastRenderQueueTransition, batchOfLastRenderQueueProducer, renderPass, currentBatchIndex);
 				currentBatch.renderTransitions.insert(currentBatch.renderTransitions.end(), transitions.begin(), transitions.end());
                 
 				// Build synchronization points
-				auto [lastComputeTransitionBatch, lastComputeProducerBatch] = GetBatchesToWaitOn(passAndResources.renderPass, batchOfLastComputeQueueTransition, batchOfLastComputeQueueProducer);
+				auto [lastComputeTransitionBatch, lastComputeProducerBatch] = GetBatchesToWaitOn(renderPass, batchOfLastComputeQueueTransition, batchOfLastComputeQueueProducer);
                 
-                if (lastComputeTransitionBatch != 0) {
+                if (lastComputeTransitionBatch != -1) {
                     // If the compute queue will transition a resource we need, wait on that transition
                     if (lastComputeTransitionBatch == currentBatchIndex) {
                         currentBatch.computeTransitionSignal = true;
@@ -71,7 +72,7 @@ void RenderGraph::Compile() {
                     }
                 }
 
-                if (lastComputeProducerBatch != 0) {
+                if (lastComputeProducerBatch != -1) {
 					// A resource cannot be produced and consumed in the same batch
 #if defined(_DEBUG)
                     if (lastComputeProducerBatch == currentBatchIndex) {
@@ -84,13 +85,14 @@ void RenderGraph::Compile() {
 					currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue = (std::max)(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue, batches[lastComputeProducerBatch].computeCompletionFenceValue);
                 }
 
-                currentBatch.renderPasses.push_back(passAndResources.renderPass);
+                currentBatch.renderPasses.push_back(renderPass);
                 // Update desired resource states
-                UpdateDesiredResourceStates(currentBatch, passAndResources.renderPass, renderUAVs);
+                UpdateDesiredResourceStates(currentBatch, renderPass, renderUAVs);
                 break;
             }
             case PassType::Compute: {
-				if (IsNewBatchNeeded(currentBatch, passAndResources.computePass, renderUAVs)) {
+                auto& computePass = std::get<ComputePassAndResources>(passAndResources.pass);
+				if (IsNewBatchNeeded(currentBatch, computePass, renderUAVs)) {
 					// Compute transitions for the current batch
 					//ComputeTransitionsForBatch(currentBatch, finalResourceStates);
 					for (const auto& [resourceName, state] : currentBatch.resourceStates) {
@@ -104,13 +106,13 @@ void RenderGraph::Compile() {
 					currentBatch.computeCompletionFenceValue = GetNextComputeQueueFenceValue();
                     currentBatchIndex++;
 				}
-				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, batchOfLastComputeQueueTransition, batchOfLastComputeQueueProducer, passAndResources.computePass, currentBatchIndex);
+				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, batchOfLastComputeQueueTransition, batchOfLastComputeQueueProducer, computePass, currentBatchIndex);
                 currentBatch.computeTransitions.insert(currentBatch.computeTransitions.end(), transitions.begin(), transitions.end());
 
 				// Build synchronization points
-				auto [lastRenderTransitionBatch, lastRenderProducerBatch] = GetBatchesToWaitOn(passAndResources.computePass, batchOfLastRenderQueueTransition, batchOfLastRenderQueueProducer);
+				auto [lastRenderTransitionBatch, lastRenderProducerBatch] = GetBatchesToWaitOn(computePass, batchOfLastRenderQueueTransition, batchOfLastRenderQueueProducer);
 
-                if (lastRenderTransitionBatch != 0) {
+                if (lastRenderTransitionBatch != -1) {
                     // If the render queue will transition a resource we need, wait on that transition
                     if (lastRenderTransitionBatch == currentBatchIndex) {
                         currentBatch.renderTransitionSignal = true;
@@ -124,7 +126,7 @@ void RenderGraph::Compile() {
                     }
                 }
 
-				if (lastRenderProducerBatch != 0) {
+				if (lastRenderProducerBatch != -1) {
 					// A resource cannot be produced and consumed in the same batch
 #if defined(_DEBUG)
 					if (lastRenderProducerBatch == currentBatchIndex) {
@@ -137,9 +139,9 @@ void RenderGraph::Compile() {
 					currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue = (std::max)(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue, batches[lastRenderProducerBatch].renderCompletionFenceValue);
 				}
 
-                currentBatch.computePasses.push_back(passAndResources.computePass);
+                currentBatch.computePasses.push_back(computePass);
 				// Update desired resource states
-				UpdateDesiredResourceStates(currentBatch, passAndResources.computePass, computeUAVs);
+				UpdateDesiredResourceStates(currentBatch, computePass, computeUAVs);
 				break;
             }
         }
@@ -164,10 +166,10 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(ComputePassAndResources& pas
 
     auto processResource = [&](const std::shared_ptr<Resource>& resource) {
         if (transitionHistory.contains(resource->GetName())) {
-            latestTransition = (std::max)(latestTransition, transitionHistory.at(resource->GetName()));
+            latestTransition = (std::max)(latestTransition, (int)transitionHistory.at(resource->GetName()));
         }
         if (producerHistory.contains(resource->GetName())) {
-            latestProducer = (std::max)(latestProducer, producerHistory.at(resource->GetName()));
+            latestProducer = (std::max)(latestProducer, (int)producerHistory.at(resource->GetName()));
         }
         };
 
@@ -190,10 +192,10 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(RenderPassAndResources& pass
 
     auto processResource = [&](const std::shared_ptr<Resource>& resource) {
         if (transitionHistory.contains(resource->GetName())) {
-            latestTransition = (std::max)(latestTransition, transitionHistory.at(resource->GetName()));
+            latestTransition = (std::max)(latestTransition, (int)transitionHistory.at(resource->GetName()));
         }
         if (producerHistory.contains(resource->GetName())) {
-            latestProducer = (std::max)(latestProducer, producerHistory.at(resource->GetName()));
+            latestProducer = (std::max)(latestProducer, (int)producerHistory.at(resource->GetName()));
         }
         };
 
@@ -310,15 +312,19 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 
 
 
-void RenderGraph::Setup(ID3D12CommandQueue* queue) {
+void RenderGraph::Setup() {
     for (auto& pass : passes) {
         switch (pass.type) {
-        case PassType::Render:
-            pass.renderPass.pass->Setup();
+        case PassType::Render: {
+            auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
+            renderPass.pass->Setup();
             break;
-        case PassType::Compute:
-            pass.computePass.pass->Setup();
+        }
+        case PassType::Compute: {
+            auto& computePass = std::get<ComputePassAndResources>(pass.pass);
+            computePass.pass->Setup();
             break;
+        }
         }
     }
 	auto& device = DeviceManager::GetInstance().GetDevice();
@@ -344,7 +350,7 @@ void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassPara
     passAndResources.resources = resources;
 	AnyPassAndResources passAndResourcesAny;
 	passAndResourcesAny.type = PassType::Render;
-	passAndResourcesAny.renderPass = passAndResources;
+	passAndResourcesAny.pass = passAndResources;
 	passes.push_back(passAndResourcesAny);
     if (name != "") {
         renderPassesByName[name] = pass;
@@ -357,7 +363,7 @@ void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassP
 	passAndResources.resources = resources;
 	AnyPassAndResources passAndResourcesAny;
 	passAndResourcesAny.type = PassType::Compute;
-	passAndResourcesAny.computePass = passAndResources;
+	passAndResourcesAny.pass = passAndResources;
 	passes.push_back(passAndResourcesAny);
 	if (name != "") {
 		computePassesByName[name] = pass;
@@ -412,7 +418,8 @@ void RenderGraph::Update() {
 
 void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
-	auto& queue = manager.GetCommandQueue();
+	auto graphicsQueue = manager.GetGraphicsQueue();
+	auto computeQueue = manager.GetComputeQueue();
 	auto& transitionCommandList = m_transitionCommandLists[context.frameIndex];
 	auto& commandAllocator = m_commandAllocators[context.frameIndex];
 
@@ -424,7 +431,7 @@ void RenderGraph::Execute(RenderContext& context) {
 
 		// Wait on compute queue if needed
 		if (batch.renderQueueWaitOnComputeQueueBeforeTransition) {
-			queue->Wait(m_computeQueueFence.Get(), batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue);
+            graphicsQueue->Wait(m_computeQueueFence.Get(), batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue);
 		}
 
         // Perform resource transitions
@@ -442,15 +449,15 @@ void RenderGraph::Execute(RenderContext& context) {
         }
         transitionCommandList->Close();
         ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get()};
-        queue->ExecuteCommandLists(1, ppCommandLists);
+        graphicsQueue->ExecuteCommandLists(1, ppCommandLists);
         if (batch.renderTransitionSignal) {
-			queue->Signal(m_graphicsQueueFence.Get(), batch.renderTransitionFenceValue);
+            graphicsQueue->Signal(m_graphicsQueueFence.Get(), batch.renderTransitionFenceValue);
         }
 
 
 		// Wait on render queue if needed
 		if (batch.renderQueueWaitOnComputeQueueBeforeExecution) {
-			queue->Wait(m_computeQueueFence.Get(), batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue);
+            graphicsQueue->Wait(m_computeQueueFence.Get(), batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue);
 		}
 
         // Execute all passes in the batch
@@ -459,15 +466,15 @@ void RenderGraph::Execute(RenderContext& context) {
 
                 auto passReturn = passAndResources.pass->Execute(context);
 				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
-                queue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
+                graphicsQueue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
 
                 if (passReturn.fence != nullptr) {
-					queue->Signal(passReturn.fence, passReturn.fenceValue); // External fences for readback: TODO merge with new fence system
+                    graphicsQueue->Signal(passReturn.fence, passReturn.fenceValue); // External fences for readback: TODO merge with new fence system
                 }
 			}
         }
         if (batch.renderCompletionSignal) {
-            queue->Signal(m_graphicsQueueFence.Get(), batch.renderCompletionFenceValue);
+            graphicsQueue->Signal(m_graphicsQueueFence.Get(), batch.renderCompletionFenceValue);
         }
     }
 }

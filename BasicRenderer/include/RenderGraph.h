@@ -6,6 +6,7 @@
 #include <string>
 #include <memory>
 #include <wrl/client.h>
+#include <variant>
 
 #include "RenderPass.h"
 #include "ComputePass.h"
@@ -20,7 +21,7 @@ public:
 	void Update();
 	void Execute(RenderContext& context);
 	void Compile();
-	void Setup(ID3D12CommandQueue* queue);
+	void Setup();
 	//void AllocateResources(RenderContext& context);
 	void AddResource(std::shared_ptr<Resource> resource);
 	void CreateResource(std::wstring name);
@@ -90,79 +91,18 @@ private:
         Compute
     };
 
-    struct AnyPassAndResources {
-        PassType type = PassType::Unknown;
+	struct AnyPassAndResources {
+		PassType type = PassType::Unknown;
+		std::variant<std::monostate, RenderPassAndResources, ComputePassAndResources> pass;
 
-        union {
-            RenderPassAndResources renderPass;
-            ComputePassAndResources computePass;
-        };
+		AnyPassAndResources() = default;
 
-        AnyPassAndResources() : type(PassType::Unknown) {
-            // By default, do not construct anything
-        }
+		explicit AnyPassAndResources(RenderPassAndResources const& rp)
+			: type(PassType::Render), pass(rp) {}
 
-        explicit AnyPassAndResources(RenderPassAndResources const& rp)
-            : type(PassType::Render) {
-            new (&renderPass) RenderPassAndResources(rp);
-        }
-
-        explicit AnyPassAndResources(ComputePassAndResources const& cp)
-            : type(PassType::Compute) {
-            new (&computePass) ComputePassAndResources(cp);
-        }
-
-        ~AnyPassAndResources() {
-            switch (type) {
-            case PassType::Render:
-                renderPass.~RenderPassAndResources();
-                break;
-            case PassType::Compute:
-                computePass.~ComputePassAndResources();
-                break;
-            default:
-                // PassType::Unknown => nothing to destroy
-                break;
-            }
-        }
-
-        // Copy/move semantics
-        AnyPassAndResources(AnyPassAndResources const& other) {
-            type = other.type;
-            switch (type) {
-            case PassType::Render:
-                new (&renderPass) RenderPassAndResources(other.renderPass);
-                break;
-            case PassType::Compute:
-                new (&computePass) ComputePassAndResources(other.computePass);
-                break;
-            default:
-                break;
-            }
-        }
-
-        AnyPassAndResources& operator=(AnyPassAndResources const& other) {
-            if (this == &other)
-                return *this;
-
-            // Destroy our active object
-            this->~AnyPassAndResources();
-
-            // Recreate from other
-            type = other.type;
-            switch (type) {
-            case PassType::Render:
-                new (&renderPass) RenderPassAndResources(other.renderPass);
-                break;
-            case PassType::Compute:
-                new (&computePass) ComputePassAndResources(other.computePass);
-                break;
-            default:
-                break;
-            }
-            return *this;
-        }
-    };
+		explicit AnyPassAndResources(ComputePassAndResources const& cp)
+			: type(PassType::Compute), pass(cp) {}
+	};
 
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
