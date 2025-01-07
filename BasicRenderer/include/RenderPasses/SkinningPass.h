@@ -82,7 +82,7 @@ public:
 
 		auto alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
 		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
-		for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
+		for (auto& pair : context.currentScene->GetAlphaTestSkinnedRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetAlphaTestMeshes();
 
@@ -100,7 +100,7 @@ public:
 
 		auto blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
 		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &blendPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
-		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
+		for (auto& pair : context.currentScene->GetBlendSkinnedRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetBlendMeshes();
 
