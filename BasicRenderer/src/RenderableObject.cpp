@@ -87,7 +87,7 @@ void RenderableObject::UpdateBuffers() {
 
 	// TODO: Any way to do this math without transforming to 4x4 and then back?
 	//XMFLOAT3X3 normalMat = GetUpperLeft3x3(XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3)));
-	XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, upperLeft3x3));
+	XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
 	m_currentManager->UpdateNormalMatrixBuffer(normalMatrixView.get(), &normalMat);
 	
 }
