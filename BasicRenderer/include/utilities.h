@@ -32,6 +32,11 @@ bool mapHasKeyNotAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
 }
 
 template <typename T1, typename T2>
+bool mapHasKeyAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
+    return map.contains(key) && map[key] != val;
+}
+
+template <typename T1, typename T2>
 void CombineMaps(std::unordered_map<T1, T2>& dest, const std::unordered_map<T1, T2>& src) {
 	for (const auto& [key, val] : src) {
 		dest[key] = val;

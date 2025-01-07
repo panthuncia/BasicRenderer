@@ -31,7 +31,7 @@ public:
 		CreatePSO();
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    RenderPassReturn Execute(RenderContext& context) override {
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = m_commandList;
         ThrowIfFailed(m_allocator->Reset());

@@ -22,7 +22,7 @@ public:
 		m_commandList->Close();
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	RenderPassReturn Execute(RenderContext& context) override {
 		auto commandList = m_commandList.Get();
 		ThrowIfFailed(m_commandAllocator->Reset());
 		ThrowIfFailed(commandList->Reset(m_commandAllocator.Get(), nullptr));

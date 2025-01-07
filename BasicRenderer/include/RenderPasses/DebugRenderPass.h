@@ -31,7 +31,7 @@ public:
 		CreateDebugPSO();
     }
 
-        PassReturn Execute(RenderContext& context) override {
+        RenderPassReturn Execute(RenderContext& context) override {
         if (m_texture == nullptr) {
             return { };
         }

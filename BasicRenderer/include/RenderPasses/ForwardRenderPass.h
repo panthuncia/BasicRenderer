@@ -38,7 +38,7 @@ public:
 		}
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	RenderPassReturn Execute(RenderContext& context) override {
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = m_commandLists[context.frameIndex];
 		auto& allocator = m_allocators[context.frameIndex];

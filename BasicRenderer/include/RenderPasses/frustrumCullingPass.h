@@ -9,7 +9,7 @@
 #include "utilities.h"
 #include "SettingsManager.h"
 
-class FrustrumCullingPass : public RenderPass {
+class FrustrumCullingPass : public ComputePass {
 public:
 	FrustrumCullingPass() {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
@@ -23,8 +23,8 @@ public:
 		for (int i = 0; i < numFramesInFlight; i++) {
 			ComPtr<ID3D12CommandAllocator> allocator;
 			ComPtr<ID3D12GraphicsCommandList7> commandList;
-			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)));
+			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
 			commandList->Close();
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
@@ -33,7 +33,7 @@ public:
 		CreatePSO();
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	ComputePassReturn Execute(RenderContext& context) override {
 		auto& commandList = m_commandLists[context.frameIndex];
 		auto& allocator = m_allocators[context.frameIndex];
 		ThrowIfFailed(allocator->Reset());

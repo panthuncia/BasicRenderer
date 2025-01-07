@@ -38,7 +38,6 @@ public:
         m_numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
         m_phiBatchSize = totalPhiSamples / m_numPasses;
 
-        auto& queue = manager.GetCommandQueue();
         for (int i = 0; i < m_numPasses; i++) {
 			ComPtr<ID3D12CommandAllocator> allocator;
             ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
@@ -60,7 +59,7 @@ public:
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    PassReturn Execute(RenderContext& context) override {
+    RenderPassReturn Execute(RenderContext& context) override {
 
 		uint16_t skyboxRes = getSkyboxResolution();
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
@@ -126,7 +125,7 @@ public:
 			commandLists.push_back(commandList);
         }
         // We can reuse the results of this pass
-		PassReturn passReturn;
+		RenderPassReturn passReturn;
         if (m_currentPass == m_numPasses) {
             
             invalidated = false;
