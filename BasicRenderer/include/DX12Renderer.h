@@ -111,6 +111,7 @@ private:
     void FlushCommandQueue();
 
     void ProcessReadbackRequests();
+    void StallPipeline();
 
 	// Settings
 	bool m_allowTearing = false;

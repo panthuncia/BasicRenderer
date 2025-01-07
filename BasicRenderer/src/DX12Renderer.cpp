@@ -615,13 +615,17 @@ void DX12Renderer::FlushCommandQueue() {
     CloseHandle(flushEvent);
 }
 
-void DX12Renderer::Cleanup() {
-    spdlog::info("In cleanup");
-    // Wait for all GPU frames to complete
+void DX12Renderer::StallPipeline() {
     for (int i = 0; i < m_numFramesInFlight; ++i) {
         WaitForFrame(i);
     }
     FlushCommandQueue();
+}
+
+void DX12Renderer::Cleanup() {
+    spdlog::info("In cleanup");
+    // Wait for all GPU frames to complete
+	StallPipeline();
     CloseHandle(m_frameFenceEvent);
 	currentScene = nullptr;
     DeletionManager::GetInstance().Cleanup();
@@ -739,6 +743,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
+    StallPipeline();
     RendererUtils utils([this](ReadbackRequest&& request) {
         SubmitReadbackRequest(std::move(request));
         }, m_readbackFence);

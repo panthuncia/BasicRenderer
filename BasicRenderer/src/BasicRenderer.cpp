@@ -213,7 +213,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
     phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
-    auto carScene = loadGLB("models/porche.glb");
+    auto carScene = loadGLB("models/cartop.glb");
     carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
     carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 	carScene->GetRoot().m_name = L"carRoot";
@@ -246,12 +246,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 
 	DeletionManager::GetInstance().MarkForDelete(carScene);
