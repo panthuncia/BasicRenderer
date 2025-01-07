@@ -60,15 +60,28 @@ private:
 		std::vector<ResourceTransition> renderTransitions; // Transitions needed to reach desired states on the render queue
         std::vector<ResourceTransition> computeTransitions; // Transitions needed to reach desired states on the compute queue
 
-		bool renderQueueWait = false; // Whether to wait on a fence on the render queue
-		UINT64 renderQueueWaitFenceValue = 0; // Fence value to wait on
-		bool computeQueueWait = false; // Whether to wait on a fence on the compute queue
-		UINT64 computeQueueWaitFenceValue = 0; // Fence value to wait on
+		// For each queue, we need to allow a fence to wait on before transitioning, in case a previous batch is still using a resource
+		// Also, we need to allow a separate fence to wait on before *executing* the batch, in case the compute and render queue use the same resource in this batch
+		bool renderQueueWaitOnComputeQueueBeforeTransition = false;
+		UINT64 renderQueueWaitOnComputeQueueBeforeTransitionFenceValue = 0;
+		bool renderQueueWaitOnComputeQueueBeforeExecution = false;
+		UINT64 renderQueueWaitOnComputeQueueBeforeExecutionFenceValue = 0;
 
-		bool transitionSignal = false; // Whether to signal a fence after transitions
-		UINT64 transitionFenceValue = 0; // Fence value to signal after transitions
-		bool completionSignal = false; // Whether to signal a fence after batch completion
-		UINT64 completionFenceValue = 0; // Fence value to signal after batch completion
+		bool computeQueueWaitOnRenderQueueBeforeTransition = false;
+		UINT64 computeQueueWaitOnRenderQueueBeforeTransitionFenceValue = 0;
+		bool computeQueueWaitOnRenderQueueBeforeExecution = false;
+		UINT64 computeQueueWaitOnRenderQueueBeforeExecutionFenceValue = 0;
+
+		// Fences to signal, after transition and after completion, for each queue
+		bool renderTransitionSignal = false;
+		UINT64 renderTransitionFenceValue = 0;
+		bool computeTransitionSignal = false;
+		UINT64 computeTransitionFenceValue = 0;
+
+		bool renderCompletionSignal = false;
+		UINT64 renderCompletionFenceValue = 0;
+		bool computeCompletionSignal = false;
+		UINT64 computeCompletionFenceValue = 0;
 	};
 
     enum class PassType {
@@ -160,8 +173,17 @@ private:
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_transitionCommandLists;
 
+	Microsoft::WRL::ComPtr<ID3D12Fence> m_graphicsQueueFence;
+	Microsoft::WRL::ComPtr<ID3D12Fence> m_computeQueueFence;
+
 	UINT64 m_graphicsQueueFenceValue = 0;
+	UINT64 GetNextGraphicsQueueFenceValue() {
+		return m_graphicsQueueFenceValue++;
+	}
 	UINT64 m_computeQueueFenceValue = 0;
+	UINT64 GetNextComputeQueueFenceValue() {
+		return m_computeQueueFenceValue++;
+	}
 
 	void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
     void UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<std::wstring>& renderUAVs);
@@ -173,6 +195,6 @@ private:
 
     std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, ComputePassAndResources pass, unsigned int batchIndex);
 	std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, RenderPassAndResources pass, unsigned int batchIndex);
-	std::pair<int, int> GetFencesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
-    std::pair<int, int> GetFencesToWaitOn(RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
+	std::pair<int, int> GetBatchesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
+    std::pair<int, int> GetBatchesToWaitOn(RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
 };
