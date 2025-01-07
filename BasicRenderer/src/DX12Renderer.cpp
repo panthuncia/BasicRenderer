@@ -799,12 +799,12 @@ void DX12Renderer::CreateRenderGraph() {
 
         // Compute pass
         auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
-        RenderPassParameters frustrumCullingPassParameters;
+        ComputePassParameters frustrumCullingPassParameters;
         frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
         frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
-        newGraph->AddRenderPass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
+        newGraph->AddComputePass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
     }
 
     auto forwardPassParameters = RenderPassParameters();

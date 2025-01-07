@@ -15,6 +15,10 @@ static bool mapHasResourceInUAVState(std::unordered_map<std::wstring, ResourceSt
 void RenderGraph::Compile() {
     batches.clear();
     auto currentBatch = PassBatch();
+    currentBatch.renderTransitionFenceValue = GetNextGraphicsQueueFenceValue();
+    currentBatch.renderCompletionFenceValue = GetNextGraphicsQueueFenceValue();
+    currentBatch.computeTransitionFenceValue = GetNextComputeQueueFenceValue();
+    currentBatch.computeCompletionFenceValue = GetNextComputeQueueFenceValue();
     //std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
     std::unordered_map<std::wstring, ResourceState> finalResourceStates;
 
@@ -434,21 +438,21 @@ void RenderGraph::Execute(RenderContext& context) {
 	auto& computeTransitionCommandList = m_computeTransitionCommandLists[context.frameIndex];
 	auto& computeCommandAllocator = m_computeCommandAllocators[context.frameIndex];
 
-    UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue;
-	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue;
+    UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue*context.frameFenceValue;
+	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue*context.frameFenceValue;
 
     graphicsCommandAllocator->Reset();
 	computeCommandAllocator->Reset();
 
-	// Sync compute and graphics queues
-	graphicsQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue+1);
-	computeQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue+1);
+	// Sync compute and graphics queues- necessary because copies are currently on the graphics queue
+	graphicsQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue);
+	computeQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue);
 
     for (auto& batch : batches) {
 
 		// Compute queue
 		if (batch.computeQueueWaitOnRenderQueueBeforeTransition) {
-			computeQueue->Wait(m_graphicsQueueFence.Get(), batch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue);
+			computeQueue->Wait(m_graphicsQueueFence.Get(), currentGraphicsQueueFenceOffset+batch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue);
 		}
 
 		// Perform resource transitions
@@ -467,12 +471,12 @@ void RenderGraph::Execute(RenderContext& context) {
 		ID3D12CommandList* ppCommandLists[] = { computeTransitionCommandList.Get() };
 		computeQueue->ExecuteCommandLists(1, ppCommandLists);
 		if (batch.computeTransitionSignal) {
-			computeQueue->Signal(m_computeQueueFence.Get(), batch.computeTransitionFenceValue);
+			computeQueue->Signal(m_computeQueueFence.Get(), currentComputeQueueFenceOffset+batch.computeTransitionFenceValue);
 		}
 
 		// Wait on render queue if needed
 		if (batch.computeQueueWaitOnRenderQueueBeforeExecution) {
-			computeQueue->Wait(m_graphicsQueueFence.Get(), batch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue);
+			computeQueue->Wait(m_graphicsQueueFence.Get(), currentGraphicsQueueFenceOffset+batch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue);
 		}
 
 		// Execute all passes in the batch
@@ -488,14 +492,14 @@ void RenderGraph::Execute(RenderContext& context) {
 			}
 		}
 		if (batch.computeCompletionSignal) {
-			computeQueue->Signal(m_computeQueueFence.Get(), batch.computeCompletionFenceValue);
+			computeQueue->Signal(m_computeQueueFence.Get(), currentComputeQueueFenceOffset+batch.computeCompletionFenceValue);
 		}
 
         // Render queue
 
 		// Wait on compute queue if needed
 		if (batch.renderQueueWaitOnComputeQueueBeforeTransition) {
-            graphicsQueue->Wait(m_computeQueueFence.Get(), batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue);
+            graphicsQueue->Wait(m_computeQueueFence.Get(), currentComputeQueueFenceOffset+batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue);
 		}
 
         // Perform resource transitions
@@ -515,13 +519,13 @@ void RenderGraph::Execute(RenderContext& context) {
         ID3D12CommandList* ppRenderCommandLists[] = { graphicsTransitionCommandList.Get()};
         graphicsQueue->ExecuteCommandLists(1, ppRenderCommandLists);
         if (batch.renderTransitionSignal) {
-            graphicsQueue->Signal(m_graphicsQueueFence.Get(), batch.renderTransitionFenceValue);
+            graphicsQueue->Signal(m_graphicsQueueFence.Get(), currentGraphicsQueueFenceOffset+batch.renderTransitionFenceValue);
         }
 
 
 		// Wait on compute queue if needed
 		if (batch.renderQueueWaitOnComputeQueueBeforeExecution) {
-            graphicsQueue->Wait(m_computeQueueFence.Get(), batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue);
+            graphicsQueue->Wait(m_computeQueueFence.Get(), currentComputeQueueFenceOffset+batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue);
 		}
 
         // Execute all passes in the batch
@@ -538,7 +542,7 @@ void RenderGraph::Execute(RenderContext& context) {
 			}
         }
         if (batch.renderCompletionSignal) {
-            graphicsQueue->Signal(m_graphicsQueueFence.Get(), batch.renderCompletionFenceValue);
+            graphicsQueue->Signal(m_graphicsQueueFence.Get(), currentGraphicsQueueFenceOffset+batch.renderCompletionFenceValue);
         }
     }
 }
