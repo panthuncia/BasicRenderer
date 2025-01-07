@@ -34,25 +34,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	auto& manager = ResourceManager::GetInstance();
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
-    // Use std::visit to determine the concrete vertex type
-  //  std::visit([&](auto&& vertexSample) {
-  //      using VertexType = std::decay_t<decltype(vertexSample)>;
-		//std::vector<VertexType> specificVertices;
-		//specificVertices.reserve(vertices.size());
-		//for (const auto& v : vertices) {
-		//	specificVertices.push_back(std::get<VertexType>(v));
-		//}
-  //      // Allocate buffer view
-  //      size_t size = vertices.size() * sizeof(VertexType);
-		//if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
-		//	preSkinningView = m_preSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
-		//	postSkinningView = m_postSkinningVertices->AddData(nullptr, size, typeid(VertexType));
-		//}
-		//else {
-		//	postSkinningView = m_postSkinningVertices->AddData(specificVertices.data(), size, typeid(VertexType));
-		//}
-
-  //      }, vertices.front());
 
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {

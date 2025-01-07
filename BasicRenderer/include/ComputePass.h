@@ -31,13 +31,7 @@ public:
 
 	void Invalidate() { invalidated = true; }
 	bool IsInvalidated() const { return invalidated; }
-	void AddInputResource(std::wstring name) { inputResources.push_back(name); }
-	void AddOutputResource(std::wstring name) { outputResources.push_back(name); }
-	const std::vector<std::wstring>& GetInputResourceNames() const { return inputResources; }
-	const std::vector<std::wstring>& GetOutputResourceNames() const { return outputResources; }
 
 protected:
 	bool invalidated = true;
-	std::vector<std::wstring> inputResources;
-	std::vector<std::wstring> outputResources;
 };
