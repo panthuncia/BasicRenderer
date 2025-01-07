@@ -110,8 +110,12 @@ private:
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
 	std::vector<PassBatch> batches;
 
-	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_transitionCommandLists;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_graphicsTransitionCommandLists;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_computeCommandAllocators;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_computeTransitionCommandLists;
+
+	Microsoft::WRL::ComPtr<ID3D12Fence> m_frameStartSyncFence; // TODO: Is there a better way of handling waiting for pre-frame things like copying resources?
 
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_graphicsQueueFence;
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_computeQueueFence;
@@ -133,8 +137,8 @@ private:
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<std::wstring>& computeUAVs);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<std::wstring>& renderUAVs);
 
-    std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, ComputePassAndResources pass, unsigned int batchIndex);
-	std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, RenderPassAndResources pass, unsigned int batchIndex);
+    std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, ComputePassAndResources& pass, unsigned int batchIndex);
+	std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, RenderPassAndResources& pass, unsigned int batchIndex);
 	std::pair<int, int> GetBatchesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
     std::pair<int, int> GetBatchesToWaitOn(RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
 };

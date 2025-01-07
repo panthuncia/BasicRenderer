@@ -606,6 +606,12 @@ void DX12Renderer::FlushCommandQueue() {
         WaitForSingleObject(flushEvent, INFINITE);
     }
 
+	ThrowIfFailed(computeQueue->Signal(flushFence.Get(), flushValue+1));
+	if (flushFence->GetCompletedValue() < flushValue+1) {
+		ThrowIfFailed(flushFence->SetEventOnCompletion(flushValue+1, flushEvent));
+		WaitForSingleObject(flushEvent, INFINITE);
+	}
+
     CloseHandle(flushEvent);
 }
 
@@ -766,7 +772,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     // Skinning
 	auto skinningPass = std::make_shared<SkinningPass>();
-	RenderPassParameters skinningPassParameters;
+	ComputePassParameters skinningPassParameters;
 	skinningPassParameters.shaderResources.push_back(perObjectBuffer);
 	skinningPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
 	skinningPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
@@ -774,7 +780,7 @@ void DX12Renderer::CreateRenderGraph() {
 	skinningPassParameters.shaderResources.push_back(preSkinningVertices);
     skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
-	newGraph->AddRenderPass(skinningPass, skinningPassParameters, "SkinningPass");
+	newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
 
     // Frustrum culling
 	bool indirect = getIndirectDrawsEnabled();

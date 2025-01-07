@@ -227,7 +227,7 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(RenderPassAndResources& pass
     return { latestTransition, latestProducer };
 }
 
-std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, ComputePassAndResources pass, unsigned int batchIndex) {
+std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, ComputePassAndResources& pass, unsigned int batchIndex) {
 	std::vector<ResourceTransition> transitions;
 
     auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState) {
@@ -242,8 +242,8 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
         };
 
     for(auto& resource : pass.resources.shaderResources) {
-		addTransition(resource, ResourceState::ALL_SRV);
-        finalResourceStates[resource->GetName()] = ResourceState::ALL_SRV;
+		addTransition(resource, ResourceState::NON_PIXEL_SRV);
+        finalResourceStates[resource->GetName()] = ResourceState::NON_PIXEL_SRV;
     }
 	for (auto& resource : pass.resources.constantBuffers) {
 		addTransition(resource, ResourceState::CONSTANT);
@@ -257,7 +257,7 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 	return transitions;
 }
 
-std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int> transitionHistory, std::unordered_map<std::wstring, unsigned int> producerHistory, RenderPassAndResources pass, unsigned int batchIndex) {
+std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, RenderPassAndResources& pass, unsigned int batchIndex) {
     std::vector<ResourceTransition> transitions;
 
     auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState) {
@@ -337,11 +337,20 @@ void RenderGraph::Setup() {
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
         commandList->Close();
-        m_commandAllocators.push_back(allocator);
-        m_transitionCommandLists.push_back(commandList);
+        m_graphicsCommandAllocators.push_back(allocator);
+        m_graphicsTransitionCommandLists.push_back(commandList);
+
+		ComPtr<ID3D12CommandAllocator> computeAllocator;
+		ComPtr<ID3D12GraphicsCommandList7> computeCommandList;
+		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&computeAllocator)));
+		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, computeAllocator.Get(), nullptr, IID_PPV_ARGS(&computeCommandList)));
+		computeCommandList->Close();
+		m_computeCommandAllocators.push_back(computeAllocator);
+		m_computeTransitionCommandLists.push_back(computeCommandList);
     }
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_graphicsQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_computeQueueFence));
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameStartSyncFence));
 }
 
 void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name) {
@@ -420,14 +429,69 @@ void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto graphicsQueue = manager.GetGraphicsQueue();
 	auto computeQueue = manager.GetComputeQueue();
-	auto& transitionCommandList = m_transitionCommandLists[context.frameIndex];
-	auto& commandAllocator = m_commandAllocators[context.frameIndex];
+	auto& graphicsTransitionCommandList = m_graphicsTransitionCommandLists[context.frameIndex];
+	auto& graphicsCommandAllocator = m_graphicsCommandAllocators[context.frameIndex];
+	auto& computeTransitionCommandList = m_computeTransitionCommandLists[context.frameIndex];
+	auto& computeCommandAllocator = m_computeCommandAllocators[context.frameIndex];
 
     UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue;
 	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue;
 
-    commandAllocator->Reset();
+    graphicsCommandAllocator->Reset();
+	computeCommandAllocator->Reset();
+
+	// Sync compute and graphics queues
+	graphicsQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue+1);
+	computeQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue+1);
+
     for (auto& batch : batches) {
+
+		// Compute queue
+		if (batch.computeQueueWaitOnRenderQueueBeforeTransition) {
+			computeQueue->Wait(m_graphicsQueueFence.Get(), batch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue);
+		}
+
+		// Perform resource transitions
+		computeTransitionCommandList->Reset(computeCommandAllocator.Get(), NULL);
+		std::vector<D3D12_RESOURCE_BARRIER> computeBarriers;
+		for (auto& transition : batch.computeTransitions) {
+			auto& transitions = transition.pResource->GetTransitions(transition.fromState, transition.toState);
+			for (auto& barrier : transitions) {
+                computeBarriers.push_back(barrier);
+			}
+		}
+		if (computeBarriers.size() > 0) {
+			computeTransitionCommandList->ResourceBarrier(static_cast<UINT>(computeBarriers.size()), computeBarriers.data());
+		}
+		computeTransitionCommandList->Close();
+		ID3D12CommandList* ppCommandLists[] = { computeTransitionCommandList.Get() };
+		computeQueue->ExecuteCommandLists(1, ppCommandLists);
+		if (batch.computeTransitionSignal) {
+			computeQueue->Signal(m_computeQueueFence.Get(), batch.computeTransitionFenceValue);
+		}
+
+		// Wait on render queue if needed
+		if (batch.computeQueueWaitOnRenderQueueBeforeExecution) {
+			computeQueue->Wait(m_graphicsQueueFence.Get(), batch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue);
+		}
+
+		// Execute all passes in the batch
+		for (auto& passAndResources : batch.computePasses) {
+			if (passAndResources.pass->IsInvalidated()) {
+				auto passReturn = passAndResources.pass->Execute(context);
+				ID3D12CommandList** ppComputeCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
+				computeQueue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppComputeCommandLists);
+                
+				if (passReturn.fence != nullptr) {
+					computeQueue->Signal(passReturn.fence, passReturn.fenceValue); // External fences for readback: TODO merge with new fence system
+				}
+			}
+		}
+		if (batch.computeCompletionSignal) {
+			computeQueue->Signal(m_computeQueueFence.Get(), batch.computeCompletionFenceValue);
+		}
+
+        // Render queue
 
 		// Wait on compute queue if needed
 		if (batch.renderQueueWaitOnComputeQueueBeforeTransition) {
@@ -436,26 +500,26 @@ void RenderGraph::Execute(RenderContext& context) {
 
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
-        transitionCommandList->Reset(commandAllocator.Get(), NULL);
-		std::vector<D3D12_RESOURCE_BARRIER> barriers;
+        graphicsTransitionCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
+		std::vector<D3D12_RESOURCE_BARRIER> renderBarriers;
         for (auto& transition : batch.renderTransitions) {
             auto& transitions = transition.pResource->GetTransitions(transition.fromState, transition.toState);
             for (auto& barrier : transitions) {
-				barriers.push_back(barrier);
+                renderBarriers.push_back(barrier);
             }
         }
-        if (barriers.size() > 0) {
-            transitionCommandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        if (renderBarriers.size() > 0) {
+            graphicsTransitionCommandList->ResourceBarrier(static_cast<UINT>(renderBarriers.size()), renderBarriers.data());
         }
-        transitionCommandList->Close();
-        ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get()};
-        graphicsQueue->ExecuteCommandLists(1, ppCommandLists);
+        graphicsTransitionCommandList->Close();
+        ID3D12CommandList* ppRenderCommandLists[] = { graphicsTransitionCommandList.Get()};
+        graphicsQueue->ExecuteCommandLists(1, ppRenderCommandLists);
         if (batch.renderTransitionSignal) {
             graphicsQueue->Signal(m_graphicsQueueFence.Get(), batch.renderTransitionFenceValue);
         }
 
 
-		// Wait on render queue if needed
+		// Wait on compute queue if needed
 		if (batch.renderQueueWaitOnComputeQueueBeforeExecution) {
             graphicsQueue->Wait(m_computeQueueFence.Get(), batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue);
 		}
@@ -532,7 +596,7 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAnd
     // New batch is needed if (a) current batch has a resource we need for this pass in a different state
     // Or (b) if this pass would use a resource in a manner that would cause a cross-queue read/write hazard
     for (auto& resource : passAndResources.resources.shaderResources) {
-        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::ALL_SRV)) {
+        if (mapHasResourceNotInState(currentBatch.resourceStates, resource->GetName(), ResourceState::NON_PIXEL_SRV)) {
             return true;
         }
     }
@@ -608,7 +672,7 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndRes
 void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<std::wstring>& computeUAVs) {
     // Update batch.resourceStates based on the resources used in passAndResources
     for (auto& resource : passAndResources.resources.shaderResources) {
-        batch.resourceStates[resource->GetName()] = ResourceState::ALL_SRV;
+        batch.resourceStates[resource->GetName()] = ResourceState::NON_PIXEL_SRV;
     }
     for (auto& resource : passAndResources.resources.constantBuffers) {
         batch.resourceStates[resource->GetName()] = ResourceState::CONSTANT;
