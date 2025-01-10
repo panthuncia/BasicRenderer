@@ -521,9 +521,15 @@ std::vector<std::shared_ptr<Texture>> loadTexturesFromImages(const json& gltfDat
     if (gltfData.contains("textures")) {
         for (const auto& gltfTexture : gltfData["textures"]) {
             const uint32_t imageIndex = gltfTexture["source"].get<uint32_t>();
-            const uint32_t samplerIndex = gltfTexture["sampler"].get<uint32_t>();
-            auto pTexture = std::make_shared<Texture>(pixelBuffers[imageIndex], samplers[samplerIndex]);
-            textures.push_back(std::move(pTexture));
+			if (gltfTexture.contains("sampler")) {
+				const uint32_t samplerIndex = gltfTexture["sampler"].get<uint32_t>();
+				auto pTexture = std::make_shared<Texture>(pixelBuffers[imageIndex], samplers[samplerIndex]);
+				textures.push_back(std::move(pTexture));
+			}
+			else {
+				auto pTexture = std::make_shared<Texture>(pixelBuffers[imageIndex], nullptr);
+				textures.push_back(std::move(pTexture));
+			}
         }
     }
 

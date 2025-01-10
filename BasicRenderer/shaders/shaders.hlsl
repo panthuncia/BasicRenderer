@@ -74,29 +74,13 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     output.position = mul(viewPosition, mainCamera.projection);
         
     uint vertexFlags = meshBuffer.vertexFlags;
-    if (vertexFlags & VERTEX_SKINNED)
-    {
+    if (vertexFlags & VERTEX_SKINNED) {
         output.normalWorldSpace = normalize(input.normal);
-    
-        if (vertexFlags & VERTEX_TANBIT)
-        {
-            output.TBN_T = normalize(input.tangent);
-            output.TBN_B = normalize(input.bitangent);
-            output.TBN_N = normalize(input.normal);
-        }
     }
-    else
-    {
+    else {
         StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
         float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
         output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
-    
-        if (vertexFlags & VERTEX_TANBIT)
-        {
-            output.TBN_T = normalize(mul(input.tangent, normalMatrix));
-            output.TBN_B = normalize(mul(input.bitangent, normalMatrix));
-            output.TBN_N = normalize(mul(input.normal, normalMatrix));
-        }
     }
 
     output.color = input.color;

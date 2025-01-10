@@ -52,13 +52,4 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     uint byteOffset = 12;
     postSkinningVertexBuffer.Store3(postSkinnedByteOffset + byteOffset, asuint(skinnedNormal));
     byteOffset += 12 + 8; // float3 normal, float2 texcoord
-    if (meshBuffer.vertexFlags & VERTEX_TANBIT)
-    {
-        float3 skinnedTangent = mul(input.tangent, normalMatrix);
-        float3 skinnedBitangent = mul(input.bitangent, normalMatrix);
-        postSkinningVertexBuffer.Store3(postSkinnedByteOffset + byteOffset, asuint(skinnedTangent));
-        byteOffset += 12;
-        postSkinningVertexBuffer.Store3(postSkinnedByteOffset + byteOffset, asuint(skinnedBitangent));
-
-    }
 }

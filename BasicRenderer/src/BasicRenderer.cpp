@@ -223,6 +223,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
 	mountainScene->GetRoot().m_name = L"mountainRoot";
 
+	auto bistro = loadGLB("models/bistro.glb");
+
     //auto cubeScene = loadGLB("models/cube.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
@@ -246,24 +248,29 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
+	renderer.GetCurrentScene()->AppendScene(*bistro);
 
 	DeletionManager::GetInstance().MarkForDelete(carScene);
     DeletionManager::GetInstance().MarkForDelete(dragonScene);
     DeletionManager::GetInstance().MarkForDelete(tigerScene);
     DeletionManager::GetInstance().MarkForDelete(mountainScene);
+	DeletionManager::GetInstance().MarkForDelete(phoenixScene);
+	DeletionManager::GetInstance().MarkForDelete(bistro);
 	carScene.reset();
 	dragonScene.reset();
 	tigerScene.reset();
 	mountainScene.reset();
+	phoenixScene.reset();
+	bistro.reset();
 
-    renderer.SetEnvironment("studio");
+    renderer.SetEnvironment("sky");
 
     XMFLOAT3 lookAt = XMFLOAT3(0.0f, 0.0f, 0.0f);
     XMFLOAT3 up = XMFLOAT3(0.0f, 1.0f, 0.0f);

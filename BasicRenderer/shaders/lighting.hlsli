@@ -50,6 +50,23 @@ struct LightingOutput { // Lighting + debug info
 #endif // IMAGE_BASED_LIGHTING
 };
 
+//http://www.thetenthplanet.de/archives/1180
+float3x3 cotangent_frame(float3 N, float3 p, float2 uv) {
+    // get edge vectors of the pixel triangle 
+    float3 dp1 = ddx(p);
+    float3 dp2 = ddy(p);
+    float2 duv1 = ddx(uv);
+    float2 duv2 = ddy(uv);
+    // solve the linear system 
+    float3 dp2perp = cross(dp2, N);
+    float3 dp1perp = cross(N, dp1);
+    float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+    float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+    // construct a scale-invariant frame 
+    float invmax = rsqrt( max( dot(T,T), dot(B,B) ) ); 
+    return float3x3( T * invmax, B * invmax, N ); 
+}
+
 // Models spotlight falloff with linear interpolation between inner and outer cone angles
 float spotAttenuation(float3 pointToLight, float3 lightDirection, float outerConeCos, float innerConeCos) {
     float cos = dot(normalize(lightDirection), normalize(-pointToLight));
@@ -162,7 +179,8 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     
     float3x3 TBN;
     if (materialInfo.materialFlags & MATERIAL_NORMAL_MAP || materialInfo.materialFlags & MATERIAL_PARALLAX) {
-        TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
+        //TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
+        TBN = cotangent_frame(input.normalWorldSpace.xyz, input.positionWorldSpace.xyz, uv);
     }
 
     float height = 0.0;

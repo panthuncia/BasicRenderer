@@ -7,8 +7,6 @@ struct Vertex {
     float3 position : POSITION;
     float3 normal : NORMAL;
     float2 texcoord : TEXCOORD0;
-    float3 tangent : TANGENT0;
-    float3 bitangent : BINORMAL0;
     uint4 joints : TEXCOORD1;
     float4 weights : TEXCOORD2;
     float3 color;
@@ -20,9 +18,6 @@ struct PSInput {
     float4 positionViewSpace : TEXCOORD1;
     float3 normalWorldSpace : TEXCOORD2;
     float2 texcoord : TEXCOORD3;
-    float3 TBN_T : TEXCOORD4;      // First row of TBN
-    float3 TBN_B : TEXCOORD5;      // Second row of TBN
-    float3 TBN_N : TEXCOORD6;      // Third row of TBN
     float3 color : TEXCOORD7;
     uint meshletIndex : TEXCOORD8;
 };
@@ -31,7 +26,6 @@ struct PSInput {
 #define VERTEX_NORMAL 1 << 1
 #define VERTEX_TEXCOORDS 1 << 2
 #define VERTEX_SKINNED 1 << 3
-#define VERTEX_TANBIT 1 << 4
 
 Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
     Vertex vertex;
@@ -50,16 +44,6 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
         byteOffset += 8;
     }
 
-    if (flags & VERTEX_TANBIT) {
-        // Load tangent (float3, 12 bytes)
-        vertex.tangent = LoadFloat3(byteOffset, buffer);
-        byteOffset += 12;
-
-        // Load bitangent (float3, 12 bytes)
-        vertex.bitangent = LoadFloat3(byteOffset, buffer);
-        byteOffset += 12;
-    }
-    
     vertex.color = float3(1.0, 1.0, 1.0);
 
     return vertex;
@@ -76,17 +60,6 @@ Vertex LoadSkinningVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags)
     // Load normal (float3, 12 bytes)
     vertex.normal = LoadFloat3(byteOffset, buffer);
     byteOffset += 12;
-
-    if (flags & VERTEX_TANBIT)
-    {
-        // Load tangent (float3, 12 bytes)
-        vertex.tangent = LoadFloat3(byteOffset, buffer);
-        byteOffset += 12;
-
-        // Load bitangent (float3, 12 bytes)
-        vertex.bitangent = LoadFloat3(byteOffset, buffer);
-        byteOffset += 12;
-    }
 
     if (flags & VERTEX_SKINNED) {
         // Load joints (uint4, 16 bytes)

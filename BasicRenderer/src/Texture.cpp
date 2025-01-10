@@ -5,7 +5,12 @@
 
 Texture::Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler) {
 	m_image = image;
-	m_sampler = sampler;
+	if (sampler == nullptr) {
+		m_sampler = Sampler::GetDefaultSampler();
+	}
+	else {
+		m_sampler = sampler;
+	}
 }
 
 UINT Texture::GetSamplerDescriptorIndex() {

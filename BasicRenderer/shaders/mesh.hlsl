@@ -59,25 +59,11 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     
     if (flags & VERTEX_SKINNED) {
         result.normalWorldSpace = normalize(vertex.normal);
-    
-        if (flags & VERTEX_TANBIT)
-        {
-            result.TBN_T = normalize(vertex.tangent);
-            result.TBN_B = normalize(vertex.bitangent);
-            result.TBN_N = normalize(vertex.normal);
-        }
     }
     else {
         StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
         float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
         result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
-    
-        if (flags & VERTEX_TANBIT)
-        {
-            result.TBN_T = normalize(mul(vertex.tangent, normalMatrix));
-            result.TBN_B = normalize(mul(vertex.bitangent, normalMatrix));
-            result.TBN_N = normalize(mul(vertex.normal, normalMatrix));
-        }
     }
     
     if (flags & VERTEX_COLORS) {

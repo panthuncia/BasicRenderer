@@ -13,7 +13,6 @@
 #include <math.h>
 #include <optional>
 
-#include "MeshUtilities.h"
 #include "PSOFlags.h"
 #include "DirectX/d3dx12.h"
 #include "DefaultDirection.h"
@@ -37,27 +36,14 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
     std::vector<std::shared_ptr<Mesh>> meshes;
 
     for (auto geom : meshData.geometries) {
-        TangentBitangent tanbit;
         bool hasTexcoords = !geom.texcoords.empty();
         bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
-        bool hasTangents = false;
         unsigned int materialFlags = geom.material->m_materialData.materialFlags;
-        if (materialFlags & MaterialFlags::MATERIAL_NORMAL_MAP || materialFlags & MaterialFlags::MATERIAL_PARALLAX) {
-            if (!geom.indices.empty()) {
-                std::vector<XMFLOAT3>& xmfloat3Positions = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.positions);
-                std::vector<XMFLOAT3>& xmfloat3Normals = *reinterpret_cast<std::vector<XMFLOAT3>*>(&geom.normals);
-                std::vector<XMFLOAT2>& xmfloat2Texcoords = *reinterpret_cast<std::vector<XMFLOAT2>*>(&geom.texcoords);
-
-                tanbit = calculateTangentsBitangentsIndexed(xmfloat3Positions, xmfloat3Normals, xmfloat2Texcoords, geom.indices);
-                hasTangents = true;
-				geom.flags |= VertexFlags::VERTEX_TANBIT;
-            }
-        }
 
         std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
 		unsigned int numVertices = geom.positions.size() / 3;
-		                    // position,        normal,            texcoord,                                tangent, bitangent
-		uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0) + (hasTangents ? sizeof(XMFLOAT3) * 2 : 0);
+		                    // position,        normal,            texcoord
+        uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
 		rawData->resize(numVertices * vertexSize);
 
         for (unsigned int i = 0; i < numVertices; i++) {
@@ -70,14 +56,9 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
 				memcpy(rawData->data() + baseOffset + offset, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
 				offset += sizeof(XMFLOAT2);
 			}
-			if (hasTangents) {
-				memcpy(rawData->data() + baseOffset + offset, &tanbit.tangents[i], sizeof(XMFLOAT3));
-				offset += sizeof(XMFLOAT3);
-				memcpy(rawData->data() + baseOffset + offset, &tanbit.bitangents[i], sizeof(XMFLOAT3));
-			}
         }
-		                                  // position,       normal                           tangent            bitangent              joints,           weights
-		unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTangents ? sizeof(XMFLOAT3) + sizeof(XMFLOAT3) : 0) + sizeof(XMUINT4) + sizeof(XMFLOAT4);
+		                                  // position,       normal            joints,           weights
+		unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)  + sizeof(XMUINT4) + sizeof(XMFLOAT4);
         std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
         if (hasJoints) {
 			skinningData->resize(numVertices * skinningVertexSize);
@@ -87,12 +68,6 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
                 size_t offset = sizeof(XMFLOAT3);
 				memcpy(skinningData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
 				offset += sizeof(XMFLOAT3);
-				if (hasTangents) {
-					memcpy(skinningData->data() + baseOffset + offset, &tanbit.tangents[i], sizeof(XMFLOAT3));
-					offset += sizeof(XMFLOAT3);
-					memcpy(skinningData->data() + baseOffset + offset, &tanbit.bitangents[i], sizeof(XMFLOAT3));
-					offset += sizeof(XMFLOAT3);
-				}
 				memcpy(skinningData->data() + baseOffset + offset, &geom.joints[i * 4], sizeof(XMUINT4));
 				offset += sizeof(XMUINT4);
 				memcpy(skinningData->data() + baseOffset + offset, &geom.weights[i * 4], sizeof(XMFLOAT4));
