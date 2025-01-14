@@ -22,10 +22,12 @@ public:
 
 protected:
     virtual std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) = 0;
+    virtual D3D12_BARRIER_GROUP& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
     virtual void OnSetName() {}
     virtual void SetState(ResourceState state) { currentState = state; }
 
     ResourceState currentState;
+	ResourceSyncState currentSyncState = ResourceSyncState::NONE;
     std::wstring name;
 private:
     bool m_uploadInProgress = false;

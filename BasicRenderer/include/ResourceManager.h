@@ -38,6 +38,9 @@ public:
     ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
+    std::shared_ptr<Buffer>& GetPerFrameBuffer() {
+		return perFrameBufferHandle;
+    }
 
     template<typename T>
     std::shared_ptr<Buffer> CreateIndexedConstantBuffer(std::wstring name = L"") {

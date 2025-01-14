@@ -42,13 +42,21 @@ public:
 	ResourceCPUAccessType m_accessType;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
 	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState);
+	D3D12_BARRIER_GROUP& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+
 
 	ID3D12Resource* GetAPIResource() const override { return m_buffer.Get(); }
 protected:
 	void OnSetName() override { m_buffer->SetName(name.c_str()); }
 private:
+	// Old barriers
 	std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
 	std::vector<D3D12_RESOURCE_BARRIER> m_emptyTransitions = {};
+
+	// Enhanced barriers
+	D3D12_BUFFER_BARRIER m_bufferBarrier;
+	D3D12_BARRIER_GROUP m_barrierGroup = {};
+
 	Buffer(ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
 		uint32_t bufferSize, 
