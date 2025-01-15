@@ -23,6 +23,8 @@ public:
 		return handle.texture;
     }
     std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
+    D3D12_BARRIER_GROUP& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 
 	ID3D12Resource* GetAPIResource() const override { return handle.texture.Get(); }
@@ -38,6 +40,11 @@ private:
 	unsigned int m_channels;
     DXGI_FORMAT m_format;
 
+	// Old barriers
 	std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
 	std::vector<D3D12_RESOURCE_BARRIER> m_emptyTransitions = {};
+
+    // Enhanced barriers
+    D3D12_TEXTURE_BARRIER m_textureBarrier;
+    D3D12_BARRIER_GROUP m_barrierGroup = {};
 };

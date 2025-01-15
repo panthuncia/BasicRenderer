@@ -99,6 +99,79 @@ inline D3D12_BARRIER_ACCESS ResourceStateToD3D12AccessType(ResourceState state) 
 	throw std::runtime_error("Invalid Resource State");
 }
 
+// TODO: Use COMPUTE_QUEUE and DIRECT_QUEUE barrier types- requires reworking render graph compiler
+inline D3D12_BARRIER_LAYOUT ResourceStateToD3D12GraphicsBarrierLayout(ResourceState state) {
+	switch (state) {
+	case ResourceState::UNKNOWN:
+		return D3D12_BARRIER_LAYOUT_COMMON;
+	case ResourceState::INDEX:
+		throw std::runtime_error("Index Buffer is not a texture and has no layout");
+	case ResourceState::VERTEX:
+		throw std::runtime_error("Vertex Buffer is not a texture and has no layout");
+	case ResourceState::CONSTANT:
+		throw std::runtime_error("Constant Buffer is not a texture and has no layout");
+	case ResourceState::PIXEL_SRV:
+		return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
+	case ResourceState::NON_PIXEL_SRV:
+		return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
+	case ResourceState::ALL_SRV:
+		return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
+	case ResourceState::RENDER_TARGET:
+		return D3D12_BARRIER_LAYOUT_RENDER_TARGET;
+	case ResourceState::DEPTH_WRITE:
+		return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
+	case ResourceState::DEPTH_READ:
+		return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_READ;
+	case ResourceState::UPLOAD:
+		return D3D12_BARRIER_LAYOUT_COPY_SOURCE;
+	case ResourceState::COPY_SOURCE:
+		return D3D12_BARRIER_LAYOUT_COPY_SOURCE;
+	case ResourceState::COPY_DEST:
+		return D3D12_BARRIER_LAYOUT_COPY_DEST;
+	case ResourceState::UNORDERED_ACCESS:
+		return D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
+	case ResourceState::INDIRECT_ARGUMENT:
+		throw std::runtime_error("Indirect Argument Buffer is not a texture and has no layout");
+	}
+	throw std::runtime_error("Invalid Resource State");
+}
+
+inline D3D12_BARRIER_LAYOUT ResourceStateToD3D12ComputeBarrierLayout(ResourceState state) {
+	switch (state) {
+	case ResourceState::UNKNOWN:
+		return D3D12_BARRIER_LAYOUT_COMMON;
+	case ResourceState::INDEX:
+		throw std::runtime_error("Index Buffer is not a texture and has no layout");
+	case ResourceState::VERTEX:
+		throw std::runtime_error("Vertex Buffer is not a texture and has no layout");
+	case ResourceState::CONSTANT:
+		throw std::runtime_error("Constant Buffer is not a texture and has no layout");
+	case ResourceState::PIXEL_SRV:
+		throw std::runtime_error("Pixel Shader Resource is not a compute resource bitmask");
+	case ResourceState::NON_PIXEL_SRV:
+		return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
+	case ResourceState::ALL_SRV:
+		throw std::runtime_error("All Shader Resource is not a valid compute bitmask");
+	case ResourceState::RENDER_TARGET:
+		throw std::runtime_error("Render Target is not a compute resource bitmask");
+	case ResourceState::DEPTH_WRITE:
+		throw std::runtime_error("Depth Write is not a compute resource bitmask");
+	case ResourceState::DEPTH_READ:
+		throw std::runtime_error("Depth Read is not a compute resource bitmask");
+	case ResourceState::UPLOAD:
+		return D3D12_BARRIER_LAYOUT_COPY_SOURCE;
+	case ResourceState::COPY_SOURCE:
+		return D3D12_BARRIER_LAYOUT_COPY_SOURCE;
+	case ResourceState::COPY_DEST:
+		return D3D12_BARRIER_LAYOUT_COPY_DEST;
+	case ResourceState::UNORDERED_ACCESS:
+		return D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
+	case ResourceState::INDIRECT_ARGUMENT:
+		throw std::runtime_error("Indirect Argument Buffer is not a texture and has no layout");
+	}
+	throw std::runtime_error("Invalid Resource State");
+}
+
 enum class ResourceSyncState {
 	NONE,
 	ALL,

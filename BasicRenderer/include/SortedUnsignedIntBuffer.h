@@ -87,6 +87,10 @@ protected:
         currentState = newState;
         return m_dataBuffer->GetTransitions(prevState, newState);
     }
+    D3D12_BARRIER_GROUP& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+		currentState = newState;
+        return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+    }
 
 private:
     SortedUnsignedIntBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
