@@ -17,6 +17,7 @@ public:
 		return m_image;
 	}
 	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
+	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 	virtual void SetName(const std::wstring& name);
 	ID3D12Resource* GetAPIResource() const override;
 private:

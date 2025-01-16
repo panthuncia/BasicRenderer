@@ -87,7 +87,7 @@ protected:
         currentState = newState;
         return m_dataBuffer->GetTransitions(prevState, newState);
     }
-    D3D12_BARRIER_GROUP& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 		currentState = newState;
         return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
     }
@@ -112,7 +112,7 @@ private:
     std::vector<unsigned int> m_data;
 
     size_t m_capacity;
-    size_t m_earliestModifiedIndex; // Tracks the earliest modified index
+	size_t m_earliestModifiedIndex; // To avoid updating the entire buffer every time
 
     UINT m_globalResizableBufferID;
 

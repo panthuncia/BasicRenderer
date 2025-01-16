@@ -59,6 +59,9 @@ Buffer::Buffer(
 	m_bufferBarrier.pResource = m_buffer.Get();
 	m_bufferBarrier.Offset = 0;
 	m_bufferBarrier.Size = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+	m_barrierGroups.numBufferBarrierGroups = 1;
+	m_barrierGroups.bufferBarriers = &m_barrierGroup;
 }
 
 std::vector<D3D12_RESOURCE_BARRIER>& Buffer::GetTransitions(ResourceState fromState, ResourceState toState) {
@@ -81,11 +84,11 @@ std::vector<D3D12_RESOURCE_BARRIER>& Buffer::GetTransitions(ResourceState fromSt
 	return m_transitions;
 }
 
-D3D12_BARRIER_GROUP& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 	m_bufferBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevState);
 	m_bufferBarrier.AccessAfter = ResourceStateToD3D12AccessType(newState);
 	m_bufferBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
 	m_bufferBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 
-	return m_barrierGroup;
+	return m_barrierGroups;
 }

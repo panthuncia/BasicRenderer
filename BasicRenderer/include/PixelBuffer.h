@@ -23,7 +23,7 @@ public:
 		return handle.texture;
     }
     std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
-    D3D12_BARRIER_GROUP& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 
@@ -47,4 +47,5 @@ private:
     // Enhanced barriers
     D3D12_TEXTURE_BARRIER m_textureBarrier;
     D3D12_BARRIER_GROUP m_barrierGroup = {};
+	BarrierGroups m_barrierGroups;
 };

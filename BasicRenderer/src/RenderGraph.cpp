@@ -162,7 +162,7 @@ void RenderGraph::Compile() {
     batches.push_back(std::move(currentBatch));
 
     // Insert transitions to loop resources back to their initial states
-    ComputeResourceLoops(finalResourceStates);
+    ComputeResourceLoops(finalResourceStates, finalResourceSyncStates);
 }
 
 std::pair<int, int> RenderGraph::GetBatchesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory) {
@@ -521,7 +521,10 @@ void RenderGraph::Execute(RenderContext& context) {
 		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.fromState, transition.toState, transition.prevSyncState, transition.newSyncState);
-			computeBarriers.push_back(transitions);
+			computeBarriers.reserve(computeBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
+			computeBarriers.insert(computeBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
+			computeBarriers.insert(computeBarriers.end(), transitions.textureBarriers, transitions.textureBarriers + transitions.numTextureBarrierGroups);
+			computeBarriers.insert(computeBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
 		}
 		if (computeBarriers.size() > 0) {
 			computeTransitionCommandList->Barrier(static_cast<UINT>(computeBarriers.size()), computeBarriers.data());
@@ -567,7 +570,10 @@ void RenderGraph::Execute(RenderContext& context) {
 		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
         for (auto& transition : batch.renderTransitions) {
             auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.fromState, transition.toState, transition.prevSyncState, transition.newSyncState);
-            
+			renderBarriers.reserve(renderBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
+			renderBarriers.insert(renderBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
+			renderBarriers.insert(renderBarriers.end(), transitions.textureBarriers, transitions.textureBarriers + transitions.numTextureBarrierGroups);
+			renderBarriers.insert(renderBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
         }
         if (renderBarriers.size() > 0) {
             graphicsTransitionCommandList->Barrier(static_cast<UINT>(renderBarriers.size()), renderBarriers.data());

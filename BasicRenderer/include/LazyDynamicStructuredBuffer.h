@@ -99,6 +99,11 @@ protected:
         return m_dataBuffer->GetTransitions(prevState, newState);
     }
 
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+        currentState = newState;
+        return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+    }
+
 private:
     LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {

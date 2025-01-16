@@ -43,6 +43,9 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
     m_textureBarrier.pResource = handle.texture.Get();
 	m_textureBarrier.Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE;
 	m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff); // TODO: would more fine-grained transitions be better?
+
+	m_barrierGroups.numTextureBarrierGroups = 1;
+	m_barrierGroups.textureBarriers = &m_barrierGroup;
 }
 
 std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState fromState, ResourceState toState) {
@@ -58,7 +61,7 @@ std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState 
 	return m_transitions;
 }
 
-D3D12_BARRIER_GROUP& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
     m_textureBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevState);
     m_textureBarrier.AccessAfter = ResourceStateToD3D12AccessType(newState);
     m_textureBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
@@ -66,5 +69,5 @@ D3D12_BARRIER_GROUP& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevStat
 	m_textureBarrier.LayoutBefore = ResourceStateToD3D12GraphicsBarrierLayout(prevState);
 	m_textureBarrier.LayoutAfter = ResourceStateToD3D12GraphicsBarrierLayout(newState);
 
-    return m_barrierGroup;
+    return m_barrierGroups;
 }

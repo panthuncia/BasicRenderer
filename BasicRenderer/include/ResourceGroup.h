@@ -39,7 +39,39 @@ protected:
         currentState = newState; // Set the state for the group as a whole
 		return m_transitions;
     }
+
+	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+		m_barrierGroups.numBufferBarrierGroups = 0;
+		m_barrierGroups.numTextureBarrierGroups = 0;
+		m_barrierGroups.numGlobalBarrierGroups = 0;
+		m_bufferBarriers.clear();
+		m_textureBarriers.clear();
+		m_globalBarriers.clear();
+		for (auto& pair : resourcesByID) {
+			auto& barrierGroup = pair.second->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+			if (barrierGroup.numBufferBarrierGroups > 0) {
+				m_bufferBarriers.insert(m_bufferBarriers.end(), barrierGroup.bufferBarriers, barrierGroup.bufferBarriers + barrierGroup.numBufferBarrierGroups);
+				m_barrierGroups.numBufferBarrierGroups += barrierGroup.numBufferBarrierGroups;
+			}
+			if (barrierGroup.numTextureBarrierGroups > 0) {
+				m_textureBarriers.insert(m_textureBarriers.end(), barrierGroup.textureBarriers, barrierGroup.textureBarriers + barrierGroup.numTextureBarrierGroups);
+				m_barrierGroups.numTextureBarrierGroups += barrierGroup.numTextureBarrierGroups;
+			}
+			if (barrierGroup.numGlobalBarrierGroups > 0) {
+				m_globalBarriers.insert(m_globalBarriers.end(), barrierGroup.globalBarriers, barrierGroup.globalBarriers + barrierGroup.numGlobalBarrierGroups);
+				m_barrierGroups.numGlobalBarrierGroups += barrierGroup.numGlobalBarrierGroups;
+			}
+		}
+		currentState = newState; // Set the state for the group as a whole
+		return m_barrierGroups;
+	}
 protected:
     std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
     std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
+	
+	// New barriers
+	std::vector<D3D12_BARRIER_GROUP> m_bufferBarriers;
+	std::vector<D3D12_BARRIER_GROUP> m_textureBarriers;
+	std::vector<D3D12_BARRIER_GROUP> m_globalBarriers;
+	BarrierGroups m_barrierGroups;
 };

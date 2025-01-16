@@ -56,6 +56,10 @@ protected:
         currentState = newState;
         return m_dataBuffer->GetTransitions(prevState, newState);
     }
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+        currentState = newState;
+        return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+    }
 
 private:
     DynamicBuffer(bool byteAddress, size_t elementSize, UINT id = 0, size_t size = 64*1024, std::wstring name = L"", bool UAV = false)
