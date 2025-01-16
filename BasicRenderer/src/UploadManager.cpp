@@ -166,9 +166,6 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 	for (auto& update : m_resourceUpdates) {
 
 		Resource* buffer = update.resourceToUpdate;
-		if (buffer->GetName() == L"preSkinningNormalMatrixBuffer") {
-			print("eh?");
-		};
 		ResourceState initialState = buffer->GetState();
 		if (buffer->m_uploadInProgress) {
 			continue;
@@ -183,9 +180,6 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 		initialD3D12States.push_back(startD3D12State);
 		initialStates.push_back(initialState);
 		deduplicatedResources.push_back(buffer);
-		if (buffer->GetName() == L"preSkinningNormalMatrixBuffer") {
-			print("eh?");
-		};
 		buffer->m_uploadInProgress = true;
 	}
     commandList->ResourceBarrier(barriers.size(), barriers.data());
