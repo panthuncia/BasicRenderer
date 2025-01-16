@@ -328,15 +328,15 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 		producerHistory[resource->GetName()] = batchIndex;
 	}
 	for (auto& resource : pass.resources.copyTargets) {
-		addTransition(resource, ResourceState::COPY_DEST, ResourceSyncState::DRAW);
+		addTransition(resource, ResourceState::COPY_DEST, ResourceSyncState::COPY);
 		finalResourceStates[resource->GetName()] = ResourceState::COPY_DEST;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COPY;
 		producerHistory[resource->GetName()] = batchIndex;
 	}
 	for (auto& resource : pass.resources.copySources) {
-		addTransition(resource, ResourceState::COPY_SOURCE, ResourceSyncState::DRAW);
+		addTransition(resource, ResourceState::COPY_SOURCE, ResourceSyncState::COPY);
 		finalResourceStates[resource->GetName()] = ResourceState::COPY_SOURCE;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COPY;
 	}
 	for (auto& resource : pass.resources.indirectArgumentBuffers) {
 		addTransition(resource, ResourceState::INDIRECT_ARGUMENT, ResourceSyncState::DRAW);

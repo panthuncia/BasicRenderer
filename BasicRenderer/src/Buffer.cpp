@@ -58,7 +58,7 @@ Buffer::Buffer(
 
 	m_bufferBarrier.pResource = m_buffer.Get();
 	m_bufferBarrier.Offset = 0;
-	m_bufferBarrier.Size = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	m_bufferBarrier.Size = UINT64_MAX;
 
 	m_barrierGroups.numBufferBarrierGroups = 1;
 	m_barrierGroups.bufferBarriers = &m_barrierGroup;

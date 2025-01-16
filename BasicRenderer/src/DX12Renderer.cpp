@@ -267,6 +267,18 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     }
 #endif
 
+    // Disable unwanted warnings
+    ComPtr<ID3D12InfoQueue> warningInfoQueue;
+    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
+    {
+        D3D12_INFO_QUEUE_FILTER filter = {};
+        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists
+        filter.DenyList.NumIDs = _countof(blockedIDs);
+        filter.DenyList.pIDList = blockedIDs;
+
+        warningInfoQueue->AddStorageFilterEntries(&filter);
+    }
+
     // Describe and create the command queue
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;

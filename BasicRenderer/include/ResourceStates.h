@@ -66,7 +66,7 @@ inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 inline D3D12_BARRIER_ACCESS ResourceStateToD3D12AccessType(ResourceState state) {
 	switch (state) {
 	case ResourceState::UNKNOWN:
-		return D3D12_BARRIER_ACCESS_COMMON;
+		return D3D12_BARRIER_ACCESS_NO_ACCESS;
 	case ResourceState::INDEX:
 		return D3D12_BARRIER_ACCESS_INDEX_BUFFER;
 	case ResourceState::VERTEX:

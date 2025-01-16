@@ -62,6 +62,9 @@ protected:
 				m_barrierGroups.numGlobalBarrierGroups += barrierGroup.numGlobalBarrierGroups;
 			}
 		}
+		m_barrierGroups.bufferBarriers = m_bufferBarriers.data();
+		m_barrierGroups.textureBarriers = m_textureBarriers.data();
+		m_barrierGroups.globalBarriers = m_globalBarriers.data();
 		currentState = newState; // Set the state for the group as a whole
 		return m_barrierGroups;
 	}
