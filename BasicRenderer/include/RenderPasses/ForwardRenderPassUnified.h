@@ -11,6 +11,7 @@
 #include "Scene.h"
 #include "Material.h"
 #include "SettingsManager.h"
+#include "CommandSignatureManager.h"
 
 class ForwardRenderPassUnified : public RenderPass {
 public:
@@ -247,7 +248,7 @@ private:
         }
 
         auto& meshManager = context.currentScene->GetMeshManager();
-        auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
+        auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
         // Opaque indirect draws
         auto numOpaque = context.currentScene->GetNumOpaqueDraws();
@@ -261,7 +262,7 @@ private:
 
             auto apiResource = opaqueIndirectBuffer->GetAPIResource();
             commandList->ExecuteIndirect(
-                commandSignature.Get(),
+                commandSignature,
                 numOpaque,
                 apiResource, 0,
                 apiResource,
@@ -282,7 +283,7 @@ private:
 
             auto apiResource = alphaTestIndirectBuffer->GetAPIResource();
             commandList->ExecuteIndirect(
-                commandSignature.Get(),
+                commandSignature,
                 numAlphaTest,
                 apiResource, 0,
                 apiResource,

@@ -18,10 +18,12 @@
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
+
     m_lightBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 10, L"lightBuffer<LightInfo>");
     m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
     m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
     m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");
+
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
@@ -40,7 +42,7 @@ void LightManager::Initialize() {
 	
 }
 
-void LightManager::AddLight(Light* lightNode, bool shadowCasting, Camera* currentCamera) {
+void LightManager::AddLight(Light* lightNode, Camera* currentCamera) {
     if (lightNode->GetCurrentLightBufferIndex() != -1) {
         RemoveLight(lightNode);
     }
@@ -58,7 +60,7 @@ void LightManager::AddLight(Light* lightNode, bool shadowCasting, Camera* curren
 		break;
     }
     lightNode->SetLightBufferIndex(index);
-	if (shadowCasting) {
+	if (lightNode->GetIsShadowCaster()) {
 		CreateLightViewInfo(lightNode, currentCamera);
 		auto shadowMap = getCurrentShadowMapResourceGroup();
 		if (shadowMap != nullptr) {

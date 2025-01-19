@@ -17,6 +17,11 @@ public:
 	static std::unique_ptr<IndirectCommandBufferManager> CreateUnique() {
 		return std::unique_ptr<IndirectCommandBufferManager>(new IndirectCommandBufferManager());
 	}
+
+	static std::shared_ptr<IndirectCommandBufferManager> CreateShared() {
+		return std::shared_ptr<IndirectCommandBufferManager>(new IndirectCommandBufferManager());
+	}
+
     // Add a single buffer to an existing ID
     std::shared_ptr<DynamicGloballyIndexedResource> CreateBuffer(const int entityID, MaterialBuckets bucket);
 
@@ -30,12 +35,9 @@ public:
 
 	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_parentResourceGroup; }
 
-	std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
-	std::shared_ptr<Buffer>& GetAlphaTestClearBuffer() { return m_clearBufferAlphaTest; }
-	std::shared_ptr<Buffer>& GetBlendClearBuffer() { return m_clearBufferBlend; }
-
-
-	Microsoft::WRL::ComPtr<ID3D12CommandSignature> GetCommandSignature() { return m_commandSignature; }
+	//std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
+	//std::shared_ptr<Buffer>& GetAlphaTestClearBuffer() { return m_clearBufferAlphaTest; }
+	//std::shared_ptr<Buffer>& GetBlendClearBuffer() { return m_clearBufferBlend; }
 
 private:
     IndirectCommandBufferManager();
@@ -48,8 +50,7 @@ private:
 	std::shared_ptr<ResourceGroup> m_opaqueResourceGroup;
 	std::shared_ptr<ResourceGroup> m_blendResourceGroup;
 	std::shared_ptr<ResourceGroup> m_parentResourceGroup;
-	std::shared_ptr<Buffer> m_clearBufferOpaque;
-	std::shared_ptr<Buffer> m_clearBufferAlphaTest;
-	std::shared_ptr<Buffer> m_clearBufferBlend;
-	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_commandSignature;
+	//std::shared_ptr<Buffer> m_clearBufferOpaque;
+	//std::shared_ptr<Buffer> m_clearBufferAlphaTest;
+	//std::shared_ptr<Buffer> m_clearBufferBlend;
 };

@@ -22,9 +22,10 @@ class DynamicGloballyIndexedResource;
 class Scene {
 public:
     Scene();
+    ~Scene();
     UINT AddObject(std::shared_ptr<RenderableObject> object);
     UINT AddNode(std::shared_ptr<SceneNode> node);
-    UINT AddLight(std::shared_ptr<Light> light, bool shadowCasting = false);
+    UINT AddLight(std::shared_ptr<Light> light);
     std::shared_ptr<SceneNode> CreateNode(std::wstring name = L""); // Like addNode, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> CreateRenderableObject(MeshData meshData, std::wstring name); // Like addObject, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> GetObjectByName(const std::wstring& name);
@@ -66,7 +67,7 @@ public:
 	unsigned int GetNumOpaqueDraws();
 	unsigned int GetNumAlphaTestDraws();
 	unsigned int GetNumBlendDraws();
-	const std::unique_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
+	const std::shared_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
 	const std::unique_ptr<CameraManager>& GetCameraManager();
 
 private:
@@ -90,10 +91,10 @@ private:
     std::vector<std::shared_ptr<Skeleton>> skeletons;
     std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
-    LightManager lightManager;
+    std::unique_ptr<LightManager> lightManager;
     std::unique_ptr<MeshManager> meshManager = nullptr;
 	std::unique_ptr<ObjectManager> objectManager = nullptr;
-	std::unique_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
+	std::shared_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraBlendIndirectCommandBuffer;
