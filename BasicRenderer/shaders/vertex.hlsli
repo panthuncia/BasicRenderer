@@ -19,7 +19,8 @@ struct PSInput {
     float3 normalWorldSpace : TEXCOORD2;
     float2 texcoord : TEXCOORD3;
     float3 color : TEXCOORD7;
-    uint meshletIndex : TEXCOORD8;
+    float3 normalModelSpace : TEXCOORD8;
+    uint meshletIndex : TEXCOORD9;
 };
 
 #define VERTEX_COLORS 1 << 0

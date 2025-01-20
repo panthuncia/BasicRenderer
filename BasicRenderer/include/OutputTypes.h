@@ -14,7 +14,8 @@ enum OutputType {
 	SPECULAR_IBL = 10,
 	METAL_FRESNEL_IBL = 11,
 	DIELECTRIC_FRESNEL_IBL = 12,
-	MESHLETS = 13
+	MESHLETS = 13,
+	MODEL_NORMAL = 14,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -32,4 +33,5 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Metal Fresnel IBL",
 	"Dielectric Fresnel IBL",
 	"Meshlets",
+	"Model Normal",
 };

@@ -86,6 +86,9 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     output.color = input.color;
 
     output.meshletIndex = 0; // Unused for vertex shader
+    
+    output.normalModelSpace = input.normal;
+    
     return output;
 }
 
@@ -169,6 +172,9 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #endif // IMAGE_BASED_LIGHTING
         case OUTPUT_MESHLETS:{
                 return lightMeshlets(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
+            }
+        case OUTPUT_MODEL_NORMALS:{
+                return float4(input.normalModelSpace * 0.5 + 0.5, opacity);
             }
         default:
             return float4(1.0, 0.0, 0.0, 1.0);

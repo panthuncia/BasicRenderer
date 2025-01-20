@@ -71,6 +71,9 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     };
     
     result.meshletIndex = vGroupID.x;
+    
+    result.normalModelSpace = normalize(vertex.normal);
+    
     return result;
 }
 

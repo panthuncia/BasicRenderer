@@ -699,7 +699,11 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
 				psoFlags |= PSOFlags::PSO_BLEND;
             }
         }
-        std::shared_ptr<Material> newMaterial = std::make_shared<Material>(gltfMaterial["name"],
+        std::string name = "";
+		if (gltfMaterial.contains("name")) {
+			name = gltfMaterial["name"].get<std::string>();
+		}
+        std::shared_ptr<Material> newMaterial = std::make_shared<Material>(name,
             materialFlags,
 			psoFlags,
             baseColorTexture,

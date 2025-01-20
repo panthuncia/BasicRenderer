@@ -125,6 +125,10 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
                 finalOutput = lightMeshlets(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
                 break;
             }
+        case OUTPUT_MODEL_NORMALS:{
+                finalOutput = float4(input.normalModelSpace * 0.5 + 0.5, lightingOutput.baseColor.a);
+                break;
+            }
         default:
             finalOutput = float4(1.0, 0.0, 0.0, 1.0);
             break;

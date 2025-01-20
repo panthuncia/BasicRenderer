@@ -233,6 +233,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
 	auto bistro = loadGLB("models/bistro.glb");
+	//auto sponza = loadGLB("models/sponza.glb");
 
     //auto cubeScene = loadGLB("models/cube.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
@@ -265,6 +266,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	renderer.GetCurrentScene()->AppendScene(*bistro);
+	//renderer.GetCurrentScene()->AppendScene(*sponza);
 
 	//DeletionManager::GetInstance().MarkForDelete(carScene);
     //DeletionManager::GetInstance().MarkForDelete(dragonScene);
@@ -272,6 +274,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
  //   DeletionManager::GetInstance().MarkForDelete(mountainScene);
 	//DeletionManager::GetInstance().MarkForDelete(phoenixScene);
 	DeletionManager::GetInstance().MarkForDelete(bistro);
+	//DeletionManager::GetInstance().MarkForDelete(sponza);
 
 	//carScene.reset();
 	//dragonScene.reset();
@@ -279,6 +282,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//mountainScene.reset();
 	//phoenixScene.reset();
 	bistro.reset();
+	//sponza.reset();
 
     renderer.SetEnvironment("sky");
 
