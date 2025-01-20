@@ -11,6 +11,7 @@
 #include "Scene.h"
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
+#include "CommandSignatureManager.h"
 
 class ShadowPassMSIndirect : public RenderPass {
 public:
@@ -72,7 +73,7 @@ public:
 
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
-		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
+		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
 		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* alphaTestIndirectCommandBuffer, ID3D12Resource* blendIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t alphaTestCommandCounterOffset, size_t blendIndirectCommandCounterOffset) {
 			auto numOpaque = context.currentScene->GetNumOpaqueDraws();
@@ -82,7 +83,7 @@ public:
 
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
 				commandList->SetPipelineState(pso.Get());
-				commandList->ExecuteIndirect(commandSignature.Get(), numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
+				commandList->ExecuteIndirect(commandSignature, numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
 			}
 
 			auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
@@ -92,7 +93,7 @@ public:
 
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST, BlendState::BLEND_STATE_MASK, false);
 				commandList->SetPipelineState(pso.Get());
-				commandList->ExecuteIndirect(commandSignature.Get(), numAlphaTest, alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset);
+				commandList->ExecuteIndirect(commandSignature, numAlphaTest, alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset);
 			}
 
 			auto numBlend = context.currentScene->GetNumBlendDraws();
@@ -102,7 +103,7 @@ public:
 
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
 				commandList->SetPipelineState(pso.Get());
-				commandList->ExecuteIndirect(commandSignature.Get(), numBlend, blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset);
+				commandList->ExecuteIndirect(commandSignature, numBlend, blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset);
 			}
 		};
 

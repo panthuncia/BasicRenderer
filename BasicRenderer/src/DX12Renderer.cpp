@@ -44,6 +44,10 @@
 #include "DeletionManager.h"
 #include "UploadManager.h"
 #include "RendererUtils.h"
+#include "NsightAftermathGpuCrashTracker.h"
+#include "Aftermath/GFSDK_Aftermath.h"
+#include "NsightAftermathHelpers.h"
+#include "CommandSignatureManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -131,6 +135,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     PSOManager::GetInstance().initialize();
     UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();
+	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
     CreateGlobalResources();
     
@@ -247,10 +252,23 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Create device
     ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
 
+    //m_gpuCrashTracker.Initialize();
+
     ThrowIfFailed(D3D12CreateDevice(
         bestAdapter.Get(),
         D3D_FEATURE_LEVEL_12_0,
         IID_PPV_ARGS(&device)));
+
+    //const uint32_t aftermathFlags =
+    //    GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.
+    //    GFSDK_Aftermath_FeatureFlags_EnableResourceTracking |    // Enable tracking of resources.
+    //    GFSDK_Aftermath_FeatureFlags_CallStackCapturing |        // Capture call stacks for all draw calls, compute dispatches, and resource copies.
+    //    GFSDK_Aftermath_FeatureFlags_GenerateShaderDebugInfo;    // Generate debug information for shaders.
+
+    //AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_DX12_Initialize(
+    //    GFSDK_Aftermath_Version_API,
+    //    aftermathFlags,
+    //    device.Get()));
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue1> infoQueue;
@@ -672,6 +690,9 @@ std::shared_ptr<Scene>& DX12Renderer::GetCurrentScene() {
 }
 
 void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
+	if (currentScene) {
+		DeletionManager::GetInstance().MarkForDelete(currentScene);
+	}
     currentScene = newScene;
     currentScene->Activate();
 	rebuildRenderGraph = true;

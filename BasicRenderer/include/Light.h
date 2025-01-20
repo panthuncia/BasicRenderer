@@ -68,6 +68,14 @@ public:
 		m_lightInfo.shadowViewInfoIndex = index;
 	}
 
+	void SetIsShadowCaster(bool shadowCaster) {
+		m_shadowCaster = shadowCaster;
+	}
+
+	bool GetIsShadowCaster() {
+		return m_shadowCaster;
+	}
+
 	void AddLightObserver(ISceneNodeObserver<Light>* observer);
 	void RemoveLightObserver(ISceneNodeObserver<Light>* observer);
 
@@ -139,6 +147,7 @@ private:
 	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_perViewBlendIndirectCommandBuffers;
 	std::vector<std::shared_ptr<BufferView>> m_cameraBufferViews;
 	std::vector<std::array<ClippingPlane, 6>> m_frustumPlanes;
+	bool m_shadowCaster = false;
 
 	void NotifyLightObservers();
 	void UpdateLightInfo();

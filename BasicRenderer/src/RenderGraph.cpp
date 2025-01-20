@@ -505,8 +505,10 @@ void RenderGraph::Execute(RenderContext& context) {
     graphicsCommandAllocator->Reset();
 	computeCommandAllocator->Reset();
 
-	// Sync compute and graphics queues- necessary because copies are currently on the graphics queue
-	graphicsQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue);
+	// Sync compute and graphics queues
+    computeQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue);
+	graphicsQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue);
+    graphicsQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue);
 	computeQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue);
 
     for (auto& batch : batches) {

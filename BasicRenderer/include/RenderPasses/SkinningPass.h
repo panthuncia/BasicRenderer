@@ -45,7 +45,7 @@ public:
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-		auto rootSignature = PSOManager::GetInstance().GetRootSignature().Get();
+		auto rootSignature = PSOManager::GetInstance().GetComputeRootSignature().Get();
 		commandList->SetComputeRootSignature(rootSignature);
 
 		// Set the compute pipeline state
@@ -140,7 +140,7 @@ private:
 		};
 
 		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetRootSignature().Get();
+		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetComputeRootSignature().Get();
 		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 
 		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};

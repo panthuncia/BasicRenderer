@@ -7,7 +7,7 @@
 
 #define FRAGMENT_LIST_NULL 0xffffffff
 #define K_NEAREST 8 // must be a power of 2
-#define MAX_FRAGMENTS 512
+#define MAX_FRAGMENTS 64
 
 struct PPLL_STRUCT {
     float depth;
@@ -174,6 +174,7 @@ void SortNearest(inout KBUFFER_STRUCT fragments[K_NEAREST]) {
 }
 
 float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
+    
     Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
     StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
 
@@ -225,19 +226,21 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
                     farthestIndex = fi;
                 }
             }
-
+            
             if (depth < farthestDepth) {
                 // Replace the farthest one
                 nearestFragments[farthestIndex].depth = depth;
                 nearestFragments[farthestIndex].color = LinkedListUAV[fragIndex].color;
             }
+            
             else {
                 // Put it into otherFragments for later blending
                 otherFragments[otherCount++] = fragIndex;
             }
+            
         }
     }
-        
+    
     // Fill unused entries in nearestFragments with dummy values
     // so the entire array has K_NEAREST entries.
     for (uint i = nearestCount; i < K_NEAREST; i++) {
@@ -249,7 +252,9 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
     SortNearest(nearestFragments);
 
     // Blend nearestFragments first (front-to-back)
+    
     float4 outColor = float4(0, 0, 0, 0);
+    
     for (uint i = 0; i < K_NEAREST; i++) {
         // Skip dummy fragments (if depth == 0xFFFFFFFF, it's dummy)
         if (nearestFragments[i].depth == 0xFFFFFFFF)
@@ -267,5 +272,6 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
 
     outColor.xyz = reinhardJodie(outColor.xyz);
     outColor.xyz = LinearToSRGB(outColor.xyz);
+
     return outColor;
 }

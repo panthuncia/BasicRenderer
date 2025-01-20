@@ -14,6 +14,7 @@ find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(meshoptimizer REQUIRED)
 find_package(DirectX-Headers CONFIG REQUIRED)
+find_package(DirectX12-Agility CONFIG REQUIRED)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (BasicRenderer WIN32  ${SOURCES})
@@ -151,8 +152,27 @@ add_symlink_or_copy_per_config(
     "winpix_dll"
 )
 
+set(D3D_SRC_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/D3D")
+set(D3D_DEST_PATH "${CMAKE_BINARY_DIR}/BasicRenderer/D3D")
+
+add_symlink_or_copy_per_config(
+    "${D3D_SRC_DIR}"
+    "${D3D_DEST_PATH}"
+    TRUE  # IS_DIRECTORY
+    "d3d"
+)
+
+set(AFTERMATH_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/GFSDK_Aftermath_Lib.x64.dll")
+set(AFTERMATH_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/GFSDK_Aftermath_Lib.x64.dll")
+
+add_symlink_or_copy_per_config(
+    "${AFTERMATH_BINARY_DIR}"
+    "${AFTERMATH_DEST_FILE}"
+    FALSE  # IS_DIRECTORY
+    "aftermath_dll"
+)
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/)
 
 # Find and link DirectX 12
-target_link_libraries(${PROJECT_NAME} PRIVATE d3d12.lib d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib")
+target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib")

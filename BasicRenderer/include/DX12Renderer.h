@@ -21,11 +21,14 @@
 #include "ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "ReadbackRequest.h"
+#include "NsightAftermathGpuCrashTracker.h"
 
 using namespace Microsoft::WRL;
 
 class DX12Renderer {
 public:
+    DX12Renderer() : m_gpuCrashTracker(m_markerMap){
+    }
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
     void Update(double elapsedSeconds);
@@ -131,6 +134,12 @@ private:
     std::function<bool()> getIndirectDrawsEnabled;
 	std::function<uint8_t()> getNumFramesInFlight;
     std::function<bool()> getDrawBoundingSpheres;
+
+
+    GpuCrashTracker::MarkerMap m_markerMap;
+    // Nsight Aftermath instrumentation
+    GFSDK_Aftermath_ContextHandle m_hAftermathCommandListContext;
+    GpuCrashTracker m_gpuCrashTracker;
 };
 
 #endif //DX12RENDERER_H

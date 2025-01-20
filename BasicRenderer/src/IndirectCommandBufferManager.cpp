@@ -6,6 +6,7 @@
 #include "GloballyIndexedResource.h"
 #include "IndirectCommand.h"
 #include "PSOManager.h"
+#include "CommandSignatureManager.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
@@ -19,28 +20,6 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 		m_buffers[type] = std::unordered_map<int, std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>>();
     }
 
-    D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[3] = {};
-    argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-    argumentDescs[0].Constant.RootParameterIndex = 0;
-    argumentDescs[0].Constant.DestOffsetIn32BitValues = 0;
-    argumentDescs[0].Constant.Num32BitValuesToSet = 1;
-
-    argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-    argumentDescs[1].Constant.RootParameterIndex = 1;
-    argumentDescs[1].Constant.DestOffsetIn32BitValues = 0;
-    argumentDescs[1].Constant.Num32BitValuesToSet = 1;
-
-    argumentDescs[2].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
-
-    D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
-    commandSignatureDesc.pArgumentDescs = argumentDescs;
-    commandSignatureDesc.NumArgumentDescs = _countof(argumentDescs);
-    commandSignatureDesc.ByteStride = sizeof(IndirectCommand);
-
-	auto device = DeviceManager::GetInstance().GetDevice();
-    auto rootSignature = PSOManager::GetInstance().GetRootSignature();
-	ThrowIfFailed(device->CreateCommandSignature(&commandSignatureDesc, rootSignature.Get(), IID_PPV_ARGS(&m_commandSignature)));
-
     // Initialize with one dummy draw
 	UpdateBuffersForBucket(MaterialBuckets::Opaque, 1000);
 	UpdateBuffersForBucket(MaterialBuckets::AlphaTest, 1000);
@@ -52,12 +31,18 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 		for (auto& pair : m_buffers[type]) {
 			for (auto& buffer : pair.second) {
 				DeletionManager::GetInstance().MarkForDelete(buffer->GetResource()); // Delay deletion until after the current frame
+				//DebugSharedPtrManager::GetInstance().StorePermenantly(buffer->GetResource());
 			}
 		}
 	}
-    DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque);
-	DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest);
-	DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend);
+
+	//DebugSharedPtrManager::GetInstance().StorePermenantly(m_clearBufferOpaque);
+	//DebugSharedPtrManager::GetInstance().StorePermenantly(m_clearBufferAlphaTest);
+	//DebugSharedPtrManager::GetInstance().StorePermenantly(m_clearBufferBlend);
+
+ //   DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque);
+	//DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest);
+	//DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend);
 
 	DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup);
 }
@@ -80,7 +65,7 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 		commandBufferSize = m_blendCommandBufferSize;
 		break;
 	}
-    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(IndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
+    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(DispatchMeshIndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
 	resource->SetName(L"IndirectCommandBuffer ("+std::to_wstring(entityID)+L")");
     std::shared_ptr<DynamicGloballyIndexedResource> pResource = std::make_shared<DynamicGloballyIndexedResource>(resource);
     m_buffers[bucket][entityID].push_back(pResource);
@@ -132,10 +117,10 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             return;
         }
         m_opaqueCommandBufferSize = newSize;
-        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_opaqueCommandBufferSize, sizeof(IndirectCommand), ResourceState::ALL_SRV, false, true, true);
-        DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
-        m_clearBufferOpaque = resource;
-        m_clearBufferOpaque->SetName(L"ClearBufferOpaque");
+        //auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_opaqueCommandBufferSize, sizeof(DispatchMeshIndirectCommand), ResourceState::ALL_SRV, false, true, true);
+        //DeletionManager::GetInstance().MarkForDelete(m_clearBufferOpaque); // Delay deletion until after the current frame
+        //m_clearBufferOpaque = resource;
+        //m_clearBufferOpaque->SetName(L"ClearBufferOpaque");
         break;
     }
     case MaterialBuckets::AlphaTest: {
@@ -144,10 +129,10 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             return;
         }
         m_alphaTestCommandBufferSize = newSize;
-        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_alphaTestCommandBufferSize, sizeof(IndirectCommand), ResourceState::COPY_SOURCE, false, true, true);
-        DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest); // Delay deletion until after the current frame
-        m_clearBufferAlphaTest = resource;
-        m_clearBufferAlphaTest->SetName(L"ClearBufferAlphaTest");
+        //auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_alphaTestCommandBufferSize, sizeof(DispatchMeshIndirectCommand), ResourceState::COPY_SOURCE, false, true, true);
+        //DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest); // Delay deletion until after the current frame
+        //m_clearBufferAlphaTest = resource;
+        //m_clearBufferAlphaTest->SetName(L"ClearBufferAlphaTest");
         break;
     }
     case MaterialBuckets::Blend: {
@@ -156,10 +141,10 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             return;
         }
         m_blendCommandBufferSize = newSize;
-        auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(IndirectCommand), ResourceState::COPY_SOURCE, false, true, true);
-        DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend); // Delay deletion until after the current frame
-        m_clearBufferBlend = resource;
-        m_clearBufferBlend->SetName(L"ClearBufferBlend");
+        //auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(DispatchMeshIndirectCommand), ResourceState::COPY_SOURCE, false, true, true);
+        //DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend); // Delay deletion until after the current frame
+        //m_clearBufferBlend = resource;
+        //m_clearBufferBlend->SetName(L"ClearBufferBlend");
         break;
     }
     }
@@ -180,7 +165,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             case MaterialBuckets::Blend:
 				commandBufferSize = m_blendCommandBufferSize;
 			}
-            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(IndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
+            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(DispatchMeshIndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
             buffer->SetResource(resource);
         }
     }

@@ -38,7 +38,9 @@ public:
 		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
 	}
 
-	~Buffer() = default;
+	~Buffer() {
+		m_buffer.Reset();
+	}
 	ResourceCPUAccessType m_accessType;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
 	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState);
