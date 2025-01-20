@@ -39,3 +39,28 @@ inline DeletionManager& DeletionManager::GetInstance() {
     static DeletionManager instance;
     return instance;
 }
+
+class DebugSharedPtrManager {
+public:
+	static DebugSharedPtrManager& GetInstance();
+
+	template <typename T>
+	void StorePermenantly(const std::shared_ptr<T>& ptr) {
+		m_deletionQueue.push_back(ptr);
+	}
+
+	void Cleanup() {
+		m_deletionQueue.clear();
+	}
+
+private:
+	DebugSharedPtrManager() = default;
+
+	std::vector<std::shared_ptr<void>> m_deletionQueue;
+};
+
+inline DebugSharedPtrManager& DebugSharedPtrManager::GetInstance() {
+	static DebugSharedPtrManager instance;
+	return instance;
+}
+

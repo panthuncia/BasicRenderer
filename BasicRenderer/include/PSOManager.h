@@ -53,6 +53,7 @@ public:
     ComPtr<ID3D12PipelineState> GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
     ComPtr<ID3D12RootSignature> GetRootSignature();
+	ComPtr<ID3D12RootSignature> GetComputeRootSignature();
     void ReloadShaders();
     void CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
@@ -60,6 +61,7 @@ public:
 private:
     PSOManager() = default;
     ComPtr<ID3D12RootSignature> rootSignature;
+	ComPtr<ID3D12RootSignature> computeRootSignature;
     ComPtr<ID3D12RootSignature> debugRootSignature;
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_psoCache;

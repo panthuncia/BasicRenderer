@@ -28,6 +28,11 @@ extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 }
 
+// Set Agility SDK version
+extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 614;}
+
+extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D\\"; }
+
 
 #define USE_PIX
 #pragma comment(lib, "WinPixEventRuntime.lib")
@@ -160,11 +165,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //    spdlog::warn("could not load the PIX library");
     //}
 
+    // Aftermath
+
     HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
     if (!pixLoaded) {
         // Print the error code for debugging purposes
         spdlog::warn("Could not load PIX! Error: ", GetLastError());
     }
+
+    SetDllDirectoryA(".\\D3D\\");
 
     HWND hwnd = InitWindow(hInstance, nShowCmd);
 
@@ -199,29 +208,29 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    auto dragonScene = loadGLB("models/dragon.glb");
-    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
-    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
-	dragonScene->GetRoot().m_name = L"dragonRoot";
+ //   auto dragonScene = loadGLB("models/dragon.glb");
+ //   dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+ //   dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+	//dragonScene->GetRoot().m_name = L"dragonRoot";
 
-    auto tigerScene = loadGLB("models/tiger.glb");
-    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
-	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
-	tigerScene->GetRoot().m_name = L"tigerRoot";
+ //   auto tigerScene = loadGLB("models/tiger.glb");
+ //   tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
+	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
+	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
-    auto phoenixScene = loadGLB("models/phoenix.glb");
-    phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
-    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+ //   auto phoenixScene = loadGLB("models/phoenix.glb");
+ //   phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+ //   phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
-    auto carScene = loadGLB("models/porche.glb");
-    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
-    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
-	carScene->GetRoot().m_name = L"carRoot";
+ //   auto carScene = loadGLB("models/porche.glb");
+ //   carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+ //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+	//carScene->GetRoot().m_name = L"carRoot";
 
-    auto mountainScene = loadGLB("models/terrain.glb");
-	mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
-	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
-	mountainScene->GetRoot().m_name = L"mountainRoot";
+ //   auto mountainScene = loadGLB("models/terrain.glb");
+	//mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
+	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
 	auto bistro = loadGLB("models/bistro.glb");
 
@@ -256,18 +265,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	renderer.GetCurrentScene()->AppendScene(*bistro);
-
-	DeletionManager::GetInstance().MarkForDelete(carScene);
-    DeletionManager::GetInstance().MarkForDelete(dragonScene);
-    DeletionManager::GetInstance().MarkForDelete(tigerScene);
-    DeletionManager::GetInstance().MarkForDelete(mountainScene);
-	DeletionManager::GetInstance().MarkForDelete(phoenixScene);
+	//DeletionManager::GetInstance().MarkForDelete(carScene);
+    //DeletionManager::GetInstance().MarkForDelete(dragonScene);
+    //DeletionManager::GetInstance().MarkForDelete(tigerScene);
+ //   DeletionManager::GetInstance().MarkForDelete(mountainScene);
+	//DeletionManager::GetInstance().MarkForDelete(phoenixScene);
 	DeletionManager::GetInstance().MarkForDelete(bistro);
-	carScene.reset();
-	dragonScene.reset();
-	tigerScene.reset();
-	mountainScene.reset();
-	phoenixScene.reset();
+	//carScene.reset();
+	//dragonScene.reset();
+	//tigerScene.reset();
+	//mountainScene.reset();
+	//phoenixScene.reset();
 	bistro.reset();
 
     renderer.SetEnvironment("sky");
@@ -313,7 +321,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //scene->AddLight(light1, true);
 	//scene->RemoveLightByID(light1->GetLocalID());
 	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));
-    scene->AddLight(light2, true);
+    scene->AddLight(light2);
     //auto light3 = Light::CreateDirectionalLight("light3", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(-1, -1, -1));
     auto light3 = Light::CreateSpotLight(L"light3", XMFLOAT3(0, 4, 0), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);
 	//scene->AddLight(light3, true);

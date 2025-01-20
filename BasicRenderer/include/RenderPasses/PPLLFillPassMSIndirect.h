@@ -15,6 +15,7 @@
 #include "TextureDescription.h"
 #include "ResourceHandles.h"
 #include "UploadManager.h"
+#include "CommandSignatureManager.h"
 
 class PPLLFillPassMSIndirect : public RenderPass {
 public:
@@ -119,12 +120,12 @@ public:
 		auto pso = psoManager.GetMeshPPLLPSO(localPSOFlags | PSOFlags::PSO_ALPHA_TEST,  BLEND_STATE_BLEND, m_wireframe);
 		commandList->SetPipelineState(pso.Get());
 
-		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
+		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
 		// Blended objects
 		auto indirectCommandBuffer = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer();
 		auto apiResource = indirectCommandBuffer->GetAPIResource();
-		commandList->ExecuteIndirect(commandSignature.Get(), numBlend, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
+		commandList->ExecuteIndirect(commandSignature, numBlend, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 		commandList->Close();
 		return { { commandList.Get() } };

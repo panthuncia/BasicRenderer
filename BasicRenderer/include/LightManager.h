@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include "buffers.h"
 #include "Interfaces/ISceneNodeObserver.h"
 #include "DynamicResource.h"
@@ -18,10 +19,12 @@ class CameraManager;
 
 class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
 public:
-    LightManager();
+	static std::unique_ptr<LightManager> CreateUnique() {
+		return std::unique_ptr<LightManager>(new LightManager());
+	}
     ~LightManager();
     void Initialize();
-    void AddLight(Light* lightNode, bool shadowCasting = false, Camera* currentCamera = nullptr);
+    void AddLight(Light* lightNode, Camera* currentCamera = nullptr);
     void RemoveLight(Light* light);
     unsigned int GetLightBufferDescriptorIndex();
     unsigned int GetPointCubemapMatricesDescriptorIndex();
@@ -36,6 +39,7 @@ public:
 
 
 private:
+    LightManager();
     std::shared_ptr<DynamicStructuredBuffer<LightInfo>> m_lightBuffer;
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_spotViewInfo; // Indices into camera buffer
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_pointViewInfo;

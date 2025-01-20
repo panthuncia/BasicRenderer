@@ -12,8 +12,7 @@ Scene::Scene(){
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
 
     // TODO: refactor indirect buffer manager and light manager so that GPU resources are destroyed on MakeNonResident
-	indirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
-	lightManager.SetCommandBufferManager(indirectCommandBufferManager.get());
+	indirectCommandBufferManager = IndirectCommandBufferManager::CreateShared();
 }
 
 UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
@@ -98,7 +97,7 @@ UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
     return node->GetLocalID();
 }
 
-UINT Scene::AddLight(std::shared_ptr<Light> light, bool shadowCasting) {
+UINT Scene::AddLight(std::shared_ptr<Light> light) {
     light->SetLocalID(nextNodeID);
     if (light->parent == nullptr) {
         sceneRoot.AddChild(light);
@@ -107,8 +106,9 @@ UINT Scene::AddLight(std::shared_ptr<Light> light, bool shadowCasting) {
     lightsByID[nextNodeID] = light;
     nextNodeID++;
 
-    lightManager.AddLight(light.get(), shadowCasting, pCamera.get());
-
+    if (lightManager != nullptr) {
+        lightManager->AddLight(light.get(), pCamera.get());
+    }
     return light->GetLocalID();
 }
 
@@ -214,7 +214,9 @@ void Scene::RemoveLightByID(UINT id) {
     if (it != lightsByID.end()) {
         auto& light = it->second;
         light->parent->RemoveChild(id);
-        lightManager.RemoveLight(light.get());
+        if (lightManager != nullptr) {
+            lightManager->RemoveLight(light.get());
+        }
         lightsByID.erase(it);
     }
 }
@@ -351,7 +353,9 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	pCamera->SetCameraBufferView(m_pCameraManager->AddCamera(info));
 
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
-    lightManager.SetCurrentCamera(pCamera.get());
+	if (lightManager != nullptr) {
+		lightManager->SetCurrentCamera(pCamera.get());
+	}
     AddNode(pCamera);
     m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Opaque);
 	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::AlphaTest);
@@ -378,19 +382,19 @@ UINT Scene::GetNumLights() {
 }
 
 UINT Scene::GetLightBufferDescriptorIndex() {
-    return lightManager.GetLightBufferDescriptorIndex();
+    return lightManager->GetLightBufferDescriptorIndex();
 }
 
 UINT Scene::GetPointCubemapMatricesDescriptorIndex() {
-	return lightManager.GetPointCubemapMatricesDescriptorIndex();
+	return lightManager->GetPointCubemapMatricesDescriptorIndex();
 }
 
 UINT Scene::GetSpotMatricesDescriptorIndex() {
-	return lightManager.GetSpotMatricesDescriptorIndex();
+	return lightManager->GetSpotMatricesDescriptorIndex();
 }
 
 UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return lightManager.GetDirectionalCascadeMatricesDescriptorIndex();
+	return lightManager->GetDirectionalCascadeMatricesDescriptorIndex();
 }
 
 std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
@@ -568,11 +572,21 @@ void Scene::MakeResident() {
 		m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Blend);
     }
 
+    lightManager = LightManager::CreateUnique();
+
 	m_pCameraManager = CameraManager::CreateUnique();
-	lightManager.SetCameraManager(m_pCameraManager.get());
+
+	lightManager->SetCameraManager(m_pCameraManager.get());
+	if (pCamera != nullptr) {
+		lightManager->SetCurrentCamera(pCamera.get());
+	}
+    lightManager->SetCommandBufferManager(indirectCommandBufferManager.get());
 }
 
 void Scene::MakeNonResident() {
+
+    auto& debugPtrManager = DebugSharedPtrManager::GetInstance();
+
     meshManager = nullptr;
 	objectManager = nullptr;
 
@@ -584,6 +598,11 @@ void Scene::MakeNonResident() {
     }
 
 	m_pCameraManager = nullptr;
+	lightManager = nullptr;
+}
+
+Scene::~Scene() {
+	MakeNonResident();
 }
 
 void Scene::Activate() {
@@ -626,7 +645,7 @@ unsigned int Scene::GetNumBlendDraws() {
     return m_numBlendDraws;
 }
 
-const std::unique_ptr<IndirectCommandBufferManager>& Scene::GetIndirectCommandBufferManager() {
+const std::shared_ptr<IndirectCommandBufferManager>& Scene::GetIndirectCommandBufferManager() {
 	return indirectCommandBufferManager;
 }
 

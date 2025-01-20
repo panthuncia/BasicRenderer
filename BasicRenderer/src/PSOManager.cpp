@@ -529,10 +529,22 @@ void PSOManager::createRootSignature() {
     ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &signature, &error));
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
+
+	// Compute root signature
+    ComPtr<ID3DBlob> computeSignature;
+    ComPtr<ID3DBlob> computeError;
+    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
+    versionedDesc.Desc_1_1 = rootSignatureDesc;
+	ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &computeSignature, &computeError));
+	ThrowIfFailed(device->CreateRootSignature(0, computeSignature->GetBufferPointer(), computeSignature->GetBufferSize(), IID_PPV_ARGS(&computeRootSignature)));
 }
 
 ComPtr<ID3D12RootSignature> PSOManager::GetRootSignature() {
     return rootSignature;
+}
+
+ComPtr<ID3D12RootSignature> PSOManager::GetComputeRootSignature() {
+	return computeRootSignature;
 }
 
 void PSOManager::ReloadShaders() {

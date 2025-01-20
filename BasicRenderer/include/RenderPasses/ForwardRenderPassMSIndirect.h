@@ -11,6 +11,7 @@
 #include "Scene.h"
 #include "Material.h"
 #include "SettingsManager.h"
+#include "CommandSignatureManager.h"
 
 class ForwardRenderPassMSIndirect : public RenderPass {
 public:
@@ -89,7 +90,7 @@ public:
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
 
-		auto commandSignature = context.currentScene->GetIndirectCommandBufferManager()->GetCommandSignature();
+		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
 		auto numOpaque = context.currentScene->GetNumOpaqueDraws();
 		if (numOpaque != 0) {
@@ -101,7 +102,7 @@ public:
 			auto pso = psoManager.GetMeshPSO(localPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
 			commandList->SetPipelineState(pso.Get());
 			auto apiResource = indirectCommandBuffer->GetAPIResource();
-			commandList->ExecuteIndirect(commandSignature.Get(), numOpaque, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
+			commandList->ExecuteIndirect(commandSignature, numOpaque, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 		}
 
 		auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
@@ -114,7 +115,7 @@ public:
 			auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED , BlendState::BLEND_STATE_MASK, m_wireframe);
 			commandList->SetPipelineState(pso.Get());
 			auto apiResource = indirectCommandBuffer->GetAPIResource();
-			commandList->ExecuteIndirect(commandSignature.Get(), numAlphaTest, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
+			commandList->ExecuteIndirect(commandSignature, numAlphaTest, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
 
 		}
 		commandList->Close();
