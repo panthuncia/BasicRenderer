@@ -7,6 +7,15 @@
 
 class RenderContext;
 
+struct BarrierGroups {
+	unsigned int numBufferBarrierGroups = 0;
+	unsigned int numTextureBarrierGroups = 0;
+	unsigned int numGlobalBarrierGroups = 0;
+    D3D12_BARRIER_GROUP* bufferBarriers = nullptr;
+    D3D12_BARRIER_GROUP* textureBarriers = nullptr;
+    D3D12_BARRIER_GROUP* globalBarriers = nullptr;
+};
+
 class Resource {
 public:
     Resource() : currentState(ResourceState::UNKNOWN) {
@@ -22,10 +31,12 @@ public:
 
 protected:
     virtual std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) = 0;
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
     virtual void OnSetName() {}
     virtual void SetState(ResourceState state) { currentState = state; }
 
     ResourceState currentState;
+	ResourceSyncState currentSyncState = ResourceSyncState::NONE;
     std::wstring name;
 private:
     bool m_uploadInProgress = false;

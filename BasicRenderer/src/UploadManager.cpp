@@ -154,41 +154,35 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Reset(commandAllocator.Get(), nullptr);
-	//auto maxNumTransitions = m_resourceUpdates.size();
-	//std::vector<D3D12_RESOURCE_BARRIER> barriers;
-	//barriers.reserve(maxNumTransitions);
-	//std::vector<D3D12_RESOURCE_STATES> initialD3D12States;
-	//initialD3D12States.reserve(maxNumTransitions);
-	//std::vector<ResourceState> initialStates;
-	//initialD3D12States.reserve(maxNumTransitions);
-	//std::vector<Resource*> deduplicatedResources;
-	//deduplicatedResources.reserve(maxNumTransitions);
-	//for (auto& update : m_resourceUpdates) {
+	auto maxNumTransitions = m_resourceUpdates.size();
+	std::vector<D3D12_RESOURCE_BARRIER> barriers;
+	barriers.reserve(maxNumTransitions);
+	std::vector<D3D12_RESOURCE_STATES> initialD3D12States;
+	initialD3D12States.reserve(maxNumTransitions);
+	std::vector<ResourceState> initialStates;
+	initialD3D12States.reserve(maxNumTransitions);
+	std::vector<Resource*> deduplicatedResources;
+	deduplicatedResources.reserve(maxNumTransitions);
+	for (auto& update : m_resourceUpdates) {
 
-	//	Resource* buffer = update.resourceToUpdate;
-	//	if (buffer->GetName() == L"preSkinningNormalMatrixBuffer") {
-	//		print("eh?");
-	//	};
-	//	ResourceState initialState = buffer->GetState();
-	//	if (buffer->m_uploadInProgress) {
-	//		continue;
-	//	}
-	//	auto startD3D12State = ResourceStateToD3D12(initialState);
-	//	D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-	//		buffer->GetAPIResource(),
-	//		startD3D12State,
-	//		D3D12_RESOURCE_STATE_COPY_DEST
-	//	);
-	//	barriers.push_back(barrier);
-	//	initialD3D12States.push_back(startD3D12State);
-	//	initialStates.push_back(initialState);
-	//	deduplicatedResources.push_back(buffer);
-	//	if (buffer->GetName() == L"preSkinningNormalMatrixBuffer") {
-	//		print("eh?");
-	//	};
-	//	buffer->m_uploadInProgress = true;
-	//}
- //   commandList->ResourceBarrier(barriers.size(), barriers.data());
+		Resource* buffer = update.resourceToUpdate;
+		ResourceState initialState = buffer->GetState();
+		if (buffer->m_uploadInProgress) {
+			continue;
+		}
+		auto startD3D12State = ResourceStateToD3D12(initialState);
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			buffer->GetAPIResource(),
+			startD3D12State,
+			D3D12_RESOURCE_STATE_COPY_DEST
+		);
+		barriers.push_back(barrier);
+		initialD3D12States.push_back(startD3D12State);
+		initialStates.push_back(initialState);
+		deduplicatedResources.push_back(buffer);
+		buffer->m_uploadInProgress = true;
+	}
+    commandList->ResourceBarrier(barriers.size(), barriers.data());
 	for (auto& update : m_resourceUpdates) {
 		Resource* buffer = update.resourceToUpdate;
 		commandList->CopyBufferRegion(
@@ -200,17 +194,17 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 		);
 	}
 
-	//int i = 0;
-	//for (auto& resource : deduplicatedResources) {
-	//	D3D12_RESOURCE_STATES temp;
-	//	temp = barriers[i].Transition.StateBefore;
-	//	barriers[i].Transition.StateBefore = barriers[i].Transition.StateAfter;
-	//	barriers[i].Transition.StateAfter = temp;
-	//	i += 1;
-	//	resource->m_uploadInProgress = false;
+	int i = 0;
+	for (auto& resource : deduplicatedResources) {
+		D3D12_RESOURCE_STATES temp;
+		temp = barriers[i].Transition.StateBefore;
+		barriers[i].Transition.StateBefore = barriers[i].Transition.StateAfter;
+		barriers[i].Transition.StateAfter = temp;
+		i += 1;
+		resource->m_uploadInProgress = false;
 
- //   }
-	//commandList->ResourceBarrier(barriers.size(), barriers.data());
+    }
+	commandList->ResourceBarrier(barriers.size(), barriers.data());
 
 	commandList->Close();
 

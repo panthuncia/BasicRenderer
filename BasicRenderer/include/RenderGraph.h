@@ -23,7 +23,7 @@ public:
 	void Compile();
 	void Setup();
 	//void AllocateResources(RenderContext& context);
-	void AddResource(std::shared_ptr<Resource> resource);
+	void AddResource(std::shared_ptr<Resource> resource, bool transition = false, ResourceState initialState = ResourceState::UNKNOWN);
 	void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
 	std::shared_ptr<RenderPass> GetRenderPassByName(const std::string& name);
@@ -40,12 +40,14 @@ private:
 	};
 
 	struct ResourceTransition {
-		ResourceTransition(std::shared_ptr<Resource> pResource, ResourceState fromState, ResourceState toState)
-			: pResource(pResource), fromState(fromState), toState(toState) {
+		ResourceTransition(std::shared_ptr<Resource> pResource, ResourceState fromState, ResourceState toState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState)
+			: pResource(pResource), fromState(fromState), toState(toState), prevSyncState(prevSyncState), newSyncState(newSyncState) {
 		}
 		std::shared_ptr<Resource> pResource;
 		ResourceState fromState;
 		ResourceState toState;
+		ResourceSyncState prevSyncState = ResourceSyncState::NONE;
+		ResourceSyncState newSyncState = ResourceSyncState::NONE;
 	};
 
 	enum class CommandQueueType {
@@ -108,12 +110,18 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
+	std::unordered_map<std::wstring, ResourceState> initialResourceStates;
 	std::vector<PassBatch> batches;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_graphicsTransitionCommandLists;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsTransitionCommandLists;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_computeCommandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_computeTransitionCommandLists;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_computeTransitionCommandLists;
+
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> initialTransitionCommandList;
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> initialTransitionCommandAllocator;
+	Microsoft::WRL::ComPtr<ID3D12Fence> m_initialTransitionFence;
+	UINT64 m_initialTransitionFenceValue = 0;
 
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_frameStartSyncFence; // TODO: Is there a better way of handling waiting for pre-frame things like copying resources?
 
@@ -129,16 +137,16 @@ private:
 		return m_computeQueueFenceValue++;
 	}
 
-	void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
+	//void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
     void UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<std::wstring>& renderUAVs);
     void UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<std::wstring>& computeUAVs);
 
-	void ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates);
+	void ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<std::wstring>& computeUAVs);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<std::wstring>& renderUAVs);
 
-    std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, ComputePassAndResources& pass, unsigned int batchIndex);
-	std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, RenderPassAndResources& pass, unsigned int batchIndex);
+    std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, ComputePassAndResources& pass, unsigned int batchIndex);
+	std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates, std::unordered_map<std::wstring, unsigned int>& transitionHistory, std::unordered_map<std::wstring, unsigned int>& producerHistory, RenderPassAndResources& pass, unsigned int batchIndex);
 	std::pair<int, int> GetBatchesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
     std::pair<int, int> GetBatchesToWaitOn(RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
 };

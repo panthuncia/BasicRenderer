@@ -40,6 +40,13 @@ public:
         }
     }
 
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+        if (resource) {
+            SetState(newState); // Keep the wrapper's state in sync
+            return resource->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+        }
+    }
+
 	ID3D12Resource* GetAPIResource() const override {
 		if (resource) {
 			return resource->GetAPIResource();
@@ -88,6 +95,13 @@ public:
             SetState(newState); // Keep the wrapper's state in sync
             return m_resource->GetTransitions(prevState, newState);
         }
+    }
+
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+		if (m_resource) {
+			SetState(newState); // Keep the wrapper's state in sync
+			return m_resource->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+		}
     }
 
     ID3D12Resource* GetAPIResource() const override {

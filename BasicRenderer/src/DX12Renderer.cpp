@@ -285,6 +285,18 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     }
 #endif
 
+    // Disable unwanted warnings
+    ComPtr<ID3D12InfoQueue> warningInfoQueue;
+    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
+    {
+        D3D12_INFO_QUEUE_FILTER filter = {};
+        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists
+        filter.DenyList.NumIDs = _countof(blockedIDs);
+        filter.DenyList.pIDList = blockedIDs;
+
+        warningInfoQueue->AddStorageFilterEntries(&filter);
+    }
+
     // Describe and create the command queue
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
@@ -808,6 +820,13 @@ void DX12Renderer::CreateRenderGraph() {
 	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
 	newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
 
+	auto& cameraManager = currentScene->GetCameraManager();
+    auto& cameraBuffer = cameraManager->GetCameraBuffer();
+    newGraph->AddResource(cameraBuffer);
+
+	auto& perFrameBuffer = ResourceManager::GetInstance().GetPerFrameBuffer();
+	newGraph->AddResource(perFrameBuffer, true, ResourceState::CONSTANT);
+
     // Frustrum culling
 	bool indirect = getIndirectDrawsEnabled();
 	if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
@@ -829,6 +848,7 @@ void DX12Renderer::CreateRenderGraph() {
         frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
         frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+		frustrumCullingPassParameters.shaderResources.push_back(cameraBuffer);
         frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
         newGraph->AddComputePass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
     }
@@ -839,6 +859,7 @@ void DX12Renderer::CreateRenderGraph() {
 	forwardPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
     //forwardPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	forwardPassParameters.shaderResources.push_back(postSkinningVertices);
+	forwardPassParameters.shaderResources.push_back(cameraBuffer);
 
     std::shared_ptr<RenderPass> forwardPass = nullptr;
 
@@ -951,6 +972,7 @@ void DX12Renderer::CreateRenderGraph() {
 		shadowPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
 		shadowPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
         shadowPassParameters.shaderResources.push_back(blendPerMeshBuffer);
+		shadowPassParameters.shaderResources.push_back(cameraBuffer);
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
@@ -1014,6 +1036,7 @@ void DX12Renderer::CreateRenderGraph() {
     PPLLFillPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
 	PPLLFillPassParameters.shaderResources.push_back(m_environmentIrradiance);
     PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
+	PPLLFillPassParameters.shaderResources.push_back(cameraBuffer);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);

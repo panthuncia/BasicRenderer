@@ -265,12 +265,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	renderer.GetCurrentScene()->AppendScene(*bistro);
+
 	//DeletionManager::GetInstance().MarkForDelete(carScene);
     //DeletionManager::GetInstance().MarkForDelete(dragonScene);
     //DeletionManager::GetInstance().MarkForDelete(tigerScene);
  //   DeletionManager::GetInstance().MarkForDelete(mountainScene);
 	//DeletionManager::GetInstance().MarkForDelete(phoenixScene);
 	DeletionManager::GetInstance().MarkForDelete(bistro);
+
 	//carScene.reset();
 	//dragonScene.reset();
 	//tigerScene.reset();

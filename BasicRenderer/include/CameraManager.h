@@ -23,6 +23,10 @@ public:
 		m_pCameraBuffer->UpdateView(view.get(), &camera);
 	}
 
+	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>>& GetCameraBuffer() {
+		return m_pCameraBuffer;
+	}
+
 private:
 	CameraManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
