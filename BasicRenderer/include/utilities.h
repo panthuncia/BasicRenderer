@@ -174,3 +174,10 @@ DirectX::XMFLOAT3 Add(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b);
 DirectX::XMFLOAT3 Scale(const DirectX::XMFLOAT3& a, const float scalar);
 
 XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix);
+
+template <class T>
+inline void hash_combine(std::size_t & s, const T & v)
+{
+    std::hash<T> h;
+    s^= h(v) + 0x9e3779b9 + (s<< 6) + (s>> 2);
+}

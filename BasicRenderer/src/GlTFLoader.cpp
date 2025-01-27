@@ -703,13 +703,15 @@ std::vector<std::shared_ptr<Material>> parseGLTFMaterials(const json& gltfData, 
 		if (gltfMaterial.contains("name")) {
 			name = gltfMaterial["name"].get<std::string>();
 		}
-        std::shared_ptr<Material> newMaterial = std::make_shared<Material>(name,
+        std::shared_ptr<Material> newMaterial = std::make_shared<Material>(
+            name,
             materialFlags,
 			psoFlags,
             baseColorTexture,
             normalTexture,
             aoMap,
             nullptr,
+            metallicRoughnessTexture,
             metallicRoughnessTexture,
             emissiveTexture,
             metallicFactor,

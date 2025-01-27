@@ -23,6 +23,8 @@
 #include "MaterialFlags.h"
 #include "PSOFlags.h"
 #include "DeletionManager.h"
+#include "ModelLoader.h"
+
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
@@ -207,11 +209,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     };
 
     auto baseScene = std::make_shared<Scene>();
+    //auto testScene = LoadModel("models/dragon.glb");
 
- //   auto dragonScene = loadGLB("models/dragon.glb");
- //   dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
- //   dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
-	//dragonScene->GetRoot().m_name = L"dragonRoot";
+    auto dragonScene = loadGLB("models/dragon.glb");
+    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+	dragonScene->GetRoot().m_name = L"dragonRoot";
 
  //   auto tigerScene = loadGLB("models/tiger.glb");
  //   tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
@@ -232,7 +235,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
-	auto bistro = loadGLB("models/bistro.glb");
+	//auto bistro = loadGLB("models/bistro.glb");
 	//auto sponza = loadGLB("models/sponza.glb");
 
     //auto cubeScene = loadGLB("models/cube.glb");
@@ -258,30 +261,30 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
 	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
-	renderer.GetCurrentScene()->AppendScene(*bistro);
+	//renderer.GetCurrentScene()->AppendScene(*bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);
 
 	//DeletionManager::GetInstance().MarkForDelete(carScene);
-    //DeletionManager::GetInstance().MarkForDelete(dragonScene);
+    DeletionManager::GetInstance().MarkForDelete(dragonScene);
     //DeletionManager::GetInstance().MarkForDelete(tigerScene);
  //   DeletionManager::GetInstance().MarkForDelete(mountainScene);
 	//DeletionManager::GetInstance().MarkForDelete(phoenixScene);
-	DeletionManager::GetInstance().MarkForDelete(bistro);
+	//DeletionManager::GetInstance().MarkForDelete(bistro);
 	//DeletionManager::GetInstance().MarkForDelete(sponza);
 
 	//carScene.reset();
-	//dragonScene.reset();
+	dragonScene.reset();
 	//tigerScene.reset();
 	//mountainScene.reset();
 	//phoenixScene.reset();
-	bistro.reset();
+	//bistro.reset();
 	//sponza.reset();
 
     renderer.SetEnvironment("sky");

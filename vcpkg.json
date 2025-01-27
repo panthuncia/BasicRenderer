@@ -10,7 +10,8 @@
             "features": [ "dx12-binding", "win32-binding" ]
         },
         "directx-headers",
-        "directx12-agility"
+        "directx12-agility",
+        "assimp"
     ],
   "builtin-baseline": "3508985146f1b1d248c67ead13f8f54be5b4f5da"
 }

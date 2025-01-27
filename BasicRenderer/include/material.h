@@ -17,7 +17,8 @@ public:
     std::shared_ptr<Texture> m_normalTexture;
     std::shared_ptr<Texture> m_aoMap;
     std::shared_ptr<Texture> m_heightMap;
-    std::shared_ptr<Texture> m_metallicRoughnessTexture;
+    std::shared_ptr<Texture> m_roughnessTexture;
+    std::shared_ptr<Texture> m_metallicTexture;
     std::shared_ptr<Texture> m_emissiveTexture;
     float m_metallicFactor;
     float m_roughnessFactor;
@@ -36,7 +37,8 @@ public:
         std::shared_ptr<Texture> normalTexture,
         std::shared_ptr<Texture> aoMap,
         std::shared_ptr<Texture> heightMap,
-        std::shared_ptr<Texture> metallicRoughnessTexture,
+        std::shared_ptr<Texture> metallicTexture,
+        std::shared_ptr<Texture> m_roughnessTexture,
         std::shared_ptr<Texture> emissiveTexture,
         float metallicFactor,
         float roughnessFactor,

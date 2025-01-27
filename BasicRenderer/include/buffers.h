@@ -67,8 +67,10 @@ struct PerMaterialCB {
     unsigned int baseColorSamplerIndex;
     unsigned int normalTextureIndex;
     unsigned int normalSamplerIndex;
-    unsigned int metallicRoughnessTextureIndex;
-    unsigned int metallicRoughnessSamplerIndex;
+    unsigned int metallicTextureIndex;
+    unsigned int metallicSamplerIndex;
+	unsigned int roughnessTextureIndex;
+	unsigned int roughnessSamplerIndex;
     unsigned int emissiveTextureIndex;
     unsigned int emissiveSamplerIndex;
     unsigned int aoMapIndex;
@@ -82,6 +84,8 @@ struct PerMaterialCB {
     float textureScale;
     float heightMapScale;
     float alphaCutoff;
+    unsigned int pad0;
+    unsigned int pad1;
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
 };

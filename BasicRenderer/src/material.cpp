@@ -22,7 +22,8 @@ Material::Material(const std::string& name,
     std::shared_ptr<Texture> normalTexture,
     std::shared_ptr<Texture> aoMap,
     std::shared_ptr<Texture> heightMap,
-    std::shared_ptr<Texture> metallicRoughnessTexture,
+    std::shared_ptr<Texture> metallicTexture,
+    std::shared_ptr<Texture> roughnessTexture,
     std::shared_ptr<Texture> emissiveTexture,
     float metallicFactor,
     float roughnessFactor,
@@ -36,7 +37,8 @@ Material::Material(const std::string& name,
     m_normalTexture(normalTexture),
     m_aoMap(aoMap),
     m_heightMap(heightMap),
-    m_metallicRoughnessTexture(metallicRoughnessTexture),
+    m_metallicTexture(metallicTexture),
+	m_roughnessTexture(roughnessTexture),
     m_emissiveTexture(emissiveTexture),
     m_metallicFactor(metallicFactor),
     m_roughnessFactor(roughnessFactor),
@@ -74,11 +76,20 @@ Material::Material(const std::string& name,
         m_materialData.heightMapIndex = heightMap->GetSamplerDescriptorIndex();
         heightMap->GetBuffer()->SetName(L"HeightMap");
     }
-    if (metallicRoughnessTexture != nullptr) {
-        m_materialData.metallicRoughnessTextureIndex = metallicRoughnessTexture->GetBuffer()->GetSRVInfo().index;
-        m_materialData.metallicRoughnessSamplerIndex = metallicRoughnessTexture->GetSamplerDescriptorIndex();
-		metallicRoughnessTexture->GetBuffer()->SetName(L"MetallicRoughnessTexture");
+    if (metallicTexture != nullptr) {
+        m_materialData.metallicTextureIndex = metallicTexture->GetBuffer()->GetSRVInfo().index;
+        m_materialData.metallicSamplerIndex = metallicTexture->GetSamplerDescriptorIndex();
+		metallicTexture->GetBuffer()->SetName(L"MetallicTexture");
     }
+	if (roughnessTexture != nullptr) {
+		m_materialData.roughnessTextureIndex = roughnessTexture->GetBuffer()->GetSRVInfo().index;
+		m_materialData.roughnessSamplerIndex = roughnessTexture->GetSamplerDescriptorIndex();
+		roughnessTexture->GetBuffer()->SetName(L"RoughnessTexture");
+	}
+    if (metallicTexture == roughnessTexture && metallicTexture != nullptr) {
+		roughnessTexture->GetBuffer()->SetName(L"MetallicRoughnessTexture");
+    }
+
     if (emissiveTexture != nullptr) {
         m_materialData.emissiveTextureIndex = emissiveTexture->GetBuffer()->GetSRVInfo().index;
         m_materialData.emissiveSamplerIndex = emissiveTexture->GetSamplerDescriptorIndex();

@@ -54,8 +54,10 @@ struct MaterialInfo {
     uint baseColorSamplerIndex;
     uint normalTextureIndex;
     uint normalSamplerIndex;
-    uint metallicRoughnessTextureIndex;
-    uint metallicRoughnessSamplerIndex;
+    uint metallicTextureIndex;
+    uint metallicSamplerIndex;
+    uint roughnessTextureIndex;
+    uint roughnessSamplerIndex;
     uint emissiveTextureIndex;
     uint emissiveSamplerIndex;
     uint aoMapIndex;
@@ -69,6 +71,8 @@ struct MaterialInfo {
     float textureScale;
     float heightMapScale;
     float alphaCutoff;
+    uint pad0;
+    uint pad1;
     float4 baseColorFactor;
     float4 emissiveFactor;
 };

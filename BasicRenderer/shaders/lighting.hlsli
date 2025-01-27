@@ -232,11 +232,12 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     
     if (materialFlags & MATERIAL_PBR) {
         if (materialFlags & MATERIAL_PBR_MAPS) {
-            Texture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[materialInfo.metallicRoughnessTextureIndex];
-            SamplerState metallicRoughnessSamplerState = SamplerDescriptorHeap[materialInfo.metallicRoughnessSamplerIndex];
-            float2 metallicRoughness = metallicRoughnessTexture.Sample(metallicRoughnessSamplerState, uv).gb;
-            metallic = metallicRoughness.y * materialInfo.metallicFactor;
-            roughness = metallicRoughness.x * materialInfo.roughnessFactor;
+            Texture2D<float4> metallicTexture = ResourceDescriptorHeap[materialInfo.metallicTextureIndex];
+            SamplerState metallicSamplerState = SamplerDescriptorHeap[materialInfo.metallicSamplerIndex];
+            Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[materialInfo.roughnessTextureIndex];
+            SamplerState roughnessSamplerState = SamplerDescriptorHeap[materialInfo.roughnessSamplerIndex];
+            metallic = metallicTexture.Sample(metallicSamplerState, uv).g * materialInfo.metallicFactor;
+            roughness = roughnessTexture.Sample(roughnessSamplerState, uv).b * materialInfo.roughnessFactor;
         }
         else {
             metallic = materialInfo.metallicFactor;
