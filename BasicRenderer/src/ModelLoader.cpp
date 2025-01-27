@@ -135,7 +135,7 @@ static std::shared_ptr<Texture> loadAiTexture(
     }
 }
 
-std::vector<std::shared_ptr<Texture>> LoadMaterialsFromAssimpScene(
+std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
     const aiScene* scene,
     const std::string& directory,                     // folder containing the model
     bool sRGB
@@ -257,12 +257,16 @@ std::vector<std::shared_ptr<Texture>> LoadMaterialsFromAssimpScene(
 		std::shared_ptr<Texture> roughnessTex = nullptr;
         std::shared_ptr<Texture> aoMap                 = nullptr;
         std::shared_ptr<Texture> emissiveTexture       = nullptr;
+		std::shared_ptr<Texture> heightMap = nullptr;
 
 		if (materialTextures.find(aiTextureType_DIFFUSE) != materialTextures.end()) {
 			baseColorTexture = materialTextures[aiTextureType_DIFFUSE];
 			materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
 		}
 		if (materialTextures.find(aiTextureType_BASE_COLOR) != materialTextures.end()) {
+            if (baseColorTexture != nullptr) {
+				spdlog::warn("Material {} has both BASE_COLOR and DIFFUSE textures. Using BASE_COLOR", mIndex);
+            }
 			baseColorTexture = materialTextures[aiTextureType_BASE_COLOR];
 			materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
 		}
@@ -285,6 +289,17 @@ std::vector<std::shared_ptr<Texture>> LoadMaterialsFromAssimpScene(
 		if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
 			emissiveTexture = materialTextures[aiTextureType_EMISSION_COLOR];
 			materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+		}
+		if (materialTextures.find(aiTextureType_HEIGHT) != materialTextures.end()) {
+			heightMap = materialTextures[aiTextureType_HEIGHT];
+			materialFlags |= MaterialFlags::MATERIAL_PARALLAX | MaterialFlags::MATERIAL_TEXTURED;
+		}
+		if (materialTextures.find(aiTextureType_DISPLACEMENT) != materialTextures.end()) {
+			if (heightMap != nullptr) {
+				spdlog::warn("Material {} has both HEIGHT and DISPLACEMENT textures. Using DISPLACEMENT", mIndex);
+			}
+			heightMap = materialTextures[aiTextureType_DISPLACEMENT];
+			materialFlags |= MaterialFlags::MATERIAL_PARALLAX | MaterialFlags::MATERIAL_TEXTURED;
 		}
 
 
@@ -339,114 +354,6 @@ std::vector<std::shared_ptr<Texture>> LoadMaterialsFromAssimpScene(
 		materials.push_back(newMaterial);
     }
 
-    // Collect all unique textures in the returned vector
-    textures.reserve(loadedTextures.size());
-    for (auto& pair : loadedTextures) {
-        textures.push_back(pair.second);
-    }
-
-    return textures;
-}
-
-static std::vector<std::shared_ptr<Material>> parseAiMaterials(
-    const aiScene* pScene,
-    const std::string& modelDirectory// For external textures
-) 
-{
-    std::vector<std::shared_ptr<Material>> materials;
-    materials.reserve(pScene->mNumMaterials);
-
-    // Create a default texture if you need fallback
-    auto defaultTexture = Material::createDefaultTexture();
-
-    for (unsigned int i = 0; i < pScene->mNumMaterials; ++i) {
-        aiMaterial* aiMat = pScene->mMaterials[i];
-
-        // In glTF code you had a bunch of flags, e.g. PBR, alpha, etc.
-        UINT materialFlags = 0;
-        UINT psoFlags = 0;
-
-        // Basic properties: e.g., retrieve diffuse color
-        aiColor4D diffuse(1.f, 1.f, 1.f, 1.f);
-        aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse);
-
-        // Emissive factor (if available)
-        aiColor3D emissive(0.f, 0.f, 0.f);
-        aiMat->Get(AI_MATKEY_COLOR_EMISSIVE, emissive);
-
-        float metallicFactor = 0.f;
-        aiMat->Get(AI_MATKEY_METALLIC_FACTOR, metallicFactor);
-
-        float roughnessFactor = 1.f;
-		aiMat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessFactor);
-
-        // Let's define placeholders for textures
-        std::shared_ptr<Texture> baseColorTexture      = nullptr;
-        std::shared_ptr<Texture> normalTexture         = nullptr;
-        std::shared_ptr<Texture> metallicTex           = nullptr;
-		std::shared_ptr<Texture> roughnessTex          = nullptr;
-        std::shared_ptr<Texture> aoMap                 = nullptr;
-        std::shared_ptr<Texture> emissiveTexture       = nullptr;
-
-        // For alpha, blending, doubleSided
-        float alphaCutoff       = 0.5f;
-        BlendState blendMode    = BlendState::BLEND_STATE_OPAQUE;
-
-        // If the material is two-sided
-        bool twoSided = false;
-        if (aiMat->Get(AI_MATKEY_TWOSIDED, twoSided) == AI_SUCCESS && twoSided) {
-            materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
-			psoFlags |= PSOFlags::PSO_DOUBLE_SIDED | PSO_ALPHA_TEST; // All double-sided materials are alpha-tested
-        }
-
-        float opacity = 1.0f;
-        if (aiMat->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS && opacity < 1.0f) {
-            blendMode = BlendState::BLEND_STATE_BLEND;
-            psoFlags |= PSOFlags::PSO_BLEND;
-        }
-
-
-        if (aiMat->GetTextureCount(aiTextureType_DIFFUSE) > 0) {
-            aiString texPath;
-            if (aiMat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) == AI_SUCCESS) {
-                // Implement your own loadAiTexture(...) to create a Texture from file or from embedded data
-                baseColorTexture = Material::createDefaultTexture(); 
-                materialFlags |= (MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED);
-            }
-        }
-
-        // Material name
-        aiString matName;
-        aiMat->Get(AI_MATKEY_NAME, matName);
-        std::string mName = matName.C_Str();
-        if (mName.empty()) mName = "Material_" + std::to_string(i);
-
-        // Convert AI colors to XMFLOAT4
-        DirectX::XMFLOAT4 baseColorFactor(diffuse.r, diffuse.g, diffuse.b, diffuse.a);
-        DirectX::XMFLOAT4 emissiveFactor(emissive.r, emissive.g, emissive.b, 1.f);
-
-        auto newMaterial = std::make_shared<Material>(
-            mName,
-            materialFlags,
-            psoFlags,
-            baseColorTexture,
-            normalTexture,
-            aoMap,
-            nullptr, // No height map here
-            metallicTex,
-			roughnessTex,
-            emissiveTexture,
-            metallicFactor,
-            roughnessFactor,
-            baseColorFactor,
-            emissiveFactor,
-            blendMode,
-            alphaCutoff
-        );
-
-        materials.push_back(newMaterial);
-    }
-
     return materials;
 }
 
@@ -464,7 +371,6 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 	// Directory of the model file
 	std::string directory = filePath.substr(0, filePath.find_last_of('/'));
 
-    auto textures = LoadMaterialsFromAssimpScene(pScene, directory, false);
-	auto materials = parseAiMaterials(pScene, directory);
+    auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
     return nullptr;
 }
