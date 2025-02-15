@@ -209,7 +209,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     };
 
     auto baseScene = std::make_shared<Scene>();
-    //auto testScene = LoadModel("models/dragon.glb");
+    auto testScene = LoadModel("models/dragon.glb");
 
     auto dragonScene = loadGLB("models/dragon.glb");
     dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});

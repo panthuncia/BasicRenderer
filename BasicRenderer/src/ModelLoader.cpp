@@ -357,6 +357,323 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
     return materials;
 }
 
+static std::vector<MeshData> parseAiMeshes(
+    const aiScene* pScene,
+    const std::vector<std::shared_ptr<Material>>& materials
+) 
+{
+    std::vector<MeshData> meshes;
+    meshes.reserve(pScene->mNumMeshes);
+
+    for (unsigned int i = 0; i < pScene->mNumMeshes; ++i) {
+        aiMesh* aMesh = pScene->mMeshes[i];
+        MeshData meshData;
+
+        // Each aiMesh can have multiple primitives in glTF terms, 
+        // but in Assimp, it’s typically one set of indices + attributes.
+        // We'll store one "GeometryData" in meshData.geometries[0].
+        GeometryData geometry;
+
+        // Positions
+        geometry.positions.reserve(aMesh->mNumVertices * 3);
+        for (unsigned int v = 0; v < aMesh->mNumVertices; v++) {
+            const auto& vec = aMesh->mVertices[v];
+            geometry.positions.push_back(vec.x);
+            geometry.positions.push_back(vec.y);
+            geometry.positions.push_back(vec.z);
+        }
+
+        // Normals (if present)
+        if (aMesh->HasNormals()) {
+            geometry.normals.reserve(aMesh->mNumVertices * 3);
+            for (unsigned int v = 0; v < aMesh->mNumVertices; v++) {
+                const auto& n = aMesh->mNormals[v];
+                geometry.normals.push_back(n.x);
+                geometry.normals.push_back(n.y);
+                geometry.normals.push_back(n.z);
+            }
+            geometry.flags |= VertexFlags::VERTEX_NORMALS;
+        }
+
+        // Texture coords (we'll only load the first set)
+        if (aMesh->HasTextureCoords(0)) {
+            geometry.texcoords.reserve(aMesh->mNumVertices * 2);
+            for (unsigned int v = 0; v < aMesh->mNumVertices; v++) {
+                const auto& uv = aMesh->mTextureCoords[0][v];
+                geometry.texcoords.push_back(uv.x);
+                geometry.texcoords.push_back(uv.y);
+            }
+            geometry.flags |= VertexFlags::VERTEX_TEXCOORDS;
+        }
+
+        // Indices
+        // Each aiMesh has mNumFaces, each face typically a triangle => 3 indices
+        for (unsigned int f = 0; f < aMesh->mNumFaces; f++) {
+            const aiFace& face = aMesh->mFaces[f];
+            for (unsigned int idx = 0; idx < face.mNumIndices; idx++) {
+                geometry.indices.push_back(face.mIndices[idx]);
+            }
+        }
+
+        // Material reference
+        if (aMesh->mMaterialIndex < materials.size()) {
+            geometry.material = materials[aMesh->mMaterialIndex];
+        } else {
+            // fallback if no valid material index
+            geometry.material = nullptr;
+        }
+
+        // If the mesh has bones, we fill out geometry.joints + geometry.weights
+        if (aMesh->HasBones()) {
+            geometry.flags |= VertexFlags::VERTEX_SKINNED;
+            // We'll do that in a separate pass or here:
+            geometry.joints.resize(aMesh->mNumVertices * 4, 0);
+            geometry.weights.resize(aMesh->mNumVertices * 4, 0.f);
+
+            // We'll accumulate up to 4 influences per vertex
+            std::vector<unsigned int> jointCount(aMesh->mNumVertices, 0);
+
+            for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
+                aiBone* bone = aMesh->mBones[b];
+                // We'll store bone->mOffsetMatrix in an array for skeleton usage
+                // We'll handle skeleton creation later.
+
+                for (unsigned int w = 0; w < bone->mNumWeights; w++) {
+                    const aiVertexWeight& vw = bone->mWeights[w];
+                    unsigned int vertexID = vw.mVertexId;
+                    float weight = vw.mWeight;
+
+                    unsigned int& count = jointCount[vertexID];
+                    if (count < 4) {
+                        geometry.joints[vertexID * 4 + count] = b;  // bone index
+                        geometry.weights[vertexID * 4 + count] = weight;
+                        count++;
+                    } else {
+                        // You might want to handle >4 influences by ignoring or re-normalizing
+                    }
+                }
+            }
+        }
+
+        meshData.geometries.push_back(std::move(geometry));
+        meshes.push_back(std::move(meshData));
+    }
+
+    return meshes;
+}
+
+static void buildAiNodeHierarchy(
+    std::shared_ptr<Scene> scene,
+    aiNode* ainode,
+    const aiScene* pScene,
+    const std::vector<MeshData>& meshData,
+    std::vector<std::shared_ptr<SceneNode>>& outNodes,
+	std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
+    std::shared_ptr<SceneNode> parent = nullptr
+) 
+{
+    // Create a new SceneNode
+    std::string nodeName(ainode->mName.C_Str());
+    std::shared_ptr<SceneNode> node = nullptr;
+
+    // For local transform: aiNode->mTransformation is a 4x4 matrix
+    // Convert it to an XMMATRIX
+    aiMatrix4x4 m = ainode->mTransformation;
+    // aiMatrix4x4 is row-major, your math might expect column-major or vice versa
+    // But let's assume row-major => XMMatrixSet
+    // You can also use a helper to convert directly.
+    XMMATRIX transform = XMMatrixSet(
+        m.a1, m.a2, m.a3, m.a4,
+        m.b1, m.b2, m.b3, m.b4,
+        m.c1, m.c2, m.c3, m.c4,
+        m.d1, m.d2, m.d3, m.d4
+    );
+
+    // If the node has meshes, create a “renderable” node. If not, just create a “plain” node.
+    if (ainode->mNumMeshes > 0) {
+		// TODO: Handle multiple meshes per node
+        int meshIndex = ainode->mMeshes[0];
+        MeshData data = meshData[meshIndex];
+
+        node = scene->CreateRenderableObject(data, s2ws(nodeName));
+        // If your engine uses "fileLocalSkinIndex" for subsequent skeleton binding, set it to -1 by default
+        auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
+        if (renderableNode) {
+            renderableNode->m_fileLocalSkinIndex = -1; 
+        }
+    } else {
+        node = scene->CreateNode(s2ws(nodeName));
+    }
+
+    // Decompose the transform into T/R/S
+    XMVECTOR s, r, t;
+    XMMatrixDecompose(&s, &r, &t, transform);
+
+    // Set the local transform
+    // Note: watch out for coordinate system differences (Assimp is typically right-handed).
+    // Here we do NOT automatically flip anything unless your engine expects so.
+    // If you need a -Z flip or other transform, apply it here.
+    node->transform.setLocalPosition(XMFLOAT3(XMVectorGetX(t), XMVectorGetY(t), XMVectorGetZ(t)));
+    node->transform.setLocalScale(XMFLOAT3(XMVectorGetX(s), XMVectorGetY(s), XMVectorGetZ(s)));
+    node->transform.setLocalRotationFromQuaternion(r);
+
+    // Attach to parent
+    if (parent) {
+        parent->AddChild(node);
+    }
+    outNodes.push_back(node);
+
+    // Recursively process children
+    for (unsigned int c = 0; c < ainode->mNumChildren; ++c) {
+        buildAiNodeHierarchy(scene, ainode->mChildren[c], pScene, meshData, outNodes, nodeMap, node);
+    }
+}
+
+// -------------------------------------------------------
+// 4) Parse Animations
+//    This loosely mimics parseGLTFAnimations. We read
+//    aiAnimation data, build your Animation objects, and
+//    store them. Each aiAnimation can have multiple channels
+//    (aiNodeAnim) for T, R, S keyframes.
+// -------------------------------------------------------
+static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
+    const aiScene* pScene,
+    const std::vector<std::shared_ptr<SceneNode>>& nodes,
+	const std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap
+)
+{
+    std::vector<std::shared_ptr<Animation>> animations;
+    animations.reserve(pScene->mNumAnimations);
+
+    for (unsigned int i = 0; i < pScene->mNumAnimations; i++) {
+        aiAnimation* aiAnim = pScene->mAnimations[i];
+        std::string animName = aiAnim->mName.length > 0 ? aiAnim->mName.C_Str() : ("Anim_" + std::to_string(i));
+
+        auto animation = std::make_shared<Animation>(animName);
+
+        // Each aiAnimation has channels -> each channel is for one node
+        for (unsigned int c = 0; c < aiAnim->mNumChannels; c++) {
+            aiNodeAnim* channel = aiAnim->mChannels[c];
+            std::string nodeName = channel->mNodeName.C_Str();
+
+            // Find the node that matches nodeName
+            int nodeLocalID = -1;
+
+			if (nodeMap.find(nodeName) != nodeMap.end()) {
+				nodeLocalID = nodeMap.at(nodeName)->GetLocalID();
+            }
+
+            if (nodeLocalID < 0) {
+                // This channel references a node we didn’t find
+				spdlog::warn("Animation {} references unknown node: {}", animName, nodeName);
+                continue;
+            }
+
+            // Ensure we have an AnimationClip for that node in this animation
+            if (animation->nodesMap.find(nodeLocalID) == animation->nodesMap.end()) {
+                animation->nodesMap[nodeLocalID] = std::make_shared<AnimationClip>();
+            }
+            auto& clip = animation->nodesMap[nodeLocalID];
+
+            // For position keys
+            for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
+                float time = static_cast<float>(channel->mPositionKeys[k].mTime);
+                const aiVector3D& v = channel->mPositionKeys[k].mValue;
+                clip->addPositionKeyframe(time, XMFLOAT3(v.x, v.y, v.z));
+            }
+
+            // For rotation keys
+            for (unsigned int k = 0; k < channel->mNumRotationKeys; k++) {
+                float time = static_cast<float>(channel->mRotationKeys[k].mTime);
+                const aiQuaternion& q = channel->mRotationKeys[k].mValue;
+                // Convert to XMVECTOR
+                XMVECTOR quat = XMVectorSet(q.x, q.y, q.z, q.w);
+                clip->addRotationKeyframe(time, quat);
+            }
+
+            // For scale keys
+            for (unsigned int k = 0; k < channel->mNumScalingKeys; k++) {
+                float time = static_cast<float>(channel->mScalingKeys[k].mTime);
+                const aiVector3D& s = channel->mScalingKeys[k].mValue;
+                clip->addScaleKeyframe(time, XMFLOAT3(s.x, s.y, s.z));
+            }
+        }
+
+        animations.push_back(animation);
+    }
+
+    return animations;
+}
+
+static std::shared_ptr<Skeleton> parseSkeletonForMesh(
+    aiMesh* aMesh,
+    const std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
+    const std::vector<std::shared_ptr<Animation>>& animations) {
+    if (!aMesh->HasBones()) {
+		return nullptr;
+    }
+    // Collect inverse bind matrices for each bone
+    std::vector<XMMATRIX> inverseBindMatrices;
+    inverseBindMatrices.reserve(aMesh->mNumBones);
+    std::vector<std::shared_ptr<SceneNode>> jointNodes;
+    jointNodes.reserve(aMesh->mNumBones);
+
+    for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
+        aiBone* bone = aMesh->mBones[b];
+
+        // Convert offset matrix
+        aiMatrix4x4 o = bone->mOffsetMatrix;
+        XMMATRIX offset = XMMatrixSet(
+            o.a1, o.a2, o.a3, o.a4,
+            o.b1, o.b2, o.b3, o.b4,
+            o.c1, o.c2, o.c3, o.c4,
+            o.d1, o.d2, o.d3, o.d4
+        );
+
+        inverseBindMatrices.push_back(offset);
+
+        // Find the node that corresponds to this bone
+        std::string boneName = bone->mName.C_Str();
+        std::shared_ptr<SceneNode> boneNode = nullptr;
+		if (nodeMap.find(boneName) != nodeMap.end()) {
+			boneNode = nodeMap.at(boneName);
+            std::string nName = ws2s(boneNode->m_name);
+            if (nName == boneName) {
+                boneNode = boneNode;
+                break;
+            }
+        }
+        // Possibly boneNode can be null if the bone is missing a corresponding node
+        jointNodes.push_back(boneNode ? boneNode : nullptr);
+    }
+
+    auto skeleton = std::make_shared<Skeleton>(jointNodes, inverseBindMatrices);
+
+    // Associate animations that reference these bones
+    // (In glTF code, you matched node IDs. We'll do something similar.)
+    for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
+        auto jointNode = jointNodes[b];
+        if (!jointNode) continue;
+        int nodeID = jointNode->GetLocalID();
+
+        for (auto& anim : animations) {
+            if (anim->nodesMap.find(nodeID) != anim->nodesMap.end()) {
+                skeleton->AddAnimation(anim);
+            }
+        }
+    }
+}
+
+void BuildSkeletons(aiScene* pScene,     
+    const std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
+    const std::vector<std::shared_ptr<Animation>>& animations) {
+	// For each mesh, parse the skeleton
+	for (unsigned int i = 0; i < pScene->mNumMeshes; i++) {
+		aiMesh* aMesh = pScene->mMeshes[i];
+		auto skeleton = parseSkeletonForMesh(aMesh, nodeMap, animations);
+	}
+}
+
 std::shared_ptr<Scene> LoadModel(std::string filePath) {
 	Assimp::Importer importer;
 	const aiScene* pScene = importer.ReadFile(filePath, aiProcess_Triangulate);
@@ -372,5 +689,9 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 	std::string directory = filePath.substr(0, filePath.find_last_of('/'));
 
     auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
+	auto meshes = parseAiMeshes(pScene, materials);
+	std::vector<std::shared_ptr<SceneNode>> nodes;
+	std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodeMap;
+	buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);
     return nullptr;
 }
