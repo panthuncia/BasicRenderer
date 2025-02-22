@@ -16,4 +16,5 @@ struct GeometryData {
 
 struct MeshData {
     std::vector<GeometryData> geometries;
+    int skinIndex = -1;
 };

@@ -209,9 +209,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     };
 
     auto baseScene = std::make_shared<Scene>();
-    auto testScene = LoadModel("models/dragon.glb");
+    //auto testScene = loadGLB("models/dragon.glb");
 
-    auto dragonScene = loadGLB("models/dragon.glb");
+    auto dragonScene = LoadModel("models/dragon.glb");
     dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
     dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
 	dragonScene->GetRoot().m_name = L"dragonRoot";
@@ -261,7 +261,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);

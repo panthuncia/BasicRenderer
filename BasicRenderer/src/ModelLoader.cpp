@@ -162,6 +162,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
             aiTextureType_DIFFUSE_ROUGHNESS, // for PBR extension
             aiTextureType_EMISSIVE,
 			aiTextureType_AMBIENT_OCCLUSION,
+            aiTextureType_LIGHTMAP,
             aiTextureType_EMISSION_COLOR,
 			aiTextureType_HEIGHT,
             aiTextureType_DISPLACEMENT,
@@ -276,16 +277,23 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 		}
 		if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
             metallicTex = materialTextures[aiTextureType_METALNESS];
-			materialFlags |= MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+			materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
 		}
 		if (materialTextures.find(aiTextureType_DIFFUSE_ROUGHNESS) != materialTextures.end()) {
 			roughnessTex = materialTextures[aiTextureType_DIFFUSE_ROUGHNESS];
-			materialFlags |= MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+			materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
 		}
 		if (materialTextures.find(aiTextureType_AMBIENT_OCCLUSION) != materialTextures.end()) {
 			aoMap = materialTextures[aiTextureType_AMBIENT_OCCLUSION];
 			materialFlags |= MaterialFlags::MATERIAL_AO_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
 		}
+        if (materialTextures.find(aiTextureType_LIGHTMAP) != materialTextures.end()) {
+			if (aoMap != nullptr) {
+				spdlog::warn("Material {} has both AMBIENT_OCCLUSION and LIGHTMAP textures. Using LIGHTMAP", mIndex);
+			}
+            aoMap = materialTextures[aiTextureType_LIGHTMAP];
+            materialFlags |= MaterialFlags::MATERIAL_AO_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+        }
 		if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
 			emissiveTexture = materialTextures[aiTextureType_EMISSION_COLOR];
 			materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
@@ -365,9 +373,14 @@ static std::vector<MeshData> parseAiMeshes(
     std::vector<MeshData> meshes;
     meshes.reserve(pScene->mNumMeshes);
 
+	int currentSkinIndex = -1;
     for (unsigned int i = 0; i < pScene->mNumMeshes; ++i) {
         aiMesh* aMesh = pScene->mMeshes[i];
         MeshData meshData;
+		if (aMesh->HasBones()) {
+			meshData.skinIndex = currentSkinIndex;
+			currentSkinIndex++;
+		}
 
         // Each aiMesh can have multiple primitives in glTF terms, 
         // but in Assimp, it’s typically one set of indices + attributes.
@@ -490,16 +503,22 @@ static void buildAiNodeHierarchy(
     );
 
     // If the node has meshes, create a “renderable” node. If not, just create a “plain” node.
+    if (ainode->mNumMeshes > 1) {
+		spdlog::warn("Node {} has multiple meshes. Only the first one will be used.", nodeName);
+		throw std::runtime_error("Multiple meshes per node not supported");
+    }
     if (ainode->mNumMeshes > 0) {
 		// TODO: Handle multiple meshes per node
         int meshIndex = ainode->mMeshes[0];
         MeshData data = meshData[meshIndex];
 
         node = scene->CreateRenderableObject(data, s2ws(nodeName));
-        // If your engine uses "fileLocalSkinIndex" for subsequent skeleton binding, set it to -1 by default
+
         auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
         if (renderableNode) {
-            renderableNode->m_fileLocalSkinIndex = -1; 
+            if (data.skinIndex >= 0) {
+                renderableNode->m_fileLocalSkinIndex = data.skinIndex;
+            }
         }
     } else {
         node = scene->CreateNode(s2ws(nodeName));
@@ -523,6 +542,7 @@ static void buildAiNodeHierarchy(
     }
     outNodes.push_back(node);
 
+	nodeMap[nodeName] = node;
     // Recursively process children
     for (unsigned int c = 0; c < ainode->mNumChildren; ++c) {
         buildAiNodeHierarchy(scene, ainode->mChildren[c], pScene, meshData, outNodes, nodeMap, node);
@@ -637,14 +657,13 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
         std::shared_ptr<SceneNode> boneNode = nullptr;
 		if (nodeMap.find(boneName) != nodeMap.end()) {
 			boneNode = nodeMap.at(boneName);
-            std::string nName = ws2s(boneNode->m_name);
-            if (nName == boneName) {
-                boneNode = boneNode;
-                break;
-            }
         }
-        // Possibly boneNode can be null if the bone is missing a corresponding node
-        jointNodes.push_back(boneNode ? boneNode : nullptr);
+		if (!boneNode) {
+			// This bone doesn't match any node
+			spdlog::error("Bone {} doesn't match any node", boneName);
+			throw std::runtime_error("Bone doesn't match any node");
+		}
+        jointNodes.push_back(boneNode);
     }
 
     auto skeleton = std::make_shared<Skeleton>(jointNodes, inverseBindMatrices);
@@ -662,16 +681,23 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
             }
         }
     }
+
+    return skeleton;
 }
 
-void BuildSkeletons(aiScene* pScene,     
+std::vector<std::shared_ptr<Skeleton>> BuildSkeletons(const aiScene* pScene,     
     const std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
     const std::vector<std::shared_ptr<Animation>>& animations) {
+	std::vector<std::shared_ptr<Skeleton>> skeletons;
 	// For each mesh, parse the skeleton
 	for (unsigned int i = 0; i < pScene->mNumMeshes; i++) {
 		aiMesh* aMesh = pScene->mMeshes[i];
 		auto skeleton = parseSkeletonForMesh(aMesh, nodeMap, animations);
+		if (skeleton) {
+			skeletons.push_back(skeleton);
+		}
 	}
+	return skeletons;
 }
 
 std::shared_ptr<Scene> LoadModel(std::string filePath) {
@@ -689,9 +715,26 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 	std::string directory = filePath.substr(0, filePath.find_last_of('/'));
 
     auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
-	auto meshes = parseAiMeshes(pScene, materials);
+	//auto meshes = parseAiMeshes(pScene, materials);
 	std::vector<std::shared_ptr<SceneNode>> nodes;
 	std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodeMap;
-	buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);
-    return nullptr;
+	//buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);
+ //   
+	//auto animations = parseAiAnimations(pScene, nodes, nodeMap);
+	//auto skeletons = BuildSkeletons(pScene, nodeMap, animations);
+
+	//for (auto& skeleton : skeletons) {
+	//	scene->AddSkeleton(skeleton);
+	//}
+
+ //   for (auto& node : nodes) {
+ //       auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
+ //       if (renderableNode) {
+ //           if (renderableNode->m_fileLocalSkinIndex >= 0) {
+	//			renderableNode->SetSkin(skeletons[renderableNode->m_fileLocalSkinIndex]);
+ //           }
+ //       }
+ //   }
+
+    return scene;
 }
