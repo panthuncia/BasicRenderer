@@ -36,9 +36,7 @@ struct PerFrameCB {
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
     unsigned int normalMatrixBufferIndex;
-    unsigned int boneTransformBufferIndex;
-    unsigned int inverseBindMatricesBufferIndex;
-    unsigned int pad0;
+    unsigned int pad[3];
 };
 
 struct BoundingSphere {
@@ -58,7 +56,9 @@ struct PerMeshCB {
     unsigned int meshletTrianglesBufferOffset;
 	BoundingSphere boundingSphere;
 	unsigned int numVertices;
-    unsigned int pad[1];
+    unsigned int boneTransformBufferIndex;
+    unsigned int inverseBindMatricesBufferIndex;
+    unsigned int pad[3];
 };
 
 struct PerMaterialCB {

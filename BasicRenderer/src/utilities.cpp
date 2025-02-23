@@ -32,28 +32,28 @@ void ThrowIfFailed(HRESULT hr) {
     }
 }
 
-std::shared_ptr<RenderableObject> RenderableFromData(const MeshData& meshData, std::wstring name) {
+std::shared_ptr<RenderableObject> RenderableFromData(const std::vector<const MeshData*>& meshData, std::wstring name) {
     std::vector<std::shared_ptr<Mesh>> meshes;
 
-    for (auto geom : meshData.geometries) {
-        bool hasTexcoords = !geom.texcoords.empty();
-        bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
-        unsigned int materialFlags = geom.material->m_materialData.materialFlags;
+    for (auto geom : meshData) {
+        bool hasTexcoords = !geom->texcoords.empty();
+        bool hasJoints = !geom->joints.empty() && !geom->weights.empty();
+        unsigned int materialFlags = geom->material->m_materialData.materialFlags;
 
         std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
-		unsigned int numVertices = geom.positions.size() / 3;
+		unsigned int numVertices = geom->positions.size() / 3;
 		                    // position,        normal,            texcoord
         uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
 		rawData->resize(numVertices * vertexSize);
 
         for (unsigned int i = 0; i < numVertices; i++) {
             size_t baseOffset = i * vertexSize;
-			memcpy(rawData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+			memcpy(rawData->data() + baseOffset, &geom->positions[i * 3], sizeof(XMFLOAT3));
             size_t offset = sizeof(XMFLOAT3);
-			memcpy(rawData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+			memcpy(rawData->data() + baseOffset + offset, &geom->normals[i * 3], sizeof(XMFLOAT3));
 			offset += sizeof(XMFLOAT3);
 			if (hasTexcoords) {
-				memcpy(rawData->data() + baseOffset + offset, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
+				memcpy(rawData->data() + baseOffset + offset, &geom->texcoords[i * 2], sizeof(XMFLOAT2));
 				offset += sizeof(XMFLOAT2);
 			}
         }
@@ -64,21 +64,63 @@ std::shared_ptr<RenderableObject> RenderableFromData(const MeshData& meshData, s
 			skinningData->resize(numVertices * skinningVertexSize);
 			for (unsigned int i = 0; i < numVertices; i++) {
 				size_t baseOffset = i * skinningVertexSize;
-				memcpy(skinningData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+				memcpy(skinningData->data() + baseOffset, &geom->positions[i * 3], sizeof(XMFLOAT3));
                 size_t offset = sizeof(XMFLOAT3);
-				memcpy(skinningData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+				memcpy(skinningData->data() + baseOffset + offset, &geom->normals[i * 3], sizeof(XMFLOAT3));
 				offset += sizeof(XMFLOAT3);
-				memcpy(skinningData->data() + baseOffset + offset, &geom.joints[i * 4], sizeof(XMUINT4));
+				memcpy(skinningData->data() + baseOffset + offset, &geom->joints[i * 4], sizeof(XMUINT4));
 				offset += sizeof(XMUINT4);
-				memcpy(skinningData->data() + baseOffset + offset, &geom.weights[i * 4], sizeof(XMFLOAT4));
+				memcpy(skinningData->data() + baseOffset + offset, &geom->weights[i * 4], sizeof(XMFLOAT4));
 			}
         }
 
-        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, geom.indices, geom.material, geom.flags);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, geom->indices, geom->material, geom->flags);
         meshes.push_back(std::move(mesh));
     }
 
     return std::make_shared<RenderableObject>(name, meshes);
+}
+
+std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {
+    bool hasTexcoords = !meshData.texcoords.empty();
+    bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
+    unsigned int materialFlags = meshData.material->m_materialData.materialFlags;
+
+    std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
+    unsigned int numVertices = meshData.positions.size() / 3;
+    // position,        normal,            texcoord
+    uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
+    rawData->resize(numVertices * vertexSize);
+
+    for (unsigned int i = 0; i < numVertices; i++) {
+        size_t baseOffset = i * vertexSize;
+        memcpy(rawData->data() + baseOffset, &meshData.positions[i * 3], sizeof(XMFLOAT3));
+        size_t offset = sizeof(XMFLOAT3);
+        memcpy(rawData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
+        offset += sizeof(XMFLOAT3);
+        if (hasTexcoords) {
+            memcpy(rawData->data() + baseOffset + offset, &meshData.texcoords[i * 2], sizeof(XMFLOAT2));
+            offset += sizeof(XMFLOAT2);
+        }
+    }
+    // position,       normal            joints,           weights
+    unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)  + sizeof(XMUINT4) + sizeof(XMFLOAT4);
+    std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
+    if (hasJoints) {
+        skinningData->resize(numVertices * skinningVertexSize);
+        for (unsigned int i = 0; i < numVertices; i++) {
+            size_t baseOffset = i * skinningVertexSize;
+            memcpy(skinningData->data() + baseOffset, &meshData.positions[i * 3], sizeof(XMFLOAT3));
+            size_t offset = sizeof(XMFLOAT3);
+            memcpy(skinningData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
+            offset += sizeof(XMFLOAT3);
+            memcpy(skinningData->data() + baseOffset + offset, &meshData.joints[i * 4], sizeof(XMUINT4));
+            offset += sizeof(XMUINT4);
+            memcpy(skinningData->data() + baseOffset + offset, &meshData.weights[i * 4], sizeof(XMFLOAT4));
+        }
+    }
+
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, meshData.indices, meshData.material, meshData.flags);
 }
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix) {

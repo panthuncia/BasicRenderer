@@ -3,7 +3,7 @@
 
 class Material;
 
-struct GeometryData {
+struct MeshData {
     std::vector<float> positions;
     std::vector<float> normals;
     std::vector<uint32_t> indices;
@@ -11,10 +11,6 @@ struct GeometryData {
     std::vector<UINT> joints;
     std::vector<float> weights;
     std::shared_ptr<Material> material;
-	unsigned int flags = 0;
-};
-
-struct MeshData {
-    std::vector<GeometryData> geometries;
-    int skinIndex = -1;
+    unsigned int flags = 0;
+	int skinIndex = -1;
 };

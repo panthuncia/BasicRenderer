@@ -16,7 +16,7 @@
 #include "OutputTypes.h"
 #include "SceneNode.h"
 #include "RenderableObject.h"
-#include "GlTFLoader.h"
+#include "ModelLoader.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -409,7 +409,7 @@ inline void Menu::DrawLoadModelButton() {
         if (OpenFileDialog(selectedFile, customFilter))
         {
             spdlog::info("Selected file: {}", ws2s(selectedFile));
-			auto scene = loadGLB(ws2s(selectedFile));
+			auto scene = LoadModel(ws2s(selectedFile));
 			scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
 			appendScene(*scene);
         }
@@ -450,11 +450,11 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
             ImGui::Text("Transparent Meshes: %d", renderableObject->GetAlphaTestMeshes().size());
 			ImGui::Text("Blend Meshes: %d", renderableObject->GetBlendMeshes().size());
 
-            if (renderableObject->GetSkin()) {
-                ImGui::Text("Has Skin: Yes");
+            if (renderableObject->HasSkinned()) {
+                ImGui::Text("Has Skinned: Yes");
             }
             else {
-                ImGui::Text("Has Skin: No");
+                ImGui::Text("Has Skinned: No");
             }
         }
 

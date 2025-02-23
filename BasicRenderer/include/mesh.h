@@ -16,6 +16,7 @@ using namespace Microsoft::WRL;
 
 class Material;
 class MeshManager;
+class Skeleton;
 
 class Mesh {
 public:
@@ -45,6 +46,8 @@ public:
 	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view);
 
 	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
+	void SetSkin(std::shared_ptr<Skeleton> skeleton);
+	bool HasSkin() const { return m_skeleton != nullptr; }
 
 	unsigned int GetPostSkinningVertexBufferOffset() const {
 		return m_postSkinningVertexBufferView->GetOffset();
@@ -115,4 +118,6 @@ private:
 	unsigned int m_skinningVertexSize = 0;
 	std::unique_ptr<BufferView> m_perMeshBufferView;
 	MeshManager* m_pCurrentMeshManager = nullptr;
+
+	std::shared_ptr<Skeleton> m_skeleton = nullptr;
 };

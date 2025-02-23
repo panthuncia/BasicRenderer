@@ -16,7 +16,6 @@ public:
     std::vector<float> m_boneTransforms;
     std::vector<std::shared_ptr<Animation>> animations;
     std::unordered_map<std::string, std::shared_ptr<Animation>> animationsByName;
-    std::vector<int> userIDs;
 
     Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices);
     Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, std::shared_ptr<Buffer> inverseBindMatrices); // For copying, since bind matrices never change between instances
@@ -27,6 +26,9 @@ public:
     uint32_t GetTransformsBufferIndex();
     uint32_t GetInverseBindMatricesBufferIndex();
     std::shared_ptr<Buffer>& GetInverseBindMatricesBuffer();
+
+	void DeleteAllAnimations();
+	void SetJoints(const std::vector<std::shared_ptr<SceneNode>>& joints);
 
 private:
     std::shared_ptr<Buffer> m_transformsBuffer;

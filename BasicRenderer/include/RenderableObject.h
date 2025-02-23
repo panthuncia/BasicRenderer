@@ -24,8 +24,7 @@ public:
 	bool HasAlphaTest() const;
 	bool HasOpaque() const;
 	bool HasBlend() const;
-	void SetSkin(std::shared_ptr<Skeleton> skeleton);
-	std::shared_ptr<Skeleton>& GetSkin();
+	bool HasSkinned() const;
 	PerObjectCB& GetPerObjectCBData();
 	void SetCurrentPerObjectCBView(std::shared_ptr<BufferView>& view);
 	std::shared_ptr<BufferView>& GetCurrentPerObjectCBView();
@@ -62,6 +61,7 @@ private:
 	bool m_hasAlphaTest = false;
 	bool m_hasOpaque = false;
 	bool m_hasBlend = false;
+	bool m_hasSkinned = false;
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
 	std::shared_ptr<BufferView> m_perObjectCBView;
 	ObjectManager* m_currentManager = nullptr;

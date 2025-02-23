@@ -208,3 +208,13 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferVi
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
 }
+
+void Mesh::SetSkin(std::shared_ptr<Skeleton> skeleton) {
+	m_skeleton = skeleton;
+	m_perMeshBufferData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
+	m_perMeshBufferData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+	//skeleton->userIDs.push_back(localID);
+}

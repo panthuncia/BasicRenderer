@@ -365,27 +365,35 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
     return materials;
 }
 
-static std::vector<MeshData> parseAiMeshes(
+static std::pair<std::vector<std::shared_ptr<Mesh>>, std::vector<int>> parseAiMeshes(
     const aiScene* pScene,
     const std::vector<std::shared_ptr<Material>>& materials
 ) 
 {
-    std::vector<MeshData> meshes;
+    std::vector<std::shared_ptr<Mesh>> meshes;
     meshes.reserve(pScene->mNumMeshes);
+	std::vector<int> meshSkinIndices;
+	meshSkinIndices.reserve(pScene->mNumMeshes);
+	// Assimp doesn't have a concept of a "skin" like glTF, so we'll just increment a counter
+	// each time we encounter a mesh with bones.
 
 	int currentSkinIndex = -1;
     for (unsigned int i = 0; i < pScene->mNumMeshes; ++i) {
         aiMesh* aMesh = pScene->mMeshes[i];
-        MeshData meshData;
-		if (aMesh->HasBones()) {
-            currentSkinIndex++;
-			meshData.skinIndex = currentSkinIndex;
-		}
 
         // Each aiMesh can have multiple primitives in glTF terms, 
         // but in Assimp, it’s typically one set of indices + attributes.
-        // We'll store one "GeometryData" in meshData.geometries[0].
-        GeometryData geometry;
+        MeshData geometry;
+
+        if (aMesh->HasBones()) {
+            currentSkinIndex++;
+            geometry.skinIndex = currentSkinIndex;
+			meshSkinIndices.push_back(currentSkinIndex);
+		}
+		else {
+			geometry.skinIndex = -1;
+			meshSkinIndices.push_back(-1);
+		}
 
         // Positions
         geometry.positions.reserve(aMesh->mNumVertices * 3);
@@ -468,20 +476,19 @@ static std::vector<MeshData> parseAiMeshes(
             }
         }
 
-        meshData.geometries.push_back(std::move(geometry));
-        meshes.push_back(std::move(meshData));
+        meshes.push_back(MeshFromData(geometry, s2ws(aMesh->mName.C_Str())));
     }
 
-    return meshes;
+    return { meshes , meshSkinIndices};
 }
 
 static void buildAiNodeHierarchy(
     std::shared_ptr<Scene> scene,
     aiNode* ainode,
     const aiScene* pScene,
-    const std::vector<MeshData>& meshData,
+    const std::vector<std::shared_ptr<Mesh>>& meshes,
     std::vector<std::shared_ptr<SceneNode>>& outNodes,
-	std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
+    std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
     std::shared_ptr<SceneNode> parent = nullptr
 ) 
 {
@@ -500,26 +507,18 @@ static void buildAiNodeHierarchy(
         m.a4, m.b4, m.c4, m.d4
     );
 
-    // If the node has meshes, create a “renderable” node. If not, just create a “plain” node.
-    if (ainode->mNumMeshes > 1) {
-		spdlog::warn("Node {} has multiple meshes. Only the first one will be used.", nodeName);
-		throw std::runtime_error("Multiple meshes per node not supported");
-    }
+	// handle multiple meshes per node
     if (ainode->mNumMeshes > 0) {
-		// TODO: Handle multiple meshes per node
-        int meshIndex = ainode->mMeshes[0];
-        //MeshData data = meshData[meshIndex];
-
-        node = scene->CreateRenderableObject(meshData[meshIndex], s2ws(nodeName));
-
-        auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
-        if (renderableNode) {
-            if (meshData[meshIndex].skinIndex >= 0) {
-                renderableNode->m_fileLocalSkinIndex = meshData[meshIndex].skinIndex;
-            }
+		std::vector<std::shared_ptr<Mesh>> objectMeshes;
+        objectMeshes.reserve(ainode->mNumMeshes);
+        for (unsigned int i = 0; i < ainode->mNumMeshes; i++) {
+            int meshIndex = ainode->mMeshes[i];
+            objectMeshes.push_back(meshes[meshIndex]);
         }
-    } else {
-        node = scene->CreateNode(s2ws(nodeName));
+		node = scene->CreateRenderableObject(objectMeshes, s2ws(nodeName));
+	}
+	else {
+		node = scene->CreateNode(s2ws(nodeName));
     }
 
     // Decompose the transform into T/R/S
@@ -540,7 +539,7 @@ static void buildAiNodeHierarchy(
 	nodeMap[nodeName] = node;
     // Recursively process children
     for (unsigned int c = 0; c < ainode->mNumChildren; ++c) {
-        buildAiNodeHierarchy(scene, ainode->mChildren[c], pScene, meshData, outNodes, nodeMap, node);
+        buildAiNodeHierarchy(scene, ainode->mChildren[c], pScene, meshes, outNodes, nodeMap, node);
     }
 }
 
@@ -710,7 +709,7 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 	std::string directory = filePath.substr(0, filePath.find_last_of('/'));
 
     auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
-	auto meshes = parseAiMeshes(pScene, materials);
+	auto [meshes, meshSkinIndices] = parseAiMeshes(pScene, materials);
 	std::vector<std::shared_ptr<SceneNode>> nodes;
 	std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodeMap;
 	buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);
@@ -722,14 +721,21 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 		scene->AddSkeleton(skeleton);
 	}
 
-    for (auto& node : nodes) {
-        auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
-        if (renderableNode) {
-            if (renderableNode->m_fileLocalSkinIndex >= 0) {
-				renderableNode->SetSkin(skeletons[renderableNode->m_fileLocalSkinIndex]);
-            }
+    for (int i = 0; i < meshSkinIndices.size(); i++) {
+		int skinIndex = meshSkinIndices[i];
+        if (skinIndex != -1) {
+			meshes[i]->SetSkin(skeletons[skinIndex]);
         }
-    }
+	}
+
+    //for (auto& node : nodes) {
+    //    auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
+    //    if (renderableNode) {
+    //        if (renderableNode->m_fileLocalSkinIndex >= 0) {
+				//renderableNode->SetSkin(skeletons[renderableNode->m_fileLocalSkinIndex]);
+    //        }
+    //    }
+    //}
 
     return scene;
 }
