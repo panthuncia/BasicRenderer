@@ -32,7 +32,7 @@ void ThrowIfFailed(HRESULT hr) {
     }
 }
 
-std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name) {
+std::shared_ptr<RenderableObject> RenderableFromData(const MeshData& meshData, std::wstring name) {
     std::vector<std::shared_ptr<Mesh>> meshes;
 
     for (auto geom : meshData.geometries) {

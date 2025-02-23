@@ -378,8 +378,8 @@ static std::vector<MeshData> parseAiMeshes(
         aiMesh* aMesh = pScene->mMeshes[i];
         MeshData meshData;
 		if (aMesh->HasBones()) {
+            currentSkinIndex++;
 			meshData.skinIndex = currentSkinIndex;
-			currentSkinIndex++;
 		}
 
         // Each aiMesh can have multiple primitives in glTF terms, 
@@ -457,12 +457,12 @@ static std::vector<MeshData> parseAiMeshes(
                     float weight = vw.mWeight;
 
                     unsigned int& count = jointCount[vertexID];
-                    if (count < 4) {
+					if (count < 4 && weight > 0.0f) { // Why does assimp pollute vertex 0 with a bunch of zero-weight influences?
                         geometry.joints[vertexID * 4 + count] = b;  // bone index
                         geometry.weights[vertexID * 4 + count] = weight;
                         count++;
-                    } else {
-                        // You might want to handle >4 influences by ignoring or re-normalizing
+                    } else if (weight > 0.0f){
+						throw std::runtime_error("Vertex has more than 4 non-zero bone influences");
                     }
                 }
             }
@@ -492,14 +492,12 @@ static void buildAiNodeHierarchy(
     // For local transform: aiNode->mTransformation is a 4x4 matrix
     // Convert it to an XMMATRIX
     aiMatrix4x4 m = ainode->mTransformation;
-    // aiMatrix4x4 is row-major, your math might expect column-major or vice versa
-    // But let's assume row-major => XMMatrixSet
-    // You can also use a helper to convert directly.
-    XMMATRIX transform = XMMatrixSet(
-        m.a1, m.a2, m.a3, m.a4,
-        m.b1, m.b2, m.b3, m.b4,
-        m.c1, m.c2, m.c3, m.c4,
-        m.d1, m.d2, m.d3, m.d4
+
+	XMMATRIX transform = XMMatrixSet( // Transpose
+        m.a1, m.b1, m.c1, m.d1,
+        m.a2, m.b2, m.c2, m.d2,
+        m.a3, m.b3, m.c3, m.d3,
+        m.a4, m.b4, m.c4, m.d4
     );
 
     // If the node has meshes, create a “renderable” node. If not, just create a “plain” node.
@@ -510,14 +508,14 @@ static void buildAiNodeHierarchy(
     if (ainode->mNumMeshes > 0) {
 		// TODO: Handle multiple meshes per node
         int meshIndex = ainode->mMeshes[0];
-        MeshData data = meshData[meshIndex];
+        //MeshData data = meshData[meshIndex];
 
-        node = scene->CreateRenderableObject(data, s2ws(nodeName));
+        node = scene->CreateRenderableObject(meshData[meshIndex], s2ws(nodeName));
 
         auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
         if (renderableNode) {
-            if (data.skinIndex >= 0) {
-                renderableNode->m_fileLocalSkinIndex = data.skinIndex;
+            if (meshData[meshIndex].skinIndex >= 0) {
+                renderableNode->m_fileLocalSkinIndex = meshData[meshIndex].skinIndex;
             }
         }
     } else {
@@ -529,9 +527,6 @@ static void buildAiNodeHierarchy(
     XMMatrixDecompose(&s, &r, &t, transform);
 
     // Set the local transform
-    // Note: watch out for coordinate system differences (Assimp is typically right-handed).
-    // Here we do NOT automatically flip anything unless your engine expects so.
-    // If you need a -Z flip or other transform, apply it here.
     node->transform.setLocalPosition(XMFLOAT3(XMVectorGetX(t), XMVectorGetY(t), XMVectorGetZ(t)));
     node->transform.setLocalScale(XMFLOAT3(XMVectorGetX(s), XMVectorGetY(s), XMVectorGetZ(s)));
     node->transform.setLocalRotationFromQuaternion(r);
@@ -597,14 +592,14 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
 
             // For position keys
             for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
-                float time = static_cast<float>(channel->mPositionKeys[k].mTime);
+                float time = static_cast<float>(channel->mPositionKeys[k].mTime)/aiAnim->mTicksPerSecond;
                 const aiVector3D& v = channel->mPositionKeys[k].mValue;
                 clip->addPositionKeyframe(time, XMFLOAT3(v.x, v.y, v.z));
             }
 
             // For rotation keys
             for (unsigned int k = 0; k < channel->mNumRotationKeys; k++) {
-                float time = static_cast<float>(channel->mRotationKeys[k].mTime);
+                float time = static_cast<float>(channel->mRotationKeys[k].mTime)/aiAnim->mTicksPerSecond;
                 const aiQuaternion& q = channel->mRotationKeys[k].mValue;
                 // Convert to XMVECTOR
                 XMVECTOR quat = XMVectorSet(q.x, q.y, q.z, q.w);
@@ -613,7 +608,7 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
 
             // For scale keys
             for (unsigned int k = 0; k < channel->mNumScalingKeys; k++) {
-                float time = static_cast<float>(channel->mScalingKeys[k].mTime);
+                float time = static_cast<float>(channel->mScalingKeys[k].mTime)/aiAnim->mTicksPerSecond;
                 const aiVector3D& s = channel->mScalingKeys[k].mValue;
                 clip->addScaleKeyframe(time, XMFLOAT3(s.x, s.y, s.z));
             }
@@ -643,11 +638,11 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
 
         // Convert offset matrix
         aiMatrix4x4 o = bone->mOffsetMatrix;
-        XMMATRIX offset = XMMatrixSet(
-            o.a1, o.a2, o.a3, o.a4,
-            o.b1, o.b2, o.b3, o.b4,
-            o.c1, o.c2, o.c3, o.c4,
-            o.d1, o.d2, o.d3, o.d4
+        XMMATRIX offset = XMMatrixSet( // Transpose
+            o.a1, o.b1, o.c1, o.d1,
+            o.a2, o.b2, o.c2, o.d2,
+            o.a3, o.b3, o.c3, o.d3,
+            o.a4, o.b4, o.c4, o.d4
         );
 
         inverseBindMatrices.push_back(offset);
@@ -702,7 +697,7 @@ std::vector<std::shared_ptr<Skeleton>> BuildSkeletons(const aiScene* pScene,
 
 std::shared_ptr<Scene> LoadModel(std::string filePath) {
 	Assimp::Importer importer;
-	const aiScene* pScene = importer.ReadFile(filePath, aiProcess_Triangulate);
+	const aiScene* pScene = importer.ReadFile(filePath, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_OptimizeGraph | aiProcess_OptimizeMeshes);
 
     if (!pScene || pScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !pScene->mRootNode) {
         spdlog::error("Model loading failed for {}. Error: {}", filePath, importer.GetErrorString());
@@ -715,26 +710,26 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 	std::string directory = filePath.substr(0, filePath.find_last_of('/'));
 
     auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
-	//auto meshes = parseAiMeshes(pScene, materials);
+	auto meshes = parseAiMeshes(pScene, materials);
 	std::vector<std::shared_ptr<SceneNode>> nodes;
 	std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodeMap;
-	//buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);
- //   
-	//auto animations = parseAiAnimations(pScene, nodes, nodeMap);
-	//auto skeletons = BuildSkeletons(pScene, nodeMap, animations);
+	buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);
+    
+	auto animations = parseAiAnimations(pScene, nodes, nodeMap);
+	auto skeletons = BuildSkeletons(pScene, nodeMap, animations);
 
-	//for (auto& skeleton : skeletons) {
-	//	scene->AddSkeleton(skeleton);
-	//}
+	for (auto& skeleton : skeletons) {
+		scene->AddSkeleton(skeleton);
+	}
 
- //   for (auto& node : nodes) {
- //       auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
- //       if (renderableNode) {
- //           if (renderableNode->m_fileLocalSkinIndex >= 0) {
-	//			renderableNode->SetSkin(skeletons[renderableNode->m_fileLocalSkinIndex]);
- //           }
- //       }
- //   }
+    for (auto& node : nodes) {
+        auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
+        if (renderableNode) {
+            if (renderableNode->m_fileLocalSkinIndex >= 0) {
+				renderableNode->SetSkin(skeletons[renderableNode->m_fileLocalSkinIndex]);
+            }
+        }
+    }
 
     return scene;
 }

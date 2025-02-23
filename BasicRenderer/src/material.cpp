@@ -6,6 +6,7 @@
 #include "TextureDescription.h"
 #include "MaterialFlags.h"
 #include "UploadManager.h"
+#include "DeletionManager.h"
 
 Material::Material(const std::string& name,
     UINT materialFlags, UINT psoFlags)
@@ -101,6 +102,10 @@ Material::Material(const std::string& name,
 	m_perMaterialHandle->SetName(L"PerMaterialCB ("+s2ws(name)+L")");
 
 	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+}
+
+Material::~Material() {
+	DeletionManager::GetInstance().MarkForDelete(m_perMaterialHandle);
 }
 
 std::shared_ptr<Texture> Material::createDefaultTexture() {

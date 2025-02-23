@@ -20,7 +20,7 @@ void print(Args... args) {
     (std::cout << ... << args) << std::endl;
 }
 
-std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name);
+std::shared_ptr<RenderableObject> RenderableFromData(const MeshData& meshData, std::wstring name);
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
 std::shared_ptr<Texture> loadTextureFromFile(std::string filename);

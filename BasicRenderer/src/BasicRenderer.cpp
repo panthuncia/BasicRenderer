@@ -209,7 +209,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     };
 
     auto baseScene = std::make_shared<Scene>();
-    //auto testScene = loadGLB("models/dragon.glb");
+    auto dragonScene1 = loadGLB("models/dragon.glb");
 
     auto dragonScene = LoadModel("models/dragon.glb");
     dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
@@ -225,17 +225,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
  //   phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
  //   phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
- //   auto carScene = loadGLB("models/porche.glb");
- //   carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
- //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
-	//carScene->GetRoot().m_name = L"carRoot";
+    auto carScene = LoadModel("models/porche.glb");
+    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+	carScene->GetRoot().m_name = L"carRoot";
 
- //   auto mountainScene = loadGLB("models/terrain.glb");
-	//mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
-	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
-	//mountainScene->GetRoot().m_name = L"mountainRoot";
+    auto mountainScene = LoadModel("models/terrain.glb");
+	mountainScene->GetRoot().transform.setLocalScale({ 50.0, 50.0, 50.0 });
+	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+	mountainScene->GetRoot().m_name = L"mountainRoot";
 
-	//auto bistro = loadGLB("models/bistro.glb");
+	//auto bistro = LoadModel("models/bistro.glb");
 	//auto sponza = loadGLB("models/sponza.glb");
 
     //auto cubeScene = loadGLB("models/cube.glb");
@@ -261,12 +261,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    renderer.GetCurrentScene()->AppendScene(*dragonScene1);
+
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(*bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);

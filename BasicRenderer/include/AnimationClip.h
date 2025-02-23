@@ -8,7 +8,6 @@ public:
     std::vector<Keyframe> rotationKeyframes;
     std::vector<Keyframe> scaleKeyframes;
     float duration;
-
     AnimationClip();
 
     void addPositionKeyframe(float time, const XMFLOAT3& position);

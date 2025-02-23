@@ -46,6 +46,7 @@ public:
         DirectX::XMFLOAT4 emissiveFactor,
         BlendState blendState,
         float alphaCutoff);
+    ~Material();
 
     static std::shared_ptr<Texture> createDefaultTexture();
     UINT GetMaterialBufferIndex();

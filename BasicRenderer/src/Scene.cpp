@@ -118,7 +118,7 @@ std::shared_ptr<SceneNode> Scene::CreateNode(std::wstring name) {
     return node;
 }
 
-std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(MeshData meshData, std::wstring name) {
+std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(const MeshData& meshData, std::wstring name) {
     std::shared_ptr<RenderableObject> object = RenderableFromData(meshData, name);
     AddObject(object);
     return object;
@@ -324,10 +324,13 @@ void Scene::Update() {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
-    for (auto& skeleton : animatedSkeletons) {
-        for (auto& node : skeleton->m_nodes) {
-            node->animationController->update(elapsed_seconds.count());
-        }
+    //for (auto& skeleton : animatedSkeletons) {
+    //    for (auto& node : skeleton->m_nodes) {
+    //        node->animationController->update(elapsed_seconds.count());
+    //    }
+    //}
+	for (auto& node : animatedNodesByID) {
+		node.second->animationController->update(elapsed_seconds.count());
     }
     this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
@@ -372,6 +375,9 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         skeleton->SetAnimation(0);
         animatedSkeletons.push_back(skeleton);
     }
+	for (auto& node : skeleton->m_nodes) {
+		animatedNodesByID[node->GetLocalID()] = node;
+	}
 }
 
 void Scene::PostUpdate() {
