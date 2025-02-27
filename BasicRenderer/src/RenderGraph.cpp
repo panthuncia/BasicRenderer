@@ -3,6 +3,7 @@
 #include "RenderContext.h"
 #include "utilities.h"
 #include "SettingsManager.h"
+#include "ReadbackManager.h"
 
 static bool mapHasResourceNotInState(std::unordered_map<std::wstring, ResourceState>& map, std::wstring resourceName, ResourceState state) {
     return mapHasKeyNotAsValue<std::wstring, ResourceState>(map, resourceName, state);

@@ -881,8 +881,12 @@ void DX12Renderer::CreateRenderGraph() {
 
     if (m_lutTexture == nullptr) {
 		TextureDescription lutDesc;
-		lutDesc.width = 512;
-		lutDesc.height = 512;
+        ImageDimensions dims;
+		dims.height = 512;
+		dims.width = 512;
+		dims.rowPitch = 512 * 2 * sizeof(float);
+		dims.slicePitch = dims.rowPitch * 512;
+		lutDesc.imageDimensions.push_back(dims);
 		lutDesc.channels = 2;
 		lutDesc.isCubemap = false;
 		lutDesc.hasRTV = true;
@@ -993,8 +997,12 @@ void DX12Renderer::CreateRenderGraph() {
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
 	static const size_t PPLLNodeSize = 24; // two uints, four floats
     TextureDescription desc;
-    desc.width = m_xRes;
-    desc.height = m_yRes;
+	ImageDimensions dimensions;
+	dimensions.width = m_xRes;
+	dimensions.height = m_yRes;
+	dimensions.rowPitch = m_xRes * sizeof(unsigned int);
+	dimensions.slicePitch = dimensions.rowPitch * m_yRes;
+	desc.imageDimensions.push_back(dimensions);
     desc.channels = 1;
     desc.format = DXGI_FORMAT_R32_UINT;
     desc.hasRTV = false;
@@ -1087,7 +1095,7 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
         std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
         
         if (std::filesystem::exists(envpath)) {
-            auto skyHDR = loadTextureFromFile(envpath.string());
+            auto skyHDR = loadTextureFromFileSTBI(envpath.string());
             SetEnvironmentTexture(skyHDR, ws2s(name));
         }
         else {
@@ -1108,9 +1116,15 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	uint16_t skyboxResolution = getSkyboxResolution();
 
 	TextureDescription skyboxDesc;
-	skyboxDesc.width = skyboxResolution;
-	skyboxDesc.height = skyboxResolution;
-	skyboxDesc.channels = buffer->GetChannels();
+    ImageDimensions dims;
+    dims.height = skyboxResolution;
+	dims.width = skyboxResolution;
+	dims.rowPitch = skyboxResolution * 4;
+	dims.slicePitch = skyboxResolution * skyboxResolution * 4;
+    for (int i = 0; i < 6; i++) {
+        skyboxDesc.imageDimensions.push_back(dims);
+    }
+    skyboxDesc.channels = buffer->GetChannels();
 	skyboxDesc.isCubemap = true;
     skyboxDesc.hasRTV = true;
 	skyboxDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -1121,8 +1135,9 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	SetSkybox(skybox);
 
 	TextureDescription irradianceDesc;
-    irradianceDesc.width = skyboxResolution;
-	irradianceDesc.height = skyboxResolution;
+    for (int i = 0; i < 6; i++) {
+        irradianceDesc.imageDimensions.push_back(dims);
+    }
 	irradianceDesc.channels = buffer->GetChannels();
 	irradianceDesc.isCubemap = true;
 	irradianceDesc.hasRTV = true;
@@ -1133,8 +1148,9 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	SetIrradiance(irradiance);
 
 	TextureDescription prefilteredDesc;
-	prefilteredDesc.width = skyboxResolution;
-	prefilteredDesc.height = skyboxResolution;
+    for (int i = 0; i < 6; i++) {
+        prefilteredDesc.imageDimensions.push_back(dims);
+    }
 	prefilteredDesc.channels = buffer->GetChannels();
 	prefilteredDesc.isCubemap = true;
 	prefilteredDesc.hasRTV = true;

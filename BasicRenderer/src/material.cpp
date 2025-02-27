@@ -114,8 +114,12 @@ std::shared_ptr<Texture> Material::createDefaultTexture() {
 
 	TextureDescription desc;
 	desc.channels = 4;
-	desc.width = 1;
-	desc.height = 1;
+    ImageDimensions dims;
+	dims.width = 1;
+	dims.height = 1;
+	dims.rowPitch = 4;
+	dims.slicePitch = 4;
+	desc.imageDimensions.push_back(dims);
 	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::Create(desc, {whitePixel});

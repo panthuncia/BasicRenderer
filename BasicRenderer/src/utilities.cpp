@@ -163,7 +163,7 @@ ImageData loadImage(const char* filename) {
     return img;
 }
 
-std::shared_ptr<Texture> loadTextureFromFile(std::string filename) {
+std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename) {
 	ImageData img = loadImage(filename.c_str());
     // Determine DXGI_FORMAT based on number of channels
 	DXGI_FORMAT format;
@@ -182,15 +182,49 @@ std::shared_ptr<Texture> loadTextureFromFile(std::string filename) {
 			throw std::runtime_error("Unsupported channel count");
     }
 
+	ImageDimensions dim;
+	dim.width = img.width;
+	dim.height = img.height;
+	dim.rowPitch = img.width * img.channels;
+	dim.slicePitch = img.height * img.channels;
+
     TextureDescription desc;
+	desc.imageDimensions.push_back(dim);
 	desc.channels = img.channels;
-	desc.width = img.width;
-	desc.height = img.height;
 	desc.format = format;
 	auto buffer = PixelBuffer::Create(desc, { img.data });
 
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
+}
+
+std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::shared_ptr<Sampler> sampler) {
+	DirectX::ScratchImage image;
+	DirectX::TexMetadata metadata;
+	HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+
+	if (FAILED(hr)) {
+		throw std::runtime_error("Failed to load DDS texture: " + ws2s(ddsFilePath));
+	}
+	// Extract the first mip level
+	const DirectX::Image* img = image.GetImage(0, 0, 0); // mip 0, face 0, slice 0
+
+	ImageDimensions dim;
+	dim.width = metadata.width;
+	dim.height = metadata.height;
+	dim.rowPitch = img->rowPitch;
+	dim.slicePitch = img->slicePitch;
+
+	TextureDescription desc;
+	desc.imageDimensions.push_back(dim);
+	desc.channels = 4;
+	desc.format = metadata.format;
+    desc.generateMipMaps = false;// metadata.mipLevels != 1;
+	auto buffer = PixelBuffer::Create(desc, { img->pixels });
+	if (!sampler) {
+		sampler = Sampler::GetDefaultSampler();
+	}
+	return std::make_shared<Texture>(buffer, sampler);
 }
 
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
@@ -202,9 +236,14 @@ std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bo
 	ImageData back = loadImage(backPath);
 
 
+	ImageDimensions dim;
+	dim.width = top.width;
+	dim.height = top.height;
+	dim.rowPitch = top.width * top.channels;
+	dim.slicePitch = dim.rowPitch * top.height;
+
 	TextureDescription desc;
-	desc.height = top.height;
-	desc.width = top.width;
+	desc.imageDimensions.push_back(dim);
 	desc.channels = top.channels;
 	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	desc.isCubemap = true;
@@ -228,18 +267,22 @@ std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
     }
 
     // Extract cubemap faces and create a PixelBuffer from them
+    TextureDescription desc;
+
     std::vector<const stbi_uc*> faces = {};
     for (size_t face = 0; face < 6; ++face) {
         for (size_t mip = 0; mip < metadata.mipLevels; ++mip) {
             const DirectX::Image* img = image.GetImage(mip, face, 0); // mip 0, face i, slice 0
             faces.push_back(img->pixels);
+			ImageDimensions dim;
+			dim.width = img->width;
+			dim.height = img->height;
+			dim.rowPitch = img->rowPitch;
+			dim.slicePitch = img->slicePitch;
+			desc.imageDimensions.push_back(dim);
         }
     }
-
-    TextureDescription desc;
 	desc.channels = 4;
-	desc.width = metadata.width;
-	desc.height = metadata.height;
     desc.format = metadata.format;
 	desc.isCubemap = true;
     if (metadata.mipLevels != 1) {

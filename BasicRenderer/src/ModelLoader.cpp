@@ -71,8 +71,12 @@ static std::shared_ptr<Texture> loadAiTexture(
 
             // Convert to PixelBuffer
             TextureDescription desc;
-            desc.width    = width;
-            desc.height   = height;
+			ImageDimensions dims;
+			dims.width = width;
+			dims.height = height;
+			dims.rowPitch = width * 4;
+			dims.slicePitch = width * height * 4;
+			desc.imageDimensions.push_back(dims);
             desc.channels = 4;
             desc.format   = DXGI_FORMAT_R8G8B8A8_UNORM; // TODO: SRGB?
 
@@ -90,8 +94,12 @@ static std::shared_ptr<Texture> loadAiTexture(
             int channels    = 4;
 
             TextureDescription desc;
-            desc.width    = width;
-            desc.height   = height;
+			ImageDimensions dims;
+			dims.width = width;
+			dims.height = height;
+			dims.rowPitch = width * 4;
+			dims.slicePitch = width * height * 4;
+			desc.imageDimensions.push_back(dims);
             desc.channels = channels;
             desc.format   = DXGI_FORMAT_R8G8B8A8_UNORM;
 
@@ -115,23 +123,8 @@ static std::shared_ptr<Texture> loadAiTexture(
     else
     {
         // EXTERNAL file: load from (directory + texPath)
-        std::string fullPath = directory + "/" + texPath; 
-        int width, height, channels;
-        stbi_uc* data = stbi_load(fullPath.c_str(), &width, &height, &channels, 4);
-        if (!data) {
-            throw std::runtime_error("Failed to load external texture file: " + fullPath);
-        }
-
-        TextureDescription desc;
-        desc.width    = width;
-        desc.height   = height;
-        desc.channels = 4;
-        desc.format   = DXGI_FORMAT_R8G8B8A8_UNORM; 
-
-        auto pBuffer = PixelBuffer::Create(desc, { data });
-        stbi_image_free(data);
-
-        return std::make_shared<Texture>(pBuffer, sampler);
+        std::string fullPath = ws2s(GetExePath()) + "\\" + directory + "\\" + texPath;
+		return loadTextureFromFileDXT(s2ws(fullPath), sampler);
     }
 }
 
@@ -251,6 +244,10 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 
         float roughnessFactor = 1.f;
         mat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessFactor);
+
+		if (metallicFactor > 0.f || roughnessFactor < 1.f) {
+			materialFlags |= MaterialFlags::MATERIAL_PBR;
+		}
 
         std::shared_ptr<Texture> baseColorTexture      = nullptr;
         std::shared_ptr<Texture> normalTexture         = nullptr;
@@ -727,15 +724,6 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 			meshes[i]->SetSkin(skeletons[skinIndex]);
         }
 	}
-
-    //for (auto& node : nodes) {
-    //    auto renderableNode = std::dynamic_pointer_cast<RenderableObject>(node);
-    //    if (renderableNode) {
-    //        if (renderableNode->m_fileLocalSkinIndex >= 0) {
-				//renderableNode->SetSkin(skeletons[renderableNode->m_fileLocalSkinIndex]);
-    //        }
-    //    }
-    //}
 
     return scene;
 }
