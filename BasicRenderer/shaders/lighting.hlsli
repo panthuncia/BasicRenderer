@@ -239,8 +239,8 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
             SamplerState metallicSamplerState = SamplerDescriptorHeap[materialInfo.metallicSamplerIndex];
             Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[materialInfo.roughnessTextureIndex];
             SamplerState roughnessSamplerState = SamplerDescriptorHeap[materialInfo.roughnessSamplerIndex];
-            metallic = metallicTexture.Sample(metallicSamplerState, uv).g * materialInfo.metallicFactor;
-            roughness = roughnessTexture.Sample(roughnessSamplerState, uv).b * materialInfo.roughnessFactor;
+            metallic = metallicTexture.Sample(metallicSamplerState, uv).b * materialInfo.metallicFactor;
+            roughness = roughnessTexture.Sample(roughnessSamplerState, uv).g * materialInfo.roughnessFactor;
         }
         else {
             metallic = materialInfo.metallicFactor;
