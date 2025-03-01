@@ -13,14 +13,14 @@ struct Vertex {
 };
 
 struct PSInput {
-    float4 position : SV_POSITION;
-    float4 positionWorldSpace : TEXCOORD0;
-    float4 positionViewSpace : TEXCOORD1;
-    float3 normalWorldSpace : TEXCOORD2;
+    float4 position : SV_POSITION; // Screen-space position, required for rasterization
+    float4 positionWorldSpace : TEXCOORD0; // For world-space lighting
+    float4 positionViewSpace : TEXCOORD1; // For cascaded shadows
+    float3 normalWorldSpace : TEXCOORD2; // For world-space lighting
     float2 texcoord : TEXCOORD3;
-    float3 color : TEXCOORD7;
-    float3 normalModelSpace : TEXCOORD8;
-    uint meshletIndex : TEXCOORD9;
+    float3 color : TEXCOORD7; // For models with vertex colors
+    float3 normalModelSpace : TEXCOORD8; // For debug view
+    uint meshletIndex : TEXCOORD9; // For meshlet debug view
 };
 
 #define VERTEX_COLORS 1 << 0

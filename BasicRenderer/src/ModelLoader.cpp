@@ -11,6 +11,7 @@
 #include "MaterialFlags.h"
 #include "PSOFlags.h"
 #include "Sampler.h"
+#include "Filetypes.h"
 
 D3D12_TEXTURE_ADDRESS_MODE aiTextureMapModeToD3D12(aiTextureMapMode mode) {
     switch (mode) {
@@ -50,6 +51,7 @@ static std::shared_ptr<Texture> loadAiTexture(
 
         // Access the aiTexture
         aiTexture* aiTex = scene->mTextures[textureIndex];
+
         if (aiTex == nullptr) {
             throw std::runtime_error("Null embedded texture at index: " + std::to_string(textureIndex));
         }
@@ -124,7 +126,18 @@ static std::shared_ptr<Texture> loadAiTexture(
     {
         // EXTERNAL file: load from (directory + texPath)
         std::string fullPath = ws2s(GetExePath()) + "\\" + directory + "\\" + texPath;
-		return loadTextureFromFileDXT(s2ws(fullPath), sampler);
+        auto fileExtension = GetFileExtension(fullPath);
+        ImageFiletype format = extensionToFiletype[fileExtension];
+		ImageLoader loader = imageFiletypeToLoader[format];
+
+        switch (loader) {
+		case ImageLoader::STBImage:
+			return loadTextureFromFileSTBI(fullPath, sampler);
+		case ImageLoader::DirectXTex:
+			return loadTextureFromFileDXT(s2ws(fullPath), sampler);
+		default:
+			throw std::runtime_error("Unsupported texture format: " + fullPath);
+        }
     }
 }
 
@@ -156,6 +169,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
             aiTextureType_EMISSIVE,
 			aiTextureType_AMBIENT_OCCLUSION,
             aiTextureType_LIGHTMAP,
+            aiTextureType_EMISSIVE,
             aiTextureType_EMISSION_COLOR,
 			aiTextureType_HEIGHT,
             aiTextureType_DISPLACEMENT,
@@ -245,9 +259,13 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
         float roughnessFactor = 1.f;
         mat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessFactor);
 
-		if (metallicFactor > 0.f || roughnessFactor < 1.f) {
+		//if (metallicFactor > 0.f || roughnessFactor < 1.f) {
 			materialFlags |= MaterialFlags::MATERIAL_PBR;
-		}
+		//}
+
+        // For alpha, blending, doubleSided
+        float alphaCutoff       = 0.5f;
+        BlendState blendMode    = BlendState::BLEND_STATE_OPAQUE;
 
         std::shared_ptr<Texture> baseColorTexture      = nullptr;
         std::shared_ptr<Texture> normalTexture         = nullptr;
@@ -259,6 +277,11 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 
 		if (materialTextures.find(aiTextureType_DIFFUSE) != materialTextures.end()) {
 			baseColorTexture = materialTextures[aiTextureType_DIFFUSE];
+			if (!baseColorTexture->AlphaIsAllOpaque()) {
+                materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
+				psoFlags |= PSOFlags::PSO_ALPHA_TEST;
+                blendMode = BlendState::BLEND_STATE_MASK;
+			}
 			materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
 		}
 		if (materialTextures.find(aiTextureType_BASE_COLOR) != materialTextures.end()) {
@@ -271,6 +294,9 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 		if (materialTextures.find(aiTextureType_NORMALS) != materialTextures.end()) {
 			normalTexture = materialTextures[aiTextureType_NORMALS];
 			materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
+            if (normalTexture->GetImageLoader() == ImageLoader::DirectXTex) {
+				materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMALS;
+            }
 		}
 		if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
             metallicTex = materialTextures[aiTextureType_METALNESS];
@@ -291,10 +317,19 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
             aoMap = materialTextures[aiTextureType_LIGHTMAP];
             materialFlags |= MaterialFlags::MATERIAL_AO_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
+
+        if (materialTextures.find(aiTextureType_EMISSIVE) != materialTextures.end()) {
+            emissiveTexture = materialTextures[aiTextureType_EMISSIVE];
+            materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+        }
 		if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
+            if (emissiveTexture != nullptr) {
+                spdlog::warn("Material {} has both EMISSION_COLOR and EMISSIVE textures. Using EMISSION_COLOR", mIndex);
+            }
 			emissiveTexture = materialTextures[aiTextureType_EMISSION_COLOR];
 			materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
 		}
+
 		if (materialTextures.find(aiTextureType_HEIGHT) != materialTextures.end()) {
 			heightMap = materialTextures[aiTextureType_HEIGHT];
 			materialFlags |= MaterialFlags::MATERIAL_PARALLAX | MaterialFlags::MATERIAL_TEXTURED;
@@ -306,11 +341,6 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 			heightMap = materialTextures[aiTextureType_DISPLACEMENT];
 			materialFlags |= MaterialFlags::MATERIAL_PARALLAX | MaterialFlags::MATERIAL_TEXTURED;
 		}
-
-
-        // For alpha, blending, doubleSided
-        float alphaCutoff       = 0.5f;
-        BlendState blendMode    = BlendState::BLEND_STATE_OPAQUE;
 
         // If the material is two-sided
         bool twoSided = false;
@@ -324,9 +354,14 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
         if (mat->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS && opacity < 1.0f) {
             blendMode = BlendState::BLEND_STATE_BLEND;
             psoFlags |= PSOFlags::PSO_BLEND;
+			diffuse.a *= opacity;
         }
 
-
+		float transparencyFactor = 0.0f;
+        if (mat->Get(AI_MATKEY_TRANSPARENCYFACTOR, transparencyFactor) == AI_SUCCESS && transparencyFactor > 0.0f) {
+			blendMode = BlendState::BLEND_STATE_BLEND;
+			psoFlags |= PSOFlags::PSO_BLEND;
+        }
 
         // Material name
         aiString matName;

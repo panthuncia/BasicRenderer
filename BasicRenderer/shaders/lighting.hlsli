@@ -217,6 +217,9 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
         float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
+        if (materialFlags & MATERIAL_INVERT_NORMALS) {
+            tangentSpaceNormal = -tangentSpaceNormal;
+        }
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }
     

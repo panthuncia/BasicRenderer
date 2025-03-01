@@ -163,7 +163,7 @@ ImageData loadImage(const char* filename) {
     return img;
 }
 
-std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename) {
+std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler) {
 	ImageData img = loadImage(filename.c_str());
     // Determine DXGI_FORMAT based on number of channels
 	DXGI_FORMAT format;
@@ -194,7 +194,9 @@ std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename) {
 	desc.format = format;
 	auto buffer = PixelBuffer::Create(desc, { img.data });
 
-    auto sampler = Sampler::GetDefaultSampler();
+    if (!sampler) {
+        sampler = Sampler::GetDefaultSampler();
+    }
     return std::make_shared<Texture>(buffer, sampler);
 }
 
@@ -208,7 +210,6 @@ std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::s
 	}
 	// Extract the first mip level
 	const DirectX::Image* img = image.GetImage(0, 0, 0); // mip 0, face 0, slice 0
-
 	ImageDimensions dim;
 	dim.width = metadata.width;
 	dim.height = metadata.height;
@@ -224,7 +225,10 @@ std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::s
 	if (!sampler) {
 		sampler = Sampler::GetDefaultSampler();
 	}
-	return std::make_shared<Texture>(buffer, sampler);
+    auto texture = std::make_shared<Texture>(buffer, sampler);
+	texture->SetFilepath(ws2s(ddsFilePath));
+	texture->SetAlphaIsAllOpaque(image.IsAlphaAllOpaque());
+	return texture;
 }
 
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
@@ -915,4 +919,12 @@ XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix) {
     result.m[2][2] = matrix.r[2].m128_f32[2]; // Row 2, Col 2
 
     return result;
+}
+
+std::string GetFileExtension(const std::string& filePath) {
+    size_t dotPos = filePath.find_last_of('.');
+    if (dotPos == std::string::npos || dotPos == filePath.length() - 1) {
+        return ""; // No extension found or ends with a dot
+    }
+    return filePath.substr(dotPos + 1);
 }

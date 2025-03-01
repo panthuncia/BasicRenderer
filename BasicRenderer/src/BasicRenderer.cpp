@@ -211,31 +211,33 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto baseScene = std::make_shared<Scene>();
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
- //   auto dragonScene = LoadModel("models/dragon.glb");
- //   dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
- //   dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
-	//dragonScene->GetRoot().m_name = L"dragonRoot";
+    auto dragonScene = LoadModel("models/dragon.glb");
+    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+	dragonScene->GetRoot().m_name = L"dragonRoot";
 
- //   auto tigerScene = loadGLB("models/tiger.glb");
- //   tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
-	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
-	//tigerScene->GetRoot().m_name = L"tigerRoot";
+    auto tigerScene = LoadModel("models/tiger.glb");
+    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
+	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
+	tigerScene->GetRoot().m_name = L"tigerRoot";
 
- //   auto phoenixScene = loadGLB("models/phoenix.glb");
- //   phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
- //   phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+    auto phoenixScene = LoadModel("models/phoenix.glb");
+    phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
- //   auto carScene = LoadModel("models/porche.glb");
- //   carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
- //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
-	//carScene->GetRoot().m_name = L"carRoot";
+    auto carScene = LoadModel("models/porche.glb");
+    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+	carScene->GetRoot().m_name = L"carRoot";
 
     auto mountainScene = LoadModel("models/terrain.glb");
 	mountainScene->GetRoot().transform.setLocalScale({ 50.0, 50.0, 50.0 });
 	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
 	mountainScene->GetRoot().m_name = L"mountainRoot";
 
-	auto bistro = LoadModel("models/BistroExterior.fbx");
+    //auto bistro = LoadModel("models/BistroExterior.fbx");
+    //auto bistro = LoadModel("models/bistro.glb");
+
 	//auto sponza = loadGLB("models/sponza.glb");
 
     //auto cubeScene = LoadModel("models/cube_blank.glb");
@@ -262,31 +264,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.SetCurrentScene(baseScene);
     //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    //renderer.GetCurrentScene()->AppendScene(*dragonScene1);
+    renderer.GetCurrentScene()->AppendScene(*dragonScene);
 
-    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
-	renderer.GetCurrentScene()->AppendScene(*bistro);
+	//renderer.GetCurrentScene()->AppendScene(*bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);
 
-	//DeletionManager::GetInstance().MarkForDelete(carScene);
-    //DeletionManager::GetInstance().MarkForDelete(dragonScene);
-    //DeletionManager::GetInstance().MarkForDelete(tigerScene);
+	DeletionManager::GetInstance().MarkForDelete(carScene);
+    DeletionManager::GetInstance().MarkForDelete(dragonScene);
+    DeletionManager::GetInstance().MarkForDelete(tigerScene);
     DeletionManager::GetInstance().MarkForDelete(mountainScene);
-	//DeletionManager::GetInstance().MarkForDelete(phoenixScene);
-	DeletionManager::GetInstance().MarkForDelete(bistro);
+	DeletionManager::GetInstance().MarkForDelete(phoenixScene);
+	//DeletionManager::GetInstance().MarkForDelete(bistro);
 	//DeletionManager::GetInstance().MarkForDelete(sponza);
 
-	//carScene.reset();
-	//dragonScene.reset();
-	//tigerScene.reset();
-	//mountainScene.reset();
-	//phoenixScene.reset();
-	bistro.reset();
+	carScene.reset();
+	dragonScene.reset();
+	tigerScene.reset();
+	mountainScene.reset();
+	phoenixScene.reset();
+	//bistro.reset();
 	//sponza.reset();
 
     renderer.SetEnvironment("sky");

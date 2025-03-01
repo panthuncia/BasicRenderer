@@ -25,7 +25,7 @@ std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
 std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename);
+std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
 std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath);
 template <typename T1, typename T2>
@@ -183,3 +183,5 @@ inline void hash_combine(std::size_t & s, const T & v)
     std::hash<T> h;
     s^= h(v) + 0x9e3779b9 + (s<< 6) + (s>> 2);
 }
+
+std::string GetFileExtension(const std::string& filePath);
