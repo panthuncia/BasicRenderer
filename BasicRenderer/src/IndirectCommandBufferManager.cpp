@@ -7,6 +7,7 @@
 #include "IndirectCommand.h"
 #include "PSOManager.h"
 #include "CommandSignatureManager.h"
+#include "DynamicResource.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");

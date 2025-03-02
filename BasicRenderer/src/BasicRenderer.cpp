@@ -15,7 +15,6 @@
 #include "DX12Renderer.h"
 #include "Utilities.h"
 #include "RenderableObject.h"
-#include "GlTFLoader.h"
 #include "PSOManager.h"
 #include "Light.h"
 #include "Material.h"

@@ -5,13 +5,13 @@
 #include <wrl.h>
 #include <d3dcompiler.h>
 
-#include "GlTFLoader.h"
 #include "Light.h"
 #include "MeshData.h"
 #include "Camera.h"
 
 class DescriptorHeap;
 class RenderableObject;
+class Mesh;
 
 void ThrowIfFailed(HRESULT hr);
 

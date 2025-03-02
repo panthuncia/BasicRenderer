@@ -12,6 +12,9 @@
 #include "PSOFlags.h"
 #include "Sampler.h"
 #include "Filetypes.h"
+#include "Scene.h"
+#include "Mesh.h"
+#include "Skeleton.h"
 
 D3D12_TEXTURE_ADDRESS_MODE aiTextureMapModeToD3D12(aiTextureMapMode mode) {
     switch (mode) {

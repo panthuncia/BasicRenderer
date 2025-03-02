@@ -23,6 +23,8 @@
 #include "SettingsManager.h"
 #include "Vertex.h"
 #include "MaterialFlags.h"
+#include "Mesh.h"
+#include "RenderableObject.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
