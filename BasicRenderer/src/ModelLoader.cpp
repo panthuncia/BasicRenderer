@@ -47,12 +47,11 @@ static std::shared_ptr<Texture> loadAiTexture(
     {
         // Embedded texture
         // Convert the number after '*' into an index
-        unsigned int textureIndex = std::atoi(texPath.c_str() + 1); // skip '*'
+        unsigned int textureIndex = std::atoi(texPath.c_str() + 1);
         if (textureIndex >= scene->mNumTextures) {
             throw std::runtime_error("Embedded texture index out of range: " + texPath);
         }
 
-        // Access the aiTexture
         aiTexture* aiTex = scene->mTextures[textureIndex];
 
         if (aiTex == nullptr) {
@@ -146,7 +145,7 @@ static std::shared_ptr<Texture> loadAiTexture(
 
 std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
     const aiScene* scene,
-    const std::string& directory,                     // folder containing the model
+    const std::string& directory, // folder containing the model
     bool sRGB
 )
 {
@@ -162,7 +161,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
         aiMaterial* mat = scene->mMaterials[mIndex];
         if (!mat) continue;
 
-        // Example texture types we might care about:
+        // Ttexture types we might care about:
         static const aiTextureType textureTypes[] = {
             aiTextureType_DIFFUSE,
             //aiTextureType_SPECULAR,
@@ -195,7 +194,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 
                 if (aiGetMaterialTexture(mat, tType, tIndex, &aiTexPath, &mapping, nullptr, &blend, &op, mapmode, nullptr) == AI_SUCCESS)
                 {
-                    std::string texPath = aiTexPath.C_Str(); // e.g. "*0" or "myTexture.png"
+                    std::string texPath = aiTexPath.C_Str(); // e.g. "*0" or "texture.png"
                     // Check if we already loaded it:
                     auto it = loadedTextures.find(texPath);
                     if (it == loadedTextures.end())
@@ -248,7 +247,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
         UINT materialFlags = 0;
         UINT psoFlags = 0;
 
-        // Basic properties: e.g., retrieve diffuse color
+        // Basic properties
         aiColor4D diffuse(1.f, 1.f, 1.f, 1.f);
         mat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse);
 
@@ -262,9 +261,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
         float roughnessFactor = 1.f;
         mat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessFactor);
 
-		//if (metallicFactor > 0.f || roughnessFactor < 1.f) {
-			materialFlags |= MaterialFlags::MATERIAL_PBR;
-		//}
+		materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
 
         // For alpha, blending, doubleSided
         float alphaCutoff       = 0.5f;
@@ -366,13 +363,11 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 			psoFlags |= PSOFlags::PSO_BLEND;
         }
 
-        // Material name
         aiString matName;
         mat->Get(AI_MATKEY_NAME, matName);
         std::string mName = matName.C_Str();
         if (mName.empty()) mName = "Material_" + std::to_string(mIndex);
 
-        // Convert AI colors to XMFLOAT4
         DirectX::XMFLOAT4 baseColorFactor(diffuse.r, diffuse.g, diffuse.b, diffuse.a);
         DirectX::XMFLOAT4 emissiveFactor(emissive.r, emissive.g, emissive.b, 1.f);
 
@@ -383,7 +378,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
             baseColorTexture,
             normalTexture,
             aoMap,
-            nullptr, // No height map here
+			nullptr, // TODO: heightMap
             metallicTex,
             roughnessTex,
             emissiveTexture,
@@ -409,15 +404,13 @@ static std::pair<std::vector<std::shared_ptr<Mesh>>, std::vector<int>> parseAiMe
     meshes.reserve(pScene->mNumMeshes);
 	std::vector<int> meshSkinIndices;
 	meshSkinIndices.reserve(pScene->mNumMeshes);
+
 	// Assimp doesn't have a concept of a "skin" like glTF, so we'll just increment a counter
 	// each time we encounter a mesh with bones.
-
 	int currentSkinIndex = -1;
     for (unsigned int i = 0; i < pScene->mNumMeshes; ++i) {
         aiMesh* aMesh = pScene->mMeshes[i];
 
-        // Each aiMesh can have multiple primitives in glTF terms, 
-        // but in Assimp, it’s typically one set of indices + attributes.
         MeshData geometry;
 
         if (aMesh->HasBones()) {
@@ -451,7 +444,7 @@ static std::pair<std::vector<std::shared_ptr<Mesh>>, std::vector<int>> parseAiMe
             geometry.flags |= VertexFlags::VERTEX_NORMALS;
         }
 
-        // Texture coords (we'll only load the first set)
+        // Texture coords (only load the first set)
         if (aMesh->HasTextureCoords(0)) {
             geometry.texcoords.reserve(aMesh->mNumVertices * 2);
             for (unsigned int v = 0; v < aMesh->mNumVertices; v++) {
@@ -463,7 +456,6 @@ static std::pair<std::vector<std::shared_ptr<Mesh>>, std::vector<int>> parseAiMe
         }
 
         // Indices
-        // Each aiMesh has mNumFaces, each face typically a triangle => 3 indices
         for (unsigned int f = 0; f < aMesh->mNumFaces; f++) {
             const aiFace& face = aMesh->mFaces[f];
             for (unsigned int idx = 0; idx < face.mNumIndices; idx++) {
@@ -482,7 +474,6 @@ static std::pair<std::vector<std::shared_ptr<Mesh>>, std::vector<int>> parseAiMe
         // If the mesh has bones, we fill out geometry.joints + geometry.weights
         if (aMesh->HasBones()) {
             geometry.flags |= VertexFlags::VERTEX_SKINNED;
-            // We'll do that in a separate pass or here:
             geometry.joints.resize(aMesh->mNumVertices * 4, 0);
             geometry.weights.resize(aMesh->mNumVertices * 4, 0.f);
 
@@ -578,13 +569,6 @@ static void buildAiNodeHierarchy(
     }
 }
 
-// -------------------------------------------------------
-// 4) Parse Animations
-//    This loosely mimics parseGLTFAnimations. We read
-//    aiAnimation data, build your Animation objects, and
-//    store them. Each aiAnimation can have multiple channels
-//    (aiNodeAnim) for T, R, S keyframes.
-// -------------------------------------------------------
 static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
     const aiScene* pScene,
     const std::vector<std::shared_ptr<SceneNode>>& nodes,
@@ -698,7 +682,6 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
     auto skeleton = std::make_shared<Skeleton>(jointNodes, inverseBindMatrices);
 
     // Associate animations that reference these bones
-    // (In glTF code, you matched node IDs. We'll do something similar.)
     for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
         auto jointNode = jointNodes[b];
         if (!jointNode) continue;
