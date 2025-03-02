@@ -23,6 +23,8 @@
 #include "SettingsManager.h"
 #include "Vertex.h"
 #include "MaterialFlags.h"
+#include "Mesh.h"
+#include "RenderableObject.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -32,28 +34,28 @@ void ThrowIfFailed(HRESULT hr) {
     }
 }
 
-std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name) {
+std::shared_ptr<RenderableObject> RenderableFromData(const std::vector<const MeshData*>& meshData, std::wstring name) {
     std::vector<std::shared_ptr<Mesh>> meshes;
 
-    for (auto geom : meshData.geometries) {
-        bool hasTexcoords = !geom.texcoords.empty();
-        bool hasJoints = !geom.joints.empty() && !geom.weights.empty();
-        unsigned int materialFlags = geom.material->m_materialData.materialFlags;
+    for (auto geom : meshData) {
+        bool hasTexcoords = !geom->texcoords.empty();
+        bool hasJoints = !geom->joints.empty() && !geom->weights.empty();
+        unsigned int materialFlags = geom->material->m_materialData.materialFlags;
 
         std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
-		unsigned int numVertices = geom.positions.size() / 3;
+		unsigned int numVertices = geom->positions.size() / 3;
 		                    // position,        normal,            texcoord
         uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
 		rawData->resize(numVertices * vertexSize);
 
         for (unsigned int i = 0; i < numVertices; i++) {
             size_t baseOffset = i * vertexSize;
-			memcpy(rawData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+			memcpy(rawData->data() + baseOffset, &geom->positions[i * 3], sizeof(XMFLOAT3));
             size_t offset = sizeof(XMFLOAT3);
-			memcpy(rawData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+			memcpy(rawData->data() + baseOffset + offset, &geom->normals[i * 3], sizeof(XMFLOAT3));
 			offset += sizeof(XMFLOAT3);
 			if (hasTexcoords) {
-				memcpy(rawData->data() + baseOffset + offset, &geom.texcoords[i * 2], sizeof(XMFLOAT2));
+				memcpy(rawData->data() + baseOffset + offset, &geom->texcoords[i * 2], sizeof(XMFLOAT2));
 				offset += sizeof(XMFLOAT2);
 			}
         }
@@ -64,21 +66,63 @@ std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wst
 			skinningData->resize(numVertices * skinningVertexSize);
 			for (unsigned int i = 0; i < numVertices; i++) {
 				size_t baseOffset = i * skinningVertexSize;
-				memcpy(skinningData->data() + baseOffset, &geom.positions[i * 3], sizeof(XMFLOAT3));
+				memcpy(skinningData->data() + baseOffset, &geom->positions[i * 3], sizeof(XMFLOAT3));
                 size_t offset = sizeof(XMFLOAT3);
-				memcpy(skinningData->data() + baseOffset + offset, &geom.normals[i * 3], sizeof(XMFLOAT3));
+				memcpy(skinningData->data() + baseOffset + offset, &geom->normals[i * 3], sizeof(XMFLOAT3));
 				offset += sizeof(XMFLOAT3);
-				memcpy(skinningData->data() + baseOffset + offset, &geom.joints[i * 4], sizeof(XMUINT4));
+				memcpy(skinningData->data() + baseOffset + offset, &geom->joints[i * 4], sizeof(XMUINT4));
 				offset += sizeof(XMUINT4);
-				memcpy(skinningData->data() + baseOffset + offset, &geom.weights[i * 4], sizeof(XMFLOAT4));
+				memcpy(skinningData->data() + baseOffset + offset, &geom->weights[i * 4], sizeof(XMFLOAT4));
 			}
         }
 
-        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, geom.indices, geom.material, geom.flags);
+        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, geom->indices, geom->material, geom->flags);
         meshes.push_back(std::move(mesh));
     }
 
     return std::make_shared<RenderableObject>(name, meshes);
+}
+
+std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {
+    bool hasTexcoords = !meshData.texcoords.empty();
+    bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
+    unsigned int materialFlags = meshData.material->m_materialData.materialFlags;
+
+    std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
+    unsigned int numVertices = meshData.positions.size() / 3;
+    // position,        normal,            texcoord
+    uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
+    rawData->resize(numVertices * vertexSize);
+
+    for (unsigned int i = 0; i < numVertices; i++) {
+        size_t baseOffset = i * vertexSize;
+        memcpy(rawData->data() + baseOffset, &meshData.positions[i * 3], sizeof(XMFLOAT3));
+        size_t offset = sizeof(XMFLOAT3);
+        memcpy(rawData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
+        offset += sizeof(XMFLOAT3);
+        if (hasTexcoords) {
+            memcpy(rawData->data() + baseOffset + offset, &meshData.texcoords[i * 2], sizeof(XMFLOAT2));
+            offset += sizeof(XMFLOAT2);
+        }
+    }
+    // position,       normal            joints,           weights
+    unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)  + sizeof(XMUINT4) + sizeof(XMFLOAT4);
+    std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
+    if (hasJoints) {
+        skinningData->resize(numVertices * skinningVertexSize);
+        for (unsigned int i = 0; i < numVertices; i++) {
+            size_t baseOffset = i * skinningVertexSize;
+            memcpy(skinningData->data() + baseOffset, &meshData.positions[i * 3], sizeof(XMFLOAT3));
+            size_t offset = sizeof(XMFLOAT3);
+            memcpy(skinningData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
+            offset += sizeof(XMFLOAT3);
+            memcpy(skinningData->data() + baseOffset + offset, &meshData.joints[i * 4], sizeof(XMUINT4));
+            offset += sizeof(XMUINT4);
+            memcpy(skinningData->data() + baseOffset + offset, &meshData.weights[i * 4], sizeof(XMFLOAT4));
+        }
+    }
+
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, meshData.indices, meshData.material, meshData.flags);
 }
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix) {
@@ -121,7 +165,7 @@ ImageData loadImage(const char* filename) {
     return img;
 }
 
-std::shared_ptr<Texture> loadTextureFromFile(std::string filename) {
+std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler) {
 	ImageData img = loadImage(filename.c_str());
     // Determine DXGI_FORMAT based on number of channels
 	DXGI_FORMAT format;
@@ -140,15 +184,53 @@ std::shared_ptr<Texture> loadTextureFromFile(std::string filename) {
 			throw std::runtime_error("Unsupported channel count");
     }
 
+	ImageDimensions dim;
+	dim.width = img.width;
+	dim.height = img.height;
+	dim.rowPitch = img.width * img.channels;
+	dim.slicePitch = img.height * img.width * img.channels;
+
     TextureDescription desc;
+	desc.imageDimensions.push_back(dim);
 	desc.channels = img.channels;
-	desc.width = img.width;
-	desc.height = img.height;
 	desc.format = format;
 	auto buffer = PixelBuffer::Create(desc, { img.data });
 
-    auto sampler = Sampler::GetDefaultSampler();
+    if (!sampler) {
+        sampler = Sampler::GetDefaultSampler();
+    }
     return std::make_shared<Texture>(buffer, sampler);
+}
+
+std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::shared_ptr<Sampler> sampler) {
+	DirectX::ScratchImage image;
+	DirectX::TexMetadata metadata;
+	HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+
+	if (FAILED(hr)) {
+		throw std::runtime_error("Failed to load DDS texture: " + ws2s(ddsFilePath));
+	}
+	// Extract the first mip level
+	const DirectX::Image* img = image.GetImage(0, 0, 0); // mip 0, face 0, slice 0
+	ImageDimensions dim;
+	dim.width = metadata.width;
+	dim.height = metadata.height;
+	dim.rowPitch = img->rowPitch;
+	dim.slicePitch = img->slicePitch;
+
+	TextureDescription desc;
+	desc.imageDimensions.push_back(dim);
+	desc.channels = 4;
+	desc.format = metadata.format;
+    desc.generateMipMaps = false;// metadata.mipLevels != 1;
+	auto buffer = PixelBuffer::Create(desc, { img->pixels });
+	if (!sampler) {
+		sampler = Sampler::GetDefaultSampler();
+	}
+    auto texture = std::make_shared<Texture>(buffer, sampler);
+	texture->SetFilepath(ws2s(ddsFilePath));
+	texture->SetAlphaIsAllOpaque(image.IsAlphaAllOpaque());
+	return texture;
 }
 
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
@@ -160,9 +242,14 @@ std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bo
 	ImageData back = loadImage(backPath);
 
 
+	ImageDimensions dim;
+	dim.width = top.width;
+	dim.height = top.height;
+	dim.rowPitch = top.width * top.channels;
+	dim.slicePitch = dim.rowPitch * top.height;
+
 	TextureDescription desc;
-	desc.height = top.height;
-	desc.width = top.width;
+	desc.imageDimensions.push_back(dim);
 	desc.channels = top.channels;
 	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	desc.isCubemap = true;
@@ -186,18 +273,22 @@ std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
     }
 
     // Extract cubemap faces and create a PixelBuffer from them
+    TextureDescription desc;
+
     std::vector<const stbi_uc*> faces = {};
     for (size_t face = 0; face < 6; ++face) {
         for (size_t mip = 0; mip < metadata.mipLevels; ++mip) {
             const DirectX::Image* img = image.GetImage(mip, face, 0); // mip 0, face i, slice 0
             faces.push_back(img->pixels);
+			ImageDimensions dim;
+			dim.width = img->width;
+			dim.height = img->height;
+			dim.rowPitch = img->rowPitch;
+			dim.slicePitch = img->slicePitch;
+			desc.imageDimensions.push_back(dim);
         }
     }
-
-    TextureDescription desc;
 	desc.channels = 4;
-	desc.width = metadata.width;
-	desc.height = metadata.height;
     desc.format = metadata.format;
 	desc.isCubemap = true;
     if (metadata.mipLevels != 1) {
@@ -830,4 +921,12 @@ XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix) {
     result.m[2][2] = matrix.r[2].m128_f32[2]; // Row 2, Col 2
 
     return result;
+}
+
+std::string GetFileExtension(const std::string& filePath) {
+    size_t dotPos = filePath.find_last_of('.');
+    if (dotPos == std::string::npos || dotPos == filePath.length() - 1) {
+        return ""; // No extension found or ends with a dot
+    }
+    return filePath.substr(dotPos + 1);
 }

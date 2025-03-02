@@ -11,6 +11,9 @@ RenderableObject::RenderableObject(std::wstring name) : SceneNode(name) {
 
 RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes) : SceneNode(name) {
     for (auto& mesh : meshes) {
+		if (mesh->HasSkin()) {
+			m_hasSkinned = true;
+		}
         switch (mesh->material->m_blendState) {
 		case BlendState::BLEND_STATE_OPAQUE:
 			opaqueMeshes.push_back(mesh);
@@ -33,18 +36,27 @@ RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_pt
         m_hasOpaque = true;
         for (auto& mesh : newOpaqueMeshes) {
             opaqueMeshes.push_back(mesh);
+			if (mesh->HasSkin()) {
+				m_hasSkinned = true;
+			}
         }
     }
     if (newAlphaTestMeshes.size() > 0) {
         m_hasAlphaTest = true;
         for (auto& mesh : newAlphaTestMeshes) {
             alphaTestMeshes.push_back(mesh);
+			if (mesh->HasSkin()) {
+				m_hasSkinned = true;
+			}
         }
     }
 	if (newBlendMeshes.size() > 0) {
 		m_hasBlend = true;
 		for (auto& mesh : newBlendMeshes) {
 			blendMeshes.push_back(mesh);
+			if (mesh->HasSkin()) {
+				m_hasSkinned = true;
+			}
 		}
 	}
 }
@@ -73,6 +85,10 @@ bool RenderableObject::HasBlend() const {
 	return m_hasBlend;
 }
 
+bool RenderableObject::HasSkinned() const {
+	return m_hasSkinned;
+}
+
 void RenderableObject::UpdateBuffers() {
     perObjectCBData.modelMatrix = transform.modelMatrix;
 
@@ -94,20 +110,6 @@ void RenderableObject::UpdateBuffers() {
 
 void RenderableObject::OnUpdate() {
     UpdateBuffers();
-}
-
-void RenderableObject::SetSkin(std::shared_ptr<Skeleton> skeleton) {
-    m_skeleton = skeleton;
-    perObjectCBData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
-    perObjectCBData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
-    if (m_currentManager != nullptr) {
-        m_currentManager->UpdatePerObjectBuffer(m_perObjectCBView.get(), perObjectCBData);
-    }
-    skeleton->userIDs.push_back(localID);
-}
-
-std::shared_ptr<Skeleton>& RenderableObject::GetSkin() {
-	return m_skeleton;
 }
 
 PerObjectCB& RenderableObject::GetPerObjectCBData() {

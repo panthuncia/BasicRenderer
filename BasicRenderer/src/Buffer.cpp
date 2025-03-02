@@ -85,10 +85,25 @@ std::vector<D3D12_RESOURCE_BARRIER>& Buffer::GetTransitions(ResourceState fromSt
 }
 
 BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+#if defined(_DEBUG)
+	if (prevState != currentState) {
+		throw(std::runtime_error("Buffer state mismatch"));
+	}
+	if (prevSyncState != currentSyncState) {
+		throw(std::runtime_error("Buffer sync state mismatch"));
+	}
+	if (prevState == newState) {
+		throw(std::runtime_error("Useless transition"));
+	}
+#endif
+	
 	m_bufferBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevState);
 	m_bufferBarrier.AccessAfter = ResourceStateToD3D12AccessType(newState);
 	m_bufferBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
 	m_bufferBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
+
+	currentState = newState;
+	currentSyncState = newSyncState;
 
 	return m_barrierGroups;
 }

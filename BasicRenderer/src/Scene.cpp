@@ -69,7 +69,7 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
 		objectManager->AddObject(object);
 	}
 
-	if (object->GetSkin() != nullptr) {
+	if (object->HasSkinned()) {
 		if (object->HasOpaque()) {
 			opaqueSkinnedObjectsByID[object->GetLocalID()] = object;
 		} if (object->HasAlphaTest()) {
@@ -118,8 +118,8 @@ std::shared_ptr<SceneNode> Scene::CreateNode(std::wstring name) {
     return node;
 }
 
-std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(MeshData meshData, std::wstring name) {
-    std::shared_ptr<RenderableObject> object = RenderableFromData(meshData, name);
+std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
+    std::shared_ptr<RenderableObject> object = std::make_shared<RenderableObject>(name, meshes);
     AddObject(object);
     return object;
 }
@@ -195,7 +195,7 @@ void Scene::RemoveObjectByID(UINT id) {
 			m_numBlendDraws--;
 			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
 		}
-		if (it->second->GetSkin() != nullptr) {
+		if (it->second->HasSkinned()) {
 			if (it->second->HasOpaque()) {
 				opaqueSkinnedObjectsByID.erase(it->second->GetLocalID());
 			} if (it->second->HasAlphaTest()) {
@@ -324,10 +324,13 @@ void Scene::Update() {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
-    for (auto& skeleton : animatedSkeletons) {
-        for (auto& node : skeleton->m_nodes) {
-            node->animationController->update(elapsed_seconds.count());
-        }
+    //for (auto& skeleton : animatedSkeletons) {
+    //    for (auto& node : skeleton->m_nodes) {
+    //        node->animationController->update(elapsed_seconds.count());
+    //    }
+    //}
+	for (auto& node : animatedNodesByID) {
+		node.second->animationController->update(elapsed_seconds.count());
     }
     this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
@@ -372,6 +375,9 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         skeleton->SetAnimation(0);
         animatedSkeletons.push_back(skeleton);
     }
+	for (auto& node : skeleton->m_nodes) {
+		animatedNodesByID[node->GetLocalID()] = node;
+	}
 }
 
 void Scene::PostUpdate() {
@@ -480,30 +486,31 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
             }
         }
         //auto newSkeleton = std::make_shared<Skeleton>(newJoints, skeleton->GetInverseBindMatricesHandle());
-        auto newSkeleton = std::make_shared<Skeleton>(newJoints, skeleton->m_inverseBindMatrices);
+        skeleton->SetJoints(newJoints);
+		auto animationsCopy = skeleton->animations;
+		skeleton->DeleteAllAnimations();
         // Remap node ids in animations
-        for (auto& animation : skeleton->animations) {
+        for (auto& animation : animationsCopy) {
             auto newAnimation = std::make_shared<Animation>(animation->name);
             for (auto& nodePair : animation->nodesMap) {
                 UINT key = nodePair.first;
                 newAnimation->nodesMap[idMap[key]] = nodePair.second;
             }
-            newSkeleton->AddAnimation(newAnimation);
+            skeleton->AddAnimation(newAnimation);
         }
-
+		AddSkeleton(skeleton);
         // Remap skeleton & users to their correct IDs
-        for (auto& oldID : skeleton->userIDs) {
-            GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
-			// Add to correct skinned object map
-            if (GetObjectByID(idMap[oldID])->HasOpaque()) {
-				opaqueSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
-			} if (GetObjectByID(idMap[oldID])->HasAlphaTest()) {
-				alphaTestSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
-			} if (GetObjectByID(idMap[oldID])->HasBlend()) {
-				blendSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
-            }
-        }
-        AddSkeleton(newSkeleton);
+   //     for (auto& oldID : skeleton->userIDs) {
+   //         GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
+			//// Add to correct skinned object map
+   //         if (GetObjectByID(idMap[oldID])->HasOpaque()) {
+			//	opaqueSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+			//} if (GetObjectByID(idMap[oldID])->HasAlphaTest()) {
+			//	alphaTestSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+			//} if (GetObjectByID(idMap[oldID])->HasBlend()) {
+			//	blendSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
+   //         }
+   //     }
     }
 
     // Rebuild parent-child mapping

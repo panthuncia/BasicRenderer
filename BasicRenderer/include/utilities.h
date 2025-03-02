@@ -5,13 +5,13 @@
 #include <wrl.h>
 #include <d3dcompiler.h>
 
-#include "GlTFLoader.h"
 #include "Light.h"
 #include "MeshData.h"
 #include "Camera.h"
 
 class DescriptorHeap;
 class RenderableObject;
+class Mesh;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -20,10 +20,12 @@ void print(Args... args) {
     (std::cout << ... << args) << std::endl;
 }
 
-std::shared_ptr<RenderableObject> RenderableFromData(MeshData meshData, std::wstring name);
+std::shared_ptr<RenderableObject> RenderableFromData(const std::vector<const MeshData*>& meshData, std::wstring name);
+std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
-std::shared_ptr<Texture> loadTextureFromFile(std::string filename);
+std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::shared_ptr<Sampler> sampler = nullptr);
+std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
 std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath);
 template <typename T1, typename T2>
@@ -174,3 +176,12 @@ DirectX::XMFLOAT3 Add(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b);
 DirectX::XMFLOAT3 Scale(const DirectX::XMFLOAT3& a, const float scalar);
 
 XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix);
+
+template <class T>
+inline void hash_combine(std::size_t & s, const T & v)
+{
+    std::hash<T> h;
+    s^= h(v) + 0x9e3779b9 + (s<< 6) + (s>> 2);
+}
+
+std::string GetFileExtension(const std::string& filePath);

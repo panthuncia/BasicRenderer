@@ -26,8 +26,8 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
-    StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[objectBuffer.boneTransformBufferIndex];
-    StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[objectBuffer.inverseBindMatricesBufferIndex];
+    StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[meshBuffer.boneTransformBufferIndex];
+    StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[meshBuffer.inverseBindMatricesBufferIndex];
     
     matrix bone1 = (boneTransformsBuffer[input.joints.x]);
     matrix bone2 = (boneTransformsBuffer[input.joints.y]);

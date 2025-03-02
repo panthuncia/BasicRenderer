@@ -10,18 +10,17 @@
 #include "ResourceHandles.h"
 #include "Utilities.h"
 #include "UploadManager.h"
-#include "RendererUtils.h"
+#include "ReadbackManager.h"
 
 class EnvironmentConversionPass : public RenderPass {
 public:
-    EnvironmentConversionPass(RendererUtils utils, std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance, std::string environmentName) : m_utils(utils) {
+    EnvironmentConversionPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance, std::string environmentName) {
 		m_environmentName = s2ws(environmentName);
         m_texture = environmentTexture;
 		m_environmentCubeMap = environmentCubeMap;
 		m_environmentRadiance = environmentRadiance;
         m_viewMatrices = GetCubemapViewMatrices({0.0, 0.0, 0.0});
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
-		m_readbackFence = utils.GetReadbackFence();
     }
 
     void Setup() override {
@@ -51,8 +50,6 @@ public:
             commandList->Close();
 			m_commandLists.push_back(commandList);
         }
-        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocators.back().Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
-		m_copyCommandList->Close();
 
 		CreateEnvironmentConversionRootSignature();
 		CreateEnvironmentConversionPSO();
@@ -131,17 +128,11 @@ public:
             invalidated = false;
 			m_currentPass = 0;
 
-            m_copyCommandList->Reset(m_allocators.back().Get(), nullptr);
-            UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
+			auto& readbackManager = ReadbackManager::GetInstance();
             auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds", L"environments");
-            m_utils.SaveCubemapToDDS(context.device, m_copyCommandList.Get(), m_environmentRadiance.get(), path, fenceValue);
+			readbackManager.RequestReadback(m_environmentRadiance, path, nullptr, true);
             path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
-            m_utils.SaveCubemapToDDS(context.device, m_copyCommandList.Get(), m_environmentCubeMap.get(), path, fenceValue);
-            m_copyCommandList->Close();
-            commandLists.push_back(m_copyCommandList.Get());
-            
-            passReturn.fence = m_readbackFence;
-			passReturn.fenceValue = fenceValue;
+			readbackManager.RequestReadback(m_environmentCubeMap, path, nullptr, true);
         }
 
 		passReturn.commandLists = std::move(commandLists);
@@ -153,8 +144,6 @@ public:
     }
 
 private:
-	RendererUtils m_utils;
-	ID3D12Fence* m_readbackFence = nullptr;
 
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
@@ -173,7 +162,6 @@ private:
     int m_currentPass = 0;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_copyCommandList;
     std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_allocators;
 
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;

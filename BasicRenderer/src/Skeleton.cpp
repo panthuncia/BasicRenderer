@@ -76,3 +76,12 @@ uint32_t Skeleton::GetInverseBindMatricesBufferIndex() {
 std::shared_ptr<Buffer>& Skeleton::GetInverseBindMatricesBuffer() {
     return m_inverseBindMatricesBuffer;
 }
+
+void Skeleton::DeleteAllAnimations() {
+	animations.clear();
+	animationsByName.clear();
+}
+
+void Skeleton::SetJoints(const std::vector<std::shared_ptr<SceneNode>>& joints) {
+	m_nodes = joints;
+}

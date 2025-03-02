@@ -10,4 +10,5 @@ enum MaterialFlags {
     MATERIAL_PBR_MAPS = 1 << 6,
     MATERIAL_DOUBLE_SIDED = 1 << 7,
     MATERIAL_PARALLAX = 1 << 8,
+	MATERIAL_INVERT_NORMALS = 1 << 9, // Some normal textures are inverted
 };

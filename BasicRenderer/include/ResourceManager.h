@@ -416,7 +416,7 @@ public:
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         // Determine the number of mip levels
-        unsigned int mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.width, desc.height) : 1;
+        unsigned int mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
 
         // Determine the array size
         uint32_t arraySize = desc.arraySize;
@@ -427,8 +427,8 @@ public:
         // Create the texture resource description
         auto textureDesc = CreateTextureResourceDesc(
             desc.format,
-            desc.width,
-            desc.height,
+            desc.imageDimensions[0].width,
+            desc.imageDimensions[0].height,
             arraySize,
             mipLevels,
             desc.isCubemap,
@@ -560,35 +560,45 @@ public:
             std::vector<const stbi_uc*> fullInitialData(numSubresources, nullptr);
             std::copy(initialData.begin(), initialData.end(), fullInitialData.begin());
 
+			int i = -1;
             for (uint32_t arraySlice = 0; arraySlice < numTextures; ++arraySlice) {
                 for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+                    i++;
                     UINT subresourceIndex = mip + arraySlice * mipLevels;
                     D3D12_SUBRESOURCE_DATA& subData = subresourceData[subresourceIndex];
 
                     const stbi_uc* imageData = fullInitialData[subresourceIndex];
 
-                    if (imageData != nullptr) {
-                        // Expand image data if channels == 3
-                        const stbi_uc* imagePtr = imageData;
-                        UINT width = desc.width >> mip;
-                        UINT height = desc.height >> mip;
-                        UINT channels = desc.channels;
-                        if (channels == 3) {
-                            // Expand image data and store it in the container
-                            expandedImages.emplace_back(ExpandImageData(imageData, width, height));
-                            imagePtr = expandedImages.back().data();
-                            channels = 4; // Update channels after expansion
-                        }
-
-                        subData.pData = imagePtr;
-                        subData.RowPitch = width * channels;
-                        subData.SlicePitch = subData.RowPitch * height;
+                    UINT width = desc.imageDimensions[i].width >> mip;
+                    UINT height = desc.imageDimensions[i].height >> mip;
+                    UINT channels = desc.channels;
+					if ((width * channels != desc.imageDimensions[i].rowPitch) || (width * channels * height != desc.imageDimensions[i].slicePitch)) // Probably compressed texture
+					{
+						subData.pData = imageData;
+						subData.RowPitch = desc.imageDimensions[i].rowPitch;
+						subData.SlicePitch = desc.imageDimensions[i].slicePitch;
                     }
                     else {
-                        // For missing data, set pData to nullptr
-                        subData.pData = nullptr;
-                        subData.RowPitch = 0;
-                        subData.SlicePitch = 0;
+                        if (imageData != nullptr) {
+                            // Expand image data if channels == 3
+                            const stbi_uc* imagePtr = imageData;
+                            if (channels == 3) {
+                                // Expand image data and store it in the container
+                                expandedImages.emplace_back(ExpandImageData(imageData, width, height));
+                                imagePtr = expandedImages.back().data();
+                                channels = 4; // Update channels after expansion
+                            }
+
+                            subData.pData = imagePtr;
+                            subData.RowPitch = width * channels;
+                            subData.SlicePitch = subData.RowPitch * height;
+                        }
+                        else {
+                            // For missing data, set pData to nullptr
+                            subData.pData = nullptr;
+                            subData.RowPitch = 0;
+                            subData.SlicePitch = 0;
+                        }
                     }
                 }
             }

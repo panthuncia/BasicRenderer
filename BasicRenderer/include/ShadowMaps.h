@@ -26,8 +26,12 @@ public:
 		std::shared_ptr<PixelBuffer> shadowMap;
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		TextureDescription desc;
-		desc.width = shadowResolution;
-		desc.height = shadowResolution;
+		ImageDimensions dims;
+		dims.height = shadowResolution;
+		dims.width = shadowResolution;
+		dims.rowPitch = shadowResolution * 4;
+		dims.slicePitch = shadowResolution * shadowResolution * 4;
+		desc.imageDimensions.push_back(dims);
 		desc.hasDSV = true;
 		desc.channels = 1;
 		desc.format = DXGI_FORMAT_R32_TYPELESS;

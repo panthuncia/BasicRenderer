@@ -7,12 +7,11 @@
 #include "ResourceHandles.h"
 #include "utilities.h"
 #include "UploadManager.h"
-#include "RendererUtils.h"
+#include "ReadbackManager.h"
 class BRDFIntegrationPass : public RenderPass {
 public:
-    BRDFIntegrationPass(RendererUtils utils, std::shared_ptr<Texture> lutTexture) : m_utils(utils) {
+    BRDFIntegrationPass(std::shared_ptr<Texture> lutTexture) {
 		m_lutTexture = lutTexture;
-		m_readbackFence = utils.GetReadbackFence();
     }
 
     void Setup() override {
@@ -57,13 +56,10 @@ public:
 
         invalidated = false;
 
-        m_copyCommandList->Reset(m_allocator.Get(), nullptr);
         auto path = GetCacheFilePath(L"lut.dds", L"luts");
-        UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
-        m_utils.SaveTextureToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_lutTexture.get(), path, fenceValue);
-        m_copyCommandList->Close();
+		ReadbackManager::GetInstance().RequestReadback(m_lutTexture, path, nullptr, false);
 
-        return { { commandList.Get() }, m_readbackFence, fenceValue };
+        return { { commandList.Get() }, nullptr, 0 };
     }
 
     void Cleanup(RenderContext& context) override {
@@ -71,7 +67,6 @@ public:
     }
 
 private:
-	RendererUtils m_utils;
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
     std::shared_ptr<Texture> m_lutTexture = nullptr;
@@ -83,7 +78,6 @@ private:
     ComPtr<ID3D12RootSignature> rootSignature;
     ComPtr<ID3D12PipelineState> PSO;
 
-	ID3D12Fence* m_readbackFence = nullptr;
 
     struct DebugVertex {
         XMFLOAT3 position;

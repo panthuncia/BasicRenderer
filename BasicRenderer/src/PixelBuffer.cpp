@@ -23,8 +23,8 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 	if (desc.hasDSV)
 	    SetDSVDescriptors(handle.dsvHeap, handle.DSVInfo);
     currentState = ResourceState::UNKNOWN;
-	m_width = desc.width;
-	m_height = desc.height;
+	m_width = desc.imageDimensions[0].width;
+	m_height = desc.imageDimensions[0].height;
 	m_channels = desc.channels;
 	m_format = desc.format;
 
@@ -49,7 +49,14 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 }
 
 std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState fromState, ResourceState toState) {
-    if (fromState == toState) return m_emptyTransitions;
+#if defined(_DEBUG)
+    if (fromState != currentState) {
+        throw(std::runtime_error("Texture state mismatch"));
+    }
+    if (fromState == toState) {
+        throw(std::runtime_error("Useless transition"));
+    }
+#endif
 
     D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
     D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);
@@ -62,12 +69,27 @@ std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState 
 }
 
 BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+#if defined(_DEBUG)
+    if (prevState != currentState) {
+        throw(std::runtime_error("Texture state mismatch"));
+    }
+    if (prevSyncState != currentSyncState) {
+        throw(std::runtime_error("Texture sync state mismatch"));
+    }
+    if (prevState == newState) {
+        throw(std::runtime_error("Useless transition"));
+    }
+#endif
+    
     m_textureBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevState);
     m_textureBarrier.AccessAfter = ResourceStateToD3D12AccessType(newState);
     m_textureBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
     m_textureBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 	m_textureBarrier.LayoutBefore = ResourceStateToD3D12GraphicsBarrierLayout(prevState);
 	m_textureBarrier.LayoutAfter = ResourceStateToD3D12GraphicsBarrierLayout(newState);
+
+    currentState = newState;
+    currentSyncState = newSyncState;
 
     return m_barrierGroups;
 }

@@ -33,3 +33,11 @@ void Texture::SetName(const std::wstring& name) {
 }
 
 ID3D12Resource* Texture::GetAPIResource() const { return m_image->GetAPIResource(); }
+
+void Texture::SetFilepath(const std::string& filepath) {
+	m_filePath = filepath;
+	ImageFiletype format = extensionToFiletype[GetFileExtension(filepath)];
+	ImageLoader loader = imageFiletypeToLoader[format];
+	m_fileType = format;
+	m_imageLoader = loader;
+}

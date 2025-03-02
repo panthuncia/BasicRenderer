@@ -54,8 +54,10 @@ struct MaterialInfo {
     uint baseColorSamplerIndex;
     uint normalTextureIndex;
     uint normalSamplerIndex;
-    uint metallicRoughnessTextureIndex;
-    uint metallicRoughnessSamplerIndex;
+    uint metallicTextureIndex;
+    uint metallicSamplerIndex;
+    uint roughnessTextureIndex;
+    uint roughnessSamplerIndex;
     uint emissiveTextureIndex;
     uint emissiveSamplerIndex;
     uint aoMapIndex;
@@ -69,6 +71,8 @@ struct MaterialInfo {
     float textureScale;
     float heightMapScale;
     float alphaCutoff;
+    uint pad0;
+    uint pad1;
     float4 baseColorFactor;
     float4 emissiveFactor;
 };
@@ -87,9 +91,7 @@ struct Meshlet {
 struct PerObjectBuffer {
     row_major matrix model;
     uint normalMatrixBufferIndex;
-    uint boneTransformBufferIndex;
-    uint inverseBindMatricesBufferIndex;
-    uint pad0;
+    uint pad[3];
 };
 
 struct BoundingSphere {
@@ -109,7 +111,9 @@ struct PerMeshBuffer {
     uint meshletTrianglesBufferOffset;
     BoundingSphere boundingSphere;
     uint numVertices;
-    uint pad[1];
+    uint boneTransformBufferIndex;
+    uint inverseBindMatricesBufferIndex;
+    uint pad[3];
 };
 
 #endif // __STRUCTS_HLSL__

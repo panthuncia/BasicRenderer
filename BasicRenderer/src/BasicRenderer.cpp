@@ -15,7 +15,6 @@
 #include "DX12Renderer.h"
 #include "Utilities.h"
 #include "RenderableObject.h"
-#include "GlTFLoader.h"
 #include "PSOManager.h"
 #include "Light.h"
 #include "Material.h"
@@ -23,6 +22,8 @@
 #include "MaterialFlags.h"
 #include "PSOFlags.h"
 #include "DeletionManager.h"
+#include "ModelLoader.h"
+
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
@@ -207,81 +208,86 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     };
 
     auto baseScene = std::make_shared<Scene>();
+    //auto dragonScene1 = loadGLB("models/dragon.glb");
 
- //   auto dragonScene = loadGLB("models/dragon.glb");
- //   dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
- //   dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
-	//dragonScene->GetRoot().m_name = L"dragonRoot";
+    auto dragonScene = LoadModel("models/dragon.glb");
+    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+	dragonScene->GetRoot().m_name = L"dragonRoot";
 
- //   auto tigerScene = loadGLB("models/tiger.glb");
- //   tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
-	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
-	//tigerScene->GetRoot().m_name = L"tigerRoot";
+    auto tigerScene = LoadModel("models/tiger.glb");
+    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
+	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
+	tigerScene->GetRoot().m_name = L"tigerRoot";
 
- //   auto phoenixScene = loadGLB("models/phoenix.glb");
- //   phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
- //   phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+    auto phoenixScene = LoadModel("models/phoenix.glb");
+    phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
- //   auto carScene = loadGLB("models/porche.glb");
- //   carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
- //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
-	//carScene->GetRoot().m_name = L"carRoot";
+    auto carScene = LoadModel("models/porche.glb");
+    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+	carScene->GetRoot().m_name = L"carRoot";
 
- //   auto mountainScene = loadGLB("models/terrain.glb");
-	//mountainScene->GetRoot().transform.setLocalScale({ 100.0, 100.0, 100.0 });
-	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
-	//mountainScene->GetRoot().m_name = L"mountainRoot";
+    auto mountainScene = LoadModel("models/terrain.glb");
+	mountainScene->GetRoot().transform.setLocalScale({ 50.0, 50.0, 50.0 });
+	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+	mountainScene->GetRoot().m_name = L"mountainRoot";
 
-	auto bistro = loadGLB("models/bistro.glb");
-	//auto sponza = loadGLB("models/sponza.glb");
+    //auto bistro = LoadModel("models/BistroExterior.fbx");
+    //auto bistro = LoadModel("models/bistro.glb");
 
-    //auto cubeScene = loadGLB("models/cube.glb");
+	auto sponza = LoadModel("models/sponza.glb");
+
+    //auto cubeScene = LoadModel("models/cube_blank.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
-    //auto heightMap = loadTextureFromFile("textures/height.jpg");
+    //auto heightMap = loadTextureFromFileSTBI("textures/height.jpg");
     //for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
     //    auto& renderable = pair.second;
     //    for (auto& mesh : renderable->GetOpaqueMeshes()) {
-    //        mesh.material->SetHeightmap(heightMap);
-    //        mesh.material->SetHeightmapScale(0.1);
-    //        mesh.material->SetTextureScale(2.0);
+    //        mesh->material->SetHeightmap(heightMap);
+    //        mesh->material->SetHeightmapScale(0.1);
+    //        mesh->material->SetTextureScale(2.0);
     //    }
     //}
-    //for (auto& pair : cubeScene->GetTransparentRenderableObjectIDMap()) {
+    //for (auto& pair : cubeScene->GetAlphaTestRenderableObjectIDMap()) {
     //    auto& renderable = pair.second;
-    //    for (auto& mesh : renderable->GetTransparentMeshes()) {
-    //        mesh.material->SetHeightmap(heightMap);
-    //        mesh.material->SetHeightmapScale(0.1);
-    //        mesh.material->SetTextureScale(2.0);
+    //    for (auto& mesh : renderable->GetAlphaTestMeshes()) {
+    //        mesh->material->SetHeightmap(heightMap);
+    //        mesh->material->SetHeightmapScale(0.1);
+    //        mesh->material->SetTextureScale(2.0);
     //    }
     //}
 
 
     renderer.SetCurrentScene(baseScene);
     //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    renderer.GetCurrentScene()->AppendScene(*dragonScene);
+
+    renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
 	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
-	renderer.GetCurrentScene()->AppendScene(*bistro);
-	//renderer.GetCurrentScene()->AppendScene(*sponza);
+	//renderer.GetCurrentScene()->AppendScene(*bistro);
+	renderer.GetCurrentScene()->AppendScene(*sponza);
 
-	//DeletionManager::GetInstance().MarkForDelete(carScene);
-    //DeletionManager::GetInstance().MarkForDelete(dragonScene);
-    //DeletionManager::GetInstance().MarkForDelete(tigerScene);
- //   DeletionManager::GetInstance().MarkForDelete(mountainScene);
-	//DeletionManager::GetInstance().MarkForDelete(phoenixScene);
-	DeletionManager::GetInstance().MarkForDelete(bistro);
-	//DeletionManager::GetInstance().MarkForDelete(sponza);
+	DeletionManager::GetInstance().MarkForDelete(carScene);
+    DeletionManager::GetInstance().MarkForDelete(dragonScene);
+    DeletionManager::GetInstance().MarkForDelete(tigerScene);
+    DeletionManager::GetInstance().MarkForDelete(mountainScene);
+	DeletionManager::GetInstance().MarkForDelete(phoenixScene);
+	//DeletionManager::GetInstance().MarkForDelete(bistro);
+	DeletionManager::GetInstance().MarkForDelete(sponza);
 
-	//carScene.reset();
-	//dragonScene.reset();
-	//tigerScene.reset();
-	//mountainScene.reset();
-	//phoenixScene.reset();
-	bistro.reset();
+	carScene.reset();
+	dragonScene.reset();
+	tigerScene.reset();
+	mountainScene.reset();
+	phoenixScene.reset();
+	//bistro.reset();
 	//sponza.reset();
 
     renderer.SetEnvironment("sky");
@@ -312,11 +318,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //scene->AddObject(cubeObject);
 
     auto animation = std::make_shared<AnimationClip>();
-    animation->addPositionKeyframe(0, { -11, 10, -11 });
-    animation->addPositionKeyframe(2, { 11, 10, -11 });
-    animation->addPositionKeyframe(4, { 11, 10, 11 });
-    animation->addPositionKeyframe(6, { -11, 10, 11 });
-    animation->addPositionKeyframe(8, { -11, 10, -11 });
+    animation->addPositionKeyframe(0, { -2, 2, -2 });
+    animation->addPositionKeyframe(2, { 2, 2, -2 });
+    animation->addPositionKeyframe(4, { 2, 2, 2 });
+    animation->addPositionKeyframe(6, { -2, 2, 2 });
+    animation->addPositionKeyframe(8, { -2, 2, -2 });
     //animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
     //animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
@@ -324,7 +330,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	auto light1 = Light::CreatePointLight(L"light1", XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032);
     light1->animationController->setAnimationClip(animation);
-    //scene->AddLight(light1, true);
+    //scene->AddLight(light1);
 	//scene->RemoveLightByID(light1->GetLocalID());
 	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));
     scene->AddLight(light2);

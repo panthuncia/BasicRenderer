@@ -43,7 +43,6 @@
 #include "Menu.h"
 #include "DeletionManager.h"
 #include "UploadManager.h"
-#include "RendererUtils.h"
 #include "NsightAftermathGpuCrashTracker.h"
 #include "Aftermath/GFSDK_Aftermath.h"
 #include "NsightAftermathHelpers.h"
@@ -137,6 +136,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
+	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
     CreateGlobalResources();
     
 }
@@ -160,9 +160,6 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
-	settingsManager.registerSetting<std::function<void(ReadbackRequest&&)>>("readbackRequestHandler", [this](ReadbackRequest&& request) {
-        SubmitReadbackRequest(std::move(request));
-		});
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
@@ -600,7 +597,7 @@ void DX12Renderer::Render() {
 
     SignalFence(graphicsQueue, m_frameIndex);
 
-	ProcessReadbackRequests(); // Save images to disk if requested
+	ReadbackManager::GetInstance().ProcessReadbackRequests(); // Save images to disk if requested
 
     DeletionManager::GetInstance().ProcessDeletions();
 }
@@ -777,9 +774,6 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 
 void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
-    RendererUtils utils([this](ReadbackRequest&& request) {
-        SubmitReadbackRequest(std::move(request));
-        }, m_readbackFence);
     auto newGraph = std::make_unique<RenderGraph>();
 
     auto& meshManager = currentScene->GetMeshManager();
@@ -881,8 +875,12 @@ void DX12Renderer::CreateRenderGraph() {
 
     if (m_lutTexture == nullptr) {
 		TextureDescription lutDesc;
-		lutDesc.width = 512;
-		lutDesc.height = 512;
+        ImageDimensions dims;
+		dims.height = 512;
+		dims.width = 512;
+		dims.rowPitch = 512 * 2 * sizeof(float);
+		dims.slicePitch = dims.rowPitch * 512;
+		lutDesc.imageDimensions.push_back(dims);
 		lutDesc.channels = 2;
 		lutDesc.isCubemap = false;
 		lutDesc.hasRTV = true;
@@ -895,7 +893,7 @@ void DX12Renderer::CreateRenderGraph() {
         ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo().index);
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
-		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(utils, m_lutTexture);
+		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
 		auto brdfIntegrationPassParameters = RenderPassParameters();
 		brdfIntegrationPassParameters.renderTargets.push_back(m_lutTexture);
         newGraph->AddRenderPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
@@ -922,7 +920,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddResource(m_currentEnvironmentTexture);
         //newGraph->AddResource(m_currentSkybox);
         //newGraph->AddResource(m_environmentIrradiance);
-        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(utils, m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
+        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
         auto environmentConversionPassParameters = RenderPassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
@@ -930,7 +928,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddRenderPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
         //newGraph->AddResource(m_prefilteredEnvironment);
-		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(utils, m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
+		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 		auto environmentFilterPassParameters = RenderPassParameters();
 		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
 		environmentFilterPassParameters.renderTargets.push_back(m_prefilteredEnvironment);
@@ -993,8 +991,12 @@ void DX12Renderer::CreateRenderGraph() {
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
 	static const size_t PPLLNodeSize = 24; // two uints, four floats
     TextureDescription desc;
-    desc.width = m_xRes;
-    desc.height = m_yRes;
+	ImageDimensions dimensions;
+	dimensions.width = m_xRes;
+	dimensions.height = m_yRes;
+	dimensions.rowPitch = m_xRes * sizeof(unsigned int);
+	dimensions.slicePitch = dimensions.rowPitch * m_yRes;
+	desc.imageDimensions.push_back(dimensions);
     desc.channels = 1;
     desc.format = DXGI_FORMAT_R32_UINT;
     desc.hasRTV = false;
@@ -1087,7 +1089,7 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
         std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
         
         if (std::filesystem::exists(envpath)) {
-            auto skyHDR = loadTextureFromFile(envpath.string());
+            auto skyHDR = loadTextureFromFileSTBI(envpath.string());
             SetEnvironmentTexture(skyHDR, ws2s(name));
         }
         else {
@@ -1108,9 +1110,15 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	uint16_t skyboxResolution = getSkyboxResolution();
 
 	TextureDescription skyboxDesc;
-	skyboxDesc.width = skyboxResolution;
-	skyboxDesc.height = skyboxResolution;
-	skyboxDesc.channels = buffer->GetChannels();
+    ImageDimensions dims;
+    dims.height = skyboxResolution;
+	dims.width = skyboxResolution;
+	dims.rowPitch = skyboxResolution * 4;
+	dims.slicePitch = skyboxResolution * skyboxResolution * 4;
+    for (int i = 0; i < 6; i++) {
+        skyboxDesc.imageDimensions.push_back(dims);
+    }
+    skyboxDesc.channels = buffer->GetChannels();
 	skyboxDesc.isCubemap = true;
     skyboxDesc.hasRTV = true;
 	skyboxDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -1121,8 +1129,9 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	SetSkybox(skybox);
 
 	TextureDescription irradianceDesc;
-    irradianceDesc.width = skyboxResolution;
-	irradianceDesc.height = skyboxResolution;
+    for (int i = 0; i < 6; i++) {
+        irradianceDesc.imageDimensions.push_back(dims);
+    }
 	irradianceDesc.channels = buffer->GetChannels();
 	irradianceDesc.isCubemap = true;
 	irradianceDesc.hasRTV = true;
@@ -1133,8 +1142,9 @@ void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::
 	SetIrradiance(irradiance);
 
 	TextureDescription prefilteredDesc;
-	prefilteredDesc.width = skyboxResolution;
-	prefilteredDesc.height = skyboxResolution;
+    for (int i = 0; i < 6; i++) {
+        prefilteredDesc.imageDimensions.push_back(dims);
+    }
 	prefilteredDesc.channels = buffer->GetChannels();
 	prefilteredDesc.isCubemap = true;
 	prefilteredDesc.hasRTV = true;
@@ -1189,34 +1199,6 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo().index);
 	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SubmitReadbackRequest(ReadbackRequest&& request) {
-    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
-	m_readbackRequests.push_back(std::move(request));
-}
-
-std::vector<ReadbackRequest>& DX12Renderer::GetPendingReadbackRequests() {
-    return m_readbackRequests;
-}
-
-void DX12Renderer::ProcessReadbackRequests() {
-    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
-
-    std::vector<ReadbackRequest> remainingRequests;
-    for (auto& request : m_readbackRequests) {
-        // Check if the GPU has completed the work for this readback
-        if (m_readbackFence->GetCompletedValue() >= request.fenceValue) {
-            request.callback();
-        }
-        else {
-            // Keep the request in the queue for the next frame
-            remainingRequests.push_back(std::move(request));
-        }
-    }
-
-    // Update the queue with remaining requests
-    m_readbackRequests = std::move(remainingRequests);
 }
 
 void DX12Renderer::SetDebugTexture(Texture* texture) {

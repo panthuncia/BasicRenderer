@@ -6,6 +6,7 @@
 #include "TextureDescription.h"
 #include "MaterialFlags.h"
 #include "UploadManager.h"
+#include "DeletionManager.h"
 
 Material::Material(const std::string& name,
     UINT materialFlags, UINT psoFlags)
@@ -22,7 +23,8 @@ Material::Material(const std::string& name,
     std::shared_ptr<Texture> normalTexture,
     std::shared_ptr<Texture> aoMap,
     std::shared_ptr<Texture> heightMap,
-    std::shared_ptr<Texture> metallicRoughnessTexture,
+    std::shared_ptr<Texture> metallicTexture,
+    std::shared_ptr<Texture> roughnessTexture,
     std::shared_ptr<Texture> emissiveTexture,
     float metallicFactor,
     float roughnessFactor,
@@ -36,7 +38,8 @@ Material::Material(const std::string& name,
     m_normalTexture(normalTexture),
     m_aoMap(aoMap),
     m_heightMap(heightMap),
-    m_metallicRoughnessTexture(metallicRoughnessTexture),
+    m_metallicTexture(metallicTexture),
+	m_roughnessTexture(roughnessTexture),
     m_emissiveTexture(emissiveTexture),
     m_metallicFactor(metallicFactor),
     m_roughnessFactor(roughnessFactor),
@@ -74,11 +77,20 @@ Material::Material(const std::string& name,
         m_materialData.heightMapIndex = heightMap->GetSamplerDescriptorIndex();
         heightMap->GetBuffer()->SetName(L"HeightMap");
     }
-    if (metallicRoughnessTexture != nullptr) {
-        m_materialData.metallicRoughnessTextureIndex = metallicRoughnessTexture->GetBuffer()->GetSRVInfo().index;
-        m_materialData.metallicRoughnessSamplerIndex = metallicRoughnessTexture->GetSamplerDescriptorIndex();
-		metallicRoughnessTexture->GetBuffer()->SetName(L"MetallicRoughnessTexture");
+    if (metallicTexture != nullptr) {
+        m_materialData.metallicTextureIndex = metallicTexture->GetBuffer()->GetSRVInfo().index;
+        m_materialData.metallicSamplerIndex = metallicTexture->GetSamplerDescriptorIndex();
+		metallicTexture->GetBuffer()->SetName(L"MetallicTexture");
     }
+	if (roughnessTexture != nullptr) {
+		m_materialData.roughnessTextureIndex = roughnessTexture->GetBuffer()->GetSRVInfo().index;
+		m_materialData.roughnessSamplerIndex = roughnessTexture->GetSamplerDescriptorIndex();
+		roughnessTexture->GetBuffer()->SetName(L"RoughnessTexture");
+	}
+    if (metallicTexture == roughnessTexture && metallicTexture != nullptr) {
+		roughnessTexture->GetBuffer()->SetName(L"MetallicRoughnessTexture");
+    }
+
     if (emissiveTexture != nullptr) {
         m_materialData.emissiveTextureIndex = emissiveTexture->GetBuffer()->GetSRVInfo().index;
         m_materialData.emissiveSamplerIndex = emissiveTexture->GetSamplerDescriptorIndex();
@@ -92,14 +104,22 @@ Material::Material(const std::string& name,
 	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
+Material::~Material() {
+	DeletionManager::GetInstance().MarkForDelete(m_perMaterialHandle);
+}
+
 std::shared_ptr<Texture> Material::createDefaultTexture() {
     // Create a 1x1 white texture
     static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
 
 	TextureDescription desc;
 	desc.channels = 4;
-	desc.width = 1;
-	desc.height = 1;
+    ImageDimensions dims;
+	dims.width = 1;
+	dims.height = 1;
+	dims.rowPitch = 4;
+	dims.slicePitch = 4;
+	desc.imageDimensions.push_back(dims);
 	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::Create(desc, {whitePixel});

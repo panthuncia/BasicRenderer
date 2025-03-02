@@ -217,6 +217,9 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
         float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
+        if (materialFlags & MATERIAL_INVERT_NORMALS) {
+            tangentSpaceNormal = -tangentSpaceNormal;
+        }
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }
     
@@ -232,11 +235,12 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     
     if (materialFlags & MATERIAL_PBR) {
         if (materialFlags & MATERIAL_PBR_MAPS) {
-            Texture2D<float4> metallicRoughnessTexture = ResourceDescriptorHeap[materialInfo.metallicRoughnessTextureIndex];
-            SamplerState metallicRoughnessSamplerState = SamplerDescriptorHeap[materialInfo.metallicRoughnessSamplerIndex];
-            float2 metallicRoughness = metallicRoughnessTexture.Sample(metallicRoughnessSamplerState, uv).gb;
-            metallic = metallicRoughness.y * materialInfo.metallicFactor;
-            roughness = metallicRoughness.x * materialInfo.roughnessFactor;
+            Texture2D<float4> metallicTexture = ResourceDescriptorHeap[materialInfo.metallicTextureIndex];
+            SamplerState metallicSamplerState = SamplerDescriptorHeap[materialInfo.metallicSamplerIndex];
+            Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[materialInfo.roughnessTextureIndex];
+            SamplerState roughnessSamplerState = SamplerDescriptorHeap[materialInfo.roughnessSamplerIndex];
+            metallic = metallicTexture.Sample(metallicSamplerState, uv).b * materialInfo.metallicFactor;
+            roughness = roughnessTexture.Sample(roughnessSamplerState, uv).g * materialInfo.roughnessFactor;
         }
         else {
             metallic = materialInfo.metallicFactor;

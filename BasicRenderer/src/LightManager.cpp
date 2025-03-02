@@ -9,12 +9,11 @@
 #include "Camera.h"
 #include "SceneNode.h"
 #include "ShadowMaps.h"
-#include "ResourceManager.h"
-#include "SettingsManager.h"
 #include "DynamicResource.h"
 #include "IndirectCommandBufferManager.h"
 #include "MaterialBuckets.h"
 #include "DeletionManager.h"
+#include "CameraManager.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();

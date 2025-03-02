@@ -2,6 +2,7 @@
 
 std::shared_ptr<Sampler> Sampler::m_defaultSampler = nullptr;
 std::shared_ptr<Sampler> Sampler::m_defaultShadowSampler = nullptr;
+std::unordered_map<D3D12_SAMPLER_DESC, std::shared_ptr<Sampler>, SamplerDescHasher, SamplerDescComparator> Sampler::m_samplerCache;
 
 std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 	if (m_defaultSampler == nullptr) {
