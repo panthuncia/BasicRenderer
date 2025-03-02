@@ -158,8 +158,8 @@ void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsComma
             //std::async(std::launch::async, AsyncSaveToDDS, std::move(scratchImage), outputFile);
             }).detach();
         };
-
-    m_submitReadbackRequest(std::move(readbackRequest));
+    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+    m_readbackRequests.push_back(std::move(readbackRequest));
 }
 
 void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile, UINT64 fenceValue) {
@@ -311,5 +311,25 @@ void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsComma
             }).detach();
         };
 
-    m_submitReadbackRequest(std::move(readbackRequest));
+    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+    m_readbackRequests.push_back(std::move(readbackRequest));
+}
+
+void ReadbackManager::ProcessReadbackRequests() {
+    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+
+    std::vector<ReadbackRequest> remainingRequests;
+    for (auto& request : m_readbackRequests) {
+        // Check if the GPU has completed the work for this readback
+        if (m_readbackFence->GetCompletedValue() >= request.fenceValue) {
+            request.callback();
+        }
+        else {
+            // Keep the request in the queue for the next frame
+            remainingRequests.push_back(std::move(request));
+        }
+    }
+
+    // Update the queue with remaining requests
+    m_readbackRequests = std::move(remainingRequests);
 }

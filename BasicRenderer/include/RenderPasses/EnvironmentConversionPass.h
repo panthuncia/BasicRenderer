@@ -50,8 +50,6 @@ public:
             commandList->Close();
 			m_commandLists.push_back(commandList);
         }
-        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocators.back().Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
-		m_copyCommandList->Close();
 
 		CreateEnvironmentConversionRootSignature();
 		CreateEnvironmentConversionPSO();
@@ -135,17 +133,6 @@ public:
 			readbackManager.RequestReadback(m_environmentRadiance, path, nullptr, true);
             path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
 			readbackManager.RequestReadback(m_environmentCubeMap, path, nullptr, true);
-            /*m_copyCommandList->Reset(m_allocators.back().Get(), nullptr);
-            UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
-            auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds", L"environments");
-            m_utils.SaveCubemapToDDS(context.device, m_copyCommandList.Get(), m_environmentRadiance.get(), path, fenceValue);
-            path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
-            m_utils.SaveCubemapToDDS(context.device, m_copyCommandList.Get(), m_environmentCubeMap.get(), path, fenceValue);
-            m_copyCommandList->Close();
-            commandLists.push_back(m_copyCommandList.Get());
-            
-            passReturn.fence = m_readbackFence;
-			passReturn.fenceValue = fenceValue;*/
         }
 
 		passReturn.commandLists = std::move(commandLists);
@@ -175,7 +162,6 @@ private:
     int m_currentPass = 0;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_copyCommandList;
     std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_allocators;
 
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;

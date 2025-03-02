@@ -56,12 +56,8 @@ public:
 
         invalidated = false;
 
-        //m_copyCommandList->Reset(m_allocator.Get(), nullptr);
         auto path = GetCacheFilePath(L"lut.dds", L"luts");
 		ReadbackManager::GetInstance().RequestReadback(m_lutTexture, path, nullptr, false);
-        //UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
-        //m_utils.SaveTextureToDDS(context.device, m_copyCommandList.Get(), context.commandQueue, m_lutTexture.get(), path, fenceValue);
-        //m_copyCommandList->Close();
 
         return { { commandList.Get() }, nullptr, 0 };
     }

@@ -20,7 +20,6 @@
 #include "RenderGraph.h"
 #include "ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
-#include "ReadbackRequest.h"
 #include "NsightAftermathGpuCrashTracker.h"
 
 using namespace Microsoft::WRL;
@@ -45,8 +44,6 @@ public:
 	void SetIrradiance(std::shared_ptr<Texture> texture);
 	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
     void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
-    void SubmitReadbackRequest(ReadbackRequest&& request);
-    std::vector<ReadbackRequest>& GetPendingReadbackRequests();
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
 
 private:
@@ -96,9 +93,6 @@ private:
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
 
-    std::mutex readbackRequestsMutex;
-	std::vector<ReadbackRequest> m_readbackRequests;
-
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
@@ -113,7 +107,6 @@ private:
     void CheckDebugMessages();
     void FlushCommandQueue();
 
-    void ProcessReadbackRequests();
     void StallPipeline();
 
 	// Settings

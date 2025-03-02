@@ -136,9 +136,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
-	ReadbackManager::GetInstance().Initialize([this](ReadbackRequest&& request) {
-        SubmitReadbackRequest(std::move(request));
-        }, m_readbackFence.Get());
+	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
     CreateGlobalResources();
     
 }
@@ -162,9 +160,6 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
-	settingsManager.registerSetting<std::function<void(ReadbackRequest&&)>>("readbackRequestHandler", [this](ReadbackRequest&& request) {
-        SubmitReadbackRequest(std::move(request));
-		});
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
@@ -602,7 +597,7 @@ void DX12Renderer::Render() {
 
     SignalFence(graphicsQueue, m_frameIndex);
 
-	ProcessReadbackRequests(); // Save images to disk if requested
+	ReadbackManager::GetInstance().ProcessReadbackRequests(); // Save images to disk if requested
 
     DeletionManager::GetInstance().ProcessDeletions();
 }
@@ -1204,34 +1199,6 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo().index);
 	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SubmitReadbackRequest(ReadbackRequest&& request) {
-    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
-	m_readbackRequests.push_back(std::move(request));
-}
-
-std::vector<ReadbackRequest>& DX12Renderer::GetPendingReadbackRequests() {
-    return m_readbackRequests;
-}
-
-void DX12Renderer::ProcessReadbackRequests() {
-    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
-
-    std::vector<ReadbackRequest> remainingRequests;
-    for (auto& request : m_readbackRequests) {
-        // Check if the GPU has completed the work for this readback
-        if (m_readbackFence->GetCompletedValue() >= request.fenceValue) {
-            request.callback();
-        }
-        else {
-            // Keep the request in the queue for the next frame
-            remainingRequests.push_back(std::move(request));
-        }
-    }
-
-    // Update the queue with remaining requests
-    m_readbackRequests = std::move(remainingRequests);
 }
 
 void DX12Renderer::SetDebugTexture(Texture* texture) {

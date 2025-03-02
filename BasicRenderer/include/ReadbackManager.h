@@ -24,9 +24,8 @@ class ReadbackManager {
 public:
 	static ReadbackManager& GetInstance();
 
-	void Initialize(std::function<void(ReadbackRequest&&)> submitReadbackRequestFunc, ID3D12Fence* readbackFence) {
+	void Initialize(ID3D12Fence* readbackFence) {
 		m_readbackPass->Setup();
-		m_submitReadbackRequest = submitReadbackRequestFunc;
 		m_readbackFence = readbackFence;
         m_readbackPass->SetReadbackFence(readbackFence);
 	}
@@ -42,6 +41,8 @@ public:
     void ClearReadbacks() {
         m_queuedReadbacks.clear();
     }
+
+    void ProcessReadbackRequests();
 
 private:
 
@@ -121,8 +122,10 @@ private:
 
     std::vector<ReadbackInfo> m_queuedReadbacks;
 	std::shared_ptr<ReadbackPass> m_readbackPass;
-    std::function<void(ReadbackRequest&&)> m_submitReadbackRequest;
     Microsoft::WRL::ComPtr<ID3D12Fence> m_readbackFence;
+    std::mutex readbackRequestsMutex;
+    std::vector<ReadbackRequest> m_readbackRequests;
+
     // Static pointer to hold the instance
     static std::unique_ptr<ReadbackManager> instance;
     // Static initialization flag

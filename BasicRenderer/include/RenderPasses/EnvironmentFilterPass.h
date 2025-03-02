@@ -78,7 +78,6 @@ public:
             commandList->SetGraphicsRoot32BitConstants(2, 1, &roughness, 0);
             for (int i = 0; i < 6; i++) {
 
-                //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvs[i].cpuHandle, mip, context.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV));
 				CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6*mip+i].cpuHandle;
                 CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
@@ -96,11 +95,9 @@ public:
 
         invalidated = false;
 
-        //UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
-
         auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds", L"environments");
 		ReadbackManager::GetInstance().RequestReadback(m_prefilteredEnvironment, path, nullptr, true);
-        //m_utils.SaveCubemapToDDS(context.device, m_commandList.Get(), m_prefilteredEnvironment.get(), path, fenceValue);
+
         m_commandList->Close();
         commandLists.push_back(m_commandList.Get());
 
