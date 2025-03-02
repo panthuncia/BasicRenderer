@@ -24,7 +24,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - Compute-based skinning
 - GPU-driven rendering with frustrum culling & ExecuteIndirect
 - Meshlets & mesh shaders
-- A basic UI for feature toggles, importing new glb files, debug view selection, and scene graph introspection & modification
+- A basic UI for feature toggles, importing new asset files, debug view selection, and scene graph introspection & modification
 
 ## Gallery
 
@@ -33,7 +33,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 ![Meshlets example](images/meshlets.png)
 
 ## Supported file formats
-- glTF (partial spec, .glb only, no mesh morphs yet)
+- Partial assimp loader implemented, https://github.com/assimp/assimp/blob/master/doc/Fileformats.md
 
 ## Third-party dependancies
 
@@ -41,6 +41,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [meshoptimizer](https://github.com/zeux/meshoptimizer)
 - [spdlog](https://github.com/gabime/spdlog)
 - [ImGui](https://github.com/ocornut/imgui)
+- [assimp](https://github.com/assimp/assimp)
 
 ## Notable sources for development ideas
 
