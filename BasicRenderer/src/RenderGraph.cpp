@@ -164,6 +164,16 @@ void RenderGraph::Compile() {
 
     // Insert transitions to loop resources back to their initial states
     ComputeResourceLoops(finalResourceStates, finalResourceSyncStates);
+
+	// Readback pass in its own batch
+	auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
+	if (readbackPass) {
+		auto readbackBatch = PassBatch();
+		RenderPassAndResources readbackPassAndResources; // ReadbackPass is a special-case pass which transitions resources internally
+		readbackPassAndResources.pass = readbackPass;
+		readbackBatch.renderPasses.push_back(readbackPassAndResources);
+		batches.push_back(readbackBatch);
+	}
 }
 
 std::pair<int, int> RenderGraph::GetBatchesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory) {

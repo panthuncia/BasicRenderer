@@ -186,7 +186,7 @@ std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shar
 	dim.width = img.width;
 	dim.height = img.height;
 	dim.rowPitch = img.width * img.channels;
-	dim.slicePitch = img.height * img.channels;
+	dim.slicePitch = img.height * img.width * img.channels;
 
     TextureDescription desc;
 	desc.imageDimensions.push_back(dim);

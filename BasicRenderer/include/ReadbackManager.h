@@ -3,8 +3,6 @@
 #include <vector>
 #include "SettingsManager.h"
 
-#pragma once
-
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
@@ -13,7 +11,6 @@
 #include "SettingsManager.h"
 #include "UploadManager.h"
 #include "ReadbackRequest.h"
-#include "RendererUtils.h"
 #include "utilities.h"
 
 struct ReadbackInfo {
@@ -25,24 +22,32 @@ struct ReadbackInfo {
 
 class ReadbackManager {
 public:
-	static ReadbackManager& GetInstance(RendererUtils* m_utils);
+	static ReadbackManager& GetInstance();
 
-	void Initialize(RendererUtils utils) {
-		m_readbackPass.Setup();
-        m_readbackPass.SetReadbackFence(utils.GetReadbackFence());
+	void Initialize(std::function<void(ReadbackRequest&&)> submitReadbackRequestFunc, ID3D12Fence* readbackFence) {
+		m_readbackPass->Setup();
+		m_submitReadbackRequest = submitReadbackRequestFunc;
+		m_readbackFence = readbackFence;
+        m_readbackPass->SetReadbackFence(readbackFence);
 	}
 
 	void RequestReadback(std::shared_ptr<Texture> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
 		m_queuedReadbacks.push_back({cubemap, texture, outputFile, callback });
 	}
 
+	std::shared_ptr<RenderPass> GetReadbackPass() {
+		return m_readbackPass;
+	}
 
+    void ClearReadbacks() {
+        m_queuedReadbacks.clear();
+    }
 
 private:
 
     class ReadbackPass : public RenderPass {
     public:
-        ReadbackPass(RendererUtils utils) : m_utils(utils) {
+        ReadbackPass() {
         }
 
         void Setup() override {
@@ -61,25 +66,35 @@ private:
         }
 
         RenderPassReturn Execute(RenderContext& context) override {
+            auto& readbackManager = ReadbackManager::GetInstance();
+            auto& readbacks = readbackManager.m_queuedReadbacks;
+			if (readbacks.empty()) {
+				return { {} };
+			}
             auto& psoManager = PSOManager::GetInstance();
             auto& commandList = m_commandLists[context.frameIndex];
             auto& allocator = m_allocators[context.frameIndex];
             ThrowIfFailed(allocator->Reset());
             commandList->Reset(allocator.Get(), nullptr);
-
-			for (auto& readback : ReadbackManager::GetInstance(nullptr).m_queuedReadbacks) {
-                UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
+            m_fenceValue++;
+			for (auto& readback : readbacks) {
 				if (readback.cubemap) {
-					m_utils.SaveCubemapToDDS(context.device, commandList.Get(), readback.texture.get(), readback.outputFile, fenceValue);
+                    readbackManager.SaveCubemapToDDS(context.device, commandList.Get(), readback.texture.get(), readback.outputFile, m_fenceValue);
 				}
 				else {
-					m_utils.SaveTextureToDDS(context.device, commandList.Get(), context.commandQueue, readback.texture.get(), readback.outputFile, fenceValue);
+                    readbackManager.SaveTextureToDDS(context.device, commandList.Get(), context.commandQueue, readback.texture.get(), readback.outputFile, m_fenceValue);
 				}
             }
 
             commandList->Close();
 
-            return { { commandList.Get() } };
+			readbackManager.ClearReadbacks();
+			RenderPassReturn passReturn;
+			passReturn.commandLists = { commandList.Get() };
+			passReturn.fence = m_readbackFence;
+			passReturn.fenceValue = m_fenceValue;
+
+            return passReturn;
         }
 
         void Cleanup(RenderContext& context) override {
@@ -93,29 +108,30 @@ private:
     private:        
         std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
         std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
-        RendererUtils m_utils;
         ID3D12Fence* m_readbackFence = nullptr;
+		UINT64 m_fenceValue = 0;
     };
 
-    ReadbackManager(RendererUtils* m_utils) :  m_readbackPass(*m_utils) {
-    
+    ReadbackManager() {
+		m_readbackPass = std::make_shared<ReadbackPass>();
     }
 
-    std::vector<ReadbackInfo> m_queuedReadbacks;
-	ReadbackPass m_readbackPass;
+    void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, Texture* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile, UINT64 fenceValue);
 
+    std::vector<ReadbackInfo> m_queuedReadbacks;
+	std::shared_ptr<ReadbackPass> m_readbackPass;
+    std::function<void(ReadbackRequest&&)> m_submitReadbackRequest;
+    Microsoft::WRL::ComPtr<ID3D12Fence> m_readbackFence;
     // Static pointer to hold the instance
     static std::unique_ptr<ReadbackManager> instance;
     // Static initialization flag
     static bool initialized;
 };
 
-std::unique_ptr<ReadbackManager> ReadbackManager::instance;
-bool ReadbackManager::initialized = false;
-
-inline ReadbackManager& ReadbackManager::GetInstance(RendererUtils* m_utils) {
+inline ReadbackManager& ReadbackManager::GetInstance() {
     if (!initialized) {
-        instance = std::unique_ptr<ReadbackManager>(new ReadbackManager(m_utils));
+        instance = std::unique_ptr<ReadbackManager>(new ReadbackManager());
         initialized = true;
     }
     return *instance;

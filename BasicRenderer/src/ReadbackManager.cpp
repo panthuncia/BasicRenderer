@@ -1,11 +1,14 @@
-#include "RendererUtils.h"
+#include "ReadbackManager.h"
 
 #include <DirectXTex.h>
 
 #include "Texture.h"
 #include "PixelBuffer.h"
 
-void RendererUtils::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, Texture* cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
+std::unique_ptr<ReadbackManager> ReadbackManager::instance = nullptr;
+bool ReadbackManager::initialized = false;
+
+void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, Texture* cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
     D3D12_RESOURCE_DESC resourceDesc = cubemap->GetBuffer()->GetTexture()->GetDesc();
 
     // Get the number of mip levels and subresources
@@ -94,7 +97,7 @@ void RendererUtils::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommand
     readbackRequest.layouts = layouts;
     readbackRequest.totalSize = totalSize;
     readbackRequest.outputFile = outputFile;
-	readbackRequest.fenceValue = fenceValue;
+    readbackRequest.fenceValue = fenceValue;
     readbackRequest.callback = [=]() {
         std::thread([=] {
             void* mappedData = nullptr;
@@ -159,7 +162,7 @@ void RendererUtils::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommand
     m_submitReadbackRequest(std::move(readbackRequest));
 }
 
-void RendererUtils::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile, UINT64 fenceValue) {
+void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile, UINT64 fenceValue) {
     D3D12_RESOURCE_DESC resourceDesc = texture->GetBuffer()->GetTexture()->GetDesc();
 
     // Get the number of mip levels and subresources
@@ -247,7 +250,7 @@ void RendererUtils::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommand
     readbackRequest.layouts = layouts;
     readbackRequest.totalSize = totalSize;
     readbackRequest.outputFile = outputFile;
-	readbackRequest.fenceValue = fenceValue;
+    readbackRequest.fenceValue = fenceValue;
     readbackRequest.callback = [=]() {
         std::thread([=] {
             void* mappedData = nullptr;

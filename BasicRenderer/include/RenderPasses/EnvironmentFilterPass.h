@@ -10,17 +10,16 @@
 #include "ResourceHandles.h"
 #include "Utilities.h"
 #include "UploadManager.h"
-#include "RendererUtils.h"
+#include "ReadbackManager.h"
 
 class EnvironmentFilterPass : public RenderPass {
 public:
-    EnvironmentFilterPass(RendererUtils utils, std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> preFilteredEnvironment, std::string environmentName) : m_utils(utils){
+    EnvironmentFilterPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> preFilteredEnvironment, std::string environmentName){
         m_environmentName = s2ws(environmentName);
         m_texture = environmentTexture;
 		m_prefilteredEnvironment = preFilteredEnvironment;
         m_viewMatrices = GetCubemapViewMatrices({ 0.0, 0.0, 0.0 });
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
-		m_readbackFence = utils.GetReadbackFence();
     }
 
     void Setup() override {
@@ -48,63 +47,64 @@ public:
 
         std::vector<ID3D12GraphicsCommandList*> commandLists;
 
-            auto commandList = m_commandList.Get();
-            commandList->Reset(m_allocator.Get(), PSO.Get());
+        auto commandList = m_commandList.Get();
+        commandList->Reset(m_allocator.Get(), PSO.Get());
 
-            ID3D12DescriptorHeap* descriptorHeaps[] = {
-                ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
-                ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
-            };
+        ID3D12DescriptorHeap* descriptorHeaps[] = {
+            ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
+            ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
+        };
 
-            commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-            commandList->SetGraphicsRootSignature(rootSignature.Get());
+        commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
 
-            commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-            commandList->SetPipelineState(PSO.Get());
-            auto& rtvs = m_prefilteredEnvironment->GetBuffer()->GetRTVInfos();
-            unsigned int maxMipLevels = rtvs.size()/6;
-            for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
-            {
-                unsigned int mipWidth = skyboxRes * std::pow(0.5, mip);
-                unsigned int mipHeight = skyboxRes * std::pow(0.5, mip);
-                CD3DX12_VIEWPORT viewport(0.0f, 0.0f, mipWidth, mipHeight);
-                CD3DX12_RECT scissorRect(0, 0, mipWidth, mipHeight);
-                commandList->RSSetViewports(1, &viewport);
-                commandList->RSSetScissorRects(1, &scissorRect);
+        commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+        commandList->SetPipelineState(PSO.Get());
+        auto& rtvs = m_prefilteredEnvironment->GetBuffer()->GetRTVInfos();
+        unsigned int maxMipLevels = rtvs.size()/6;
+        for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
+        {
+            unsigned int mipWidth = skyboxRes * std::pow(0.5, mip);
+            unsigned int mipHeight = skyboxRes * std::pow(0.5, mip);
+            CD3DX12_VIEWPORT viewport(0.0f, 0.0f, mipWidth, mipHeight);
+            CD3DX12_RECT scissorRect(0, 0, mipWidth, mipHeight);
+            commandList->RSSetViewports(1, &viewport);
+            commandList->RSSetScissorRects(1, &scissorRect);
 
-                float roughness = (float)mip / (float)(maxMipLevels - 1);
-                commandList->SetGraphicsRoot32BitConstants(2, 1, &roughness, 0);
-                for (int i = 0; i < 6; i++) {
+            float roughness = (float)mip / (float)(maxMipLevels - 1);
+            commandList->SetGraphicsRoot32BitConstants(2, 1, &roughness, 0);
+            for (int i = 0; i < 6; i++) {
 
-                    //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvs[i].cpuHandle, mip, context.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV));
-					CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6*mip+i].cpuHandle;
-                    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
+                //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvs[i].cpuHandle, mip, context.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV));
+				CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6*mip+i].cpuHandle;
+                CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
-                    commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+                commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-                    auto viewMatrix = m_viewMatrices[i];
-                    auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
-                    commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
-                    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                    commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
-                }
+                auto viewMatrix = m_viewMatrices[i];
+                auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
+                commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
+                commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
             }
+        }
 
         // We can reuse the results of this pass
 
-            invalidated = false;
+        invalidated = false;
 
-            UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
+        //UINT64 fenceValue = m_readbackFence->GetCompletedValue() + 1;
 
-            auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds", L"environments");
-            m_utils.SaveCubemapToDDS(context.device, m_commandList.Get(), m_prefilteredEnvironment.get(), path, fenceValue);
-            m_commandList->Close();
-            commandLists.push_back(m_commandList.Get());
+        auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds", L"environments");
+		ReadbackManager::GetInstance().RequestReadback(m_prefilteredEnvironment, path, nullptr, true);
+        //m_utils.SaveCubemapToDDS(context.device, m_commandList.Get(), m_prefilteredEnvironment.get(), path, fenceValue);
+        m_commandList->Close();
+        commandLists.push_back(m_commandList.Get());
 
-            return { commandLists, m_readbackFence, fenceValue };
+        return { commandLists, nullptr, 0 };
     }
 
     void Cleanup(RenderContext& context) override {
@@ -112,8 +112,6 @@ public:
     }
 
 private:
-	RendererUtils m_utils;
-	ID3D12Fence* m_readbackFence;
 
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;

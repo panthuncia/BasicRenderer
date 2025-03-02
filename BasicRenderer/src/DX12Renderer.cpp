@@ -43,7 +43,6 @@
 #include "Menu.h"
 #include "DeletionManager.h"
 #include "UploadManager.h"
-#include "RendererUtils.h"
 #include "NsightAftermathGpuCrashTracker.h"
 #include "Aftermath/GFSDK_Aftermath.h"
 #include "NsightAftermathHelpers.h"
@@ -137,6 +136,9 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
+	ReadbackManager::GetInstance().Initialize([this](ReadbackRequest&& request) {
+        SubmitReadbackRequest(std::move(request));
+        }, m_readbackFence.Get());
     CreateGlobalResources();
     
 }
@@ -777,9 +779,6 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 
 void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
-    RendererUtils utils([this](ReadbackRequest&& request) {
-        SubmitReadbackRequest(std::move(request));
-        }, m_readbackFence);
     auto newGraph = std::make_unique<RenderGraph>();
 
     auto& meshManager = currentScene->GetMeshManager();
@@ -899,7 +898,7 @@ void DX12Renderer::CreateRenderGraph() {
         ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo().index);
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
-		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(utils, m_lutTexture);
+		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
 		auto brdfIntegrationPassParameters = RenderPassParameters();
 		brdfIntegrationPassParameters.renderTargets.push_back(m_lutTexture);
         newGraph->AddRenderPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
@@ -926,7 +925,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddResource(m_currentEnvironmentTexture);
         //newGraph->AddResource(m_currentSkybox);
         //newGraph->AddResource(m_environmentIrradiance);
-        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(utils, m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
+        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
         auto environmentConversionPassParameters = RenderPassParameters();
         environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
         environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
@@ -934,7 +933,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddRenderPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
         //newGraph->AddResource(m_prefilteredEnvironment);
-		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(utils, m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
+		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 		auto environmentFilterPassParameters = RenderPassParameters();
 		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
 		environmentFilterPassParameters.renderTargets.push_back(m_prefilteredEnvironment);
