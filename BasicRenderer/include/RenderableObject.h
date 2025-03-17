@@ -11,6 +11,8 @@
 #include "ResourceHandles.h"
 #include "Skeleton.h"
 #include "BufferView.h"
+#include "MeshInstance.h"
+
 class ObjectManager;
 
 class RenderableObject : public SceneNode {
@@ -18,9 +20,9 @@ public:
 	RenderableObject(std::wstring name);
 	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes);
 	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newAlphaTestMeshes, std::vector<std::shared_ptr<Mesh>>& newBlendMeshes);
-	std::vector<std::shared_ptr<Mesh>>& GetOpaqueMeshes();
-	std::vector<std::shared_ptr<Mesh>>& GetAlphaTestMeshes();
-	std::vector<std::shared_ptr<Mesh>>& GetBlendMeshes();
+	std::vector<std::shared_ptr<MeshInstance>>& GetOpaqueMeshes();
+	std::vector<std::shared_ptr<MeshInstance>>& GetAlphaTestMeshes();
+	std::vector<std::shared_ptr<MeshInstance>>& GetBlendMeshes();
 	bool HasAlphaTest() const;
 	bool HasOpaque() const;
 	bool HasBlend() const;
@@ -47,9 +49,9 @@ public:
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
-	std::vector<std::shared_ptr<Mesh>> opaqueMeshes;
-	std::vector<std::shared_ptr<Mesh>> alphaTestMeshes;
-	std::vector<std::shared_ptr<Mesh>> blendMeshes;
+	std::vector<std::shared_ptr<MeshInstance>> opaqueMeshes;
+	std::vector<std::shared_ptr<MeshInstance>> alphaTestMeshes;
+	std::vector<std::shared_ptr<MeshInstance>> blendMeshes;
 	std::vector<unsigned int> m_opaqueDrawSetIndices;
 	std::vector<unsigned int> m_alphaTestDrawSetIndices;
 	std::vector<unsigned int> m_blendDrawSetIndices;

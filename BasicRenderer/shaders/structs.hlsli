@@ -104,16 +104,20 @@ struct PerMeshBuffer {
     uint vertexFlags;
     uint vertexByteSize;
     uint skinningVertexByteSize;
-    uint preSkinningVertexBufferOffset;
-    uint postSkinningVertexBufferOffset;
+    uint vertexBufferOffset;
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
     uint meshletTrianglesBufferOffset;
     BoundingSphere boundingSphere;
     uint numVertices;
+    uint pad[2];
+};
+
+struct PerMeshInstanceBuffer {
     uint boneTransformBufferIndex;
     uint inverseBindMatricesBufferIndex;
-    uint pad[3];
+    uint preSkinningVertexBufferOffset;
+    uint pad[1];
 };
 
 #endif // __STRUCTS_HLSL__

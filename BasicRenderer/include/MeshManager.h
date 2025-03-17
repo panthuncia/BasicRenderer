@@ -9,6 +9,7 @@
 #include "MaterialBuckets.h"
 
 class Mesh;
+class MeshInstance;
 class DynamicBuffer;
 class ResourceGroup;
 class BufferView;
@@ -20,6 +21,7 @@ public:
 	}
 	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket);
 	void RemoveMesh(Mesh* mesh);
+	void RemoveMeshInstance(MeshInstance* mesh);
 
 	unsigned int GetPreSkinningVertexBufferSRVIndex() const {
 		return m_preSkinningVertices->GetSRVInfo().index;
@@ -76,9 +78,15 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletIndices;
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
 
+	// Base meshes
 	std::shared_ptr<DynamicBuffer> m_opaquePerMeshBuffers;
 	std::shared_ptr<DynamicBuffer> m_alphaTestPerMeshBuffers;
 	std::shared_ptr<DynamicBuffer> m_blendPerMeshBuffers;
 
+	// Skinned mesh instances
+	std::shared_ptr<DynamicBuffer> m_opaquePerMeshInstanceBuffers;
+	std::shared_ptr<DynamicBuffer> m_alphaTestPerMeshInstanceBuffers;
+	std::shared_ptr<DynamicBuffer> m_blendPerMeshInstanceBuffers;
+	
 	std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

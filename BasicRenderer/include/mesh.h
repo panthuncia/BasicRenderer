@@ -37,21 +37,14 @@ public:
 
     std::shared_ptr<Material> material;
 
-	void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
 	void SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view);
-	BufferView* GetPostSkinningVertexBufferView();
 	BufferView* GetPreSkinningVertexBufferView();
 	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view);
 
-	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
-	void SetSkin(std::shared_ptr<Skeleton> skeleton);
-	bool HasSkin() const { return m_skeleton != nullptr; }
-
-	unsigned int GetPostSkinningVertexBufferOffset() const {
-		return m_postSkinningVertexBufferView->GetOffset();
-	}
+	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
+	void SetBaseSkin(std::shared_ptr<Skeleton> skeleton);
 
 	unsigned int GetMeshletBufferOffset() const {
 		return m_meshletBufferView->GetOffset();

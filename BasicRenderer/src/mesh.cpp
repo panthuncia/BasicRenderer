@@ -140,15 +140,6 @@ int Mesh::GetGlobalID() const {
 	return m_globalMeshID;
 }
 
-void Mesh::SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
-	m_postSkinningVertexBufferView = std::move(view);
-	m_perMeshBufferData.postSkinningVertexBufferOffset = m_postSkinningVertexBufferView->GetOffset();
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-
 void Mesh::SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
 	m_preSkinningVertexBufferView = std::move(view);
 	m_perMeshBufferData.preSkinningVertexBufferOffset = m_preSkinningVertexBufferView->GetOffset();
@@ -156,10 +147,6 @@ void Mesh::SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
-}
-
-BufferView* Mesh::GetPostSkinningVertexBufferView() {
-	return m_postSkinningVertexBufferView.get();
 }
 
 BufferView* Mesh::GetPreSkinningVertexBufferView() {
@@ -191,9 +178,9 @@ void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 	}
 }
 
-void Mesh::SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView) {
+void Mesh::SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView) {
 	m_postSkinningVertexBufferView = std::move(postSkinningVertexBufferView);
-	m_preSkinningVertexBufferView = std::move(preSkinningVertexBufferView);
+	//m_preSkinningVertexBufferView = std::move(preSkinningVertexBufferView);
 	m_meshletBufferView = std::move(meshletBufferView);
 	m_meshletVerticesBufferView = std::move(meshletVerticesBufferView);
 	m_meshletTrianglesBufferView = std::move(meshletTrianglesBufferView);

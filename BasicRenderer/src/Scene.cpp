@@ -485,10 +485,10 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
                 spdlog::error("Joint mapping broke during scene cloning!");
             }
         }
-        //auto newSkeleton = std::make_shared<Skeleton>(newJoints, skeleton->GetInverseBindMatricesHandle());
+        auto newSkeleton = std::make_shared<Skeleton>(newJoints, skeleton->GetInverseBindMatricesBuffer());
         skeleton->SetJoints(newJoints);
 		auto animationsCopy = skeleton->animations;
-		skeleton->DeleteAllAnimations();
+		//skeleton->DeleteAllAnimations();
         // Remap node ids in animations
         for (auto& animation : animationsCopy) {
             auto newAnimation = std::make_shared<Animation>(animation->name);
@@ -496,7 +496,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
                 UINT key = nodePair.first;
                 newAnimation->nodesMap[idMap[key]] = nodePair.second;
             }
-            skeleton->AddAnimation(newAnimation);
+            newSkeleton->AddAnimation(newAnimation);
         }
 		AddSkeleton(skeleton);
         // Remap skeleton & users to their correct IDs
