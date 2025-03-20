@@ -742,7 +742,7 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
     for (int i = 0; i < meshSkinIndices.size(); i++) {
 		int skinIndex = meshSkinIndices[i];
         if (skinIndex != -1) {
-			meshes[i]->SetSkin(skeletons[skinIndex]);
+			meshes[i]->SetBaseSkin(skeletons[skinIndex]);
         }
 	}
 

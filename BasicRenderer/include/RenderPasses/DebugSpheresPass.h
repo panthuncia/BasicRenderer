@@ -90,7 +90,7 @@ public:
 			auto& meshes = renderable->GetOpaqueMeshes();
 
 			for (auto& pMesh : meshes) {
-				auto meshData = pMesh->GetPerMeshCBData();
+				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
 				constants.center[0] = meshData.boundingSphere.center.x;
 				constants.center[1] = meshData.boundingSphere.center.y;
 				constants.center[2] = meshData.boundingSphere.center.z;

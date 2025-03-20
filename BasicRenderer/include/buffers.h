@@ -49,6 +49,7 @@ struct PerMeshCB {
     unsigned int vertexFlags;
 	unsigned int vertexByteSize;
     unsigned int skinningVertexByteSize;
+    unsigned int inverseBindMatricesBufferIndex;
 	unsigned int vertexBufferOffset;
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
@@ -60,8 +61,7 @@ struct PerMeshCB {
 
 struct PerMeshInstanceCB {
     unsigned int boneTransformBufferIndex;
-    unsigned int preSkinningVertexBufferOffset;
-    unsigned int inverseBindMatricesBufferIndex;
+    unsigned int postSkinningVertexBufferOffset;
     unsigned int pad[1];
 };
 
@@ -156,6 +156,7 @@ enum StaticBufferRootConstants {
     MeshletTrianglesBufferDescriptorIndex,
     PerObjectBufferDescriptorIndex,
     CameraBufferDescriptorIndex,
+    PerMeshInstanceBufferDescriptorIndex,
 	NumStaticBufferRootConstants
 };
 

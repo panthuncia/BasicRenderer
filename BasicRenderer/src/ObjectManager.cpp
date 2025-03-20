@@ -32,7 +32,8 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 		std::vector<unsigned int> indices;
 		std::vector<std::shared_ptr<BufferView>> views;
 		// For each mesh, add an indirect command to the draw set buffer
-		for (auto& mesh : object->GetOpaqueMeshes()) {
+		for (auto& meshInstance : object->GetOpaqueMeshes()) {
+			auto& mesh = meshInstance->GetMesh();
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -53,7 +54,8 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	if (object->HasAlphaTest()) {
 		std::vector<unsigned int> indices;
 		std::vector<std::shared_ptr<BufferView>> views;
-		for (auto& mesh : object->GetAlphaTestMeshes()) {
+		for (auto& meshInstance : object->GetAlphaTestMeshes()) {
+			auto& mesh = meshInstance->GetMesh();
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -73,7 +75,8 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 	if (object->HasBlend()) {
 		std::vector<unsigned int> indices;
 		std::vector<std::shared_ptr<BufferView>> views;
-		for (auto& mesh : object->GetBlendMeshes()) {
+		for (auto& meshInstance : object->GetBlendMeshes()) {
+			auto& mesh = meshInstance->GetMesh();
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);

@@ -6,29 +6,33 @@
 
 class MeshInstance {
 public:
-    MeshInstance(std::shared_ptr<Mesh> mesh)
-        : m_mesh(mesh) {}
+
+	static std::shared_ptr<MeshInstance> CreateShared(std::shared_ptr<Mesh> mesh) {
+		return std::shared_ptr<MeshInstance>(new MeshInstance(mesh));
+	}
 
     void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
     BufferView* GetPostSkinningVertexBufferView();
 
 	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView);
 
-    void SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
-        m_skeleton = skeleton;
-    }
+    void SetSkeleton(std::shared_ptr<Skeleton> skeleton);
 
     std::shared_ptr<Skeleton> GetSkin() const {
         return m_skeleton;
     }
 
-    std::shared_ptr<Mesh> GetMesh() const {
+    std::shared_ptr<Mesh>& GetMesh() {
         return m_mesh;
     }
 
     unsigned int GetPostSkinningVertexBufferOffset() const {
         return m_postSkinningVertexBufferView->GetOffset();
     }
+
+	unsigned int GetPerMeshInstanceBufferOffset() const {
+		return m_perMeshInstanceBufferView->GetOffset();
+	}
 
     bool HasSkin() const { return m_skeleton != nullptr; }
 
@@ -37,6 +41,8 @@ public:
     }
 
 private:
+    MeshInstance(std::shared_ptr<Mesh> mesh)
+        : m_mesh(mesh) {}
 	PerMeshInstanceCB m_perMeshInstanceBufferData;
     std::shared_ptr<Mesh> m_mesh;
     std::shared_ptr<Skeleton> m_skeleton; // Instance-specific skeleton

@@ -20,6 +20,7 @@ public:
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
 	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket);
+	void AddMeshInstance(MeshInstance* mesh);
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
 
@@ -68,8 +69,12 @@ public:
 	std::shared_ptr<DynamicBuffer>& GetPostSkinningVertices() {
 		return m_postSkinningVertices;
 	}
+	unsigned int GetPerMeshInstanceBufferSRVIndex() const {
+		return m_perMeshInstanceBuffers->GetSRVInfo().index;
+	}
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
+	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
 private:
 	MeshManager();
 	std::shared_ptr<DynamicBuffer> m_preSkinningVertices;
@@ -84,9 +89,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_blendPerMeshBuffers;
 
 	// Skinned mesh instances
-	std::shared_ptr<DynamicBuffer> m_opaquePerMeshInstanceBuffers;
-	std::shared_ptr<DynamicBuffer> m_alphaTestPerMeshInstanceBuffers;
-	std::shared_ptr<DynamicBuffer> m_blendPerMeshInstanceBuffers;
+	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;
 	
 	std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

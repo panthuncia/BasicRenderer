@@ -104,6 +104,7 @@ struct PerMeshBuffer {
     uint vertexFlags;
     uint vertexByteSize;
     uint skinningVertexByteSize;
+    uint inverseBindMatricesBufferIndex;
     uint vertexBufferOffset;
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
@@ -115,8 +116,7 @@ struct PerMeshBuffer {
 
 struct PerMeshInstanceBuffer {
     uint boneTransformBufferIndex;
-    uint inverseBindMatricesBufferIndex;
-    uint preSkinningVertexBufferOffset;
+    uint postSkinningVertexBufferOffset;
     uint pad[1];
 };
 

@@ -58,3 +58,14 @@ void SceneNode::NotifyObservers() {
         observer->OnNodeUpdated(this);
     }
 }
+
+std::shared_ptr<SceneNode> SceneNode::CloneHierarchy() {
+	auto clone = std::make_shared<SceneNode>(m_name);
+	clone->transform = transform;
+	clone->localID = -1; // Leave localID assignment to the scene
+	for (auto& childPair : children) {
+		auto childClone = childPair.second->CloneHierarchy();
+		clone->AddChild(childClone);
+	}
+	return clone;
+}

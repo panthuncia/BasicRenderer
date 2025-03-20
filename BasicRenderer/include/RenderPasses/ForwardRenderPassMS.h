@@ -100,7 +100,7 @@ public:
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
 
 			for (auto& pMesh : meshes) {
-				auto& mesh = *pMesh;
+				auto& mesh = *pMesh->GetMesh();
 				auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 
@@ -122,7 +122,7 @@ public:
 			commandList->SetGraphicsRoot32BitConstants(0, 1, &perObjectIndex, 0);
 
 			for (auto& pMesh : meshes) {
-				auto& mesh = *pMesh;
+				auto& mesh = *pMesh->GetMesh();
 				auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 

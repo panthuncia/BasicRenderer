@@ -84,7 +84,7 @@ public:
 				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
-					auto& mesh = *pMesh;
+					auto& mesh = *pMesh->GetMesh();
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -105,7 +105,7 @@ public:
 				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
-					auto& mesh = *pMesh;
+					auto& mesh = *pMesh->GetMesh();
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -126,7 +126,7 @@ public:
 				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
-					auto& mesh = *pMesh;
+					auto& mesh = *pMesh->GetMesh();
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);

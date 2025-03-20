@@ -59,11 +59,14 @@ public:
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferUAVIndex();
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
+		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
 		auto opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
 		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
+
+		unsigned int perMeshConstants[NumPerMeshRootConstants] = {};
 		for (auto& pair : context.currentScene->GetOpaqueSkinnedRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetOpaqueMeshes();
@@ -72,9 +75,10 @@ public:
 			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 			for (auto& pMesh : meshes) {
-				auto& mesh = *pMesh;
-				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+				auto& mesh = *pMesh->GetMesh();
+				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
 				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
 			}
@@ -90,9 +94,10 @@ public:
 			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 			for (auto& pMesh : meshes) {
-				auto& mesh = *pMesh;
-				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+				auto& mesh = *pMesh->GetMesh();
+				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
 				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
 			}
@@ -108,9 +113,10 @@ public:
 			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
 
 			for (auto& pMesh : meshes) {
-				auto& mesh = *pMesh;
-				auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+				auto& mesh = *pMesh->GetMesh();
+				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
 				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
 			}

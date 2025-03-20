@@ -22,9 +22,8 @@ MeshManager::MeshManager() {
 	m_opaquePerMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"OpaquePerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 	m_alphaTestPerMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"AlphaTestPerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 	m_blendPerMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"BlendPerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
-	m_opaquePerMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"OpaquePerMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
-	m_alphaTestPerMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"AlphaTestPerMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
-	m_blendPerMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"BlendPerMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
+	
+	m_perMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"perMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
@@ -43,7 +42,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
 		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), mesh->GetNumVertices() * skinningVertexByteSize, skinningVertexByteSize);
-		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
+		//postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
 	}
 	else {
 		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
@@ -60,7 +59,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	auto& meshletTriangles = mesh->GetMeshletTriangles();
 	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), sizeof(unsigned char));
 
-	mesh->SetBufferViews(std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
+	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
 
 	// Per mesh buffer
 	switch (bucket){
@@ -92,10 +91,22 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 	}
 }
 
+void MeshManager::AddMeshInstance(MeshInstance* mesh) {
+	auto& vertices = mesh->GetMesh()->GetVertices();
+
+	auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), vertices.size() * mesh->GetMesh()->GetPerMeshCBData().vertexByteSize, mesh->GetMesh()->GetPerMeshCBData().vertexByteSize);
+	mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
+}
+
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	m_postSkinningVertices->Deallocate(mesh->GetPostSkinningVertexBufferView());
+	mesh->SetPostSkinningVertexBufferView(nullptr);
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {
+	view->GetBuffer()->UpdateView(view.get(), &data);
+}
+
+void MeshManager::UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data) {
 	view->GetBuffer()->UpdateView(view.get(), &data);
 }

@@ -26,28 +26,40 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
         sceneRoot.AddChild(object);
     }
 	for (auto& mesh : object->GetOpaqueMeshes()) {
-        meshesByID[mesh->GetGlobalID()] = mesh;
         m_numDrawsInScene++;
 		m_numOpaqueDraws++;
+        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
 		if (meshManager != nullptr) { // If mesh manager exists, this scene is active and we want to add the mesh immediately
-            meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Opaque);
+            }
+            meshManager->AddMeshInstance(mesh.get());
         }
+        meshesByID[meshGlobaId] = mesh->GetMesh();
 	}
     for (auto& mesh : object->GetAlphaTestMeshes()) {
-        meshesByID[mesh->GetGlobalID()] = mesh;
-		m_numDrawsInScene++;
+        m_numDrawsInScene++;
 		m_numAlphaTestDraws++;
+        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
         if (meshManager != nullptr) {
-            meshManager->AddMesh(mesh, MaterialBuckets::AlphaTest);
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::AlphaTest);
+            }
+            meshManager->AddMeshInstance(mesh.get());
         }
+        meshesByID[mesh->GetMesh()->GetGlobalID()] = mesh->GetMesh();
     }
 	for (auto& mesh : object->GetBlendMeshes()) {
-		meshesByID[mesh->GetGlobalID()] = mesh;
-		m_numDrawsInScene++;
+        m_numDrawsInScene++;
 		m_numBlendDraws++;
+        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
 		if (meshManager != nullptr) {
-			meshManager->AddMesh(mesh, MaterialBuckets::Blend);
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
+            }
 		}
+        meshManager->AddMeshInstance(mesh.get());
+        meshesByID[mesh->GetMesh()->GetGlobalID()] = mesh->GetMesh();
 	}
 
     if (object->HasOpaque()) {
@@ -498,7 +510,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
             }
             newSkeleton->AddAnimation(newAnimation);
         }
-		AddSkeleton(skeleton);
+		AddSkeleton(newSkeleton);
         // Remap skeleton & users to their correct IDs
    //     for (auto& oldID : skeleton->userIDs) {
    //         GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
@@ -555,13 +567,25 @@ void Scene::MakeResident() {
 	for (auto& objectPair : objectsByID) {
 		auto& object = objectPair.second;
 		for (auto& mesh : object->GetOpaqueMeshes()) {
-			meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
+            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Opaque);
+            }
+			meshManager->AddMeshInstance(mesh.get());
 		}
 		for (auto& mesh : object->GetAlphaTestMeshes()) {
-            meshManager->AddMesh(mesh, MaterialBuckets::AlphaTest);
+            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::AlphaTest);
+            }
+            meshManager->AddMeshInstance(mesh.get());
 		}
 		for (auto& mesh : object->GetBlendMeshes()) {
-			meshManager->AddMesh(mesh, MaterialBuckets::Blend);
+            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
+            }
+            meshManager->AddMeshInstance(mesh.get());
 		}
 		if (object->HasOpaque()) {
 			opaqueObjectsByID[object->GetLocalID()] = object;
