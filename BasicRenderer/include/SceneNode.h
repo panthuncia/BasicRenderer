@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-#include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include "Transform.h"
 #include "AnimationController.h"
@@ -14,7 +14,7 @@ public:
 	static std::shared_ptr<SceneNode> CreateShared(std::wstring name = L"") {
 		return std::shared_ptr<SceneNode>(new SceneNode(name));
 	}
-    std::unordered_map<unsigned int, std::shared_ptr<SceneNode>> children;
+    std::unordered_set<std::shared_ptr<SceneNode>> children;
     SceneNode* parent = nullptr;
     Transform transform;
     std::unique_ptr<AnimationController> animationController; // Use unique_ptr to avoid incomplete type
@@ -22,7 +22,7 @@ public:
 
     void AddChild(std::shared_ptr<SceneNode> node);
     void AddChild(SceneNode* node);
-    void RemoveChild(unsigned int childId);
+    void RemoveChild(std::shared_ptr<SceneNode> child);
     void Update();
     void ForceUpdate();
 	void SetLocalID(int id) { localID = id; }

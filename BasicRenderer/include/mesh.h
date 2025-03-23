@@ -46,6 +46,7 @@ public:
 	void SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
 	void SetBaseSkin(std::shared_ptr<Skeleton> skeleton);
 	bool HasBaseSkin() const { return m_baseSkeleton != nullptr; }
+	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }
 
 	unsigned int GetMeshletBufferOffset() const {
 		return m_meshletBufferView->GetOffset();

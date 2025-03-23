@@ -38,25 +38,31 @@ Skeleton::Skeleton(const Skeleton& other) {
 	// Rebuild the hierarchy
 	for (auto& node : other.m_nodes) {
 		if (node->parent) {
-			nodePtrMap[node->parent]->AddChild(nodeMap[node]);
+            auto parent = nodePtrMap[node->parent];
+            if (parent) {
+                parent->AddChild(nodeMap[node]);
+            }
+            else {
+				// Probably a root node
+            }
 		}
 	}
 
-
-	//// copy animations
-	//for (auto& anim : other.animations) {
-	//	auto newAnim = std::make_shared<Animation>();
-	//	newAnim->name = anim->name;
-	//	for (auto& nodePair : anim->nodesMap) {
-	//		auto newNode = nodeMap[nodePair.second];
-	//		newAnim->nodesMap[nodePair.first] = newNode;
-	//	}
-	//	AddAnimation(newAnim);
-	//}
+    for (auto& animation : other.animations) {
+        auto newAnimation = std::make_shared<Animation>(animation->name);
+        for (auto& nodePair : animation->nodesMap) {
+            SceneNode* node = nodePair.first;
+            newAnimation->nodesMap[nodePtrMap[node].get()] = nodePair.second;
+        }
+        AddAnimation(newAnimation);
+    }
 
 	// copy inverse bind matrices
 	m_inverseBindMatrices = other.m_inverseBindMatrices;
-
+    m_boneTransforms.resize(m_nodes.size() * 16);
+    auto& resourceManager = ResourceManager::GetInstance();
+    m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(m_nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
+    m_transformsBuffer->SetName(L"BoneTransforms");
 }
 
 std::shared_ptr<Skeleton> Skeleton::CopySkeleton() {

@@ -11,10 +11,10 @@ public:
 		return std::shared_ptr<MeshInstance>(new MeshInstance(mesh));
 	}
 
-    void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
+    //void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
     BufferView* GetPostSkinningVertexBufferView();
 
-	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView);
+	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> perMeshInstanceBufferView);
 
     void SetSkeleton(std::shared_ptr<Skeleton> skeleton);
 
@@ -40,9 +40,17 @@ public:
         m_pCurrentMeshManager = manager;
     }
 
+	const PerMeshInstanceCB& GetPerMeshInstanceBufferData() const {
+		return m_perMeshInstanceBufferData;
+	}
+
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
-        : m_mesh(mesh) {}
+        : m_mesh(mesh) {
+        if (mesh->HasBaseSkin()) {
+			SetSkeleton(mesh->GetBaseSkin());
+        }
+    }
 	PerMeshInstanceCB m_perMeshInstanceBufferData;
     std::shared_ptr<Mesh> m_mesh;
     std::shared_ptr<Skeleton> m_skeleton; // Instance-specific skeleton

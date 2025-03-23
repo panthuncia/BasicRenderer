@@ -6,23 +6,23 @@ SceneNode::SceneNode(const std::wstring& name)
 }
 
 void SceneNode::AddChild(std::shared_ptr<SceneNode> node) {
-    children[node->localID] = node;
+    children.insert(node);
     if (node->parent != nullptr) {
-        node->parent->RemoveChild(node->localID);
+        node->parent->RemoveChild(node);
     }
     node->parent = this;
 }
 
-void SceneNode::RemoveChild(unsigned int childId) {
-    children.erase(childId);
+void SceneNode::RemoveChild(std::shared_ptr<SceneNode> child) {
+    children.erase(child);
 }
 
 void SceneNode::Update() {
     if (transform.isDirty) {
         ForceUpdate();
     }
-    for (auto& childPair : children) {
-        childPair.second->Update();
+    for (auto& child : children) {
+        child->Update();
     }
 }
 
@@ -34,8 +34,8 @@ void SceneNode::ForceUpdate() {
         transform.computeLocalModelMatrix();
     }
     OnUpdate();
-    for (auto& childPair : children) {
-        childPair.second->ForceUpdate();
+    for (auto& child : children) {
+        child->ForceUpdate();
     }
     NotifyObservers();
 }

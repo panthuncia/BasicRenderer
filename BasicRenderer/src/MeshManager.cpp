@@ -92,15 +92,17 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 }
 
 void MeshManager::AddMeshInstance(MeshInstance* mesh) {
+	mesh->SetCurrentMeshManager(this);
 	auto& vertices = mesh->GetMesh()->GetVertices();
 
 	auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), vertices.size(), mesh->GetMesh()->GetPerMeshCBData().vertexByteSize);
-	mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
+	auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
+	mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	m_postSkinningVertices->Deallocate(mesh->GetPostSkinningVertexBufferView());
-	mesh->SetPostSkinningVertexBufferView(nullptr);
+	mesh->SetBufferViews(nullptr, nullptr);
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

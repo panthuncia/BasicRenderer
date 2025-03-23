@@ -11,10 +11,11 @@ RenderableObject::RenderableObject(std::wstring name) : SceneNode(name) {
 
 RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes) : SceneNode(name) {
     for (auto& mesh : meshes) {
+		auto instance = MeshInstance::CreateShared(mesh);
 		if (mesh->HasBaseSkin()) {
 			m_hasSkinned = true;
+			//instance->SetSkeleton(mesh->GetBaseSkin());
 		}
-		auto instance = MeshInstance::CreateShared(mesh);
         switch (mesh->material->m_blendState) {
 		case BlendState::BLEND_STATE_OPAQUE:
 			opaqueMeshes.push_back(instance);
@@ -34,10 +35,12 @@ RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_pt
 
 RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<MeshInstance>> meshes) : SceneNode(name) {
 	for (auto& mesh : meshes) {
+
+		auto instance = MeshInstance::CreateShared(mesh->GetMesh());
 		if (mesh->GetMesh()->HasBaseSkin()) {
 			m_hasSkinned = true;
+			//instance->SetSkeleton(mesh->GetSkin());
 		}
-		auto instance = MeshInstance::CreateShared(mesh->GetMesh());
 		switch (mesh->GetMesh()->material->m_blendState) {
 		case BlendState::BLEND_STATE_OPAQUE:
 			opaqueMeshes.push_back(instance);
@@ -60,30 +63,33 @@ RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_pt
         m_hasOpaque = true;
         for (auto& mesh : newOpaqueMeshes) {
 			auto instance = MeshInstance::CreateShared(mesh->GetMesh());
-            opaqueMeshes.push_back(instance);
 			if (mesh->GetMesh()->HasBaseSkin()) {
 				m_hasSkinned = true;
+				//instance->SetSkeleton(mesh->GetSkin());
 			}
-        }
+			opaqueMeshes.push_back(instance);
+		}
     }
     if (newAlphaTestMeshes.size() > 0) {
         m_hasAlphaTest = true;
         for (auto& mesh : newAlphaTestMeshes) {
 			auto instance = MeshInstance::CreateShared(mesh->GetMesh());
-            alphaTestMeshes.push_back(instance);
 			if (mesh->GetMesh()->HasBaseSkin()) {
 				m_hasSkinned = true;
+				//instance->SetSkeleton(mesh->GetSkin());
 			}
-        }
+			alphaTestMeshes.push_back(instance);
+		}
     }
 	if (newBlendMeshes.size() > 0) {
 		m_hasBlend = true;
 		for (auto& mesh : newBlendMeshes) {
 			auto instance = MeshInstance::CreateShared(mesh->GetMesh());
-			blendMeshes.push_back(instance);
 			if (mesh->GetMesh()->HasBaseSkin()) {
 				m_hasSkinned = true;
+				//instance->SetSkeleton(mesh->GetSkin());
 			}
+			blendMeshes.push_back(instance);
 		}
 	}
 }
