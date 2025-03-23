@@ -87,8 +87,12 @@ public:
 					auto& mesh = *pMesh->GetMesh();
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+
+					unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
+					perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+					perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}
@@ -108,8 +112,12 @@ public:
 					auto& mesh = *pMesh->GetMesh();
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+
+					unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
+					perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+					perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}
@@ -129,8 +137,12 @@ public:
 					auto& mesh = *pMesh->GetMesh();
 					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
-					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+
+					unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
+					perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+					perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+					commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+
 					commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 				}
 			}

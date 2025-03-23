@@ -270,7 +270,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto bistro = LoadModel("models/bistro.glb");
 
-	auto sponza = LoadModel("models/sponza.glb");
+	//auto sponza = LoadModel("models/sponza.glb");
     auto street = LoadModel("models/street.obj");
 
     //auto cubeScene = LoadModel("models/cube_blank.glb");
@@ -298,17 +298,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.SetCurrentScene(baseScene);
     //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     
-	for (int i = 0; i < 1; i++) {
-		auto root = renderer.GetCurrentScene()->AppendScene(*dragonScene);
-		auto point = randomPointInSphere(50.0);
-		dragonScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
-	}
+	//for (int i = 0; i < 1; i++) {
+	//	auto root = renderer.GetCurrentScene()->AppendScene(*dragonScene);
+	//	auto point = randomPointInSphere(50.0);
+	//	dragonScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
+	//}
 
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
+	renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(*bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);
@@ -321,7 +321,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     DeletionManager::GetInstance().MarkForDelete(mountainScene);
 	DeletionManager::GetInstance().MarkForDelete(phoenixScene);
 	//DeletionManager::GetInstance().MarkForDelete(bistro);
-	DeletionManager::GetInstance().MarkForDelete(sponza);
+	//DeletionManager::GetInstance().MarkForDelete(sponza);
 
 	carScene.reset();
 	dragonScene.reset();

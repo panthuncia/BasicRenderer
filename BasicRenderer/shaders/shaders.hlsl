@@ -18,7 +18,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
         
-    uint byteOffset = meshBuffer.postSkinningVertexBufferOffset + vertexID * meshBuffer.vertexByteSize;
+    uint byteOffset = meshBuffer.vertexBufferOffset + vertexID * meshBuffer.vertexByteSize;
     Vertex input = LoadVertex(byteOffset, vertexBuffer, meshBuffer.vertexFlags);
     
     float4 pos = float4(input.position.xyz, 1.0f);

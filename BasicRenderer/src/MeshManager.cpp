@@ -94,7 +94,7 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 void MeshManager::AddMeshInstance(MeshInstance* mesh) {
 	auto& vertices = mesh->GetMesh()->GetVertices();
 
-	auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), vertices.size() * mesh->GetMesh()->GetPerMeshCBData().vertexByteSize, mesh->GetMesh()->GetPerMeshCBData().vertexByteSize);
+	auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), vertices.size(), mesh->GetMesh()->GetPerMeshCBData().vertexByteSize);
 	mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
 }
 

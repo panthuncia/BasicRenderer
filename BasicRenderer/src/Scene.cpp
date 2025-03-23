@@ -57,8 +57,8 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
             if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
                 meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
             }
-		}
-        meshManager->AddMeshInstance(mesh.get());
+            meshManager->AddMeshInstance(mesh.get());
+        }
         meshesByID[mesh->GetMesh()->GetGlobalID()] = mesh->GetMesh();
 	}
 

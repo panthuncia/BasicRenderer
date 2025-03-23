@@ -166,7 +166,7 @@ void MSMain(
     
     if (uGroupThreadID < meshlet.VertCount) {
         uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshBuffer.postSkinningVertexBufferOffset, thisVertex, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, vGroupID, objectBuffer);
+        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshBuffer.vertexBufferOffset, thisVertex, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, vGroupID, objectBuffer);
     }
     if (uGroupThreadID < meshlet.TriCount) {
         outputTriangles[uGroupThreadID] = meshletIndices;
