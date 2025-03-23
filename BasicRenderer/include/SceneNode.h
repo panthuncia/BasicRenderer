@@ -11,7 +11,7 @@ class AnimationController;
 
 class SceneNode {
 public:
-	static std::shared_ptr<SceneNode> CreateShared(std::wstring name) {
+	static std::shared_ptr<SceneNode> CreateShared(std::wstring name = L"") {
 		return std::shared_ptr<SceneNode>(new SceneNode(name));
 	}
     std::unordered_map<unsigned int, std::shared_ptr<SceneNode>> children;
@@ -20,9 +20,8 @@ public:
     std::unique_ptr<AnimationController> animationController; // Use unique_ptr to avoid incomplete type
     std::wstring m_name;
 
-	std::shared_ptr<SceneNode> CloneHierarchy();
-
     void AddChild(std::shared_ptr<SceneNode> node);
+    void AddChild(SceneNode* node);
     void RemoveChild(unsigned int childId);
     void Update();
     void ForceUpdate();
@@ -39,4 +38,6 @@ protected:
     virtual void OnUpdate() {} // Hook method for derived classes to extend update behavior
     void NotifyObservers();
     int localID;
+
+    friend class Scene;
 };

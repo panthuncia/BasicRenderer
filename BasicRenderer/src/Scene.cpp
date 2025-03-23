@@ -125,7 +125,7 @@ UINT Scene::AddLight(std::shared_ptr<Light> light) {
 }
 
 std::shared_ptr<SceneNode> Scene::CreateNode(std::wstring name) {
-    std::shared_ptr<SceneNode> node = std::make_shared<SceneNode>(name);
+    std::shared_ptr<SceneNode> node = SceneNode::CreateShared(name);
     AddNode(node);
     return node;
 }
@@ -388,6 +388,9 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         animatedSkeletons.push_back(skeleton);
     }
 	for (auto& node : skeleton->m_nodes) {
+		if (node->GetLocalID() == -1) {
+			AddNode(node);
+		}
 		animatedNodesByID[node->GetLocalID()] = node;
 	}
 }
@@ -418,10 +421,10 @@ UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex() {
 std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     std::unordered_map<UINT, UINT> idMap;
     auto oldRootID = scene.sceneRoot.GetLocalID();
-    auto newRootNode = std::make_shared<SceneNode>();
+    auto newRootNode = SceneNode::CreateShared();
     for (auto& childPair : scene.sceneRoot.children) {
         auto& child = childPair.second;
-        auto dummyNode = std::make_shared<SceneNode>();
+        auto dummyNode = SceneNode::CreateShared();
 		dummyNode->SetLocalID(child->GetLocalID());
         newRootNode->AddChild(dummyNode);
     }
@@ -439,7 +442,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
 		auto newLight = Light::CopyLight(light->GetLightInfo());
         for (auto& childPair : light->children) {
             auto& child = childPair.second;
-            auto dummyNode = std::make_shared<SceneNode>();
+            auto dummyNode = SceneNode::CreateShared();
 			dummyNode->SetLocalID(child->GetLocalID());
             newLight->AddChild(dummyNode);
         }
@@ -457,7 +460,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         auto newObject = std::make_shared<RenderableObject>(object->m_name, object->GetOpaqueMeshes(), object->GetAlphaTestMeshes(), object->GetBlendMeshes());
         for (auto& childPair : object->children) {
             auto& child = childPair.second;
-            auto dummyNode = std::make_shared<SceneNode>();
+            auto dummyNode = SceneNode::CreateShared();
             dummyNode->SetLocalID(child->GetLocalID());
             newObject->AddChild(dummyNode);
         }
@@ -472,10 +475,10 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     for (auto& nodePair : scene.nodesByID) {
         auto& node = nodePair.second;
         UINT oldID = node->GetLocalID();
-        auto newNode = std::make_shared<SceneNode>();
+        auto newNode = SceneNode::CreateShared();
         for (auto& childPair : node->children) {
             auto& child = childPair.second;
-            auto dummyNode = std::make_shared<SceneNode>();
+            auto dummyNode = SceneNode::CreateShared();
             dummyNode->SetLocalID(child->GetLocalID());
             newNode->AddChild(dummyNode);
         }
@@ -497,7 +500,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
                 spdlog::error("Joint mapping broke during scene cloning!");
             }
         }
-        auto newSkeleton = std::make_shared<Skeleton>(newJoints, skeleton->GetInverseBindMatricesBuffer());
+        auto newSkeleton = skeleton->CopySkeleton();
         skeleton->SetJoints(newJoints);
 		auto animationsCopy = skeleton->animations;
 		//skeleton->DeleteAllAnimations();
@@ -505,8 +508,8 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         for (auto& animation : animationsCopy) {
             auto newAnimation = std::make_shared<Animation>(animation->name);
             for (auto& nodePair : animation->nodesMap) {
-                UINT key = nodePair.first;
-                newAnimation->nodesMap[idMap[key]] = nodePair.second;
+                SceneNode* node = nodePair.first;
+                newAnimation->nodesMap[GetEntityByID(idMap[node->GetLocalID()]).get()] = nodePair.second;
             }
             newSkeleton->AddAnimation(newAnimation);
         }

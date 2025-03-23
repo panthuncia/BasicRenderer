@@ -19,7 +19,8 @@ class RenderableObject : public SceneNode {
 public:
 	RenderableObject(std::wstring name);
 	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes);
-	RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newAlphaTestMeshes, std::vector<std::shared_ptr<Mesh>>& newBlendMeshes);
+	RenderableObject(std::wstring name, std::vector<std::shared_ptr<MeshInstance>> meshes);
+	RenderableObject(std::wstring name, std::vector<std::shared_ptr<MeshInstance>>& newOpaqueMeshes, std::vector<std::shared_ptr<MeshInstance>>& newAlphaTestMeshes, std::vector<std::shared_ptr<MeshInstance>>& newBlendMeshes);
 	std::vector<std::shared_ptr<MeshInstance>>& GetOpaqueMeshes();
 	std::vector<std::shared_ptr<MeshInstance>>& GetAlphaTestMeshes();
 	std::vector<std::shared_ptr<MeshInstance>>& GetBlendMeshes();

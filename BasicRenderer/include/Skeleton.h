@@ -11,6 +11,7 @@ class Buffer;
 
 class Skeleton {
 public:
+	std::shared_ptr<Skeleton> CopySkeleton();
     std::vector<std::shared_ptr<SceneNode>> m_nodes;
     std::vector<XMMATRIX> m_inverseBindMatrices;
     std::vector<float> m_boneTransforms;
