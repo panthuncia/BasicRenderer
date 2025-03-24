@@ -574,11 +574,6 @@ void Scene::MakeResident() {
                 meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Opaque);
             }
 			meshManager->AddMeshInstance(mesh.get());
-            if (mesh->GetMesh()->HasBaseSkin()) {
-                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
-                AddSkeleton(skeletonCopy);
-                mesh->SetSkeleton(skeletonCopy);
-            }
 		}
 		for (auto& mesh : object->GetAlphaTestMeshes()) {
             auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
@@ -586,11 +581,6 @@ void Scene::MakeResident() {
                 meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::AlphaTest);
             }
             meshManager->AddMeshInstance(mesh.get());
-            if (mesh->GetMesh()->HasBaseSkin()) {
-                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
-                AddSkeleton(skeletonCopy);
-                mesh->SetSkeleton(skeletonCopy);
-            }
 		}
 		for (auto& mesh : object->GetBlendMeshes()) {
             auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
@@ -598,11 +588,6 @@ void Scene::MakeResident() {
                 meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
             }
             meshManager->AddMeshInstance(mesh.get());
-            if (mesh->GetMesh()->HasBaseSkin()) {
-                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
-                AddSkeleton(skeletonCopy);
-                mesh->SetSkeleton(skeletonCopy);
-            }
 		}
 		if (object->HasOpaque()) {
 			opaqueObjectsByID[object->GetLocalID()] = object;

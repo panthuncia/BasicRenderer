@@ -94,10 +94,16 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 void MeshManager::AddMeshInstance(MeshInstance* mesh) {
 	mesh->SetCurrentMeshManager(this);
 	auto& vertices = mesh->GetMesh()->GetVertices();
-
-	auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), vertices.size(), mesh->GetMesh()->GetPerMeshCBData().vertexByteSize);
-	auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
-	mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
+	auto vertexSize = mesh->GetMesh()->GetPerMeshCBData().vertexByteSize;
+	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
+		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetMesh()->GetNumVertices() * vertexSize, vertexSize);
+		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
+		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
+	}
+	else { // Non-skinned meshes can share post-skinning vertex buffers
+		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
+		mesh->SetBufferViewUsingBaseMesh(std::move(perMeshInstanceBufferView));
+	}
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {

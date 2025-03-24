@@ -296,19 +296,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
+    //renderer.GetCurrentScene()->AppendScene(*mountainScene);
+    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
+
     //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     
-	//for (int i = 0; i < 1; i++) {
-	//	auto root = renderer.GetCurrentScene()->AppendScene(*dragonScene);
-	//	auto point = randomPointInSphere(50.0);
-	//	dragonScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
-	//}
+	for (int i = 0; i < 100; i++) {
+		auto root = renderer.GetCurrentScene()->AppendScene(*tigerScene);
+		auto point = randomPointInSphere(50.0);
+        tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
+	}
 
-    renderer.GetCurrentScene()->AppendScene(*tigerScene);
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
     //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(*bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);

@@ -153,6 +153,10 @@ BufferView* Mesh::GetPreSkinningVertexBufferView() {
 	return m_preSkinningVertexBufferView.get();
 }
 
+BufferView* Mesh::GetPostSkinningVertexBufferView() {
+	return m_postSkinningVertexBufferView.get();
+}
+
 void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletBufferView = std::move(view);
 	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset();

@@ -37,6 +37,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+			command.perMeshInstanceBufferIndex = meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
@@ -59,6 +60,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+			command.perMeshInstanceBufferIndex = meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
@@ -80,6 +82,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = object->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+			command.perMeshInstanceBufferIndex = meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;

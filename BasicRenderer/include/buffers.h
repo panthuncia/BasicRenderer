@@ -56,13 +56,13 @@ struct PerMeshCB {
     unsigned int meshletTrianglesBufferOffset;
 	BoundingSphere boundingSphere;
 	unsigned int numVertices;
-    unsigned int pad[2];
+    unsigned int pad[1];
 };
 
 struct PerMeshInstanceCB {
     unsigned int boneTransformBufferIndex;
     unsigned int postSkinningVertexBufferOffset;
-    unsigned int pad[1];
+    unsigned int pad[2];
 };
 
 struct PerMaterialCB {

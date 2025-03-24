@@ -111,13 +111,13 @@ struct PerMeshBuffer {
     uint meshletTrianglesBufferOffset;
     BoundingSphere boundingSphere;
     uint numVertices;
-    uint pad[2];
+    uint pad[1];
 };
 
 struct PerMeshInstanceBuffer {
     uint boneTransformBufferIndex;
     uint postSkinningVertexBufferOffset;
-    uint pad[1];
+    uint pad[2];
 };
 
 #endif // __STRUCTS_HLSL__

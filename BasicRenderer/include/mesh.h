@@ -39,6 +39,7 @@ public:
 
 	void SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view);
 	BufferView* GetPreSkinningVertexBufferView();
+	BufferView* GetPostSkinningVertexBufferView();
 	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view);

@@ -101,6 +101,38 @@ public:
 			}
 		}
 
+		for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
+			auto& renderable = pair.second;
+			auto& meshes = renderable->GetAlphaTestMeshes();
+
+			for (auto& pMesh : meshes) {
+				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
+				constants.center[0] = meshData.boundingSphere.center.x;
+				constants.center[1] = meshData.boundingSphere.center.y;
+				constants.center[2] = meshData.boundingSphere.center.z;
+				constants.radius = meshData.boundingSphere.radius;
+				constants.perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
+				commandList->DispatchMesh(1, 1, 1);
+			}
+		}
+
+		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
+			auto& renderable = pair.second;
+			auto& meshes = renderable->GetBlendMeshes();
+
+			for (auto& pMesh : meshes) {
+				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
+				constants.center[0] = meshData.boundingSphere.center.x;
+				constants.center[1] = meshData.boundingSphere.center.y;
+				constants.center[2] = meshData.boundingSphere.center.z;
+				constants.radius = meshData.boundingSphere.radius;
+				constants.perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
+				commandList->DispatchMesh(1, 1, 1);
+			}
+		}
+
 		commandList->Close();
 		return { { commandList.Get() } };
 	}
