@@ -23,6 +23,52 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, std::sh
     m_transformsBuffer->SetName(L"BoneTransforms");
 }
 
+Skeleton::Skeleton(const Skeleton& other) {
+	// copy nodes
+	std::unordered_map<std::shared_ptr<SceneNode>, std::shared_ptr<SceneNode>> nodeMap;
+	std::unordered_map<SceneNode*, std::shared_ptr<SceneNode>> nodePtrMap;
+	for (auto& node : other.m_nodes) {
+		auto newNode = SceneNode::CreateShared(node->m_name);
+		newNode->transform = node->transform.copy();
+		m_nodes.push_back(newNode);
+		nodeMap[node] = newNode;
+		nodePtrMap[node.get()] = newNode;
+	}
+    
+	// Rebuild the hierarchy
+	for (auto& node : other.m_nodes) {
+		if (node->parent) {
+            auto parent = nodePtrMap[node->parent];
+            if (parent) {
+                parent->AddChild(nodeMap[node]);
+            }
+            else {
+				// Probably a root node
+            }
+		}
+	}
+
+    for (auto& animation : other.animations) {
+        auto newAnimation = std::make_shared<Animation>(animation->name);
+        for (auto& nodePair : animation->nodesMap) {
+            SceneNode* node = nodePair.first;
+            newAnimation->nodesMap[nodePtrMap[node].get()] = nodePair.second;
+        }
+        AddAnimation(newAnimation);
+    }
+
+	// copy inverse bind matrices
+	m_inverseBindMatrices = other.m_inverseBindMatrices;
+    m_boneTransforms.resize(m_nodes.size() * 16);
+    auto& resourceManager = ResourceManager::GetInstance();
+    m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(m_nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
+    m_transformsBuffer->SetName(L"BoneTransforms");
+}
+
+std::shared_ptr<Skeleton> Skeleton::CopySkeleton() {
+	return std::make_shared<Skeleton>(*this);
+}
+
 Skeleton::~Skeleton() {
 	auto& deletionManager = DeletionManager::GetInstance();
 	deletionManager.MarkForDelete(m_transformsBuffer);
@@ -47,8 +93,8 @@ void Skeleton::SetAnimation(size_t index) {
 
     auto& animation = animations[index];
     for (auto& node : m_nodes) {
-        if (animation->nodesMap.find(node->GetLocalID()) != animation->nodesMap.end()) {
-            node->animationController->setAnimationClip(animation->nodesMap[node->GetLocalID()]);
+        if (animation->nodesMap.find(node.get()) != animation->nodesMap.end()) {
+            node->animationController->setAnimationClip(animation->nodesMap[node.get()]);
         }
     }
 }

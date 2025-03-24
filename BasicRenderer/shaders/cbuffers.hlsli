@@ -9,6 +9,7 @@ cbuffer PerObject : register(b1) {
 
 cbuffer PerMesh : register(b2) {
     uint perMeshBufferIndex;
+    uint perMeshInstanceBufferIndex;
 };
 
 cbuffer ShadowInfo : register(b3) {
@@ -30,6 +31,7 @@ cbuffer StaticBufferInfo : register(b5) {
     uint meshletTrianglesBufferDescriptorIndex;
     uint perObjectBufferDescriptorIndex;
     uint cameraBufferDescriptorIndex;
+    uint perMeshInstanceBufferDescriptorIndex; // Used by skinned meshes for skinning
 }
 
 cbuffer variableBufferInfo : register(b6) {

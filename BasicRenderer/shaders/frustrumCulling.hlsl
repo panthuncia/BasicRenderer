@@ -4,6 +4,7 @@
 struct IndirectCommand {
     uint perObjectBufferIndex;
     uint perMeshBufferIndex;
+    uint perMeshInstanceBufferIndex;
     uint dispatchMeshX;
     uint dispatchMeshY;
     uint dispatchMeshZ;

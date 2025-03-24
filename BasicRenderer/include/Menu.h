@@ -461,7 +461,7 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
         // Recursively display child nodes
         for (const auto& childPair : node->children) {
             bool childIsOnly = (node->children.size() == 1);
-            DisplaySceneNode(childPair.second.get(), childIsOnly);
+            DisplaySceneNode(childPair.get(), childIsOnly);
         }
 
         ImGui::TreePop();

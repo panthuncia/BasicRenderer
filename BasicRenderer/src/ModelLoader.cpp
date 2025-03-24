@@ -590,23 +590,23 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
             std::string nodeName = channel->mNodeName.C_Str();
 
             // Find the node that matches nodeName
-            int nodeLocalID = -1;
+			SceneNode* node = nullptr;
 
 			if (nodeMap.find(nodeName) != nodeMap.end()) {
-				nodeLocalID = nodeMap.at(nodeName)->GetLocalID();
+                node = nodeMap.at(nodeName).get();
             }
 
-            if (nodeLocalID < 0) {
+            if (node == nullptr) {
                 // This channel references a node we didn’t find
 				spdlog::warn("Animation {} references unknown node: {}", animName, nodeName);
                 continue;
             }
 
             // Ensure we have an AnimationClip for that node in this animation
-            if (animation->nodesMap.find(nodeLocalID) == animation->nodesMap.end()) {
-                animation->nodesMap[nodeLocalID] = std::make_shared<AnimationClip>();
+            if (animation->nodesMap.find(node) == animation->nodesMap.end()) {
+                animation->nodesMap[node] = std::make_shared<AnimationClip>();
             }
-            auto& clip = animation->nodesMap[nodeLocalID];
+            auto& clip = animation->nodesMap[node];
 
             // For position keys
             for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
@@ -685,10 +685,8 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
     for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
         auto jointNode = jointNodes[b];
         if (!jointNode) continue;
-        int nodeID = jointNode->GetLocalID();
-
         for (auto& anim : animations) {
-            if (anim->nodesMap.find(nodeID) != anim->nodesMap.end()) {
+            if (anim->nodesMap.find(jointNode.get()) != anim->nodesMap.end()) {
                 skeleton->AddAnimation(anim);
             }
         }
@@ -742,7 +740,7 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
     for (int i = 0; i < meshSkinIndices.size(); i++) {
 		int skinIndex = meshSkinIndices[i];
         if (skinIndex != -1) {
-			meshes[i]->SetSkin(skeletons[skinIndex]);
+			meshes[i]->SetBaseSkin(skeletons[skinIndex]);
         }
 	}
 

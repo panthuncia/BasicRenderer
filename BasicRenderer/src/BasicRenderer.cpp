@@ -9,6 +9,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <imgui.h>
+#include <random>
 
 #include "pix/pix3.h"
 #include "Mesh.h"
@@ -155,6 +156,38 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
     return hwnd;
 }
 
+struct point {
+	float x, y, z;
+};
+
+point randomPointInSphere(float radius) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    float x, y, z, len2;
+    do {
+        x = dist(gen);
+        y = dist(gen);
+        z = dist(gen);
+        len2 = x * x + y * y + z * z;
+    } while (len2 > 1.0f); // Ensure the point is inside the unit sphere
+
+    // Scale to desired radius
+    x *= radius;
+    y *= radius;
+    z *= radius;
+
+    return {x, y, z};
+}
+
+int main() {
+    float radius = 5.0f;
+    auto [x, y, z] = randomPointInSphere(radius);
+    std::cout << "Random point in sphere: (" << x << ", " << y << ", " << z << ")\n";
+    return 0;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
     spdlog::set_default_logger(file_logger);
@@ -237,7 +270,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto bistro = LoadModel("models/bistro.glb");
 
-	auto sponza = LoadModel("models/sponza.glb");
+	//auto sponza = LoadModel("models/sponza.glb");
+    auto street = LoadModel("models/street.obj");
 
     //auto cubeScene = LoadModel("models/cube_blank.glb");
     //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
@@ -262,17 +296,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
-    renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    //renderer.GetCurrentScene()->AppendScene(*mountainScene);
+    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
-    renderer.GetCurrentScene()->AppendScene(*tigerScene);
-    renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    
+	for (int i = 0; i < 100; i++) {
+		auto root = renderer.GetCurrentScene()->AppendScene(*tigerScene);
+		auto point = randomPointInSphere(50.0);
+        tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
+	}
+
+    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
-	//renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(*bistro);
-	renderer.GetCurrentScene()->AppendScene(*sponza);
+	//renderer.GetCurrentScene()->AppendScene(*sponza);
+
+    //renderer.GetCurrentScene()->AppendScene(*street);
 
 	DeletionManager::GetInstance().MarkForDelete(carScene);
     DeletionManager::GetInstance().MarkForDelete(dragonScene);
@@ -280,7 +322,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     DeletionManager::GetInstance().MarkForDelete(mountainScene);
 	DeletionManager::GetInstance().MarkForDelete(phoenixScene);
 	//DeletionManager::GetInstance().MarkForDelete(bistro);
-	DeletionManager::GetInstance().MarkForDelete(sponza);
+	//DeletionManager::GetInstance().MarkForDelete(sponza);
 
 	carScene.reset();
 	dragonScene.reset();
@@ -333,6 +375,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //scene->AddLight(light1);
 	//scene->RemoveLightByID(light1->GetLocalID());
 	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));
+    light2->SetIsShadowCaster(true);
     scene->AddLight(light2);
     //auto light3 = Light::CreateDirectionalLight("light3", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(-1, -1, -1));
     auto light3 = Light::CreateSpotLight(L"light3", XMFLOAT3(0, 4, 0), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);

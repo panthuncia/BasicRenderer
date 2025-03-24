@@ -1,6 +1,8 @@
 #include "Scene.h"
 
 #include <spdlog/spdlog.h>
+#include <algorithm>
+#include <execution>
 
 #include "Utilities.h"
 #include "SettingsManager.h"
@@ -26,28 +28,55 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
         sceneRoot.AddChild(object);
     }
 	for (auto& mesh : object->GetOpaqueMeshes()) {
-        meshesByID[mesh->GetGlobalID()] = mesh;
         m_numDrawsInScene++;
 		m_numOpaqueDraws++;
+        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
 		if (meshManager != nullptr) { // If mesh manager exists, this scene is active and we want to add the mesh immediately
-            meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Opaque);
+            }
+            meshManager->AddMeshInstance(mesh.get());
+            if (mesh->GetMesh()->HasBaseSkin()) {
+                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
+				AddSkeleton(skeletonCopy);
+				mesh->SetSkeleton(skeletonCopy);
+            }
         }
+        meshesByID[meshGlobaId] = mesh->GetMesh();
 	}
     for (auto& mesh : object->GetAlphaTestMeshes()) {
-        meshesByID[mesh->GetGlobalID()] = mesh;
-		m_numDrawsInScene++;
+        m_numDrawsInScene++;
 		m_numAlphaTestDraws++;
+        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
         if (meshManager != nullptr) {
-            meshManager->AddMesh(mesh, MaterialBuckets::AlphaTest);
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::AlphaTest);
+            }
+            meshManager->AddMeshInstance(mesh.get());
+            if (mesh->GetMesh()->HasBaseSkin()) {
+                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
+                AddSkeleton(skeletonCopy);
+                mesh->SetSkeleton(skeletonCopy);
+            }
         }
+        meshesByID[mesh->GetMesh()->GetGlobalID()] = mesh->GetMesh();
     }
 	for (auto& mesh : object->GetBlendMeshes()) {
-		meshesByID[mesh->GetGlobalID()] = mesh;
-		m_numDrawsInScene++;
+        m_numDrawsInScene++;
 		m_numBlendDraws++;
+        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
 		if (meshManager != nullptr) {
-			meshManager->AddMesh(mesh, MaterialBuckets::Blend);
-		}
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
+            }
+            meshManager->AddMeshInstance(mesh.get());
+            if (mesh->GetMesh()->HasBaseSkin()) {
+                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
+                AddSkeleton(skeletonCopy);
+                mesh->SetSkeleton(skeletonCopy);
+            }
+        }
+        meshesByID[mesh->GetMesh()->GetGlobalID()] = mesh->GetMesh();
 	}
 
     if (object->HasOpaque()) {
@@ -113,7 +142,7 @@ UINT Scene::AddLight(std::shared_ptr<Light> light) {
 }
 
 std::shared_ptr<SceneNode> Scene::CreateNode(std::wstring name) {
-    std::shared_ptr<SceneNode> node = std::make_shared<SceneNode>(name);
+    std::shared_ptr<SceneNode> node = SceneNode::CreateShared(name);
     AddNode(node);
     return node;
 }
@@ -175,7 +204,7 @@ void Scene::RemoveObjectByID(UINT id) {
 		blendObjectsByID.erase(it->second->GetLocalID());
 
         std::shared_ptr<SceneNode> node = it->second;
-        node->parent->RemoveChild(node->GetLocalID());
+        node->parent->RemoveChild(node);
 		if (objectManager != nullptr) {
 			objectManager->RemoveObject(it->second);
 		}
@@ -213,7 +242,7 @@ void Scene::RemoveLightByID(UINT id) {
     auto it = lightsByID.find(id);
     if (it != lightsByID.end()) {
         auto& light = it->second;
-        light->parent->RemoveChild(id);
+        light->parent->RemoveChild(it->second);
         if (lightManager != nullptr) {
             lightManager->RemoveLight(light.get());
         }
@@ -228,13 +257,13 @@ void Scene::RemoveNodeByID(UINT id) {
 
 		std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
         for (auto& childNode : node->children) {
-			childrenToRemove.push_back(childNode.second);
+			childrenToRemove.push_back(childNode);
         }
 		for (auto& childNode : childrenToRemove) {
 			node->parent->AddChild(childNode);
 		}
 
-		node->parent->RemoveChild(id);
+		node->parent->RemoveChild(it->second);
 		nodesByID.erase(it);
 	}
 }
@@ -246,7 +275,7 @@ void Scene::RemoveEntityByID(UINT id, bool recurse) {
 			auto& object = it->second;
 			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
 			for (auto& child : object->children) {
-				childrenToRemove.push_back(child.second);
+				childrenToRemove.push_back(child);
 			}
 			for (auto& child : childrenToRemove) {
 				RemoveEntityByID(child->GetLocalID(), recurse);
@@ -260,7 +289,7 @@ void Scene::RemoveEntityByID(UINT id, bool recurse) {
 			auto& light = it1->second;
 			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
 			for (auto& child : light->children) {
-				childrenToRemove.push_back(child.second);
+				childrenToRemove.push_back(child);
 			}
             for (auto& child : childrenToRemove) {
                 RemoveEntityByID(child->GetLocalID(), recurse);
@@ -274,7 +303,7 @@ void Scene::RemoveEntityByID(UINT id, bool recurse) {
 			auto& node = it2->second;
 			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
 			for (auto& child : node->children) {
-				childrenToRemove.push_back(child.second);
+				childrenToRemove.push_back(child);
 			}
 			for (auto& child : childrenToRemove) {
 				RemoveEntityByID(child->GetLocalID(), recurse);
@@ -329,9 +358,11 @@ void Scene::Update() {
     //        node->animationController->update(elapsed_seconds.count());
     //    }
     //}
-	for (auto& node : animatedNodesByID) {
-		node.second->animationController->update(elapsed_seconds.count());
-    }
+    std::for_each(std::execution::par, animatedNodesByID.begin(), animatedNodesByID.end(), 
+        [elapsed = elapsed_seconds.count()](auto& node) {
+            node.second->animationController->update(elapsed);
+        });
+
     this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
@@ -376,6 +407,9 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         animatedSkeletons.push_back(skeleton);
     }
 	for (auto& node : skeleton->m_nodes) {
+		if (node->GetLocalID() == -1) {
+			AddNode(node);
+		}
 		animatedNodesByID[node->GetLocalID()] = node;
 	}
 }
@@ -406,10 +440,9 @@ UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex() {
 std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     std::unordered_map<UINT, UINT> idMap;
     auto oldRootID = scene.sceneRoot.GetLocalID();
-    auto newRootNode = std::make_shared<SceneNode>();
-    for (auto& childPair : scene.sceneRoot.children) {
-        auto& child = childPair.second;
-        auto dummyNode = std::make_shared<SceneNode>();
+    auto newRootNode = SceneNode::CreateShared();
+    for (auto& child : scene.sceneRoot.children) {
+        auto dummyNode = SceneNode::CreateShared();
 		dummyNode->SetLocalID(child->GetLocalID());
         newRootNode->AddChild(dummyNode);
     }
@@ -425,9 +458,8 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         auto& light = lightPair.second;
         UINT oldID = light->GetLocalID();
 		auto newLight = Light::CopyLight(light->GetLightInfo());
-        for (auto& childPair : light->children) {
-            auto& child = childPair.second;
-            auto dummyNode = std::make_shared<SceneNode>();
+        for (auto& child : light->children) {
+            auto dummyNode = SceneNode::CreateShared();
 			dummyNode->SetLocalID(child->GetLocalID());
             newLight->AddChild(dummyNode);
         }
@@ -443,14 +475,13 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         auto& object = objectPair.second;
         UINT oldID = object->GetLocalID();
         auto newObject = std::make_shared<RenderableObject>(object->m_name, object->GetOpaqueMeshes(), object->GetAlphaTestMeshes(), object->GetBlendMeshes());
-        for (auto& childPair : object->children) {
-            auto& child = childPair.second;
-            auto dummyNode = std::make_shared<SceneNode>();
+        for (auto& child : object->children) {
+            auto dummyNode = SceneNode::CreateShared();
             dummyNode->SetLocalID(child->GetLocalID());
             newObject->AddChild(dummyNode);
         }
         newObject->transform = object->transform.copy();
-		newObject->m_name = object->m_name;
+        newObject->m_name = object->m_name;
         UINT newID = AddObject(newObject);
         idMap[oldID] = newID;
         newEntities.push_back(newObject);
@@ -460,10 +491,9 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     for (auto& nodePair : scene.nodesByID) {
         auto& node = nodePair.second;
         UINT oldID = node->GetLocalID();
-        auto newNode = std::make_shared<SceneNode>();
-        for (auto& childPair : node->children) {
-            auto& child = childPair.second;
-            auto dummyNode = std::make_shared<SceneNode>();
+        auto newNode = SceneNode::CreateShared();
+        for (auto& child : node->children) {
+            auto dummyNode = SceneNode::CreateShared();
             dummyNode->SetLocalID(child->GetLocalID());
             newNode->AddChild(dummyNode);
         }
@@ -475,30 +505,20 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     }
 
     for (auto& skeleton : scene.skeletons) {
-        std::vector<std::shared_ptr<SceneNode>> newJoints;
-        for (auto& joint : skeleton->m_nodes) {
-            auto newJoint = GetEntityByID(idMap[joint->GetLocalID()]);
-            if (newJoint) {
-                newJoints.push_back(newJoint);
-            }
-            else {
-                spdlog::error("Joint mapping broke during scene cloning!");
-            }
-        }
-        //auto newSkeleton = std::make_shared<Skeleton>(newJoints, skeleton->GetInverseBindMatricesHandle());
-        skeleton->SetJoints(newJoints);
-		auto animationsCopy = skeleton->animations;
-		skeleton->DeleteAllAnimations();
-        // Remap node ids in animations
-        for (auto& animation : animationsCopy) {
-            auto newAnimation = std::make_shared<Animation>(animation->name);
-            for (auto& nodePair : animation->nodesMap) {
-                UINT key = nodePair.first;
-                newAnimation->nodesMap[idMap[key]] = nodePair.second;
-            }
-            skeleton->AddAnimation(newAnimation);
-        }
-		AddSkeleton(skeleton);
+        //std::vector<std::shared_ptr<SceneNode>> newJoints;
+        //for (auto& joint : skeleton->m_nodes) {
+        //    auto newJoint = GetEntityByID(idMap[joint->GetLocalID()]);
+        //    if (newJoint) {
+        //        newJoints.push_back(newJoint);
+        //    }
+        //    else {
+        //        spdlog::error("Joint mapping broke during scene cloning!");
+        //    }
+        //}
+        //auto newSkeleton = skeleton->CopySkeleton();
+        //skeleton->SetJoints(newJoints);
+
+		//AddSkeleton(newSkeleton);
         // Remap skeleton & users to their correct IDs
    //     for (auto& oldID : skeleton->userIDs) {
    //         GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
@@ -517,8 +537,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
     auto oldRootChildren = newRootNode->children; // Copy existing children
     newRootNode->children.clear(); // Clear children
 
-    for (auto& childPair : oldRootChildren) {
-        auto& child = childPair.second;
+    for (auto& child : oldRootChildren) {
         if (idMap.find(child->GetLocalID()) != idMap.end()) {
             auto mappedChild = GetEntityByID(idMap[child->GetLocalID()]);
             if (mappedChild) {
@@ -531,8 +550,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         auto oldChildren = entity->children; // Copy existing children
         entity->children.clear(); // Clear children
 
-        for (auto& childPair : oldChildren) {
-            auto& child = childPair.second;
+        for (auto& child : oldChildren) {
             if (idMap.find(child->GetLocalID()) != idMap.end()) {
                 auto mappedChild = GetEntityByID(idMap[child->GetLocalID()]);
                 if (mappedChild) {
@@ -555,13 +573,25 @@ void Scene::MakeResident() {
 	for (auto& objectPair : objectsByID) {
 		auto& object = objectPair.second;
 		for (auto& mesh : object->GetOpaqueMeshes()) {
-			meshManager->AddMesh(mesh, MaterialBuckets::Opaque);
+            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Opaque);
+            }
+			meshManager->AddMeshInstance(mesh.get());
 		}
 		for (auto& mesh : object->GetAlphaTestMeshes()) {
-            meshManager->AddMesh(mesh, MaterialBuckets::AlphaTest);
+            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::AlphaTest);
+            }
+            meshManager->AddMeshInstance(mesh.get());
 		}
 		for (auto& mesh : object->GetBlendMeshes()) {
-			meshManager->AddMesh(mesh, MaterialBuckets::Blend);
+            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
+            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
+                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
+            }
+            meshManager->AddMeshInstance(mesh.get());
 		}
 		if (object->HasOpaque()) {
 			opaqueObjectsByID[object->GetLocalID()] = object;

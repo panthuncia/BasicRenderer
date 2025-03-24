@@ -11,65 +11,98 @@ RenderableObject::RenderableObject(std::wstring name) : SceneNode(name) {
 
 RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>> meshes) : SceneNode(name) {
     for (auto& mesh : meshes) {
-		if (mesh->HasSkin()) {
+		auto instance = MeshInstance::CreateShared(mesh);
+		if (mesh->HasBaseSkin()) {
 			m_hasSkinned = true;
+			//instance->SetSkeleton(mesh->GetBaseSkin());
 		}
         switch (mesh->material->m_blendState) {
 		case BlendState::BLEND_STATE_OPAQUE:
-			opaqueMeshes.push_back(mesh);
+			opaqueMeshes.push_back(instance);
 			m_hasOpaque = true;
 			break;
 		case BlendState::BLEND_STATE_MASK:
-			alphaTestMeshes.push_back(mesh);
+			alphaTestMeshes.push_back(instance);
 			m_hasAlphaTest = true;
 			break;
 		case BlendState::BLEND_STATE_BLEND:
-			blendMeshes.push_back(mesh);
+			blendMeshes.push_back(instance);
 			m_hasBlend = true;
 			break;
         }
     }
 }
 
-RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<Mesh>>& newOpaqueMeshes, std::vector<std::shared_ptr<Mesh>>& newAlphaTestMeshes, std::vector<std::shared_ptr<Mesh>>& newBlendMeshes) : SceneNode(name) {
-    if (newOpaqueMeshes.size() > 0) {
-        m_hasOpaque = true;
-        for (auto& mesh : newOpaqueMeshes) {
-            opaqueMeshes.push_back(mesh);
-			if (mesh->HasSkin()) {
-				m_hasSkinned = true;
-			}
-        }
-    }
-    if (newAlphaTestMeshes.size() > 0) {
-        m_hasAlphaTest = true;
-        for (auto& mesh : newAlphaTestMeshes) {
-            alphaTestMeshes.push_back(mesh);
-			if (mesh->HasSkin()) {
-				m_hasSkinned = true;
-			}
-        }
-    }
-	if (newBlendMeshes.size() > 0) {
-		m_hasBlend = true;
-		for (auto& mesh : newBlendMeshes) {
-			blendMeshes.push_back(mesh);
-			if (mesh->HasSkin()) {
-				m_hasSkinned = true;
-			}
+RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<MeshInstance>> meshes) : SceneNode(name) {
+	for (auto& mesh : meshes) {
+
+		auto instance = MeshInstance::CreateShared(mesh->GetMesh());
+		if (mesh->GetMesh()->HasBaseSkin()) {
+			m_hasSkinned = true;
+			//instance->SetSkeleton(mesh->GetSkin());
+		}
+		switch (mesh->GetMesh()->material->m_blendState) {
+		case BlendState::BLEND_STATE_OPAQUE:
+			opaqueMeshes.push_back(instance);
+			m_hasOpaque = true;
+			break;
+		case BlendState::BLEND_STATE_MASK:
+			alphaTestMeshes.push_back(instance);
+			m_hasAlphaTest = true;
+			break;
+		case BlendState::BLEND_STATE_BLEND:
+			blendMeshes.push_back(instance);
+			m_hasBlend = true;
+			break;
 		}
 	}
 }
 
-std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetOpaqueMeshes() {
+RenderableObject::RenderableObject(std::wstring name, std::vector<std::shared_ptr<MeshInstance>>& newOpaqueMeshes, std::vector<std::shared_ptr<MeshInstance>>& newAlphaTestMeshes, std::vector<std::shared_ptr<MeshInstance>>& newBlendMeshes) : SceneNode(name) {
+    if (newOpaqueMeshes.size() > 0) {
+        m_hasOpaque = true;
+        for (auto& mesh : newOpaqueMeshes) {
+			auto instance = MeshInstance::CreateShared(mesh->GetMesh());
+			if (mesh->GetMesh()->HasBaseSkin()) {
+				m_hasSkinned = true;
+				//instance->SetSkeleton(mesh->GetSkin());
+			}
+			opaqueMeshes.push_back(instance);
+		}
+    }
+    if (newAlphaTestMeshes.size() > 0) {
+        m_hasAlphaTest = true;
+        for (auto& mesh : newAlphaTestMeshes) {
+			auto instance = MeshInstance::CreateShared(mesh->GetMesh());
+			if (mesh->GetMesh()->HasBaseSkin()) {
+				m_hasSkinned = true;
+				//instance->SetSkeleton(mesh->GetSkin());
+			}
+			alphaTestMeshes.push_back(instance);
+		}
+    }
+	if (newBlendMeshes.size() > 0) {
+		m_hasBlend = true;
+		for (auto& mesh : newBlendMeshes) {
+			auto instance = MeshInstance::CreateShared(mesh->GetMesh());
+			if (mesh->GetMesh()->HasBaseSkin()) {
+				m_hasSkinned = true;
+				//instance->SetSkeleton(mesh->GetSkin());
+			}
+			blendMeshes.push_back(instance);
+		}
+	}
+}
+
+std::vector<std::shared_ptr<MeshInstance>>& RenderableObject::GetOpaqueMeshes() {
 	return opaqueMeshes;
 }
 
-std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetAlphaTestMeshes() {
+std::vector<std::shared_ptr<MeshInstance>>& RenderableObject::GetAlphaTestMeshes() {
     return alphaTestMeshes;
 }
 
-std::vector<std::shared_ptr<Mesh>>& RenderableObject::GetBlendMeshes() {
+std::vector<std::shared_ptr<MeshInstance>>& RenderableObject::GetBlendMeshes() {
 	return blendMeshes;
 }
 

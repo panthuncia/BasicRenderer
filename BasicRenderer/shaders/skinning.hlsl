@@ -6,6 +6,8 @@
 void CSMain(uint dispatchID : SV_DispatchThreadID) {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     
     if (dispatchID >= meshBuffer.numVertices) {
         return;
@@ -19,14 +21,14 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
     
-    uint preSkinnedByteOffset = meshBuffer.preSkinningVertexBufferOffset + dispatchID * meshBuffer.skinningVertexByteSize;
-    uint postSkinnedByteOffset = meshBuffer.postSkinningVertexBufferOffset + dispatchID * meshBuffer.vertexByteSize;
+    uint preSkinnedByteOffset = meshBuffer.vertexBufferOffset + dispatchID * meshBuffer.skinningVertexByteSize;
+    uint postSkinnedByteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset + dispatchID * meshBuffer.vertexByteSize;
     
     Vertex input = LoadSkinningVertex(preSkinnedByteOffset, preSkinningVertexBuffer, meshBuffer.vertexFlags);
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
-    StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[meshBuffer.boneTransformBufferIndex];
+    StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[meshInstanceBuffer.boneTransformBufferIndex];
     StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[meshBuffer.inverseBindMatricesBufferIndex];
     
     matrix bone1 = (boneTransformsBuffer[input.joints.x]);

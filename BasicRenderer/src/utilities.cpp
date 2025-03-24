@@ -792,7 +792,7 @@ bool OpenFileDialog(std::wstring& selectedFile, const std::wstring& filter) {
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = fileBuffer;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = filter.c_str();  // Use the provided filter
+    //ofn.lpstrFilter = filter.c_str();  // Use the provided filter
     ofn.nFilterIndex = 1;  // Default to the first filter
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;  // Prevent directory change
 
