@@ -1,6 +1,8 @@
 #include "Scene.h"
 
 #include <spdlog/spdlog.h>
+#include <algorithm>
+#include <execution>
 
 #include "Utilities.h"
 #include "SettingsManager.h"
@@ -356,9 +358,11 @@ void Scene::Update() {
     //        node->animationController->update(elapsed_seconds.count());
     //    }
     //}
-	for (auto& node : animatedNodesByID) {
-		node.second->animationController->update(elapsed_seconds.count());
-    }
+    std::for_each(std::execution::par, animatedNodesByID.begin(), animatedNodesByID.end(), 
+        [elapsed = elapsed_seconds.count()](auto& node) {
+            node.second->animationController->update(elapsed);
+        });
+
     this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
