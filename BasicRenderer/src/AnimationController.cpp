@@ -33,23 +33,34 @@ void AnimationController::update(float elapsedTime, bool force) {
     updateTransform();
 }
 
+std::pair<Keyframe, Keyframe> findBoundingKeyframes(float currentTime, const std::vector<Keyframe>& keyframes, unsigned int& counter) {
+    Keyframe prevKeyframe = keyframes.front();
+    Keyframe nextKeyframe = keyframes.back();
+
+	if (keyframes.size() == 1) {
+		return std::make_pair(prevKeyframe, nextKeyframe);
+	}
+
+    bool found = false;
+    for (size_t i = counter; i < keyframes.size() - 1; ++i) {
+        if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
+            prevKeyframe = keyframes[i];
+            nextKeyframe = keyframes[i + 1];
+            counter = i;
+            found = true;
+            break;
+        }
+    }
+	if (!found) { // We've wrapped around
+        counter = 0;
+        return findBoundingKeyframes(currentTime, keyframes, counter);
+    }
+
+    return std::make_pair(prevKeyframe, nextKeyframe);
+    };
+
 void AnimationController::updateTransform() {
     if (!animationClip) return;
-
-    auto findBoundingKeyframes = [this](float currentTime, const std::vector<Keyframe>& keyframes) {
-        Keyframe prevKeyframe = keyframes.front();
-        Keyframe nextKeyframe = keyframes.back();
-
-        for (size_t i = 0; i < keyframes.size() - 1; ++i) {
-            if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
-                prevKeyframe = keyframes[i];
-                nextKeyframe = keyframes[i + 1];
-                break;
-            }
-        }
-
-        return std::make_pair(prevKeyframe, nextKeyframe);
-        };
 
     auto lerpVec3 = [](const XMFLOAT3& start, const XMFLOAT3& end, float t) {
         XMVECTOR s = XMLoadFloat3(&start);
@@ -67,7 +78,7 @@ void AnimationController::updateTransform() {
 
     // Check if position keyframes are available
     if (!animationClip->positionKeyframes.empty()) {
-        auto boundingPositionFrames = findBoundingKeyframes(currentTime, animationClip->positionKeyframes);
+        auto boundingPositionFrames = findBoundingKeyframes(currentTime, animationClip->positionKeyframes, m_lastPositionKeyframeIndex);
         if (boundingPositionFrames.first.time != boundingPositionFrames.second.time) {
             float timeElapsed = currentTime - boundingPositionFrames.first.time;
             float diff = boundingPositionFrames.second.time - boundingPositionFrames.first.time;
@@ -79,7 +90,7 @@ void AnimationController::updateTransform() {
 
     // Check if rotation keyframes are available
     if (!animationClip->rotationKeyframes.empty()) {
-        auto boundingRotationFrames = findBoundingKeyframes(currentTime, animationClip->rotationKeyframes);
+        auto boundingRotationFrames = findBoundingKeyframes(currentTime, animationClip->rotationKeyframes, m_lastRotationKeyframeIndex);
         if (boundingRotationFrames.first.time != boundingRotationFrames.second.time) {
             float timeElapsed = currentTime - boundingRotationFrames.first.time;
             float diff = boundingRotationFrames.second.time - boundingRotationFrames.first.time;
@@ -91,7 +102,7 @@ void AnimationController::updateTransform() {
 
     // Check if scale keyframes are available
     if (!animationClip->scaleKeyframes.empty()) {
-        auto boundingScaleFrames = findBoundingKeyframes(currentTime, animationClip->scaleKeyframes);
+        auto boundingScaleFrames = findBoundingKeyframes(currentTime, animationClip->scaleKeyframes, m_lastScaleKeyframeIndex);
         if (boundingScaleFrames.first.time != boundingScaleFrames.second.time) {
             float timeElapsed = currentTime - boundingScaleFrames.first.time;
             float diff = boundingScaleFrames.second.time - boundingScaleFrames.first.time;
