@@ -224,6 +224,12 @@ void RenderableObject::SetAnimationSpeed(float speed) {
 	for (auto& mesh : opaqueMeshes) {
 		mesh->SetAnimationSpeed(speed);
 	}
+	for (auto& mesh : alphaTestMeshes) {
+		mesh->SetAnimationSpeed(speed);
+	}
+	for (auto& mesh : blendMeshes) {
+		mesh->SetAnimationSpeed(speed);
+	}
 }
 
 float RenderableObject::GetAnimationSpeed() {
