@@ -45,6 +45,13 @@ public:
 		return m_perMeshInstanceBufferData;
 	}
 
+	void SetAnimationSpeed(float speed) {
+		m_animationSpeed = speed;
+		if (m_skeleton != nullptr) {
+			m_skeleton->SetAnimationSpeed(speed);
+		}
+	}
+
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
@@ -58,4 +65,5 @@ private:
     MeshManager* m_pCurrentMeshManager = nullptr;
     std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
+	float m_animationSpeed = 1.0f;
 };

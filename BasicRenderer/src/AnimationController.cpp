@@ -27,7 +27,7 @@ void AnimationController::unpause() {
 void AnimationController::update(float elapsedTime, bool force) {
     if (!force && (!isPlaying || !animationClip)) return;
 
-    currentTime += elapsedTime;
+    currentTime += elapsedTime * m_animationSpeed;
     currentTime = fmod(currentTime, animationClip->duration);
 
     updateTransform();

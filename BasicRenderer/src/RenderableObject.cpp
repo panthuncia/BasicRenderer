@@ -218,3 +218,20 @@ void RenderableObject::SetNormalMatrixView(std::shared_ptr<BufferView> view) {
 BufferView* RenderableObject::GetNormalMatrixView() {
 	return normalMatrixView.get();
 }
+
+void RenderableObject::SetAnimationSpeed(float speed) {
+	m_animationSpeed = speed;
+	for (auto& mesh : opaqueMeshes) {
+		mesh->SetAnimationSpeed(speed);
+	}
+	for (auto& mesh : alphaTestMeshes) {
+		mesh->SetAnimationSpeed(speed);
+	}
+	for (auto& mesh : blendMeshes) {
+		mesh->SetAnimationSpeed(speed);
+	}
+}
+
+float RenderableObject::GetAnimationSpeed() {
+	return m_animationSpeed;
+}
