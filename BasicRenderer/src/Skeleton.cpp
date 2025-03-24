@@ -131,3 +131,9 @@ void Skeleton::DeleteAllAnimations() {
 void Skeleton::SetJoints(const std::vector<std::shared_ptr<SceneNode>>& joints) {
 	m_nodes = joints;
 }
+
+void Skeleton::SetAnimationSpeed(float speed) {
+	for (auto& node : m_nodes) {
+		node->animationController->SetAnimationSpeed(speed);
+	}
+}

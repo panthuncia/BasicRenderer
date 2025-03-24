@@ -483,6 +483,7 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         newObject->transform = object->transform.copy();
         newObject->m_name = object->m_name;
         UINT newID = AddObject(newObject);
+        newObject->SetAnimationSpeed(object->GetAnimationSpeed());
         idMap[oldID] = newID;
         newEntities.push_back(newObject);
     }

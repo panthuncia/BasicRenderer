@@ -19,7 +19,10 @@ public:
     void pause();
     void unpause();
     void update(float elapsedTime, bool force = false);
+    void SetAnimationSpeed(float speed) { m_animationSpeed = speed; }
+    float GetAnimationSpeed() { return m_animationSpeed; }
 
 private:
+    float m_animationSpeed;
     void updateTransform();
 };

@@ -47,6 +47,8 @@ public:
 	std::vector<std::shared_ptr<BufferView>>& GetCurrentBlendDrawSetCommandViews();
 	void SetNormalMatrixView(std::shared_ptr<BufferView> view);
 	BufferView* GetNormalMatrixView();
+	void SetAnimationSpeed(float speed);
+	float GetAnimationSpeed();
 	int m_fileLocalSkinIndex = -1; // hack for loading gltf. TODO: remove
 private:
 	void UpdateBuffers();
@@ -68,6 +70,7 @@ private:
 	std::shared_ptr<Skeleton> m_skeleton = nullptr;
 	std::shared_ptr<BufferView> m_perObjectCBView;
 	ObjectManager* m_currentManager = nullptr;
+	float m_animationSpeed = 1.0f;
 protected:
 	void OnUpdate() override;
 };

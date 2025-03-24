@@ -38,6 +38,5 @@ protected:
     virtual void OnUpdate() {} // Hook method for derived classes to extend update behavior
     void NotifyObservers();
     int localID;
-
     friend class Scene;
 };

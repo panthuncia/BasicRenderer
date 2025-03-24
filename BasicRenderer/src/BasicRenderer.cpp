@@ -181,6 +181,13 @@ point randomPointInSphere(float radius) {
     return {x, y, z};
 }
 
+float randomFloat(float min, float max) {
+	static std::random_device rd;
+	static std::mt19937 gen(rd());
+	std::uniform_real_distribution<float> dist(min, max);
+	return dist(gen);
+}
+
 int main() {
     float radius = 5.0f;
     auto [x, y, z] = randomPointInSphere(radius);
@@ -302,6 +309,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     
 	for (int i = 0; i < 100; i++) {
+		float animationSpeed = randomFloat(0.5, 2.0);
+        for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
+			object.second->SetAnimationSpeed(animationSpeed);
+        }
 		auto root = renderer.GetCurrentScene()->AppendScene(*tigerScene);
 		auto point = randomPointInSphere(50.0);
         tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
