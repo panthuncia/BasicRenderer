@@ -43,9 +43,23 @@ Skeleton::Skeleton(const Skeleton& other) {
                 parent->AddChild(nodeMap[node]);
             }
             else {
-				// Probably a root node
+                // Probably a root node
+				if (!m_root) {
+					m_root = nodeMap[node].get();
+				}
+                else {
+                    spdlog::warn("Multiple root nodes in skeleton?");
+                }
             }
 		}
+        else {
+            if (!m_root) {
+                m_root = nodeMap[node].get();
+            }
+            else {
+                spdlog::warn("Multiple root nodes in skeleton?");
+            }
+        }
 	}
 
     for (auto& animation : other.animations) {
@@ -101,10 +115,13 @@ void Skeleton::SetAnimation(size_t index) {
 
 void Skeleton::UpdateTransforms() {
     for (size_t i = 0; i < m_nodes.size(); ++i) {
-        if (m_nodes[i]->transform.isDirty) {
-            spdlog::warn("Skeleton node wasn't updated!");
-            m_nodes[i]->Update();
-        }
+
+#if defined(_DEBUG)
+        //if (m_nodes[i]->transform.isDirty) {
+        //    spdlog::warn("Skeleton node wasn't updated!");
+        //    m_nodes[i]->Update();
+        //}
+#endif
 
         memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
     }

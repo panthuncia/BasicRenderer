@@ -33,8 +33,10 @@ public:
 
 	void DeleteAllAnimations();
 	void SetJoints(const std::vector<std::shared_ptr<SceneNode>>& joints);
+	SceneNode* GetRoot() { return m_root; }
 
 private:
     std::shared_ptr<Buffer> m_transformsBuffer;
     std::shared_ptr<Buffer> m_inverseBindMatricesBuffer;
+	SceneNode* m_root = nullptr;
 };

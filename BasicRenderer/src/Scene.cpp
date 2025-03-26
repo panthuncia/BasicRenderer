@@ -111,10 +111,10 @@ UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
     return object->GetLocalID();
 }
 
-UINT Scene::AddNode(std::shared_ptr<SceneNode> node) {
+UINT Scene::AddNode(std::shared_ptr<SceneNode> node, bool canAttachToRoot) {
     node->SetLocalID(nextNodeID);
 
-    if (node->parent == nullptr) {
+    if (node->parent == nullptr && canAttachToRoot) {
         sceneRoot.AddChild(node);
     }
 
@@ -353,11 +353,7 @@ void Scene::Update() {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
-    //for (auto& skeleton : animatedSkeletons) {
-    //    for (auto& node : skeleton->m_nodes) {
-    //        node->animationController->update(elapsed_seconds.count());
-    //    }
-    //}
+
     std::for_each(std::execution::par, animatedNodesByID.begin(), animatedNodesByID.end(), 
         [elapsed = elapsed_seconds.count()](auto& node) {
             node.second->animationController->update(elapsed);
@@ -408,7 +404,7 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
     }
 	for (auto& node : skeleton->m_nodes) {
 		if (node->GetLocalID() == -1) {
-			AddNode(node);
+			AddNode(node, true);
 		}
 		animatedNodesByID[node->GetLocalID()] = node;
 	}
@@ -503,35 +499,6 @@ std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
         UINT newID = AddNode(newNode);
         idMap[oldID] = newID;
         newEntities.push_back(newNode);
-    }
-
-    for (auto& skeleton : scene.skeletons) {
-        //std::vector<std::shared_ptr<SceneNode>> newJoints;
-        //for (auto& joint : skeleton->m_nodes) {
-        //    auto newJoint = GetEntityByID(idMap[joint->GetLocalID()]);
-        //    if (newJoint) {
-        //        newJoints.push_back(newJoint);
-        //    }
-        //    else {
-        //        spdlog::error("Joint mapping broke during scene cloning!");
-        //    }
-        //}
-        //auto newSkeleton = skeleton->CopySkeleton();
-        //skeleton->SetJoints(newJoints);
-
-		//AddSkeleton(newSkeleton);
-        // Remap skeleton & users to their correct IDs
-   //     for (auto& oldID : skeleton->userIDs) {
-   //         GetObjectByID(idMap[oldID])->SetSkin(newSkeleton);
-			//// Add to correct skinned object map
-   //         if (GetObjectByID(idMap[oldID])->HasOpaque()) {
-			//	opaqueSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
-			//} if (GetObjectByID(idMap[oldID])->HasAlphaTest()) {
-			//	alphaTestSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
-			//} if (GetObjectByID(idMap[oldID])->HasBlend()) {
-			//	blendSkinnedObjectsByID[idMap[oldID]] = GetObjectByID(idMap[oldID]);
-   //         }
-   //     }
     }
 
     // Rebuild parent-child mapping

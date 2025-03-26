@@ -24,7 +24,7 @@ public:
     Scene();
     ~Scene();
     UINT AddObject(std::shared_ptr<RenderableObject> object);
-    UINT AddNode(std::shared_ptr<SceneNode> node);
+    UINT AddNode(std::shared_ptr<SceneNode> node, bool canAttachToRoot = true);
     UINT AddLight(std::shared_ptr<Light> light);
     std::shared_ptr<SceneNode> CreateNode(std::wstring name = L""); // Like addNode, if node ids need to be pre-assigned
     std::shared_ptr<RenderableObject> CreateRenderableObject(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name); // Like addObject, if node ids need to be pre-assigned
