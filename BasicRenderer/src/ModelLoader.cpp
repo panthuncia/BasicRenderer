@@ -552,8 +552,8 @@ static void buildAiNodeHierarchy(
     XMMatrixDecompose(&s, &r, &t, transform);
 
     // Set the local transform
-    node->transform.setLocalPosition(XMFLOAT3(XMVectorGetX(t), XMVectorGetY(t), XMVectorGetZ(t)));
-    node->transform.setLocalScale(XMFLOAT3(XMVectorGetX(s), XMVectorGetY(s), XMVectorGetZ(s)));
+    node->transform.setLocalPosition(t);
+    node->transform.setLocalScale(s);
     node->transform.setLocalRotationFromQuaternion(r);
 
     // Attach to parent

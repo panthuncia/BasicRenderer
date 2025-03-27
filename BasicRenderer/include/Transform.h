@@ -14,9 +14,9 @@ struct MovementState {
 
 class Transform {
 public:
-    XMFLOAT3 pos;
+    XMVECTOR pos;
     XMVECTOR rot;
-    XMFLOAT3 scale;
+    XMVECTOR scale;
     bool isDirty;
     XMMATRIX modelMatrix;
 
@@ -27,13 +27,13 @@ public:
     void computeLocalModelMatrix();
     void computeModelMatrixFromParent(const XMMATRIX& parentGlobalModelMatrix);
 
-    void setLocalPosition(const XMFLOAT3& newPosition);
+    void setLocalPosition(const XMVECTOR& newPosition);
     void setLocalRotationFromEuler(const XMFLOAT3& rotEuler);
     void rotateEuler(const XMFLOAT3& rotEuler);
     void rotatePitchYaw(float pitch, float yaw);
     void setLocalRotationFromQuaternion(const XMVECTOR& quaternion);
     void setDirection(const XMFLOAT3& dir);
-    void setLocalScale(const XMFLOAT3& newScale);
+    void setLocalScale(const XMVECTOR& newScale);
     void applyMovement(const MovementState& movement, float deltaTime);
     XMVECTOR GetUp() const;
     XMVECTOR GetForward() const;

@@ -308,7 +308,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     
-	for (int i = 0; i < 10; i++) {
+	for (int i = 0; i < 500; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
         for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			object.second->SetAnimationSpeed(animationSpeed);

@@ -319,7 +319,7 @@ void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPla
     float farWidth = farHeight * aspectRatio;
 
     // Get camera basis vectors
-    XMVECTOR camPos = XMLoadFloat3(&camera.transform.pos);
+    const XMVECTOR& camPos = camera.transform.pos;
     XMVECTOR camDir = camera.transform.GetForward();
     XMVECTOR camUp = camera.transform.GetUp();
     XMVECTOR camRight = XMVector3Cross(camDir, camUp);

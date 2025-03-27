@@ -33,19 +33,19 @@ void AnimationController::update(float elapsedTime, bool force) {
     updateTransform();
 }
 
-std::pair<Keyframe, Keyframe> findBoundingKeyframes(float currentTime, const std::vector<Keyframe>& keyframes, unsigned int& counter) {
-    Keyframe prevKeyframe = keyframes.front();
-    Keyframe nextKeyframe = keyframes.back();
+std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, std::vector<Keyframe>& keyframes, unsigned int& counter) {
+	unsigned int prevKeyframeIndex = 0;
+	unsigned int nextKeyframeIndex = 0;
 
 	if (keyframes.size() == 1) {
-		return std::make_pair(prevKeyframe, nextKeyframe);
+		return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
 	}
 
     bool found = false;
     for (size_t i = counter; i < keyframes.size() - 1; ++i) {
         if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
-            prevKeyframe = keyframes[i];
-            nextKeyframe = keyframes[i + 1];
+            prevKeyframeIndex = i;
+            nextKeyframeIndex = i + 1;
             counter = i;
             found = true;
             break;
@@ -56,19 +56,15 @@ std::pair<Keyframe, Keyframe> findBoundingKeyframes(float currentTime, const std
         return findBoundingKeyframes(currentTime, keyframes, counter);
     }
 
-    return std::make_pair(prevKeyframe, nextKeyframe);
+    return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
     };
 
 void AnimationController::updateTransform() {
     if (!animationClip) return;
 
-    auto lerpVec3 = [](const XMFLOAT3& start, const XMFLOAT3& end, float t) {
-        XMVECTOR s = XMLoadFloat3(&start);
-        XMVECTOR e = XMLoadFloat3(&end);
-        XMVECTOR lerped = XMVectorLerp(s, e, t);
-        XMFLOAT3 result;
-        XMStoreFloat3(&result, lerped);
-        return result;
+    auto lerpVec3 = [](const XMVECTOR& start, const XMVECTOR& end, float t) {
+        XMVECTOR lerped = XMVectorLerp(start, end, t);
+        return lerped;
         };
 
     auto lerpRotation = [](const XMVECTOR& start, const XMVECTOR& end, float t) {
@@ -79,11 +75,13 @@ void AnimationController::updateTransform() {
     // Check if position keyframes are available
     if (!animationClip->positionKeyframes.empty()) {
         auto boundingPositionFrames = findBoundingKeyframes(currentTime, animationClip->positionKeyframes, m_lastPositionKeyframeIndex);
-        if (boundingPositionFrames.first.time != boundingPositionFrames.second.time) {
-            float timeElapsed = currentTime - boundingPositionFrames.first.time;
-            float diff = boundingPositionFrames.second.time - boundingPositionFrames.first.time;
+		Keyframe* prevKeyframe = &animationClip->positionKeyframes[boundingPositionFrames.first];
+		Keyframe* nextKeyframe = &animationClip->positionKeyframes[boundingPositionFrames.second];
+        if (prevKeyframe->time != nextKeyframe->time) {
+            float timeElapsed = currentTime - prevKeyframe->time;
+            float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
-            XMFLOAT3 interpolatedPosition = lerpVec3(boundingPositionFrames.first.value, boundingPositionFrames.second.value, t);
+            XMVECTOR interpolatedPosition = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
             node->transform.setLocalPosition(interpolatedPosition);
         }
     }
@@ -91,11 +89,13 @@ void AnimationController::updateTransform() {
     // Check if rotation keyframes are available
     if (!animationClip->rotationKeyframes.empty()) {
         auto boundingRotationFrames = findBoundingKeyframes(currentTime, animationClip->rotationKeyframes, m_lastRotationKeyframeIndex);
-        if (boundingRotationFrames.first.time != boundingRotationFrames.second.time) {
-            float timeElapsed = currentTime - boundingRotationFrames.first.time;
-            float diff = boundingRotationFrames.second.time - boundingRotationFrames.first.time;
+		Keyframe* prevKeyframe = &animationClip->rotationKeyframes[boundingRotationFrames.first];
+		Keyframe* nextKeyframe = &animationClip->rotationKeyframes[boundingRotationFrames.second];
+        if (prevKeyframe->time != nextKeyframe->time) {
+            float timeElapsed = currentTime - prevKeyframe->time;
+            float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
-            XMVECTOR interpolatedRotation = lerpRotation(boundingRotationFrames.first.rotation, boundingRotationFrames.second.rotation, t);
+            XMVECTOR interpolatedRotation = lerpRotation(prevKeyframe->value, nextKeyframe->value, t);
             node->transform.setLocalRotationFromQuaternion(interpolatedRotation);
         }
     }
@@ -103,11 +103,13 @@ void AnimationController::updateTransform() {
     // Check if scale keyframes are available
     if (!animationClip->scaleKeyframes.empty()) {
         auto boundingScaleFrames = findBoundingKeyframes(currentTime, animationClip->scaleKeyframes, m_lastScaleKeyframeIndex);
-        if (boundingScaleFrames.first.time != boundingScaleFrames.second.time) {
-            float timeElapsed = currentTime - boundingScaleFrames.first.time;
-            float diff = boundingScaleFrames.second.time - boundingScaleFrames.first.time;
+		Keyframe* prevKeyframe = &animationClip->scaleKeyframes[boundingScaleFrames.first];
+		Keyframe* nextKeyframe = &animationClip->scaleKeyframes[boundingScaleFrames.second];
+        if (prevKeyframe->time != nextKeyframe->time) {
+            float timeElapsed = currentTime - prevKeyframe->time;
+            float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
-            XMFLOAT3 interpolatedScale = lerpVec3(boundingScaleFrames.first.value, boundingScaleFrames.second.value, t);
+            XMVECTOR interpolatedScale = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
             node->transform.setLocalScale(interpolatedScale);
         }
     }

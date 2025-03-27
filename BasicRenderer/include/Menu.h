@@ -485,14 +485,20 @@ inline void Menu::DisplaySelectedNode() {
 
         // Display the transform details
         ImGui::Text("Position:");
-        if (ImGui::InputFloat3("Position", &selectedNode->transform.pos.x)) {
+        XMFLOAT3 pos;
+        XMStoreFloat3(&pos, selectedNode->transform.pos);
+        if (ImGui::InputFloat3("Position", &pos.x)) {
+			selectedNode->transform.setLocalPosition(XMLoadFloat3(&pos));
             selectedNode->transform.isDirty = true; // Mark as dirty if modified
         }
         ImGui::Text("Scale:");
-        if (ImGui::InputFloat("Scale", &selectedNode->transform.scale.x)) {
+		XMFLOAT3 scale;
+		XMStoreFloat3(&scale, selectedNode->transform.scale);
+        if (ImGui::InputFloat("Scale", &scale.x)) {
             selectedNode->transform.isDirty = true; // Mark as dirty if modified
-			selectedNode->transform.scale.y = selectedNode->transform.scale.x;
-			selectedNode->transform.scale.z = selectedNode->transform.scale.x;
+			scale.y = scale.x;
+			scale.z = scale.x;
+			selectedNode->transform.setLocalScale(XMLoadFloat3(&scale));
         }
 
         // Display rotation (you may want to convert it to Euler angles for readability)

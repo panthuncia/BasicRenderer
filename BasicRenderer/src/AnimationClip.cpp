@@ -3,7 +3,7 @@
 AnimationClip::AnimationClip() : duration(0.0f) {}
 
 void AnimationClip::addPositionKeyframe(float time, const XMFLOAT3& position) {
-    positionKeyframes.emplace_back(time, position);
+    positionKeyframes.emplace_back(time, XMLoadFloat3(&position));
     updateDuration(time);
 }
 
@@ -13,7 +13,7 @@ void AnimationClip::addRotationKeyframe(float time, const XMVECTOR& rotation) {
 }
 
 void AnimationClip::addScaleKeyframe(float time, const XMFLOAT3& scale) {
-    scaleKeyframes.emplace_back(time, scale);
+    scaleKeyframes.emplace_back(time, XMLoadFloat3(&scale));
     updateDuration(time);
 }
 

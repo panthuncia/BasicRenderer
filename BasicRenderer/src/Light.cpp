@@ -19,7 +19,7 @@ Light::Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 colo
 	m_lightInfo.shadowViewInfoIndex = -1;
 	m_lightInfo.nearPlane = nearPlane;
 	m_lightInfo.farPlane = farPlane;
-	transform.setLocalPosition(position);
+	transform.setLocalPosition(XMLoadFloat3(&position));
 
 	if (direction.x != 0 || direction.y != 0 || direction.z || 0) {
 		transform.setDirection(direction);

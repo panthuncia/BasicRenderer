@@ -4,7 +4,9 @@
 DirectX::XMVECTOR defaultDirection = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
 
 Transform::Transform(XMFLOAT3 pos, XMFLOAT3 rotEuler, XMFLOAT3 scale)
-    : pos(pos), scale(scale), isDirty(false) {
+    : isDirty(false) {
+	this->pos = DirectX::XMLoadFloat3(&pos);
+	this->scale = DirectX::XMLoadFloat3(&scale);
     rot = XMQuaternionRotationRollPitchYawFromVector(XMLoadFloat3(&rotEuler));
     modelMatrix = XMMatrixIdentity();
 }
@@ -15,8 +17,8 @@ Transform::Transform(const Transform& other)
 
 XMMATRIX Transform::getLocalModelMatrix() {
     XMMATRIX matRotation = XMMatrixRotationQuaternion(rot);
-    XMMATRIX matTranslation = XMMatrixTranslationFromVector(XMLoadFloat3(&pos));
-    XMMATRIX matScale = XMMatrixScalingFromVector(XMLoadFloat3(&scale));
+    XMMATRIX matTranslation = XMMatrixTranslationFromVector(pos);
+    XMMATRIX matScale = XMMatrixScalingFromVector(scale);
     return matScale * matRotation * matTranslation;
 }
 
@@ -30,7 +32,7 @@ void Transform::computeModelMatrixFromParent(const XMMATRIX& parentGlobalModelMa
     isDirty = false;
 }
 
-void Transform::setLocalPosition(const XMFLOAT3& newPosition) {
+void Transform::setLocalPosition(const XMVECTOR& newPosition) {
     pos = newPosition;
     isDirty = true;
 }
@@ -82,7 +84,7 @@ void Transform::setDirection(const XMFLOAT3& dir) {
     isDirty = true;
 }
 
-void Transform::setLocalScale(const XMFLOAT3& newScale) {
+void Transform::setLocalScale(const XMVECTOR& newScale) {
     scale = newScale;
     isDirty = true;
 }
@@ -105,10 +107,8 @@ void Transform::applyMovement(const MovementState& movement, float deltaTime) {
     displacement += rightDir * (movement.rightMagnitude - movement.leftMagnitude) * deltaTime;
     displacement += upDir * (movement.upMagnitude - movement.downMagnitude) * deltaTime;
 
-    // Update position
-    XMVECTOR posVec = XMLoadFloat3(&pos);
-    posVec += displacement;
-    XMStoreFloat3(&pos, posVec);
+
+    pos += displacement;
     isDirty = true;
 }
 
