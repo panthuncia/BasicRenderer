@@ -69,14 +69,13 @@ public:
 		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
 
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		auto drawObjects = [&]() {
 
 			// Opaque objects
-			unsigned int opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetOpaqueMeshes();
@@ -102,8 +101,6 @@ public:
 			}
 
 			// Alpha test objects
-			unsigned int alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 			for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetAlphaTestMeshes();
@@ -129,8 +126,6 @@ public:
 			}
 
 			// Blend objects
-			unsigned int blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
-			commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &blendPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 			for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
 				auto& renderable = pair.second;
 				auto& meshes = renderable->GetBlendMeshes();

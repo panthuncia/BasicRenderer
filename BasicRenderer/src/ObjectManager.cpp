@@ -11,13 +11,9 @@
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, ResourceState::ALL_SRV, L"perObjectBuffers<PerObjectCB>");
-	m_opaqueDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, ResourceState::ALL_SRV, L"opaqueDrawSetCommandsBuffer<IndirectCommand>");
-	m_alphaTestDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, ResourceState::ALL_SRV, L"alphaTestDrawSetCommandsBuffer<IndirectCommand>");
-	m_blendDrawSetCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, ResourceState::ALL_SRV, L"blendDrawSetCommandsBuffer<IndirectCommand>");
+	m_masterIndirectCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, ResourceState::ALL_SRV, L"masterIndirectCommandsBuffer<IndirectCommand>");
 	
 	m_normalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(ResourceState::ALL_SRV, 1, L"preSkinningNormalMatrixBuffer");
-
-	
 
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
 	m_activeAlphaTestDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeAlphaTestDrawSetIndices");
@@ -41,7 +37,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			std::shared_ptr<BufferView> view = m_opaqueDrawSetCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
+			std::shared_ptr<BufferView> view = m_masterIndirectCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
 			views.push_back(view);
 			unsigned int index = view->GetOffset() / sizeof(DispatchMeshIndirectCommand);
 			indices.push_back(index);
@@ -64,7 +60,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			std::shared_ptr<BufferView> view = m_alphaTestDrawSetCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
+			std::shared_ptr<BufferView> view = m_masterIndirectCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
 			views.push_back(view);
 			unsigned int index = view->GetOffset() / sizeof(DispatchMeshIndirectCommand);
 			indices.push_back(index);
@@ -86,7 +82,7 @@ void ObjectManager::AddObject(std::shared_ptr<RenderableObject>& object) {
 			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
-			std::shared_ptr<BufferView> view = m_blendDrawSetCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
+			std::shared_ptr<BufferView> view = m_masterIndirectCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
 			views.push_back(view);
 
 			unsigned int index = view->GetOffset() / sizeof(DispatchMeshIndirectCommand);
@@ -112,7 +108,7 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 	// Remove the object's draw set commands from the draw set buffers
 	auto& opaqueViews = object->GetCurrentOpaqueDrawSetCommandViews();
 	for (auto view : opaqueViews) {
-		m_opaqueDrawSetCommandsBuffer->Deallocate(view.get());
+		m_masterIndirectCommandsBuffer->Deallocate(view.get());
 		unsigned int index = view->GetOffset() / sizeof(DispatchMeshIndirectCommand);
 		m_activeOpaqueDrawSetIndices->Remove(index);
 	}
@@ -121,7 +117,7 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 
 	auto& transparentViews = object->GetCurrentAlphaTestDrawSetCommandViews();
 	for (auto view : transparentViews) {
-		m_alphaTestDrawSetCommandsBuffer->Deallocate(view.get());
+		m_masterIndirectCommandsBuffer->Deallocate(view.get());
 		unsigned int index = view->GetOffset() / sizeof(DispatchMeshIndirectCommand);
 		m_activeAlphaTestDrawSetIndices->Remove(index);
 	}
@@ -130,7 +126,7 @@ void ObjectManager::RemoveObject(std::shared_ptr<RenderableObject>& object) {
 
 	auto& blendViews = object->GetCurrentBlendDrawSetCommandViews();
 	for (auto view : blendViews) {
-		m_blendDrawSetCommandsBuffer->Deallocate(view.get());
+		m_masterIndirectCommandsBuffer->Deallocate(view.get());
 		unsigned int index = view->GetOffset() / sizeof(DispatchMeshIndirectCommand);
 		m_activeBlendDrawSetIndices->Remove(index);
 	}

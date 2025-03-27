@@ -148,6 +148,7 @@ enum SettingsRootConstants {
 };
 
 enum StaticBufferRootConstants {
+    PerMeshBufferDescriptorIndex,
     NormalMatrixBufferDescriptorIndex,
     PreSkinningVertexBufferDescriptorIndex,
     PostSkinningVertexBufferDescriptorIndex,
@@ -157,12 +158,11 @@ enum StaticBufferRootConstants {
     PerObjectBufferDescriptorIndex,
     CameraBufferDescriptorIndex,
     PerMeshInstanceBufferDescriptorIndex,
-	NumStaticBufferRootConstants
+    DrawSetCommandBufferDescriptorIndex,
+    NumStaticBufferRootConstants,
 };
 
 enum VariableBufferRootConstants {
-    PerMeshBufferDescriptorIndex,
-    DrawSetCommandBufferDescriptorIndex,
     ActiveDrawSetIndicesBufferDescriptorIndex,
     IndirectCommandBufferDescriptorIndex,
     MaxDrawIndex,

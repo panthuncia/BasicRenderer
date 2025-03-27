@@ -45,23 +45,11 @@ public:
 	std::shared_ptr<ResourceGroup> GetResourceGroup() {
 		return m_resourceGroup;
 	}
-	unsigned int GetOpaquePerMeshBufferSRVIndex() const {
-		return m_opaquePerMeshBuffers->GetSRVInfo().index;
+	unsigned int GetPerMeshBufferSRVIndex() const {
+		return m_perMeshBuffers->GetSRVInfo().index;
 	}
-	std::shared_ptr<DynamicBuffer>& GetOpaquePerMeshBuffers() {
-		return m_opaquePerMeshBuffers;
-	}
-	unsigned int GetAlphaTestPerMeshBufferSRVIndex() const {
-		return m_alphaTestPerMeshBuffers->GetSRVInfo().index;
-	}
-	std::shared_ptr<DynamicBuffer>& GetAlphaTestPerMeshBuffers() {
-		return m_alphaTestPerMeshBuffers;
-	}
-	unsigned int GetBlendPerMeshBufferSRVIndex() const {
-		return m_blendPerMeshBuffers->GetSRVInfo().index;
-	}
-	std::shared_ptr<DynamicBuffer>& GetBlendPerMeshBuffers() {
-		return m_blendPerMeshBuffers;
+	std::shared_ptr<DynamicBuffer>& GetPerMeshBuffers() {
+		return m_perMeshBuffers;
 	}
 	std::shared_ptr<DynamicBuffer>& GetPreSkinningVertices() {
 		return m_preSkinningVertices;
@@ -84,9 +72,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
 
 	// Base meshes
-	std::shared_ptr<DynamicBuffer> m_opaquePerMeshBuffers;
-	std::shared_ptr<DynamicBuffer> m_alphaTestPerMeshBuffers;
-	std::shared_ptr<DynamicBuffer> m_blendPerMeshBuffers;
+	std::shared_ptr<DynamicBuffer> m_perMeshBuffers;
 
 	// Skinned mesh instances
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;

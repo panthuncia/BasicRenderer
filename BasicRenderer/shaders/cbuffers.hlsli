@@ -23,6 +23,7 @@ cbuffer Settings : register(b4) {
 }
 
 cbuffer StaticBufferInfo : register(b5) {
+    uint perMeshBufferDescriptorIndex;
     uint normalMatrixBufferDescriptorIndex;
     uint preSkinningVertexBufferDescriptorIndex;
     uint postSkinningVertexBufferDescriptorIndex;
@@ -32,11 +33,10 @@ cbuffer StaticBufferInfo : register(b5) {
     uint perObjectBufferDescriptorIndex;
     uint cameraBufferDescriptorIndex;
     uint perMeshInstanceBufferDescriptorIndex; // Used by skinned meshes for skinning
+    uint drawSetCommandBufferDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {
-    uint perMeshBufferDescriptorIndex; // Variable between opaque vs. transparent
-    uint drawSetCommandBufferDescriptorIndex;
     uint activeDrawSetIndicesBufferDescriptorIndex;
     uint indirectCommandBufferDescriptorIndex;
     uint maxDrawIndex;

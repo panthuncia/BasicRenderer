@@ -28,16 +28,8 @@ public:
 		return m_perObjectBuffers;
 	}
 
-	unsigned int GetOpaqueDrawSetCommandsBufferSRVIndex() const {
-		return m_opaqueDrawSetCommandsBuffer->GetSRVInfo().index;
-	}
-	
-	unsigned int GetAlphaTestDrawSetCommandsBufferSRVIndex() const {
-		return m_alphaTestDrawSetCommandsBuffer->GetSRVInfo().index;
-	}
-
-	unsigned int GetBlendDrawSetCommandsBufferSRVIndex() const {
-		return m_blendDrawSetCommandsBuffer->GetSRVInfo().index;
+	unsigned int GetMasterIndirectCommandsBufferSRVIndex() const {
+		return m_masterIndirectCommandsBuffer->GetSRVInfo().index;
 	}
 
 	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const {
@@ -54,18 +46,6 @@ public:
 
 	unsigned int GetNormalMatrixBufferSRVIndex() const {
 		return m_normalMatrixBuffer->GetSRVInfo().index;
-	}
-
-	std::shared_ptr<DynamicBuffer>& GetOpaqueDrawSetCommandsBuffer() {
-		return m_opaqueDrawSetCommandsBuffer;
-	}
-
-	std::shared_ptr<DynamicBuffer>& GetAlphaTestDrawSetCommandsBuffer() {
-		return m_alphaTestDrawSetCommandsBuffer;
-	}
-
-	std::shared_ptr<DynamicBuffer>& GetBlendDrawSetCommandsBuffer() {
-		return m_blendDrawSetCommandsBuffer;
 	}
 
 	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveOpaqueDrawSetIndices() {
@@ -89,12 +69,10 @@ private:
 	ObjectManager();
 	std::vector<std::shared_ptr<RenderableObject>> m_objects;
 	std::shared_ptr<DynamicBuffer> m_perObjectBuffers; // Per object constant buffer
-	std::shared_ptr<DynamicBuffer> m_opaqueDrawSetCommandsBuffer; // Indirect draw command buffer for opaque objects
-	std::shared_ptr<DynamicBuffer> m_alphaTestDrawSetCommandsBuffer; // Indirect draw command buffer for alpha tested objects
-	std::shared_ptr<DynamicBuffer> m_blendDrawSetCommandsBuffer; // Indirect draw command buffer for blended objects
+	std::shared_ptr<DynamicBuffer> m_masterIndirectCommandsBuffer; // Indirect draw command buffer
 	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>> m_normalMatrixBuffer; // Normal matrices for each object
-	std::shared_ptr<SortedUnsignedIntBuffer> m_activeOpaqueDrawSetIndices; // Indices into m_opaqueDrawSetCommandsBuffer for active opaque objects
-	std::shared_ptr<SortedUnsignedIntBuffer> m_activeAlphaTestDrawSetIndices; // Indices into m_alphaTestDrawSetCommandsBuffer for active alpha tested objects
-	std::shared_ptr<SortedUnsignedIntBuffer> m_activeBlendDrawSetIndices; // Indices into m_blendDrawSetCommandsBuffer for active blended objects
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeOpaqueDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active opaque objects
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeAlphaTestDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active alpha tested objects
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeBlendDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active blended objects
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshInstanceCB>> m_perMeshInstanceBuffers; // Indices into m_perObjectBuffers for each mesh instance in each object
 };

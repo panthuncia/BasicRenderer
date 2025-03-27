@@ -60,11 +60,10 @@ public:
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferUAVIndex();
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
 		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
+		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
-		auto opaquePerMeshBufferIndex = meshManager->GetOpaquePerMeshBufferSRVIndex();
-		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &opaquePerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
 		unsigned int perMeshConstants[NumPerMeshRootConstants] = {};
 		for (auto& pair : context.currentScene->GetOpaqueSkinnedRenderableObjectIDMap()) {
@@ -83,9 +82,6 @@ public:
 				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
 			}
 		}
-
-		auto alphaTestPerMeshBufferIndex = meshManager->GetAlphaTestPerMeshBufferSRVIndex();
-		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &alphaTestPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 		for (auto& pair : context.currentScene->GetAlphaTestSkinnedRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetAlphaTestMeshes();
@@ -103,8 +99,6 @@ public:
 			}
 		}
 
-		auto blendPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
-		commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &blendPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 		for (auto& pair : context.currentScene->GetBlendSkinnedRenderableObjectIDMap()) {
 			auto& renderable = pair.second;
 			auto& meshes = renderable->GetBlendMeshes();

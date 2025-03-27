@@ -98,6 +98,7 @@ public:
 		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
 
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
@@ -105,9 +106,6 @@ public:
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
-
-		unsigned int transparentPerMeshBufferIndex = meshManager->GetBlendPerMeshBufferSRVIndex();
-		commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &transparentPerMeshBufferIndex, PerMeshBufferDescriptorIndex);
 
 		// PPLL heads & buffer
 		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo().index, m_PPLLBuffer->GetSRVInfo().index };

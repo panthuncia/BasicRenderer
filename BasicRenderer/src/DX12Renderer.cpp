@@ -17,9 +17,6 @@
 #include "RenderContext.h"
 #include "RenderGraph.h"
 #include "RenderPass.h"
-#include "RenderPasses/ForwardRenderPass.h"
-#include "RenderPasses/ForwardRenderPassMS.h"
-#include "RenderPasses/ForwardRenderPassMSIndirect.h"
 #include "RenderPasses/ForwardRenderPassUnified.h"
 #include "RenderPasses/ShadowPass.h"
 #include "RenderPasses/ShadowPassMS.h"
@@ -783,12 +780,8 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto& perObjectBuffer = objectManager->GetPerObjectBuffers();
 	newGraph->AddResource(perObjectBuffer);
-    auto& opaquePerMeshBuffer = meshManager->GetOpaquePerMeshBuffers();
-	auto& transparentPerMeshBuffer = meshManager->GetAlphaTestPerMeshBuffers();
-	auto& blendPerMeshBuffer = meshManager->GetBlendPerMeshBuffers();
-	newGraph->AddResource(opaquePerMeshBuffer);
-	newGraph->AddResource(transparentPerMeshBuffer);
-	newGraph->AddResource(blendPerMeshBuffer);
+    auto& perMeshBuffer = meshManager->GetPerMeshBuffers();
+	newGraph->AddResource(perMeshBuffer);
 
 	auto& preSkinningVertices = meshManager->GetPreSkinningVertices();
 	auto& postSkinningVertices = meshManager->GetPostSkinningVertices();
@@ -806,9 +799,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto skinningPass = std::make_shared<SkinningPass>();
 	ComputePassParameters skinningPassParameters;
 	skinningPassParameters.shaderResources.push_back(perObjectBuffer);
-	skinningPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
-	skinningPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
-	skinningPassParameters.shaderResources.push_back(blendPerMeshBuffer);
+	skinningPassParameters.shaderResources.push_back(perMeshBuffer);
 	skinningPassParameters.shaderResources.push_back(preSkinningVertices);
     skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
@@ -840,8 +831,7 @@ void DX12Renderer::CreateRenderGraph() {
         auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
         ComputePassParameters frustrumCullingPassParameters;
         frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
-        frustrumCullingPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
-        frustrumCullingPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+        frustrumCullingPassParameters.shaderResources.push_back(perMeshBuffer);
 		frustrumCullingPassParameters.shaderResources.push_back(cameraBuffer);
         frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
         newGraph->AddComputePass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
@@ -849,8 +839,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto forwardPassParameters = RenderPassParameters();
 	forwardPassParameters.shaderResources.push_back(perObjectBuffer);
-	forwardPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
-	forwardPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
+	forwardPassParameters.shaderResources.push_back(perMeshBuffer);
     //forwardPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	forwardPassParameters.shaderResources.push_back(postSkinningVertices);
 	forwardPassParameters.shaderResources.push_back(cameraBuffer);
@@ -967,9 +956,7 @@ void DX12Renderer::CreateRenderGraph() {
 			shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
 		}
 		shadowPassParameters.shaderResources.push_back(perObjectBuffer);
-		shadowPassParameters.shaderResources.push_back(transparentPerMeshBuffer);
-		shadowPassParameters.shaderResources.push_back(opaquePerMeshBuffer);
-        shadowPassParameters.shaderResources.push_back(blendPerMeshBuffer);
+		shadowPassParameters.shaderResources.push_back(perMeshBuffer);
 		shadowPassParameters.shaderResources.push_back(cameraBuffer);
         shadowPassParameters.depthTextures.push_back(m_shadowMaps);
         forwardPassParameters.shaderResources.push_back(m_shadowMaps);
@@ -1031,7 +1018,7 @@ void DX12Renderer::CreateRenderGraph() {
     }
 	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
 	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
-	PPLLFillPassParameters.shaderResources.push_back(blendPerMeshBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(perMeshBuffer);
     if (drawShadows) {
         PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
     }
