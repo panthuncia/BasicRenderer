@@ -7,6 +7,7 @@
 #include <chrono>
 #include <ctime>  
 #include <functional>
+#include <flecs.h>
 #include "Camera.h"
 #include "Skeleton.h"
 #include "LightManager.h"
@@ -27,7 +28,9 @@ public:
     UINT AddNode(std::shared_ptr<SceneNode> node, bool canAttachToRoot = true);
     UINT AddLight(std::shared_ptr<Light> light);
     std::shared_ptr<SceneNode> CreateNode(std::wstring name = L""); // Like addNode, if node ids need to be pre-assigned
+	flecs::entity CreateNodeECS(std::wstring name = L"");
     std::shared_ptr<RenderableObject> CreateRenderableObject(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name); // Like addObject, if node ids need to be pre-assigned
+	flecs::entity CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name);
     std::shared_ptr<RenderableObject> GetObjectByName(const std::wstring& name);
     std::shared_ptr<RenderableObject> GetObjectByID(UINT id);
     std::shared_ptr<SceneNode> GetEntityByID(UINT id);
@@ -44,7 +47,7 @@ public:
 	std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetAlphaTestSkinnedRenderableObjectIDMap();
 	std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& GetBlendSkinnedRenderableObjectIDMap();
     std::unordered_map<UINT, std::shared_ptr<Light>>& GetLightIDMap();
-    SceneNode& GetRoot();
+    flecs::entity GetRoot();
     void Update();
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
     std::shared_ptr<Camera> GetCamera();
@@ -85,10 +88,9 @@ private:
 	std::unordered_map<UINT, std::shared_ptr<RenderableObject>> blendSkinnedObjectsByID;
     std::unordered_map<UINT, std::shared_ptr<Light>> lightsByID;
 	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;
-	std::unordered_map<UINT, std::shared_ptr<SceneNode>> animatedNodesByID;
+	std::unordered_map<uint64_t, flecs::entity> animatedEntitiesByID;
 	UINT numObjects = 0;
 	UINT nextNodeID = 0;
-    SceneNode sceneRoot;
     std::vector<std::shared_ptr<Skeleton>> skeletons;
     std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
@@ -101,7 +103,8 @@ private:
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraBlendIndirectCommandBuffer;
 	std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
 
-
+    // ECS
+    flecs::entity ECSSceneRoot;
 
 	unsigned int m_numDrawsInScene = 0;
 	unsigned int m_numOpaqueDraws = 0;

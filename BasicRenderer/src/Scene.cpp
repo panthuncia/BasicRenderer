@@ -3,11 +3,14 @@
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <execution>
+#include <flecs.h>
 
 #include "Utilities.h"
 #include "SettingsManager.h"
 #include "CameraManager.h"
-
+#include "ECSManager.h"
+#include "Components.h"
+#include "material.h"
 Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
@@ -15,6 +18,11 @@ Scene::Scene(){
 
     // TODO: refactor indirect buffer manager and light manager so that GPU resources are destroyed on MakeNonResident
 	indirectCommandBufferManager = IndirectCommandBufferManager::CreateShared();
+
+    //Initialize ECS scene
+    auto& world = ECSManager::GetInstance().GetWorld();
+    ECSSceneRoot = world.component<Components::SceneRoot>();
+    world.set_pipeline(world.get<Components::GameScene>()->pipeline);
 }
 
 UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
@@ -153,6 +161,43 @@ std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(const std::vecto
     return object;
 }
 
+flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
+    flecs::entity entity = ECSSceneRoot.add<Components::RenderableObject>()
+        .set<Components::Rotation>({0, 0, 0, 1 })
+        .set<Components::Position>({ 0, 0, 0 })
+        .set<Components::Scale>({ 1, 1, 1 });
+	Components::OpaqueMeshInstances opaqueMeshInstances;
+	Components::AlphaTestMeshInstances alphaTestMeshInstances;
+	Components::BlendMeshInstances blendMeshInstances;
+    for (auto& mesh : meshes) {
+        switch (mesh->material->m_blendState) {
+        case BlendState::BLEND_STATE_OPAQUE:
+            opaqueMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
+		case BlendState::BLEND_STATE_MASK:
+			alphaTestMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
+		case BlendState::BLEND_STATE_BLEND:
+			blendMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
+        }
+    }
+	if (!opaqueMeshInstances.meshInstances.empty()) {
+		entity.set<Components::OpaqueMeshInstances>(opaqueMeshInstances);
+	}
+	if (!alphaTestMeshInstances.meshInstances.empty()) {
+		entity.set<Components::AlphaTestMeshInstances>(alphaTestMeshInstances);
+	}
+	if (!blendMeshInstances.meshInstances.empty()) {
+		entity.set<Components::BlendMeshInstances>(blendMeshInstances);
+	}
+    return entity;
+}
+
+flecs::entity Scene::CreateNodeECS(std::wstring name) {
+	flecs::entity entity = ECSSceneRoot.add<Components::SceneNode>()
+		.set<Components::Rotation>({ 0, 0, 0, 1 })
+		.set<Components::Position>({ 0, 0, 0 })
+		.set<Components::Scale>({ 1, 1, 1 });
+	return entity;
+}
 
 std::shared_ptr<RenderableObject> Scene::GetObjectByName(const std::wstring& name) {
     auto it = objectsByName.find(name);
@@ -345,8 +390,8 @@ std::unordered_map<UINT, std::shared_ptr<Light>>& Scene::GetLightIDMap() {
 	return lightsByID;
 }
 
-SceneNode& Scene::GetRoot() {
-    return sceneRoot;
+flecs::entity Scene::GetRoot() {
+    return ECSSceneRoot;
 }
 
 void Scene::Update() {
@@ -354,12 +399,26 @@ void Scene::Update() {
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
 
-    std::for_each(std::execution::par, animatedNodesByID.begin(), animatedNodesByID.end(), 
-        [elapsed = elapsed_seconds.count()](auto& node) {
-            node.second->animationController->update(elapsed);
-        });
+    //std::for_each(std::execution::par, animatedEntitiesByID.begin(), animatedEntitiesByID.end(), 
+    //    [elapsed = elapsed_seconds.count()](auto& node) {
+    //        node.second->animationController->update(elapsed);
+    //    });
+	for (auto& node : animatedEntitiesByID) {
+		auto& entity = node.second;
+		AnimationController* animationController = entity.get_mut<AnimationController>();
+#if defined(_DEBUG)
+		if (animationController == nullptr) {
+			spdlog::error("AnimationController is null for entity with ID: {}", node.first);
+			return;
+		}
+#endif
+	    auto& transform = animationController->GetUpdatedTransform(elapsed_seconds.count());
+		entity.set<Components::Rotation>(transform.rot);
+		entity.set<Components::Position>(transform.pos);
+		entity.set<Components::Scale>(transform.scale);
+	}
 
-    this->sceneRoot.Update();
+    //this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }
@@ -402,11 +461,9 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         skeleton->SetAnimation(0);
         animatedSkeletons.push_back(skeleton);
     }
-	for (auto& node : skeleton->m_nodes) {
-		if (node->GetLocalID() == -1) {
-			AddNode(node, true);
-		}
-		animatedNodesByID[node->GetLocalID()] = node;
+	skeleton->GetRoot().child_of(ECSSceneRoot);
+	for (auto& node : skeleton->m_bones) {
+		animatedEntitiesByID[node.id()] = node;
 	}
 }
 

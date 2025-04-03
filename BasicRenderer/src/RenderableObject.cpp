@@ -1,5 +1,7 @@
 #include "RenderableObject.h"
 
+#include <flecs.h>
+
 #include "DirectX/d3dx12.h"
 #include "Buffers.h"
 #include "Utilities.h"

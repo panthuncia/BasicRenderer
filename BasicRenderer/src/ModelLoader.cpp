@@ -15,6 +15,7 @@
 #include "Scene.h"
 #include "Mesh.h"
 #include "Skeleton.h"
+#include "Components.h"
 
 D3D12_TEXTURE_ADDRESS_MODE aiTextureMapModeToD3D12(aiTextureMapMode mode) {
     switch (mode) {
@@ -513,14 +514,11 @@ static void buildAiNodeHierarchy(
     aiNode* ainode,
     const aiScene* pScene,
     const std::vector<std::shared_ptr<Mesh>>& meshes,
-    std::vector<std::shared_ptr<SceneNode>>& outNodes,
-    std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
-    std::shared_ptr<SceneNode> parent = nullptr
-) 
-{
-    // Create a new SceneNode
+    std::vector<flecs::entity>& outNodes,
+    std::unordered_map<std::string, flecs::entity>& nodeMap,
+	flecs::entity parent = flecs::entity()) {
+
     std::string nodeName(ainode->mName.C_Str());
-    std::shared_ptr<SceneNode> node = nullptr;
 
     // For local transform: aiNode->mTransformation is a 4x4 matrix
     // Convert it to an XMMATRIX
@@ -533,6 +531,7 @@ static void buildAiNodeHierarchy(
         m.a4, m.b4, m.c4, m.d4
     );
 
+    flecs::entity entity;
 	// handle multiple meshes per node
     if (ainode->mNumMeshes > 0) {
 		std::vector<std::shared_ptr<Mesh>> objectMeshes;
@@ -541,10 +540,12 @@ static void buildAiNodeHierarchy(
             int meshIndex = ainode->mMeshes[i];
             objectMeshes.push_back(meshes[meshIndex]);
         }
-		node = scene->CreateRenderableObject(objectMeshes, s2ws(nodeName));
+		entity = scene->CreateRenderableEntityECS(objectMeshes, s2ws(nodeName));
+		//node = scene->CreateRenderableObject(objectMeshes, s2ws(nodeName));
 	}
 	else {
-		node = scene->CreateNode(s2ws(nodeName));
+		entity = scene->CreateNodeECS(s2ws(nodeName));
+		//node = scene->CreateNode(s2ws(nodeName));
     }
 
     // Decompose the transform into T/R/S
@@ -552,27 +553,27 @@ static void buildAiNodeHierarchy(
     XMMatrixDecompose(&s, &r, &t, transform);
 
     // Set the local transform
-    node->transform.setLocalPosition(t);
-    node->transform.setLocalScale(s);
-    node->transform.setLocalRotationFromQuaternion(r);
+    entity.set<Components::Rotation>({ r });
+	entity.set<Components::Position>({ t });
+	entity.set<Components::Scale>({ s });
 
     // Attach to parent
     if (parent) {
-        parent->AddChild(node);
+		entity.child_of(parent);
     }
-    outNodes.push_back(node);
+    outNodes.push_back(entity);
 
-	nodeMap[nodeName] = node;
+	nodeMap[nodeName] = entity;
     // Recursively process children
     for (unsigned int c = 0; c < ainode->mNumChildren; ++c) {
-        buildAiNodeHierarchy(scene, ainode->mChildren[c], pScene, meshes, outNodes, nodeMap, node);
+        buildAiNodeHierarchy(scene, ainode->mChildren[c], pScene, meshes, outNodes, nodeMap, entity);
     }
 }
 
 static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
     const aiScene* pScene,
-    const std::vector<std::shared_ptr<SceneNode>>& nodes,
-	const std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap
+    const std::vector<flecs::entity>& nodes,
+	const std::unordered_map<std::string, flecs::entity>& nodeMap
 )
 {
     std::vector<std::shared_ptr<Animation>> animations;
@@ -590,23 +591,24 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
             std::string nodeName = channel->mNodeName.C_Str();
 
             // Find the node that matches nodeName
-			SceneNode* node = nullptr;
-
+			flecs::entity node;
+			bool found = false;
 			if (nodeMap.find(nodeName) != nodeMap.end()) {
-                node = nodeMap.at(nodeName).get();
+                node = nodeMap.at(nodeName);
+				found = true;
             }
 
-            if (node == nullptr) {
+            if (!found) {
                 // This channel references a node we didn’t find
 				spdlog::warn("Animation {} references unknown node: {}", animName, nodeName);
                 continue;
             }
 
             // Ensure we have an AnimationClip for that node in this animation
-            if (animation->nodesMap.find(node) == animation->nodesMap.end()) {
-                animation->nodesMap[node] = std::make_shared<AnimationClip>();
+            if (animation->nodesMap.find(node.name().c_str()) == animation->nodesMap.end()) {
+                animation->nodesMap[node.name().c_str()] = std::make_shared<AnimationClip>();
             }
-            auto& clip = animation->nodesMap[node];
+            auto& clip = animation->nodesMap[node.name().c_str()];
 
             // For position keys
             for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
@@ -640,7 +642,7 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
 
 static std::shared_ptr<Skeleton> parseSkeletonForMesh(
     aiMesh* aMesh,
-    const std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
+    const std::unordered_map<std::string, flecs::entity>& nodeMap,
     const std::vector<std::shared_ptr<Animation>>& animations) {
     if (!aMesh->HasBones()) {
 		return nullptr;
@@ -648,7 +650,7 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
     // Collect inverse bind matrices for each bone
     std::vector<XMMATRIX> inverseBindMatrices;
     inverseBindMatrices.reserve(aMesh->mNumBones);
-    std::vector<std::shared_ptr<SceneNode>> jointNodes;
+    std::vector<flecs::entity> jointNodes;
     jointNodes.reserve(aMesh->mNumBones);
 
     for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
@@ -667,11 +669,13 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
 
         // Find the node that corresponds to this bone
         std::string boneName = bone->mName.C_Str();
-        std::shared_ptr<SceneNode> boneNode = nullptr;
-		if (nodeMap.find(boneName) != nodeMap.end()) {
+		flecs::entity boneNode;
+		bool found = false;
+        if (nodeMap.find(boneName) != nodeMap.end()) {
 			boneNode = nodeMap.at(boneName);
+			found = true;
         }
-		if (!boneNode) {
+		if (!found) {
 			// This bone doesn't match any node
 			spdlog::error("Bone {} doesn't match any node", boneName);
 			throw std::runtime_error("Bone doesn't match any node");
@@ -686,7 +690,7 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
         auto jointNode = jointNodes[b];
         if (!jointNode) continue;
         for (auto& anim : animations) {
-            if (anim->nodesMap.find(jointNode.get()) != anim->nodesMap.end()) {
+            if (anim->nodesMap.find(jointNode.name().c_str()) != anim->nodesMap.end()) {
                 skeleton->AddAnimation(anim);
             }
         }
@@ -696,7 +700,7 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
 }
 
 std::vector<std::shared_ptr<Skeleton>> BuildSkeletons(const aiScene* pScene,     
-    const std::unordered_map<std::string, std::shared_ptr<SceneNode>>& nodeMap,
+    const std::unordered_map<std::string, flecs::entity>& nodeMap,
     const std::vector<std::shared_ptr<Animation>>& animations) {
 	std::vector<std::shared_ptr<Skeleton>> skeletons;
 	// For each mesh, parse the skeleton
@@ -726,8 +730,8 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 
     auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
 	auto [meshes, meshSkinIndices] = parseAiMeshes(pScene, materials);
-	std::vector<std::shared_ptr<SceneNode>> nodes;
-	std::unordered_map<std::string, std::shared_ptr<SceneNode>> nodeMap;
+	std::vector<flecs::entity> nodes;
+	std::unordered_map<std::string, flecs::entity> nodeMap;
 	buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);
     
 	auto animations = parseAiAnimations(pScene, nodes, nodeMap);

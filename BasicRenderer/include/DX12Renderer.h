@@ -5,6 +5,7 @@
 #ifndef DX12RENDERER_H
 #define DX12RENDERER_H
 
+#define NOMINMAX
 #include <windows.h>
 #include <wrl.h>
 #include <directx/d3d12.h>
@@ -12,6 +13,7 @@
 #include <directxmath.h>
 #include <memory>
 #include <functional>
+#include <flecs.h>
 
 #include "Mesh.h"
 #include "Buffers.h"

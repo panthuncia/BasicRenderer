@@ -9,6 +9,7 @@
 #include <dxgi1_6.h>
 #include <atlbase.h>
 #include <filesystem>
+
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
@@ -44,6 +45,7 @@
 #include "Aftermath/GFSDK_Aftermath.h"
 #include "NsightAftermathHelpers.h"
 #include "CommandSignatureManager.h"
+#include "ECSManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -134,8 +136,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
+	ECSManager::GetInstance().Initialize();
     CreateGlobalResources();
-    
 }
 
 void DX12Renderer::CreateGlobalResources() {
