@@ -17,7 +17,7 @@ Scene::Scene(){
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
 
     // TODO: refactor indirect buffer manager and light manager so that GPU resources are destroyed on MakeNonResident
-	indirectCommandBufferManager = IndirectCommandBufferManager::CreateShared();
+	//indirectCommandBufferManager = IndirectCommandBufferManager::CreateShared();
 
     //Initialize ECS scene
     auto& world = ECSManager::GetInstance().GetWorld();

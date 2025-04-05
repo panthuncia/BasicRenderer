@@ -1,24 +1,39 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include "LazyDynamicStructuredBuffer.h"
 #include "DynamicStructuredBuffer.h"
 #include "buffers.h"
 #include "SortedUnsignedIntBuffer.h"
 #include "IndirectCommand.h"
+#include "Components.h"
 
 class RenderableObject;
 class BufferView;
 class DynamicBuffer;
+
+struct IndirectDrawInfo {
+	std::vector<unsigned int> indices;
+	std::vector<std::shared_ptr<BufferView>> views;
+};
+
+struct ObjectDrawInfo {
+	std::optional<IndirectDrawInfo> opaque;
+	std::optional<IndirectDrawInfo> alphaTest;
+	std::optional<IndirectDrawInfo> blend;
+	std::shared_ptr<BufferView> perObjectCBView;
+	std::shared_ptr<BufferView> normalMatrixView;
+};
 
 class ObjectManager {
 public:
 	static std::unique_ptr<ObjectManager> CreateUnique() {
 		return std::unique_ptr<ObjectManager>(new ObjectManager());
 	}
-	void AddObject(std::shared_ptr<RenderableObject>& object);
-	void RemoveObject(std::shared_ptr<RenderableObject>& object);
+	ObjectDrawInfo AddObject(PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances);
+	void RemoveObject(const ObjectDrawInfo* drawInfo);
 	unsigned int GetPerObjectBufferSRVIndex() const {
 		return m_perObjectBuffers->GetSRVInfo().index;
 	}

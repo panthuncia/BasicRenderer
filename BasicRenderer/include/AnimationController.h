@@ -12,7 +12,7 @@ public:
     bool isPlaying;
 
     AnimationController();
-    AnimationController(AnimationController& other);
+    AnimationController(const AnimationController& other);
 
     void setAnimationClip(std::shared_ptr<AnimationClip> animationClip);
     void reset();

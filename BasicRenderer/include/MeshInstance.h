@@ -59,7 +59,7 @@ private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
         if (mesh->HasBaseSkin()) {
-			SetSkeleton(mesh->GetBaseSkin());
+            SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
         }
     }
 	PerMeshInstanceCB m_perMeshInstanceBufferData;

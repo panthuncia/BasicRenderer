@@ -94,14 +94,10 @@ private:
     std::vector<std::shared_ptr<Skeleton>> skeletons;
     std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
-    std::unique_ptr<LightManager> lightManager;
-    std::unique_ptr<MeshManager> meshManager = nullptr;
-	std::unique_ptr<ObjectManager> objectManager = nullptr;
-	std::shared_ptr<IndirectCommandBufferManager> indirectCommandBufferManager = nullptr;
+
     std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraBlendIndirectCommandBuffer;
-	std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
 
     // ECS
     flecs::entity ECSSceneRoot;

@@ -28,7 +28,7 @@ public:
     D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
-	int GetGlobalID() const;
+	uint64_t GetGlobalID() const;
 	std::vector<std::byte>& GetVertices() { return *m_vertices; }
 	std::vector<std::byte>& GetSkinningVertices() { return *m_skinningVertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
@@ -90,8 +90,8 @@ private:
 	void ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
     static int GetNextGlobalIndex();
 
-    static std::atomic<int> globalMeshCount;
-    int m_globalMeshID;
+    static std::atomic<uint64_t> globalMeshCount;
+    uint64_t m_globalMeshID;
 
 	std::unique_ptr<std::vector<std::byte>> m_vertices;
 	std::unique_ptr<std::vector<std::byte>> m_skinningVertices;

@@ -37,10 +37,6 @@ LightManager::~LightManager() {
 	deletionManager.MarkForDelete(m_directionalViewInfo);
 }
 
-void LightManager::Initialize() {
-	
-}
-
 void LightManager::AddLight(Light* lightNode, Camera* currentCamera) {
     if (lightNode->GetCurrentLightBufferIndex() != -1) {
         RemoveLight(lightNode);

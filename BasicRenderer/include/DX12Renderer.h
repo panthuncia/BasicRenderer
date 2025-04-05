@@ -95,6 +95,13 @@ private:
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
 
+    // GPU resource managers
+    std::unique_ptr<LightManager> m_pLightManager;
+    std::unique_ptr<MeshManager> m_pMeshManager = nullptr;
+    std::unique_ptr<ObjectManager> m_pObjectManager = nullptr;
+    std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
+    std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);

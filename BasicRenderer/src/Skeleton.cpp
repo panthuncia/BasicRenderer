@@ -42,7 +42,7 @@ Skeleton::Skeleton(const Skeleton& other) {
 		newBone.set<Components::Position>({ oldBone.get<Components::Position>()->pos });
 		newBone.set<Components::Scale>({ oldBone.get<Components::Scale>()->scale });
 		newBone.set<Components::Matrix>({ });
-		newBone.set<AnimationController>({ oldBone.get<AnimationController>() });
+        newBone.set<AnimationController>({ *oldBone.get<AnimationController>() });
         // Copy any additional bone-specific components here.
 
         // Save in mapping.

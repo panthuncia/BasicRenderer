@@ -3,8 +3,10 @@
 #include <DirectXMath.h>
 #include <flecs.h>
 #include <memory>
+#include <unordered_map>
 
 #include "BufferView.h"
+#include "buffers.h"
 
 class MeshInstance;
 
@@ -54,22 +56,45 @@ namespace Components {
 	struct ActiveScene {}; // Represents the current scene
 	struct GameScene { flecs::entity pipeline; }; // Represents the scene for the game
 	struct SceneRoot {}; // Parent for all entities unique to the scene
-	struct RenderableObject {}; // Represents an object that can be rendered
+	struct RenderableObject {
+		PerObjectCB perObjectCB;
+	}; // Represents an object that can be rendered
 	struct Light {}; // Represents a light source
 	struct Camera {}; // Represents a camera
 	struct SceneNode {}; // Represents a generic node in the scene graph
+	struct GlobalMeshLibrary {
+		std::unordered_map<uint64_t, std::shared_ptr<Mesh>> meshes;
+	};
 
 	struct RenderData {
 		BufferView perObjectBufferView;
 	};
 
-	struct IndirectDrawData {
-		std::vector<unsigned int> opaqueDrawSetIndices;
-		std::vector<unsigned int> alphaTestDrawSetIndices;
-		std::vector<unsigned int> blendDrawSetIndices;
-		std::vector<BufferView> opaqueDrawSetCommandViews;
-		std::vector<BufferView> alphaTestDrawSetCommandViews;
-		std::vector<BufferView> blendDrawSetCommandViews;
+	struct OpaqueIndirectDrawInfo {
+		OpaqueIndirectDrawInfo() = default;
+		OpaqueIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
+			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
+		}
+		std::vector<unsigned int> drawSetIndices;
+		std::vector<BufferView> drawSetCommandViews;
+	};
+
+	struct AlphaTestIndirectDrawInfo {
+		AlphaTestIndirectDrawInfo() = default;
+		AlphaTestIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
+			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
+		}
+		std::vector<unsigned int> drawSetIndices;
+		std::vector<BufferView> drawSetCommandViews;
+	};
+
+	struct BlendIndirectDrawInfo {
+		BlendIndirectDrawInfo() = default;
+		BlendIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
+			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
+		}
+		std::vector<unsigned int> drawSetIndices;
+		std::vector<BufferView> drawSetCommandViews;
 	};
 
 	struct OpaqueMeshInstances {

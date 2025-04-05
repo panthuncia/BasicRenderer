@@ -46,6 +46,7 @@
 #include "NsightAftermathHelpers.h"
 #include "CommandSignatureManager.h"
 #include "ECSManager.h"
+#include "ECSSystems.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -138,6 +139,17 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
     CreateGlobalResources();
+
+    // Initialize GPU resource managers
+    m_pLightManager = LightManager::CreateUnique();
+    m_pMeshManager = MeshManager::CreateUnique();
+	m_pObjectManager = ObjectManager::CreateUnique();
+	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
+	m_pCameraManager = CameraManager::CreateUnique();
+
+    auto& world = ECSManager::GetInstance().GetWorld();
+    world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
+	RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
 }
 
 void DX12Renderer::CreateGlobalResources() {

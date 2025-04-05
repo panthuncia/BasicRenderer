@@ -23,7 +23,6 @@ public:
 		return std::unique_ptr<LightManager>(new LightManager());
 	}
     ~LightManager();
-    void Initialize();
     void AddLight(Light* lightNode, Camera* currentCamera = nullptr);
     void RemoveLight(Light* light);
     unsigned int GetLightBufferDescriptorIndex();

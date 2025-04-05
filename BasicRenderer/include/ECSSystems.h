@@ -1,4 +1,10 @@
 #pragma once
 #include <flecs.h>
 
-void RegisterAllSystems(flecs::world& world);
+class LightManager;
+class MeshManager;
+class ObjectManager;
+class IndirectCommandBufferManager;
+class CameraManager;
+
+void RegisterAllSystems(flecs::world& world, LightManager* lightManager, MeshManager* meshManager, ObjectManager* objectManager, IndirectCommandBufferManager* indirectCommandManager, CameraManager* cameraManager);

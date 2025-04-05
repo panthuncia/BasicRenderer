@@ -6,7 +6,7 @@ AnimationController::AnimationController()
     : animationClip(nullptr), currentTime(0.0f), isPlaying(true) {
 }
 
-AnimationController::AnimationController(AnimationController& other)
+AnimationController::AnimationController(const AnimationController& other)
 	: animationClip(other.animationClip), currentTime(other.currentTime), isPlaying(other.isPlaying) {
 }
 
