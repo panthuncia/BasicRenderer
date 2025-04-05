@@ -46,6 +46,8 @@ struct LightInfo {
     float farPlane;
     int shadowMapIndex;
     int shadowSamplerIndex;
+    bool shadowCaster;
+    uint pad[3];
 };
 
 struct MaterialInfo {

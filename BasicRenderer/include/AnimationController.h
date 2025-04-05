@@ -18,7 +18,7 @@ public:
     void reset();
     void pause();
     void unpause();
-    Transform& GetUpdatedTransform(float elapsedTime, bool force = false);
+    Components::Transform& GetUpdatedTransform(float elapsedTime, bool force = false);
     void SetAnimationSpeed(float speed) { m_animationSpeed = speed; }
     float GetAnimationSpeed() { return m_animationSpeed; }
 	unsigned int m_lastPositionKeyframeIndex = 0;
@@ -26,7 +26,7 @@ public:
 	unsigned int m_lastScaleKeyframeIndex = 0;
 
 private:
-	Transform m_transform;
+	Components::Transform m_transform;
     float m_animationSpeed = 1.0f;
-    Transform& UpdateTransform();
+    void UpdateTransform();
 };

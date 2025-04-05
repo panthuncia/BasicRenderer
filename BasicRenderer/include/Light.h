@@ -15,25 +15,19 @@ class DynamicGloballyIndexedResource;
 class BufferView;
 class Buffer;
 
-enum LightType {
-	Point = 0,
-	Spot = 1,
-	Directional = 2
-};
-
 class Light : public SceneNode{
 public:
 
 	static std::shared_ptr<Light> CreateDirectionalLight(std::wstring name, XMFLOAT3 color, float intensity, XMFLOAT3 direction) {
-		return std::shared_ptr<Light>(new Light(name, LightType::Directional, { 0, 0, 0 }, color, intensity, 0, 0, 0, direction));
+		return std::shared_ptr<Light>(new Light(name, Components::LightType::Directional, { 0, 0, 0 }, color, intensity, 0, 0, 0, direction));
 	}
 
 	static std::shared_ptr<Light> CreatePointLight(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0) {
-		return std::shared_ptr<Light>(new Light(name, LightType::Point, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation));
+		return std::shared_ptr<Light>(new Light(name, Components::LightType::Point, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation));
 	}
 
 	static std::shared_ptr<Light> CreateSpotLight(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0) {
-		return std::shared_ptr<Light>(new Light(name, LightType::Spot, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation, direction, innerConeAngle, outerConeAngle));
+		return std::shared_ptr<Light>(new Light(name, Components::LightType::Spot, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation, direction, innerConeAngle, outerConeAngle));
 	}
 
 	static std::shared_ptr<Light> CopyLight(LightInfo& lightInfo) {
@@ -41,7 +35,7 @@ public:
 	}
 
 	LightInfo& GetLightInfo();
-	LightType GetLightType() const;
+	Components::LightType GetLightType() const;
 
 	int GetCurrentLightBufferIndex() {
 		return m_currentLightBufferIndex;
@@ -132,7 +126,7 @@ public:
 
 private:
 
-	Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
+	Light(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
 	Light(LightInfo& lightInfo);
 
 	std::vector<std::shared_ptr<Buffer>> m_lightFrameConstantHandles;

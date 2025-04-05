@@ -25,6 +25,7 @@
 #include "MaterialFlags.h"
 #include "Mesh.h"
 #include "RenderableObject.h"
+#include "Components.h"
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
@@ -929,4 +930,15 @@ std::string GetFileExtension(const std::string& filePath) {
         return ""; // No extension found or ends with a dot
     }
     return filePath.substr(dotPos + 1);
+}
+
+DirectX::XMMATRIX GetProjectionMatrixForLight(LightInfo info) {
+    switch (info.type) {
+    case Components::LightType::Spot:
+        return XMMatrixPerspectiveFovRH(acos(info.outerConeAngle) * 2, 1.0, info.nearPlane, info.farPlane);
+        break;
+    case Components::LightType::Point:
+        return XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, info.nearPlane, info.farPlane);
+        break;
+    }
 }

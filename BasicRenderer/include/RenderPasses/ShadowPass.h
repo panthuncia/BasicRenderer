@@ -157,7 +157,7 @@ public:
 			}
 			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
 			switch (light->GetLightType()) {
-			case LightType::Spot: {
+			case Components::LightType::Spot: {
 				auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
 				commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 				commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
@@ -167,7 +167,7 @@ public:
 				drawObjects();
 				break;
 			}
-			case LightType::Point: {
+			case Components::LightType::Point: {
 				int lightViewIndex = light->GetCurrentviewInfoIndex() * 6;
 				int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
 				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
@@ -181,7 +181,7 @@ public:
 				}
 				break;
 			}
-				case LightType::Directional: {
+			case Components::LightType::Directional: {
 					int lightViewIndex = light->GetCurrentviewInfoIndex() * getNumDirectionalLightCascades();
 					int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
 					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);

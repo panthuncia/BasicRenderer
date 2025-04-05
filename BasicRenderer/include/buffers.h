@@ -111,6 +111,8 @@ struct LightInfo {
     float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
+    bool shadowCaster;
+	unsigned int pad[3];
 };
 
 enum RootSignatureLayout {

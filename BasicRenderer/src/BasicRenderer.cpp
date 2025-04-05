@@ -252,28 +252,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
     auto dragonScene = LoadModel("models/dragon.glb");
-    dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
-    dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
-	dragonScene->GetRoot().m_name = L"dragonRoot";
+ //   dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
+ //   dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+	//dragonScene->GetRoot().m_name = L"dragonRoot";
 
     auto tigerScene = LoadModel("models/tiger.glb");
-    tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
-	tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
-	tigerScene->GetRoot().m_name = L"tigerRoot";
+ //   tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
+	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
+	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
     auto phoenixScene = LoadModel("models/phoenix.glb");
-    phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
-    phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+    //phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+    //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
     auto carScene = LoadModel("models/porche.glb");
-    carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
-    carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
-	carScene->GetRoot().m_name = L"carRoot";
+ //   carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
+ //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+	//carScene->GetRoot().m_name = L"carRoot";
 
     auto mountainScene = LoadModel("models/terrain.glb");
-	mountainScene->GetRoot().transform.setLocalScale({ 50.0, 50.0, 50.0 });
-	mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
-	mountainScene->GetRoot().m_name = L"mountainRoot";
+	//mountainScene->GetRoot().transform.setLocalScale({ 50.0, 50.0, 50.0 });
+	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
     //auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto bistro = LoadModel("models/bistro.glb");
@@ -309,14 +309,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
     
-	for (int i = 0; i < 500; i++) {
+	for (int i = 0; i < 1; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
         for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			object.second->SetAnimationSpeed(animationSpeed);
         }
 		auto root = renderer.GetCurrentScene()->AppendScene(*tigerScene);
 		auto point = randomPointInSphere(50.0);
-        tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
+        //tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
@@ -409,7 +409,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             auto currentTime = std::chrono::system_clock::now();
             std::chrono::duration<double> elapsedSeconds = currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
-            light1->animationController->update(elapsedSeconds.count());
 
             frameIndex += 1;
             renderer.Update(elapsedSeconds.count());

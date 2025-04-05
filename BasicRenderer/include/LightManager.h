@@ -8,7 +8,9 @@
 #include "buffers.h"
 #include "Interfaces/ISceneNodeObserver.h"
 #include "DynamicResource.h"
+#include "LazyDynamicStructuredBuffer.h"
 #include "DynamicStructuredBuffer.h"
+#include "Components.h"
 
 class Camera;
 class Light;
@@ -16,30 +18,30 @@ class ShadowMaps;
 class SceneNode;
 class IndirectCommandBufferManager;
 class CameraManager;
+class SortedUnsignedIntBuffer;
 
-class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
+class LightManager {
 public:
 	static std::unique_ptr<LightManager> CreateUnique() {
 		return std::unique_ptr<LightManager>(new LightManager());
 	}
     ~LightManager();
-    void AddLight(Light* lightNode, Camera* currentCamera = nullptr);
-    void RemoveLight(Light* light);
+    void AddLight(LightInfo* lightInfo, Camera* currentCamera = nullptr);
+    void RemoveLight(LightInfo* light);
     unsigned int GetLightBufferDescriptorIndex();
     unsigned int GetPointCubemapMatricesDescriptorIndex();
     unsigned int GetSpotMatricesDescriptorIndex();
     unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
     unsigned int GetNumLights();
     void SetCurrentCamera(Camera* camera);
-    void OnNodeUpdated(SceneNode* camera) override;
-    void OnNodeUpdated(Light* light) override;
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 	void SetCameraManager(CameraManager* cameraManager);
 
 
 private:
     LightManager();
-    std::shared_ptr<DynamicStructuredBuffer<LightInfo>> m_lightBuffer;
+    std::shared_ptr<LazyDynamicStructuredBuffer<LightInfo>> m_lightBuffer;
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeLightIndices; // Sorted list of active light indices
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_spotViewInfo; // Indices into camera buffer
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_pointViewInfo;
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_directionalViewInfo;
@@ -48,7 +50,6 @@ private:
 	std::vector<Light*> m_pointLights;
 	std::vector<Light*> m_directionalLights;
 
-	std::unordered_map<int, DynamicGloballyIndexedResource> m_lightDrawSetBufferMap;
     // TODO: The buffer size and increment size are low for testing.
     unsigned int m_commandBufferSize = 1;
 	bool m_resizeCommandBuffers = false;
@@ -66,7 +67,7 @@ private:
     Camera* m_currentCamera = nullptr;
 
     unsigned int CreateLightInfo(Light* node);
-    unsigned int CreateLightViewInfo(Light* node, Camera* camera = nullptr);
+    Components::LightViewInfo CreateLightViewInfo(LightInfo info, Camera* camera = nullptr);
     void UpdateLightViewInfo(Light* node);
 	void RemoveLightViewInfo(Light* node);
 };

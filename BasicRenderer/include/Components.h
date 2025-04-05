@@ -9,6 +9,9 @@
 #include "buffers.h"
 
 class MeshInstance;
+class DynamicGloballyIndexedResource;
+class Texture;
+class Mesh;
 
 using namespace DirectX;
 
@@ -59,11 +62,38 @@ namespace Components {
 	struct RenderableObject {
 		PerObjectCB perObjectCB;
 	}; // Represents an object that can be rendered
-	struct Light {}; // Represents a light source
+
+	enum LightType {
+		Point = 0,
+		Spot = 1,
+		Directional = 2
+	};
+	struct Light {
+		LightType type;
+	}; // Represents a light source
+	struct IndirectCommandBuffers {
+		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> opaqueIndirectCommandBuffers;
+		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> alphaTestIndirectCommandBuffers;
+		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> blendIndirectCommandBuffers;
+	};
+	struct LightViewInfo {
+		std::vector<std::shared_ptr<BufferView>> cameraBufferViews;
+		IndirectCommandBuffers commandBuffers;
+	};
+	struct ShadowMap {
+		std::shared_ptr<Texture> shadowMap;
+	};
 	struct Camera {}; // Represents a camera
 	struct SceneNode {}; // Represents a generic node in the scene graph
 	struct GlobalMeshLibrary {
 		std::unordered_map<uint64_t, std::shared_ptr<Mesh>> meshes;
+	};
+
+	struct DrawStats {
+		uint32_t numDrawsInScene = 0;
+		uint32_t numOpaqueDraws = 0;
+		uint32_t numAlphaTestDraws = 0;
+		uint32_t numBlendDraws = 0;
 	};
 
 	struct RenderData {
@@ -99,25 +129,25 @@ namespace Components {
 
 	struct OpaqueMeshInstances {
 		OpaqueMeshInstances() = default;
-		OpaqueMeshInstances(std::vector<std::unique_ptr<MeshInstance>> instances)
+		OpaqueMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
 			: meshInstances(std::move(meshInstances)) {
 		}
-		std::vector<std::unique_ptr<MeshInstance>> meshInstances;
+		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
 	};
 
 	struct AlphaTestMeshInstances {
 		AlphaTestMeshInstances() = default;
-		AlphaTestMeshInstances(std::vector<std::unique_ptr<MeshInstance>> instances)
+		AlphaTestMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
 			: meshInstances(std::move(meshInstances)) {
 		}
-		std::vector<std::unique_ptr<MeshInstance>> meshInstances;
+		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
 	};
 
 	struct BlendMeshInstances {
 		BlendMeshInstances() = default;
-		BlendMeshInstances(std::vector<std::unique_ptr<MeshInstance>> instances)
+		BlendMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
 			: meshInstances(std::move(meshInstances)) {
 		}
-		std::vector<std::unique_ptr<MeshInstance>> meshInstances;
+		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
 	};
 } // namespace Components

@@ -102,11 +102,6 @@ private:
     // ECS
     flecs::entity ECSSceneRoot;
 
-	unsigned int m_numDrawsInScene = 0;
-	unsigned int m_numOpaqueDraws = 0;
-	unsigned int m_numAlphaTestDraws = 0;
-	unsigned int m_numBlendDraws = 0;
-
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<float()> getMaxShadowDistance;

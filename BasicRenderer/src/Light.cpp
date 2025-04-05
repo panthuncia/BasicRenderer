@@ -5,7 +5,7 @@
 #include "PixelBuffer.h"
 #include "Utilities.h"
 
-Light::Light(std::wstring name, LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
+Light::Light(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) : SceneNode(name) {
 	m_lightInfo.type = type;
 	m_lightInfo.posWorldSpace = XMLoadFloat3(&position);
 	m_lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
@@ -73,12 +73,12 @@ void Light::RemoveLightObserver(ISceneNodeObserver<Light>* observer) {
 
 void Light::CalculateFrustumPlanes() {
 	switch (m_lightInfo.type) {
-	case LightType::Directional:
+	case Components::LightType::Directional:
 		break; // Directional is special-cased, frustrums are in world space, calculated during cascade setup
-	case LightType::Spot: {
+	case Components::LightType::Spot: {
 		m_frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, acos(m_lightInfo.outerConeAngle) * 2, m_lightInfo.nearPlane, m_lightInfo.farPlane));
 		break;
-	case LightType::Point: {
+	case Components::LightType::Point: {
 		for (int i = 0; i < 6; i++) {
 			m_frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, XM_PI / 2, m_lightInfo.nearPlane, m_lightInfo.farPlane)); // TODO: All of these are the same.
 		}
@@ -93,18 +93,18 @@ void Light::NotifyLightObservers() {
 	}
 }
 
-LightType Light::GetLightType() const {
-	return (LightType)m_lightInfo.type;
+Components::LightType Light::GetLightType() const {
+	return (Components::LightType)m_lightInfo.type;
 }
 
 void Light::CreateProjectionMatrix(float nearPlane, float farPlane) {
 	float aspect = 1.0f;
 
-	switch ((LightType)m_lightInfo.type) {
-	case LightType::Spot:
+	switch ((Components::LightType)m_lightInfo.type) {
+	case Components::LightType::Spot:
 		m_lightProjection = XMMatrixPerspectiveFovRH(acos(this->m_lightInfo.outerConeAngle) * 2, aspect, nearPlane, farPlane);
 		break;
-	case LightType::Point:
+	case Components::LightType::Point:
 		m_lightProjection = XMMatrixPerspectiveFovRH(XM_PI / 2, aspect, nearPlane, farPlane);
 		break;
 	}

@@ -192,26 +192,43 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 		objectManager->RemoveObject(e.get<ObjectDrawInfo>());
 		e.remove<ObjectDrawInfo>();
 		auto opaqueMeshInstances = e.get_mut<Components::OpaqueMeshInstances>();
+		unsigned int drawCount = 0;
+		unsigned int drawCountOpaque = 0;
+		unsigned int drawCountAlphaTest = 0;
+		unsigned int drawCountBlend = 0;
 		if (opaqueMeshInstances) {
 			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
 				meshManager->RemoveMeshInstance(meshInstance.get());
+				drawCount++;
+				drawCountOpaque++;
 			}
 		}
 		auto alphaTestMeshInstances = e.get_mut<Components::AlphaTestMeshInstances>();
 		if (alphaTestMeshInstances) {
 			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
 				meshManager->RemoveMeshInstance(meshInstance.get());
+				drawCount++;
+				drawCountAlphaTest++;
 			}
 		}
 		auto blendMeshInstances = e.get_mut<Components::BlendMeshInstances>();
 		if (blendMeshInstances) {
 			for (auto& meshInstance : blendMeshInstances->meshInstances) {
 				meshManager->RemoveMeshInstance(meshInstance.get());
+				drawCount++;
+				drawCountBlend++;
 			}
 		}
 		e.remove<Components::OpaqueMeshInstances>();
 		e.remove<Components::AlphaTestMeshInstances>();
 		e.remove<Components::BlendMeshInstances>();
+		auto drawStats = world.get_mut<Components::DrawStats>();
+		if (drawStats) {
+			drawStats->numDrawsInScene -= drawCount;
+			drawStats->numOpaqueDraws -= drawCountOpaque;
+			drawStats->numAlphaTestDraws -= drawCountAlphaTest;
+			drawStats->numBlendDraws -= drawCountBlend;
+		}
 		spdlog::info("[System] DrawInfo removed from RenderableObject: {}", e.name().c_str());
 			});
 	
@@ -222,8 +239,15 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
         .each([&](flecs::entity e, Components::OpaqueMeshInstances&) {
             spdlog::info("[System] MeshInstances added in active scene on entity: {}", e.name().c_str());
 			auto meshInstances = e.get_mut<Components::OpaqueMeshInstances>();
+			unsigned int drawCount = 0;
 			for (auto& meshInstance : meshInstances->meshInstances) {
 				meshManager->AddMeshInstance(meshInstance.get());
+				drawCount++;
+			}
+			auto drawStats = world.get_mut<Components::DrawStats>();
+			if (drawStats) {
+				drawStats->numDrawsInScene += drawCount;
+				drawStats->numOpaqueDraws += drawCount;
 			}
             });
 
@@ -233,8 +257,15 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 		.each([&](flecs::entity e, Components::AlphaTestMeshInstances&) {
 		spdlog::info("[System] AlphaTestMeshInstances added in active scene on entity: {}", e.name().c_str());
 		auto meshInstances = e.get_mut<Components::AlphaTestMeshInstances>();
+		unsigned int drawCount = 0;
 		for (auto& meshInstance : meshInstances->meshInstances) {
 			meshManager->AddMeshInstance(meshInstance.get());
+			drawCount++;
+		}
+		auto drawStats = world.get_mut<Components::DrawStats>();
+		if (drawStats) {
+			drawStats->numDrawsInScene += drawCount;
+			drawStats->numAlphaTestDraws += drawCount;
 		}
 			});
 
@@ -244,9 +275,48 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 		.each([&](flecs::entity e, Components::BlendMeshInstances&) {
 		spdlog::info("[System] BlendMeshInstances added in active scene on entity: {}", e.name().c_str());
 		auto meshInstances = e.get_mut<Components::BlendMeshInstances>();
+		unsigned int drawCount = 0;
 		for (auto& meshInstance : meshInstances->meshInstances) {
 			meshManager->AddMeshInstance(meshInstance.get());
+			drawCount++;
+		}
+		auto drawStats = world.get_mut<Components::DrawStats>();
+		if (drawStats) {
+			drawStats->numDrawsInScene += drawCount;
+			drawStats->numBlendDraws += drawCount;
 		}
 			});
 
+	// System: Process entities on OnAdd of Light, but only if they are in an active scene.
+	world.system<LightInfo>()
+		.kind(flecs::OnAdd)
+		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
+		.each([&](flecs::entity e, LightInfo&) {
+		spdlog::info("[System] Light added in active scene on entity: {}", e.name().c_str());
+		auto light = e.get_mut<LightInfo>();
+		if (lightManager) {
+			lightManager->AddLight(light);
+		}
+			});
+
+	// System: Process entities on OnDelete of Light, but only if they are in an active scene.
+	world.system<LightInfo>()
+		.kind(flecs::OnDelete)
+		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
+		.each([&](flecs::entity e, LightInfo&) {
+		spdlog::info("[System] Light removed in active scene on entity: {}", e.name().c_str());
+		auto light = e.get_mut<LightInfo>();
+		if (lightManager) {
+			lightManager->RemoveLight(light);
+		}
+			});
+
+	// Observer: Update light views when the matrix of a light changes
+	world.observer<Components::Matrix>()
+		.event(flecs::OnSet)         // Trigger when the Matrix component is set/changed
+		.with<Light>()              // Only match if the entity has a Light component
+		.each([](flecs::entity e, Components::Matrix &matrix) {
+		spdlog::info("Matrix updated for light: {}", e.name().c_str());
+		// Process the matrix change here...
+			});
 }

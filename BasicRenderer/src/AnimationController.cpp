@@ -28,8 +28,8 @@ void AnimationController::unpause() {
     isPlaying = true;
 }
 
-Transform& AnimationController::GetUpdatedTransform(float elapsedTime, bool force) {
-    if (!force && (!isPlaying || !animationClip)) return;
+Components::Transform& AnimationController::GetUpdatedTransform(float elapsedTime, bool force) {
+    if (!force && (!isPlaying || !animationClip)) return m_transform;
 
     currentTime += elapsedTime * m_animationSpeed;
     currentTime = fmod(currentTime, animationClip->duration);
@@ -64,8 +64,8 @@ std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, s
     return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
     };
 
-Transform& AnimationController::UpdateTransform() {
-    if (!animationClip) return;
+void AnimationController::UpdateTransform() {
+    if (!animationClip) return ;
 
     auto lerpVec3 = [](const XMVECTOR& start, const XMVECTOR& end, float t) {
         XMVECTOR lerped = XMVectorLerp(start, end, t);
@@ -88,6 +88,7 @@ Transform& AnimationController::UpdateTransform() {
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedPosition = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
             //node->transform.setLocalPosition(interpolatedPosition);
+			m_transform.pos = interpolatedPosition;
         }
     }
 
@@ -102,6 +103,7 @@ Transform& AnimationController::UpdateTransform() {
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedRotation = lerpRotation(prevKeyframe->value, nextKeyframe->value, t);
             //node->transform.setLocalRotationFromQuaternion(interpolatedRotation);
+			m_transform.rot = interpolatedRotation;
         }
     }
 
@@ -116,6 +118,7 @@ Transform& AnimationController::UpdateTransform() {
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedScale = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
             //node->transform.setLocalScale(interpolatedScale);
+			m_transform.scale = interpolatedScale;
         }
     }
 }

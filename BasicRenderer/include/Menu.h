@@ -411,7 +411,7 @@ inline void Menu::DrawLoadModelButton() {
         {
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 			auto scene = LoadModel(ws2s(selectedFile));
-			scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
+			//scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
 			appendScene(*scene);
         }
         else

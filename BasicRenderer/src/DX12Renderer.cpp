@@ -149,6 +149,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
+    world.component<Components::DrawStats>({ 0, 0, 0, 0 }).add(flecs::Exclusive);
 	RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
 }
 
@@ -181,7 +182,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
 		return currentScene->GetRenderableObjectIDMap();
 		});
-    settingsManager.registerSetting<std::function<SceneNode&()>>("getSceneRoot", [this]() -> SceneNode& {
+    settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
         });
 	settingsManager.registerSetting<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene", [this](Scene& scene) -> std::shared_ptr<SceneNode> {

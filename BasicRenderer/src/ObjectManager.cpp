@@ -102,6 +102,7 @@ ObjectDrawInfo ObjectManager::AddObject(PerObjectCB& perObjectCB, const Componen
 
 	auto normalMatrixView = m_normalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
 	drawInfo.normalMatrixView = normalMatrixView;
+	return drawInfo;
 }
 
 void ObjectManager::RemoveObject(const ObjectDrawInfo* drawInfo) {
