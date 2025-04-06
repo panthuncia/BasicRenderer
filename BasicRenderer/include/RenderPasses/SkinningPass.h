@@ -51,8 +51,8 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[PreSkinningVertexBufferDescriptorIndex] = meshManager->GetPreSkinningVertexBufferSRVIndex();

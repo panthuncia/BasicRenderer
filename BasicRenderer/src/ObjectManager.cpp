@@ -155,3 +155,27 @@ void ObjectManager::UpdatePerObjectBuffer(BufferView* view, PerObjectCB& data) {
 void ObjectManager::UpdateNormalMatrixBuffer(BufferView* view, void* data) {
 	m_normalMatrixBuffer->UpdateView(view, data);
 }
+
+unsigned int ObjectManager::GetPerObjectBufferSRVIndex() const {
+	return m_perObjectBuffers->GetSRVInfo().index;
+}
+
+unsigned int ObjectManager::GetMasterIndirectCommandsBufferSRVIndex() const {
+	return m_masterIndirectCommandsBuffer->GetSRVInfo().index;
+}
+
+unsigned int ObjectManager::GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const {
+	return m_activeOpaqueDrawSetIndices->GetSRVInfo().index;
+}
+
+unsigned int ObjectManager::GetActiveAlphaTestDrawSetIndicesBufferSRVIndex() const {
+	return m_activeAlphaTestDrawSetIndices->GetSRVInfo().index;
+}
+
+unsigned int ObjectManager::GetActiveBlendDrawSetIndicesBufferSRVIndex() const {
+	return m_activeBlendDrawSetIndices->GetSRVInfo().index;
+}
+
+unsigned int ObjectManager::GetNormalMatrixBufferSRVIndex() const {
+	return m_normalMatrixBuffer->GetSRVInfo().index;
+}

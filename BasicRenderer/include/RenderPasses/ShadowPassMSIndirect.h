@@ -58,9 +58,9 @@ public:
 
 		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
 
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
-		auto& cameraManager = context.currentScene->GetCameraManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
+		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
@@ -77,21 +77,21 @@ public:
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
 		auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* alphaTestIndirectCommandBuffer, ID3D12Resource* blendIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t alphaTestCommandCounterOffset, size_t blendIndirectCommandCounterOffset) {
-			auto numOpaque = context.currentScene->GetNumOpaqueDraws();
+			auto numOpaque = context.drawStats.numOpaqueDraws;
 			if (numOpaque != 0) {
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
 				commandList->SetPipelineState(pso.Get());
 				commandList->ExecuteIndirect(commandSignature, numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
 			}
 
-			auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
+			auto numAlphaTest = context.drawStats.numAlphaTestDraws;
 			if (numAlphaTest != 0) {
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST, BlendState::BLEND_STATE_MASK, false);
 				commandList->SetPipelineState(pso.Get());
 				commandList->ExecuteIndirect(commandSignature, numAlphaTest, alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset);
 			}
 
-			auto numBlend = context.currentScene->GetNumBlendDraws();
+			auto numBlend = context.drawStats.numBlendDraws;
 			if (numBlend != 0) {
 				auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
 				commandList->SetPipelineState(pso.Get());

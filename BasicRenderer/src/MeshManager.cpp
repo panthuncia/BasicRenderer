@@ -6,6 +6,7 @@
 #include "ResourceGroup.h"
 #include "BufferView.h"
 #include "MeshInstance.h"
+#include "DynamicBuffer.h"
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -99,4 +100,41 @@ void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMesh
 
 void MeshManager::UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data) {
 	view->GetBuffer()->UpdateView(view.get(), &data);
+}
+
+unsigned int  MeshManager::GetPreSkinningVertexBufferSRVIndex() const {
+	return m_preSkinningVertices->GetSRVInfo().index;
+}
+unsigned int  MeshManager::GetPostSkinningVertexBufferSRVIndex() const {
+	return m_postSkinningVertices->GetSRVInfo().index;
+}
+unsigned int  MeshManager::GetPostSkinningVertexBufferUAVIndex() const {
+	return m_postSkinningVertices->GetUAVShaderVisibleInfo().index;
+}
+unsigned int  MeshManager::GetMeshletOffsetBufferSRVIndex() const {
+	return m_meshletOffsets->GetSRVInfo().index;
+}
+unsigned int  MeshManager::GetMeshletIndexBufferSRVIndex() const {
+	return m_meshletIndices->GetSRVInfo().index;
+}
+unsigned int  MeshManager::GetMeshletTriangleBufferSRVIndex() const {
+	return m_meshletTriangles->GetSRVInfo().index;
+}
+std::shared_ptr<ResourceGroup>  MeshManager::GetResourceGroup() {
+	return m_resourceGroup;
+}
+unsigned int  MeshManager::GetPerMeshBufferSRVIndex() const {
+	return m_perMeshBuffers->GetSRVInfo().index;
+}
+std::shared_ptr<DynamicBuffer>&  MeshManager::GetPerMeshBuffers() {
+	return m_perMeshBuffers;
+}
+std::shared_ptr<DynamicBuffer>&  MeshManager::GetPreSkinningVertices() {
+	return m_preSkinningVertices;
+}
+std::shared_ptr<DynamicBuffer>&  MeshManager::GetPostSkinningVertices() {
+	return m_postSkinningVertices;
+}
+unsigned int  MeshManager::GetPerMeshInstanceBufferSRVIndex() const {
+	return m_perMeshInstanceBuffers->GetSRVInfo().index;
 }

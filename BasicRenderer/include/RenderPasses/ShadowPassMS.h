@@ -57,9 +57,9 @@ public:
 
 		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
 
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
-		auto& cameraManager = context.currentScene->GetCameraManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
+		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();

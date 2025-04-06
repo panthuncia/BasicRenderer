@@ -17,6 +17,7 @@
 #include "ResourceManager.h"
 #include "RenderContext.h"
 #include "RenderGraph.h"
+#include "DynamicBuffer.h"
 #include "RenderPass.h"
 #include "RenderPasses/ForwardRenderPassUnified.h"
 #include "RenderPasses/ShadowPass.h"
@@ -788,8 +789,8 @@ void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
     auto newGraph = std::make_unique<RenderGraph>();
 
-    auto& meshManager = currentScene->GetMeshManager();
-    auto& objectManager = currentScene->GetObjectManager();
+    auto& meshManager = m_pMeshManager;
+    auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
 	newGraph->AddResource(meshResourceGroup);
 
@@ -820,7 +821,7 @@ void DX12Renderer::CreateRenderGraph() {
 	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
 	newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
 
-	auto& cameraManager = currentScene->GetCameraManager();
+	auto& cameraManager = m_pCameraManager;
     auto& cameraBuffer = cameraManager->GetCameraBuffer();
     newGraph->AddResource(cameraBuffer);
 
@@ -835,7 +836,7 @@ void DX12Renderer::CreateRenderGraph() {
 	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
     if (indirect) {
         // Clear UAVs
-        indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
+        indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
         auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
         RenderPassParameters clearUAVsPassParameters;

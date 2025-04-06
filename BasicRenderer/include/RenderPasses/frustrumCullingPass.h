@@ -53,9 +53,9 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
-		auto& cameraManager = context.currentScene->GetCameraManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
+		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
@@ -73,9 +73,9 @@ public:
 		unsigned int numCascades = getNumDirectionalLightCascades();
 
 		// opaque buffer
-		auto numOpaqueDraws = context.currentScene->GetNumOpaqueDraws();
+		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
-			unsigned int numThreadGroups = std::ceil(context.currentScene->GetNumOpaqueDraws() / 64.0);
+			unsigned int numThreadGroups = std::ceil(numOpaqueDraws / 64.0);
 			// First, process buffer for main camera
 			auto resource = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
 			auto apiResource = resource->GetAPIResource();
@@ -84,7 +84,7 @@ public:
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumOpaqueDraws()-1;
+			bufferIndices[MaxDrawIndex] = numOpaqueDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -108,7 +108,7 @@ public:
 			}
 		}
 		// alpha test buffer
-		auto numAlphaTestDraws = context.currentScene->GetNumAlphaTestDraws();
+		auto numAlphaTestDraws = context.drawStats.numAlphaTestDraws;
 		if (numAlphaTestDraws > 0) {
 			unsigned int numThreadGroups = std::ceil(numAlphaTestDraws / 64.0);
 			auto resource = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource();
@@ -118,7 +118,7 @@ public:
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveAlphaTestDrawSetIndicesBufferSRVIndex();
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumAlphaTestDraws()-1;
+			bufferIndices[MaxDrawIndex] = numAlphaTestDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -142,7 +142,7 @@ public:
 		}
 
 		// blend buffer
-		auto numBlendDraws = context.currentScene->GetNumBlendDraws();
+		auto numBlendDraws = context.drawStats.numBlendDraws;
 		if (numBlendDraws > 0) {
 			unsigned int numThreadGroups = std::ceil(numBlendDraws / 64.0);
 			auto resource = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource();
@@ -152,7 +152,7 @@ public:
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveBlendDrawSetIndicesBufferSRVIndex();
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumBlendDraws() - 1;
+			bufferIndices[MaxDrawIndex] = numBlendDraws - 1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);

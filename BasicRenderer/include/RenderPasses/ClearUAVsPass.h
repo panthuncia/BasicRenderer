@@ -8,6 +8,8 @@
 #include "DeviceManager.h"
 #include "utilities.h"
 #include "IndirectCommand.h"
+#include "ResourceManager.h"
+#include "Scene.h"
 
 class ClearUAVsPass : public RenderPass {
 public:
@@ -30,8 +32,8 @@ public:
 		auto currentScene = context.currentScene;
 		
 
-		auto& objectManager = currentScene->GetObjectManager();
-		auto& meshManager = currentScene->GetMeshManager();
+		auto& objectManager = *context.objectManager;//currentScene->GetObjectManager();
+		auto& meshManager = *context.meshManager;//currentScene->GetMeshManager();
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 		// opaque buffer
 		auto resource = currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();

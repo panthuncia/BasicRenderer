@@ -108,9 +108,9 @@ private:
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
-        auto& meshManager = context.currentScene->GetMeshManager();
-        auto& objectManager = context.currentScene->GetObjectManager();
-        auto& cameraManager = context.currentScene->GetCameraManager();
+        auto& meshManager = context.meshManager;
+        auto& objectManager = context.objectManager;
+        auto& cameraManager = context.cameraManager;
 
         unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
         staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
@@ -134,7 +134,7 @@ private:
             localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
         }
 
-        auto& meshManager = context.currentScene->GetMeshManager();
+        auto& meshManager = context.meshManager;
 
         // Opaque objects
         for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
@@ -193,7 +193,7 @@ private:
             localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
         }
 
-        auto& meshManager = context.currentScene->GetMeshManager();
+        auto& meshManager = context.meshManager;
 
         // Opaque objects
         for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
@@ -249,11 +249,11 @@ private:
             localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
         }
 
-        auto& meshManager = context.currentScene->GetMeshManager();
+        auto& meshManager = context.meshManager;
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
         // Opaque indirect draws
-        auto numOpaque = context.currentScene->GetNumOpaqueDraws();
+        auto numOpaque = context.drawStats.numOpaqueDraws;
         if (numOpaque > 0) {
 
             auto opaqueIndirectBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
@@ -271,7 +271,7 @@ private:
         }
 
         // Alpha test indirect draws
-        auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
+		auto numAlphaTest = context.drawStats.numAlphaTestDraws;
         if (numAlphaTest > 0) {
 
             auto alphaTestIndirectBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();

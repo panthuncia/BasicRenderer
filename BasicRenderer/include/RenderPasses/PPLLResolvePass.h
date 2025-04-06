@@ -48,7 +48,7 @@ public:
 
 	RenderPassReturn Execute(RenderContext& context) override {
 
-		auto numBlend = context.currentScene->GetNumBlendDraws();
+		auto numBlend = context.drawStats.numBlendDraws;
 		if (numBlend == 0) {
 			return {};
 		}
@@ -88,9 +88,9 @@ public:
 		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
-		auto& cameraManager = context.currentScene->GetCameraManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
+		auto& cameraManager = context.cameraManager;
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
 		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();

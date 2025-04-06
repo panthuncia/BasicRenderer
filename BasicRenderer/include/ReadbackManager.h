@@ -8,10 +8,10 @@
 #include "RenderContext.h"
 #include "Texture.h"
 #include "ResourceHandles.h"
-#include "SettingsManager.h"
 #include "UploadManager.h"
 #include "ReadbackRequest.h"
 #include "utilities.h"
+#include "DeviceManager.h"
 
 struct ReadbackInfo {
     bool cubemap;

@@ -61,17 +61,9 @@ public:
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
     //LightManager& GetLightManager();
     void Activate();
-    const std::unique_ptr<MeshManager>& GetMeshManager();
-	const std::unique_ptr<ObjectManager>& GetObjectManager();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
     std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
-	unsigned int GetNumDrawsInScene();
-	unsigned int GetNumOpaqueDraws();
-	unsigned int GetNumAlphaTestDraws();
-	unsigned int GetNumBlendDraws();
-	const std::shared_ptr<IndirectCommandBufferManager>& GetIndirectCommandBufferManager();
-	const std::unique_ptr<CameraManager>& GetCameraManager();
 
 private:
     std::shared_ptr<Camera> pCamera;

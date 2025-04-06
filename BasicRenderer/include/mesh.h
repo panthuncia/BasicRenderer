@@ -17,6 +17,7 @@ using namespace Microsoft::WRL;
 class Material;
 class MeshManager;
 class Skeleton;
+class Buffer;
 
 class Mesh {
 public:
