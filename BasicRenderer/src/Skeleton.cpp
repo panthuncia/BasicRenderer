@@ -30,7 +30,7 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buff
 
 Skeleton::Skeleton(const Skeleton& other) {
 
-    std::unordered_map<flecs::entity, flecs::entity> boneMap;
+    std::unordered_map<uint64_t, uint64_t> boneMap;
 	auto& ecs_world = ECSManager::GetInstance().GetWorld();
     // Clone each bone entity.
     for (auto& oldBone : other.m_bones) {
@@ -46,19 +46,19 @@ Skeleton::Skeleton(const Skeleton& other) {
         // Copy any additional bone-specific components here.
 
         // Save in mapping.
-        boneMap[oldBone] = newBone;
+        boneMap[oldBone.id()] = newBone.id();
         m_bones.push_back(newBone);
     }
 
     // Rebuild the hierarchy using flecs relationships.
     // For each old bone, if it had a parent, add the new bone as a child of the new parent.
     for (auto& oldBone : other.m_bones) {
-        flecs::entity newBone = boneMap[oldBone];
+        flecs::entity newBone = ecs_world.entity(boneMap[oldBone]);
 
         flecs::entity oldParent = oldBone.parent();
         if (oldParent.is_valid()) {
             // Add the new bone as a child of the new parent.
-            newBone.add(flecs::ChildOf, boneMap[oldParent]);
+            newBone.add(flecs::ChildOf, ecs_world.entity(boneMap[oldParent]));
         }
         else {
             // This bone is a root

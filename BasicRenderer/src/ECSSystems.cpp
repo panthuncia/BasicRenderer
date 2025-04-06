@@ -1,4 +1,4 @@
-#include "ECSSystems.h">
+#include "ECSSystems.h"
 
 #include <spdlog/spdlog.h>
 
@@ -14,7 +14,7 @@ void OnSceneActivated(flecs::world& world) {
 	// System: When a scene root gets ActiveScene removed, process all child entities
 	world.system<Components::ActiveScene>()
 		.kind(flecs::OnAdd)
-		.each([&](flecs::entity scene, Components::ActiveScene&) {
+		.each([&](flecs::entity scene, const Components::ActiveScene&) {
 		spdlog::info("[System] Scene activated: {}", scene.name().c_str());
 
 		// renderable objects
@@ -67,7 +67,7 @@ void OnSceneActivated(flecs::world& world) {
 			.with(flecs::ChildOf, scene)
 			.cascade() // Only consider entities that inherit from the scene.
 			.build();
-		cameraQuery.each([&](flecs::entity child, Components::Camera&) {
+		cameraQuery.each([&](flecs::entity child, const Components::Camera&) {
 			spdlog::info("[System] Processing descendant entity with Camera: {}", child.name().c_str());
 			});
 
@@ -78,7 +78,7 @@ void OnSceneDeactivated(flecs::world& world) {
 	// System: When a scene root gets ActiveScene removed, process all child entities
 	world.system<Components::ActiveScene>()
 		.kind(flecs::OnDelete)
-		.each([&](flecs::entity scene, Components::ActiveScene&) {
+		.each([&](flecs::entity scene, const Components::ActiveScene&) {
 		spdlog::info("[System] Scene activated: {}", scene.name().c_str());
 
 		// renderable objects
@@ -131,7 +131,7 @@ void OnSceneDeactivated(flecs::world& world) {
 			.with(flecs::ChildOf, scene)
 			.cascade() // Only consider entities that inherit from the scene.
 			.build();
-		cameraQuery.each([&](flecs::entity child, Components::Camera&) {
+		cameraQuery.each([&](flecs::entity child, const Components::Camera&) {
 			spdlog::info("[System] Processing descendant entity with Camera: {}", child.name().c_str());
 			});
 
@@ -150,11 +150,11 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 		const Components::AlphaTestMeshInstances* alphaTestMeshInstances = e.get<Components::AlphaTestMeshInstances>();
 		const Components::BlendMeshInstances* blendMeshInstances = e.get<Components::BlendMeshInstances>();
 		auto drawInfo = objectManager->AddObject(renderableObject->perObjectCB, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
-		e.add<ObjectDrawInfo>(drawInfo);
+		e.set<ObjectDrawInfo>(drawInfo);
 
 		auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
 		if (drawInfo.opaque.has_value()) {
-			e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
+			//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
 			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
 				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
@@ -163,7 +163,7 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 			}
 		}
 		if (drawInfo.alphaTest.has_value()) {
-			e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
+			//e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
 			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
 				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
@@ -172,7 +172,7 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 			}
 		}
 		if (drawInfo.blend.has_value()) {
-			e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
+			//e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
 			for (auto& meshInstance : blendMeshInstances->meshInstances) {
 				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
@@ -180,7 +180,7 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 				}
 			}
 		}
-		spdlog::info("[System 1] DrawInfo added to RenderableObject: {}", e.name().c_str());
+		spdlog::info("[System] DrawInfo added to RenderableObject: {}", e.name().c_str());
 			});
 
 	// System: Process entities on OnDelete of RenderableObjects, but only if they are in an active scene.
@@ -231,7 +231,7 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 		}
 		spdlog::info("[System] DrawInfo removed from RenderableObject: {}", e.name().c_str());
 			});
-	
+
 	// System: Process entities on OnAdd of MeshInstances, but only if they are in an active scene.
     world.system<Components::OpaqueMeshInstances>()
         .kind(flecs::OnAdd)
@@ -314,7 +314,7 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 	// Observer: Update light views when the matrix of a light changes
 	world.observer<Components::Matrix>()
 		.event(flecs::OnSet)         // Trigger when the Matrix component is set/changed
-		.with<Light>()              // Only match if the entity has a Light component
+		.with<Components::Light>()              // Only match if the entity has a Light component
 		.each([](flecs::entity e, Components::Matrix &matrix) {
 		spdlog::info("Matrix updated for light: {}", e.name().c_str());
 		// Process the matrix change here...

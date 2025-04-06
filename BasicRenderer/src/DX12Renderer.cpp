@@ -150,7 +150,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
-    world.component<Components::DrawStats>({ 0, 0, 0, 0 }).add(flecs::Exclusive);
+    world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
+	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
 	RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
 }
 

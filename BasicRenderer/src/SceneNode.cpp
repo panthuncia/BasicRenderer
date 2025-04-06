@@ -2,7 +2,7 @@
 #include "AnimationController.h"
 
 SceneNode::SceneNode(const std::wstring& name)
-    : parent(nullptr), transform(), animationController(std::make_unique<AnimationController>(this)), localID(-1), m_name(name) {
+    : parent(nullptr), transform(), animationController(std::make_unique<AnimationController>()), localID(-1), m_name(name) {
 }
 
 void SceneNode::AddChild(std::shared_ptr<SceneNode> node) {
