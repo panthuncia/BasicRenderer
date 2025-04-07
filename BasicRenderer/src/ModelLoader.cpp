@@ -680,6 +680,10 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
 			spdlog::error("Bone {} doesn't match any node", boneName);
 			throw std::runtime_error("Bone doesn't match any node");
 		}
+        if (!boneNode.has<AnimationController>()) {
+			// Create a new AnimationController for this bone
+			boneNode.add<AnimationController>();
+		}
         jointNodes.push_back(boneNode);
     }
 

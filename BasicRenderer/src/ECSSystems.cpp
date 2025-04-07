@@ -139,53 +139,11 @@ void OnSceneDeactivated(flecs::world& world) {
 }
 
 void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshManager* meshManager, ObjectManager* objectManager, IndirectCommandBufferManager* indirectCommandManager, CameraManager* cameraManager) {
-	// System: Process entities on OnAdd of RenderableObjects, but only if they are in an active scene.
-	world.system<Components::RenderableObject>()
-		.kind(flecs::OnAdd)
-		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
-		.each([&](flecs::entity e, Components::RenderableObject&) {
-		spdlog::info("[System] RenderableObject added in active scene on entity: {}", e.name().c_str());
-		Components::RenderableObject* renderableObject = e.get_mut<Components::RenderableObject>();
-		const Components::OpaqueMeshInstances* opaqueMeshInstances = e.get<Components::OpaqueMeshInstances>();
-		const Components::AlphaTestMeshInstances* alphaTestMeshInstances = e.get<Components::AlphaTestMeshInstances>();
-		const Components::BlendMeshInstances* blendMeshInstances = e.get<Components::BlendMeshInstances>();
-		auto drawInfo = objectManager->AddObject(renderableObject->perObjectCB, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
-		e.set<ObjectDrawInfo>(drawInfo);
 
-		auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
-		if (drawInfo.opaque.has_value()) {
-			//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
-			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
-				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-					meshManager->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Opaque);
-				}
-			}
-		}
-		if (drawInfo.alphaTest.has_value()) {
-			//e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
-			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
-				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-					meshManager->AddMesh(meshInstance->GetMesh(), MaterialBuckets::AlphaTest);
-				}
-			}
-		}
-		if (drawInfo.blend.has_value()) {
-			//e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
-			for (auto& meshInstance : blendMeshInstances->meshInstances) {
-				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-					meshManager->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Blend);
-				}
-			}
-		}
-		spdlog::info("[System] DrawInfo added to RenderableObject: {}", e.name().c_str());
-			});
-
+	/**/
 	// System: Process entities on OnDelete of RenderableObjects, but only if they are in an active scene.
-	world.system<Components::RenderableObject>()
-		.kind(flecs::OnDelete)
+	world.observer<Components::RenderableObject>()
+		.event(flecs::OnDelete)
 		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
 		.each([&](flecs::entity e, Components::RenderableObject&) {
 		spdlog::info("[System] RenderableObject removed in active scene on entity: {}", e.name().c_str());
@@ -233,8 +191,8 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 			});
 
 	// System: Process entities on OnAdd of MeshInstances, but only if they are in an active scene.
-    world.system<Components::OpaqueMeshInstances>()
-        .kind(flecs::OnAdd)
+    world.observer<Components::OpaqueMeshInstances>()
+        .event(flecs::OnAdd)
         .with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
         .each([&](flecs::entity e, Components::OpaqueMeshInstances&) {
             spdlog::info("[System] MeshInstances added in active scene on entity: {}", e.name().c_str());
@@ -251,8 +209,8 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 			}
             });
 
-	world.system<Components::AlphaTestMeshInstances>()
-		.kind(flecs::OnAdd)
+	world.observer<Components::AlphaTestMeshInstances>()
+		.event(flecs::OnAdd)
 		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
 		.each([&](flecs::entity e, Components::AlphaTestMeshInstances&) {
 		spdlog::info("[System] AlphaTestMeshInstances added in active scene on entity: {}", e.name().c_str());
@@ -269,8 +227,8 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 		}
 			});
 
-	world.system<Components::BlendMeshInstances>()
-		.kind(flecs::OnAdd)
+	world.observer<Components::BlendMeshInstances>()
+		.event(flecs::OnAdd)
 		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
 		.each([&](flecs::entity e, Components::BlendMeshInstances&) {
 		spdlog::info("[System] BlendMeshInstances added in active scene on entity: {}", e.name().c_str());
@@ -288,8 +246,8 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 			});
 
 	// System: Process entities on OnAdd of Light, but only if they are in an active scene.
-	world.system<LightInfo>()
-		.kind(flecs::OnAdd)
+	world.observer<LightInfo>()
+		.event(flecs::OnAdd)
 		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
 		.each([&](flecs::entity e, LightInfo&) {
 		spdlog::info("[System] Light added in active scene on entity: {}", e.name().c_str());
@@ -300,8 +258,8 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 			});
 
 	// System: Process entities on OnDelete of Light, but only if they are in an active scene.
-	world.system<LightInfo>()
-		.kind(flecs::OnDelete)
+	world.observer<LightInfo>()
+		.event(flecs::OnDelete)
 		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
 		.each([&](flecs::entity e, LightInfo&) {
 		spdlog::info("[System] Light removed in active scene on entity: {}", e.name().c_str());

@@ -23,6 +23,11 @@
 #include "ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
+#include "CameraManager.h"
+#include "LightManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
+#include "IndirectCommandBufferManager.h"
 
 using namespace Microsoft::WRL;
 
@@ -30,6 +35,7 @@ class DX12Renderer {
 public:
     DX12Renderer() : m_gpuCrashTracker(m_markerMap){
     }
+
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
     void Update(double elapsedSeconds);
@@ -96,11 +102,13 @@ private:
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
 
     // GPU resource managers
-    std::unique_ptr<LightManager> m_pLightManager;
+    std::unique_ptr<LightManager> m_pLightManager = nullptr;
     std::unique_ptr<MeshManager> m_pMeshManager = nullptr;
     std::unique_ptr<ObjectManager> m_pObjectManager = nullptr;
     std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
     std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+
+	ManagerInterface m_managerInterface;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();

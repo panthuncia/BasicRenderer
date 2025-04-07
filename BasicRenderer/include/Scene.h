@@ -12,13 +12,10 @@
 #include "Skeleton.h"
 #include "LightManager.h"
 #include "MeshData.h"
-#include "Light.h"
-#include "MeshManager.h"
-#include "ObjectManager.h"
-#include "IndirectCommandBufferManager.h"
-#include "CameraManager.h"
+#include "ManagerInterface.h"
 
 class DynamicGloballyIndexedResource;
+class Light;
 
 class Scene {
 public:
@@ -27,6 +24,9 @@ public:
     UINT AddObject(std::shared_ptr<RenderableObject> object);
     UINT AddNode(std::shared_ptr<SceneNode> node, bool canAttachToRoot = true);
     UINT AddLight(std::shared_ptr<Light> light);
+    flecs::entity CreateDirectionalLightECS(std::wstring name, XMFLOAT3 color, float intensity, XMFLOAT3 direction);
+    flecs::entity CreatePointLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0);
+    flecs::entity CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0);
     std::shared_ptr<SceneNode> CreateNode(std::wstring name = L""); // Like addNode, if node ids need to be pre-assigned
 	flecs::entity CreateNodeECS(std::wstring name = L"");
     std::shared_ptr<RenderableObject> CreateRenderableObject(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name); // Like addObject, if node ids need to be pre-assigned
@@ -60,12 +60,13 @@ public:
     void PostUpdate();
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
     //LightManager& GetLightManager();
-    void Activate();
+    void Activate(ManagerInterface managerInterface);
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
     std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
 
 private:
+
     std::shared_ptr<Camera> pCamera;
 
     std::unordered_map<std::wstring, std::shared_ptr<RenderableObject>> objectsByName;
@@ -94,10 +95,14 @@ private:
     // ECS
     flecs::entity ECSSceneRoot;
 
+	ManagerInterface m_managerInterface;
+
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<float()> getMaxShadowDistance;
 
     void MakeResident();
 	void MakeNonResident();
+    flecs::entity CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
+
 };

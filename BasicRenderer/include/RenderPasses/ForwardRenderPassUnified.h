@@ -12,6 +12,9 @@
 #include "Material.h"
 #include "SettingsManager.h"
 #include "CommandSignatureManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
+#include "CameraManager.h"
 
 class ForwardRenderPassUnified : public RenderPass {
 public:

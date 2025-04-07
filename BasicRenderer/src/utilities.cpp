@@ -942,3 +942,26 @@ DirectX::XMMATRIX GetProjectionMatrixForLight(LightInfo info) {
         break;
     }
 }
+
+DirectX::XMVECTOR QuaternionFromAxisAngle(const XMFLOAT3& dir) {
+    XMVECTOR targetDirection = XMVector3Normalize(XMLoadFloat3(&dir));
+    float dotProduct = XMVectorGetX(XMVector3Dot(defaultDirection, targetDirection));
+	DirectX::XMVECTOR rot;
+    if (dotProduct < -0.9999f) {
+        XMVECTOR perpendicularAxis = XMVector3Cross(defaultDirection, XMVectorSet(1, 0, 0, 0));
+        if (XMVector3Length(perpendicularAxis).m128_f32[0] < 0.01f) {
+            perpendicularAxis = XMVector3Cross(defaultDirection, XMVectorSet(0, 1, 0, 0));
+        }
+        perpendicularAxis = XMVector3Normalize(perpendicularAxis);
+        rot = XMQuaternionRotationAxis(perpendicularAxis, XM_PI);
+    }
+    else if (dotProduct > 0.9999f) {
+        rot = XMQuaternionIdentity();
+    }
+    else {
+        XMVECTOR rotationAxis = XMVector3Normalize(XMVector3Cross(defaultDirection, targetDirection));
+        float rotationAngle = acosf(dotProduct);
+        rot = XMQuaternionRotationAxis(rotationAxis, rotationAngle);
+    }
+	return rot;
+}

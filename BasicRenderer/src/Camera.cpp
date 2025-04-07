@@ -1,6 +1,7 @@
 #include "camera.h"
 #include "utilities.h"
 #include "ResourceManager.h"
+#include "DynamicBufferBase.h"
 
 using namespace DirectX;
 
@@ -26,7 +27,6 @@ void Camera::OnUpdate() {
 	if (m_cameraBufferView) {
         auto pos = transform.getGlobalPosition();
 		m_cameraInfo.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
-
 
 		auto buffer = m_cameraBufferView->GetBuffer();
         buffer->UpdateView(m_cameraBufferView.get(), &m_cameraInfo);

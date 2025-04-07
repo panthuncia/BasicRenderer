@@ -4,6 +4,8 @@
 #include <flecs.h>
 #include <memory>
 #include <unordered_map>
+#include <vector>
+#include <array>
 
 #include "BufferView.h"
 #include "buffers.h"
@@ -58,6 +60,8 @@ namespace Components {
 	struct GameScene { flecs::entity pipeline; }; // Represents the scene for the game
 	struct SceneRoot {}; // Parent for all entities unique to the scene
 	struct RenderableObject {
+		RenderableObject() = default;
+		RenderableObject(PerObjectCB cb) : perObjectCB(cb) {}
 		PerObjectCB perObjectCB;
 	}; // Represents an object that can be rendered
 
@@ -67,8 +71,31 @@ namespace Components {
 		Directional = 2
 	};
 	struct Light {
+		Light() = default;
+		Light(LightType type, DirectX::XMFLOAT3 color, DirectX::XMFLOAT3 attenuation, float range)
+			: type(type), color(color), attenuation(attenuation), range(range) {
+		}
 		LightType type;
+		DirectX::XMFLOAT3 color;
+		DirectX::XMFLOAT3 attenuation;
+		float range;
 	}; // Represents a light source
+
+	struct ProjectionMatrix {
+		ProjectionMatrix() : matrix(DirectX::XMMatrixIdentity()) {}
+		ProjectionMatrix(const DirectX::XMMATRIX& matrix) : matrix(matrix) {}
+		ProjectionMatrix(const DirectX::XMFLOAT4X4& matrix) : matrix(DirectX::XMLoadFloat4x4(&matrix)) {}
+		DirectX::XMMATRIX matrix;
+	}; // Represents a projection matrix
+
+	struct FrustrumPlanes {
+		FrustrumPlanes() = default;
+		FrustrumPlanes(std::vector<std::array<ClippingPlane, 6>> frustumPlanes)
+			: m_frustumPlanes(std::move(frustumPlanes)) {
+		}
+		std::vector<std::array<ClippingPlane, 6>> m_frustumPlanes;
+	}; // A set of frustrum clipping planes
+
 	struct IndirectCommandBuffers {
 		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> opaqueIndirectCommandBuffers;
 		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> alphaTestIndirectCommandBuffers;
@@ -97,6 +124,11 @@ namespace Components {
 	struct RenderData {
 		BufferView perObjectBufferView;
 	};
+
+	struct Skinned {};
+	struct OpaqueSkinned {};
+	struct AlphaTestSkinned {};
+	struct BlendSkinned {};
 
 	struct OpaqueIndirectDrawInfo {
 		OpaqueIndirectDrawInfo() = default;

@@ -48,6 +48,7 @@
 #include "CommandSignatureManager.h"
 #include "ECSManager.h"
 #include "ECSSystems.h"
+#include "IndirectCommandBufferManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -148,9 +149,12 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pCameraManager = CameraManager::CreateUnique();
 
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get());
+
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
+    world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
 	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
 	RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
 }
@@ -704,8 +708,10 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	if (currentScene) {
 		DeletionManager::GetInstance().MarkForDelete(currentScene);
 	}
+	auto& ecs_world = ECSManager::GetInstance().GetWorld();
+	ecs_world.add<Components::ActiveScene>(newScene->GetRoot());
     currentScene = newScene;
-    currentScene->Activate();
+    currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;
 }
 

@@ -8,6 +8,8 @@
 #include "DeviceManager.h"
 #include "utilities.h"
 #include "SettingsManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
 
 class SkinningPass : public ComputePass {
 public:

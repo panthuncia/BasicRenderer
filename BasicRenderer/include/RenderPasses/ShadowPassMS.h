@@ -11,6 +11,8 @@
 #include "Scene.h"
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
 
 class ShadowPassMS : public RenderPass {
 public:

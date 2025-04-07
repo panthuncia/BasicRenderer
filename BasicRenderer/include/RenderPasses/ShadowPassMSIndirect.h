@@ -12,6 +12,9 @@
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
 #include "CommandSignatureManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
+#include "CameraManager.h"
 
 class ShadowPassMSIndirect : public RenderPass {
 public:
