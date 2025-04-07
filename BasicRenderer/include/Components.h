@@ -82,6 +82,16 @@ namespace Components {
 		float range;
 	}; // Represents a light source
 
+	struct Camera {
+		CameraInfo info;
+	};
+
+	struct CameraBufferView {
+		CameraBufferView() = default;
+		CameraBufferView(std::shared_ptr<BufferView> view) : view(view) {}
+		std::shared_ptr<BufferView> view;
+	}; // Represents a camera buffer view;
+
 	struct ProjectionMatrix {
 		ProjectionMatrix() : matrix(DirectX::XMMatrixIdentity()) {}
 		ProjectionMatrix(const DirectX::XMMATRIX& matrix) : matrix(matrix) {}
@@ -111,7 +121,6 @@ namespace Components {
 		std::shared_ptr<BufferView> normalMatrixView;
 		uint64_t normalMatrixIndex;
 	};
-
 
 	struct IndirectCommandBuffers {
 		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> opaqueIndirectCommandBuffers;

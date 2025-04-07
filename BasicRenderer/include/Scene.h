@@ -28,7 +28,7 @@ public:
     flecs::entity GetRoot();
     void Update();
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
-    std::shared_ptr<Camera> GetCamera();
+    flecs::entity& GetPrimaryCamera();
     void AddSkeleton(std::shared_ptr<Skeleton>);
     void PostUpdate();
     std::shared_ptr<SceneNode> AppendScene(Scene& scene);
@@ -40,7 +40,7 @@ public:
 
 private:
 
-    std::shared_ptr<Camera> pCamera;
+    flecs::entity m_primaryCamera;
 
 	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;
 	std::unordered_map<uint64_t, flecs::entity> animatedEntitiesByID;

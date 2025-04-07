@@ -263,33 +263,54 @@ void Scene::Update() {
 }
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
+		
+    if (m_primaryCamera.is_valid()) {
 
- //   if (pCamera != nullptr) {
- //       indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
- //       m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
-	//	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
-	//	m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
+        m_managerInterface.GetIndirectCommandBufferManager()->UnregisterBuffers(m_primaryCamera.id());
+        m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
+		m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
 
-	//	m_pCameraManager->RemoveCamera(pCamera->GetCameraBufferView());
-	//	pCamera->SetCameraBufferView(nullptr);
- //   }
+		m_pCameraManager->RemoveCamera(pCamera->GetCameraBufferView());
+		pCamera->SetCameraBufferView(nullptr);
+    }
 
- //   pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
- //   CameraInfo info;
-	//pCamera->SetCameraBufferView(m_pCameraManager->AddCamera(info));
+    //pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
+    CameraInfo info;
+	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
+	info.view = XMMatrixIdentity();
+	info.projection = XMMatrixPerspectiveFovRH(fov, aspect, zNear, zFar);
+	info.viewProjection = info.projection;
+	info.clippingPlanes[0] = planes[0];
+	info.clippingPlanes[1] = planes[1];
+	info.clippingPlanes[2] = planes[2];
+	info.clippingPlanes[3] = planes[3];
+	info.clippingPlanes[4] = planes[4];
+	info.clippingPlanes[5] = planes[5];
 
- //   setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
-	//if (lightManager != nullptr) {
-	//	lightManager->SetCurrentCamera(pCamera.get());
-	//}
- //   AddNode(pCamera);
- //   m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Opaque);
-	//m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::AlphaTest);
-	//m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Blend);
+	auto cameraBufferView = m_managerInterface.GetCameraManager()->AddCamera(info);
+
+	auto& world = ECSManager::GetInstance().GetWorld();
+	auto entity = world.entity()
+		.set<Components::Camera>({info})
+		.set<Components::CameraBufferView>(cameraBufferView)
+		.set<Components::Position>({0, 0, 0})
+		.set<Components::Rotation>({0, 0, 0})
+		.set<Components::Scale>({0, 0, 0})
+		.set<Components::Matrix>({});
+
+    setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
+	if (lightManager != nullptr) {
+		lightManager->SetCurrentCamera(pCamera.get());
+	}
+    AddNode(pCamera);
+    m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Opaque);
+	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::AlphaTest);
+	m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Blend);
 }
 
-std::shared_ptr<Camera> Scene::GetCamera() {
-    return pCamera;
+flecs::entity& Scene::GetPrimaryCamera() {
+    return m_primaryCamera;
 }
 
 void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {

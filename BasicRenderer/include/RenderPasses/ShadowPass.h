@@ -19,6 +19,14 @@ public:
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	}
+
+	~ShadowPass() {
+		lightQuery.destruct();
+		m_opaqueMeshInstancesQuery.destruct();
+		m_alphaTestMeshInstancesQuery.destruct();
+		m_blendMeshInstancesQuery.destruct();
+	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();

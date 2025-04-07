@@ -32,6 +32,11 @@ public:
 		m_PPLLCounter = PPLLCounter;
 		m_numPPLLNodes = numPPLLNodes;
 	}
+
+	~PPLLFillPass() {
+		m_blendMeshInstancesQuery.destruct();
+	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();

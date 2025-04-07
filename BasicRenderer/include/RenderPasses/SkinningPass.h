@@ -17,6 +17,12 @@ public:
 	SkinningPass() {
 	}
 
+	~SkinningPass() {
+		opaqueQuery.destruct();
+		alphaTestQuery.destruct();
+		blendQuery.destruct();
+	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();

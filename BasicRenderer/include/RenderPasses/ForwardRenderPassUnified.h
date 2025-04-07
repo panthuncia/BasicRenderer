@@ -27,6 +27,11 @@ public:
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
     }
 
+	~ForwardRenderPassUnified() {
+		m_opaqueMeshInstancesQuery.destruct();
+		m_alphaTestMeshInstancesQuery.destruct();
+	}
+
     void Setup() override {
         auto& manager = DeviceManager::GetInstance();
         auto& device = manager.GetDevice();
