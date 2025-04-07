@@ -15,6 +15,7 @@
 #include "TextureDescription.h"
 #include "ResourceHandles.h"
 #include "UploadManager.h"
+#include "ECSManager.h"
 
 class PPLLFillPassMS : public RenderPass {
 public:
@@ -44,6 +45,8 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
@@ -115,12 +118,10 @@ public:
 		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes};
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 4, &indices, 0);
 
-		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetBlendMeshes();
+		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
+			auto& meshes = blendMeshes.meshInstances;
 
-			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-			commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+			commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
@@ -134,7 +135,7 @@ public:
 
 				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
-		}
+			});
 
 		commandList->Close();
 		return { { commandList.Get() } };
@@ -151,6 +152,7 @@ public:
 	}
 
 private:
+	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;

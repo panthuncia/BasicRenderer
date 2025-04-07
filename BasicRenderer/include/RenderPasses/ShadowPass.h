@@ -34,6 +34,9 @@ public:
 		}
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::ShadowMap>().build();
+		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().build();
+		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().build();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
@@ -79,12 +82,10 @@ public:
 		auto drawObjects = [&]() {
 
 			// Opaque objects
-			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-				auto& renderable = pair.second;
-				auto& meshes = renderable->GetOpaqueMeshes();
+			m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
+				auto& meshes = opaqueMeshes.meshInstances;
 
-				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
@@ -101,15 +102,13 @@ public:
 
 					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 				}
-			}
+				});
 
 			// Alpha test objects
-			for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
-				auto& renderable = pair.second;
-				auto& meshes = renderable->GetAlphaTestMeshes();
+			m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
+				auto& meshes = alphaTestMeshes.meshInstances;
 
-				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
@@ -126,15 +125,13 @@ public:
 
 					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 				}
-			}
+				});
 
 			// Blend objects
-			for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
-				auto& renderable = pair.second;
-				auto& meshes = renderable->GetBlendMeshes();
+			m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
+				auto& meshes = blendMeshes.meshInstances;
 
-				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
@@ -149,7 +146,7 @@ public:
 
 					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 				}
-			}
+				});
 		};
 
 		lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::ShadowMap shadowMap) {
@@ -205,6 +202,9 @@ public:
 
 private:
 	flecs::query<Components::Light, Components::LightViewInfo, Components::ShadowMap> lightQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	std::function<uint8_t()> getNumDirectionalLightCascades;

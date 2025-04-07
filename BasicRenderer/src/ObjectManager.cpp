@@ -19,9 +19,9 @@ ObjectManager::ObjectManager() {
 	m_activeAlphaTestDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeAlphaTestDrawSetIndices");
 	m_activeBlendDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeBlendDrawSetIndices");
 }
-ObjectDrawInfo ObjectManager::AddObject(PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances) {
+Components::ObjectDrawInfo ObjectManager::AddObject(PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances) {
 	
-	ObjectDrawInfo drawInfo;
+	Components::ObjectDrawInfo drawInfo;
 
 	std::shared_ptr<BufferView> perObjectCBview = m_perObjectBuffers->AddData(&perObjectCB, sizeof(PerObjectCB), sizeof(PerObjectCB));
 
@@ -45,7 +45,7 @@ ObjectDrawInfo ObjectManager::AddObject(PerObjectCB& perObjectCB, const Componen
 			m_activeOpaqueDrawSetIndices->Insert(index);
 		}
 
-		IndirectDrawInfo info;
+		Components::IndirectDrawInfo info;
 		info.indices = indices;
 		info.views = views;
 		drawInfo.opaque = info;
@@ -69,7 +69,7 @@ ObjectDrawInfo ObjectManager::AddObject(PerObjectCB& perObjectCB, const Componen
 			indices.push_back(index);
 			m_activeAlphaTestDrawSetIndices->Insert(index);
 		}
-		IndirectDrawInfo info;
+		Components::IndirectDrawInfo info;
 		info.indices = indices;
 		info.views = views;
 		drawInfo.alphaTest = info;
@@ -94,7 +94,7 @@ ObjectDrawInfo ObjectManager::AddObject(PerObjectCB& perObjectCB, const Componen
 			indices.push_back(index);
 			m_activeBlendDrawSetIndices->Insert(index);
 		}
-		IndirectDrawInfo info;
+		Components::IndirectDrawInfo info;
 		info.indices = indices;
 		info.views = views;
 		drawInfo.blend = info;
@@ -102,10 +102,13 @@ ObjectDrawInfo ObjectManager::AddObject(PerObjectCB& perObjectCB, const Componen
 
 	auto normalMatrixView = m_normalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
 	drawInfo.normalMatrixView = normalMatrixView;
+	drawInfo.perObjectCBView = perObjectCBview;
+	drawInfo.normalMatrixIndex = normalMatrixView->GetOffset() / sizeof(DirectX::XMFLOAT4X4);
+	drawInfo.perObjectCBIndex = perObjectCBview->GetOffset() / sizeof(PerObjectCB);
 	return drawInfo;
 }
 
-void ObjectManager::RemoveObject(const ObjectDrawInfo* drawInfo) {
+void ObjectManager::RemoveObject(const Components::ObjectDrawInfo* drawInfo) {
 #ifdef _DEBUG
 	if (drawInfo == nullptr) {
 		throw std::runtime_error("ObjectDrawInfo is null");

@@ -147,8 +147,8 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 		.with<Components::ActiveScene>().cascade() // Only consider entities inheriting ActiveScene.
 		.each([&](flecs::entity e, Components::RenderableObject&) {
 		spdlog::info("[System] RenderableObject removed in active scene on entity: {}", e.name().c_str());
-		objectManager->RemoveObject(e.get<ObjectDrawInfo>());
-		e.remove<ObjectDrawInfo>();
+		objectManager->RemoveObject(e.get<Components::ObjectDrawInfo>());
+		e.remove<Components::ObjectDrawInfo>();
 		auto opaqueMeshInstances = e.get_mut<Components::OpaqueMeshInstances>();
 		unsigned int drawCount = 0;
 		unsigned int drawCountOpaque = 0;

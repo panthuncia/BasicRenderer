@@ -185,9 +185,6 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
-	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
-		return currentScene->GetRenderableObjectIDMap();
-		});
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
         });

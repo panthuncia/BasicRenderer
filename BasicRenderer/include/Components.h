@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 #include <array>
+#include <optional>
 
 #include "BufferView.h"
 #include "buffers.h"
@@ -96,6 +97,22 @@ namespace Components {
 		std::vector<std::array<ClippingPlane, 6>> m_frustumPlanes;
 	}; // A set of frustrum clipping planes
 
+	struct IndirectDrawInfo {
+		std::vector<unsigned int> indices;
+		std::vector<std::shared_ptr<BufferView>> views;
+	};
+
+	struct ObjectDrawInfo {
+		std::optional<IndirectDrawInfo> opaque;
+		std::optional<IndirectDrawInfo> alphaTest;
+		std::optional<IndirectDrawInfo> blend;
+		std::shared_ptr<BufferView> perObjectCBView;
+		uint64_t perObjectCBIndex;
+		std::shared_ptr<BufferView> normalMatrixView;
+		uint64_t normalMatrixIndex;
+	};
+
+
 	struct IndirectCommandBuffers {
 		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> opaqueIndirectCommandBuffers;
 		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> alphaTestIndirectCommandBuffers;
@@ -123,10 +140,6 @@ namespace Components {
 		uint32_t numOpaqueDraws = 0;
 		uint32_t numAlphaTestDraws = 0;
 		uint32_t numBlendDraws = 0;
-	};
-
-	struct RenderData {
-		BufferView perObjectBufferView;
 	};
 
 	struct Skinned {};

@@ -15,6 +15,7 @@
 #include "MeshManager.h"
 #include "ObjectManager.h"
 #include "CameraManager.h"
+#include "ECSManager.h"
 
 class ForwardRenderPassUnified : public RenderPass {
 public:
@@ -41,6 +42,9 @@ public:
             m_allocators.push_back(allocator);
             m_commandLists.push_back(commandList7);
         }
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().build();
+		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().build();
     }
 
     RenderPassReturn Execute(RenderContext& context) override {
@@ -140,12 +144,10 @@ private:
         auto& meshManager = context.meshManager;
 
         // Opaque objects
-        for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetOpaqueMeshes();
+        m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
+            auto& meshes = opaqueMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -161,15 +163,13 @@ private:
                 commandList->IASetIndexBuffer(&indexBufferView);
                 commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
             }
-        }
+            });
 
         // Alpha test objects
-        for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetAlphaTestMeshes();
+        m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
+            auto& meshes = alphaTestMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -185,7 +185,7 @@ private:
                 commandList->IASetIndexBuffer(&indexBufferView);
                 commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
             }
-        }
+            });
     }
 
     void ExecuteMeshShader(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -199,12 +199,10 @@ private:
         auto& meshManager = context.meshManager;
 
         // Opaque objects
-        for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetOpaqueMeshes();
+        m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
+            auto& meshes = opaqueMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -219,15 +217,13 @@ private:
                 // Mesh shaders use DispatchMesh
                 commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
-        }
+            });
 
         // Alpha test objects
-        for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetAlphaTestMeshes();
+        m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
+            auto& meshes = alphaTestMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -241,7 +237,7 @@ private:
 
                 commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
-        }
+            });
     }
 
     void ExecuteMeshShaderIndirect(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -294,6 +290,8 @@ private:
     }
 
 private:
+	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
     bool m_wireframe;

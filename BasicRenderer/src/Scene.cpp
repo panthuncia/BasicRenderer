@@ -161,7 +161,7 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 	// If scene is active, add object & manage meshes
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
 		auto drawInfo = m_managerInterface.GetObjectManager()->AddObject(buffer, &opaqueMeshInstances, &alphaTestMeshInstances, &blendMeshInstances);
-		entity.set<ObjectDrawInfo>(drawInfo);
+		entity.set<Components::ObjectDrawInfo>(drawInfo);
 
 		auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
 		auto drawStats = world.get_mut<Components::DrawStats>();

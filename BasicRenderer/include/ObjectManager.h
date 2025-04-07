@@ -14,26 +14,13 @@ class RenderableObject;
 class BufferView;
 class DynamicBuffer;
 
-struct IndirectDrawInfo {
-	std::vector<unsigned int> indices;
-	std::vector<std::shared_ptr<BufferView>> views;
-};
-
-struct ObjectDrawInfo {
-	std::optional<IndirectDrawInfo> opaque;
-	std::optional<IndirectDrawInfo> alphaTest;
-	std::optional<IndirectDrawInfo> blend;
-	std::shared_ptr<BufferView> perObjectCBView;
-	std::shared_ptr<BufferView> normalMatrixView;
-};
-
 class ObjectManager {
 public:
 	static std::unique_ptr<ObjectManager> CreateUnique() {
 		return std::unique_ptr<ObjectManager>(new ObjectManager());
 	}
-	ObjectDrawInfo AddObject(PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances);
-	void RemoveObject(const ObjectDrawInfo* drawInfo);
+	Components::ObjectDrawInfo AddObject(PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances);
+	void RemoveObject(const Components::ObjectDrawInfo* drawInfo);
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
 	void UpdateNormalMatrixBuffer(BufferView* view, void* data);
 	std::shared_ptr<DynamicBuffer>& GetPerObjectBuffers() {
