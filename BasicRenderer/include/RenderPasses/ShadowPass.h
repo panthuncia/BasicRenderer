@@ -11,6 +11,7 @@
 #include "Scene.h"
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
+#include "ECSManager.h"
 
 class ShadowPass : public RenderPass {
 public:
@@ -31,6 +32,8 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::ShadowMap>().build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
@@ -149,30 +152,25 @@ public:
 			}
 		};
 
-		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
-			auto& light = lightPair.second;
-			auto& shadowMap = light->getShadowMap();
-			if (!shadowMap) {
-				continue;
-			}
+		lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::ShadowMap shadowMap) {
 			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
-			switch (light->GetLightType()) {
+			switch (light.type) {
 			case Components::LightType::Spot: {
-				auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
+				auto& dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
 				commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 				commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-				int lightInfo[2] = { light->GetCurrentLightBufferIndex(), light->GetCurrentviewInfoIndex() };
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
 				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
 				drawObjects();
 				break;
 			}
 			case Components::LightType::Point: {
-				int lightViewIndex = light->GetCurrentviewInfoIndex() * 6;
-				int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
+				int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
 				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
 				for (int i = 0; i < 6; i++) {
-					D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
+					D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
@@ -182,21 +180,21 @@ public:
 				break;
 			}
 			case Components::LightType::Directional: {
-					int lightViewIndex = light->GetCurrentviewInfoIndex() * getNumDirectionalLightCascades();
-					int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
-					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
-					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
-						lightViewIndex += 1;
-						drawObjects();
+				int lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+					auto& dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
+					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+					lightViewIndex += 1;
+					drawObjects();
 
-					}
 				}
 			}
-		}
+			}
+			});
 		commandList->Close();
 		return { { commandList.Get()} };
 	}
@@ -206,6 +204,7 @@ public:
 	}
 
 private:
+	flecs::query<Components::Light, Components::LightViewInfo, Components::ShadowMap> lightQuery;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	std::function<uint8_t()> getNumDirectionalLightCascades;

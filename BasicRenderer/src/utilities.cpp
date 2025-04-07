@@ -341,10 +341,9 @@ void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPla
     corners[7] = farCenter - (camUp * (farHeight / 2.0f)) + (camRight * (farWidth / 2.0f)); // Bottom-right
 }
 
-std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera, const std::vector<float>& cascadeSplits) {
+std::vector<Cascade> setupCascades(int numCascades, XMVECTOR& lightDir, Camera& camera, const std::vector<float>& cascadeSplits) {
     std::vector<Cascade> cascades;
 
-    XMVECTOR lightDir = light.GetLightDir();
     XMVECTOR lightPos = XMVectorZero(); // For directional lights, position can be zero
     XMVECTOR lightUp = XMVectorSet(0, 1, 0, 0);
     XMMATRIX lightViewMatrix = XMMatrixLookToRH(lightPos, lightDir, lightUp);
@@ -964,4 +963,10 @@ DirectX::XMVECTOR QuaternionFromAxisAngle(const XMFLOAT3& dir) {
         rot = XMQuaternionRotationAxis(rotationAxis, rotationAngle);
     }
 	return rot;
+}
+
+XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat) {
+    XMFLOAT4X4 matFloats;
+    XMStoreFloat4x4(&matFloats, mat);
+    return XMFLOAT3(matFloats._41, matFloats._42, matFloats._43);
 }

@@ -13,7 +13,6 @@
 #include "Components.h"
 
 class Camera;
-class Light;
 class ShadowMaps;
 class SceneNode;
 class IndirectCommandBufferManager;
@@ -26,7 +25,7 @@ public:
 		return std::unique_ptr<LightManager>(new LightManager());
 	}
     ~LightManager();
-    void AddLight(LightInfo* lightInfo, Camera* currentCamera = nullptr);
+    Components::LightViewInfo AddLight(LightInfo* lightInfo, uint64_t entityId, Camera* currentCamera = nullptr);
     void RemoveLight(LightInfo* light);
     unsigned int GetLightBufferDescriptorIndex();
     unsigned int GetPointCubemapMatricesDescriptorIndex();
@@ -45,10 +44,6 @@ private:
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_spotViewInfo; // Indices into camera buffer
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_pointViewInfo;
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_directionalViewInfo;
-    std::vector<Light*> m_lights; // Active light IDs
-    std::vector<Light*> m_spotLights;
-	std::vector<Light*> m_pointLights;
-	std::vector<Light*> m_directionalLights;
 
     // TODO: The buffer size and increment size are low for testing.
     unsigned int m_commandBufferSize = 1;
@@ -66,8 +61,7 @@ private:
 
     Camera* m_currentCamera = nullptr;
 
-    unsigned int CreateLightInfo(Light* node);
-    Components::LightViewInfo CreateLightViewInfo(LightInfo info, Camera* camera = nullptr);
-    void UpdateLightViewInfo(Light* node);
-	void RemoveLightViewInfo(Light* node);
+    Components::LightViewInfo CreateLightViewInfo(LightInfo info, uint64_t entityId, Camera* camera = nullptr);
+    void UpdateLightViewInfo(flecs::entity light);
+	void RemoveLightViewInfo(flecs::entity light);
 };

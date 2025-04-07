@@ -49,7 +49,7 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 }
 
 // Add a single buffer to an existing ID
-std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::CreateBuffer(const int entityID, MaterialBuckets bucket) {
+std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::CreateBuffer(uint64_t entityID, MaterialBuckets bucket) {
     if (entityID < 0) {
         spdlog::error("Invalid entity ID for buffer creation");
         return nullptr;
@@ -86,7 +86,7 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 }
 
 // Remove buffers associated with an ID
-void IndirectCommandBufferManager::UnregisterBuffers(const int entityID) {
+void IndirectCommandBufferManager::UnregisterBuffers(uint64_t entityID) {
 
     for (auto type : MaterialBucketTypes) {
         for (std::shared_ptr<DynamicGloballyIndexedResource> buffer : m_buffers[type][entityID]) {

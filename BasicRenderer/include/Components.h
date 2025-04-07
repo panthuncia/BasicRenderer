@@ -104,10 +104,14 @@ namespace Components {
 	struct LightViewInfo {
 		std::vector<std::shared_ptr<BufferView>> cameraBufferViews;
 		IndirectCommandBuffers commandBuffers;
+		std::shared_ptr<BufferView> lightBufferView;
+		uint64_t lightBufferIndex;
+		uint64_t viewInfoBufferIndex;
 	};
 	struct ShadowMap {
 		std::shared_ptr<Texture> shadowMap;
 	};
+
 	struct Camera {}; // Represents a camera
 	struct SceneNode {}; // Represents a generic node in the scene graph
 	struct GlobalMeshLibrary {

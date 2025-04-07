@@ -18,7 +18,6 @@
 #include "Utilities.h"
 #include "RenderableObject.h"
 #include "PSOManager.h"
-#include "Light.h"
 #include "Material.h"
 #include "Menu.h"
 #include "MaterialFlags.h"
@@ -311,9 +310,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	for (int i = 0; i < 1; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
-        for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
-			object.second->SetAnimationSpeed(animationSpeed);
-        }
+   //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
+			//object.second->SetAnimationSpeed(animationSpeed);
+   //     }
 		auto root = renderer.GetCurrentScene()->AppendScene(*tigerScene);
 		auto point = randomPointInSphere(50.0);
         //tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
@@ -382,19 +381,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
-	auto light1 = Light::CreatePointLight(L"light1", XMFLOAT3(0, 0, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032);
-    light1->animationController->setAnimationClip(animation);
-    //scene->AddLight(light1);
-	//scene->RemoveLightByID(light1->GetLocalID());
-	auto light2 = Light::CreateDirectionalLight(L"light2", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(1, -1, 1));
-    light2->SetIsShadowCaster(true);
-    scene->AddLight(light2);
-    //auto light3 = Light::CreateDirectionalLight("light3", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(-1, -1, -1));
-    auto light3 = Light::CreateSpotLight(L"light3", XMFLOAT3(0, 4, 0), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);
-	//scene->AddLight(light3, true);
-    //light3->AddChild(cubeScaleNode);
-
-	renderer.SetDebugTexture(light2->getShadowMap().get());
+	renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
 
     MSG msg = {};
     unsigned int frameIndex = 0;

@@ -15,6 +15,7 @@
 #include "MeshManager.h"
 #include "ObjectManager.h"
 #include "CameraManager.h"
+#include "ECSManager.h"
 
 class ShadowPassMSIndirect : public RenderPass {
 public:
@@ -35,6 +36,8 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::ShadowMap>().build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
@@ -102,65 +105,56 @@ public:
 			}
 		};
 
-		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
-			auto& light = lightPair.second;
-			auto& shadowMap = light->getShadowMap();
-			if (!shadowMap) {
-				continue;
-			}
+		lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::ShadowMap shadowMap) {
 			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
-			switch (light->GetLightType()) {
+			switch (light.type) {
 			case Components::LightType::Spot: {
-					auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
+				auto& dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
+				commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+				commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
+				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				auto& opaque = lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers[0];
+				auto& alphaTest = lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers[0];
+				auto& blend = lightViewInfo.commandBuffers.blendIndirectCommandBuffers[0];
+				drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
+				break;
+			}
+			case Components::LightType::Point: {
+				int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				for (int i = 0; i < 6; i++) {
+					D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-					int lightInfo[2] = { light->GetCurrentLightBufferIndex(), light->GetCurrentviewInfoIndex() };
-					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
-					auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[0];
-					auto& alphaTest = light->GetPerViewAlphaTestIndirectCommandBuffers()[0];
-					auto& blend = light->GetPerViewBlendIndirectCommandBuffers()[0];
+					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+					lightViewIndex += 1;
+					auto& opaque = lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers[i];
+					auto& alphaTest = lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers[i];
+					auto& blend = lightViewInfo.commandBuffers.blendIndirectCommandBuffers[i];
 					drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
-					break;
 				}
-			case Components::LightType::Point: {
-					//int lightIndex = light->GetCurrentLightBufferIndex();
-					int lightViewIndex = light->GetCurrentviewInfoIndex() * 6;
-					int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
-					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
-					auto& opaqueBuffers = light->GetPerViewOpaqueIndirectCommandBuffers();
-					auto& transparentBuffers = light->GetPerViewAlphaTestIndirectCommandBuffers();
-					for (int i = 0; i < 6; i++) {
-						D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
-						lightViewIndex += 1;
-						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
-						auto& alphaTest = light->GetPerViewAlphaTestIndirectCommandBuffers()[i];
-						auto& blend = light->GetPerViewBlendIndirectCommandBuffers()[i];
-						drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
-					}
-					break;
-				}
+				break;
+			}
 			case Components::LightType::Directional: {
-					//int lightIndex = light->GetCurrentLightBufferIndex();
-					int lightViewIndex = light->GetCurrentviewInfoIndex() * getNumDirectionalLightCascades();
-					int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };					auto& opaqueBuffers = light->GetPerViewOpaqueIndirectCommandBuffers();
-					auto& transparentBuffers = light->GetPerViewAlphaTestIndirectCommandBuffers();
-					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
-						lightViewIndex += 1;
-						auto& opaque = light->GetPerViewOpaqueIndirectCommandBuffers()[i];
-						auto& alphaTest = light->GetPerViewAlphaTestIndirectCommandBuffers()[i];
-						auto& blend = light->GetPerViewBlendIndirectCommandBuffers()[i];
-						drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
-					}
+				//int lightIndex = light->GetCurrentLightBufferIndex();
+				int lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+				for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+					auto& dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
+					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+					lightViewIndex += 1;
+					auto& opaque = lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers[i];
+					auto& alphaTest = lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers[i];
+					auto& blend = lightViewInfo.commandBuffers.blendIndirectCommandBuffers[i];
+					drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
 				}
 			}
-		}
+			}
+			});
 		commandList->Close();
 		return { { commandList.Get()} };
 	}
@@ -170,6 +164,7 @@ public:
 	}
 
 private:
+	flecs::query<Components::Light, Components::LightViewInfo, Components::ShadowMap> lightQuery;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	std::function<uint8_t()> getNumDirectionalLightCascades;

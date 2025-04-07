@@ -1,10 +1,9 @@
 #pragma once
 
 #include <optional>
-
+#include <DirectXMath.h>
 using namespace DirectX;
 
-#include <DirectXMath.h>
 #include <variant>
 #include <vector>
 #include <cstdint>

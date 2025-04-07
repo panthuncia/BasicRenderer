@@ -3,16 +3,19 @@
 #define NOMINMAX
 #include <windows.h>
 #include <iostream>
-#include <wrl.h>
+#include <wrl/client.h>
 #include <d3dcompiler.h>
+#include <stb_image.h>
 
-#include "Light.h"
 #include "MeshData.h"
 #include "Camera.h"
+#include "DescriptorHeap.h"
+#include "HeapIndexInfo.h"
 
 class DescriptorHeap;
 class RenderableObject;
 class Mesh;
+class Sampler;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -55,7 +58,7 @@ struct Cascade {
 
 DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center);
 
-std::vector<Cascade> setupCascades(int numCascades, Light& light, Camera& camera, const std::vector<float>& cascadeSplits);
+std::vector<Cascade> setupCascades(int numCascades, XMVECTOR& lightDir, Camera& camera, const std::vector<float>& cascadeSplits);
 
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda = 0.9f);
 
@@ -80,7 +83,7 @@ CD3DX12_RESOURCE_DESC CreateTextureResourceDesc(
     bool allowDSV = false,
     bool allowUAV = false);
 
-ComPtr<ID3D12Resource> CreateCommittedTextureResource(
+Microsoft::WRL::ComPtr<ID3D12Resource> CreateCommittedTextureResource(
     ID3D12Device* device,
     const CD3DX12_RESOURCE_DESC& desc,
     D3D12_CLEAR_VALUE* clearValue = nullptr,
@@ -190,3 +193,5 @@ std::string GetFileExtension(const std::string& filePath);
 DirectX::XMMATRIX GetProjectionMatrixForLight(LightInfo info);
 
 DirectX::XMVECTOR QuaternionFromAxisAngle(const XMFLOAT3& dir);
+
+XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat);

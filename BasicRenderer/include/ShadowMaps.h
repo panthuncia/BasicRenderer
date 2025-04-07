@@ -8,7 +8,6 @@
 #include "SettingsManager.h"
 #include "ResourceGroup.h"
 #include "Texture.h"
-#include "Light.h"
 #include "ResourceManager.h"
 #include "PixelBuffer.h"
 #include "Sampler.h"
@@ -59,9 +58,8 @@ public:
 		return map;
     }
 
-	void RemoveMap(Light* light) {
-		auto map = light->getShadowMap();
-		if (map!= nullptr) {
+	void RemoveMap(std::shared_ptr<Texture> map) {
+		if (map != nullptr) {
 			RemoveResource(map.get());
 		}
 
