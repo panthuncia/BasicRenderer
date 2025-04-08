@@ -18,9 +18,6 @@ public:
 	}
 
 	~SkinningPass() {
-		opaqueQuery.destruct();
-		alphaTestQuery.destruct();
-		blendQuery.destruct();
 	}
 
 	void Setup() override {

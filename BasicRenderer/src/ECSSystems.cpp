@@ -18,7 +18,8 @@ void IterateTree(flecs::entity e, const DirectX::XMMATRIX& parentTransform, Mana
 	XMMATRIX matTranslation = XMMatrixTranslationFromVector(e.get<Components::Position>()->pos);
 	XMMATRIX matScale = XMMatrixScalingFromVector(e.get<Components::Scale>()->scale);
 	XMMATRIX result = (matScale * matRotation * matTranslation)* parentTransform;
-	e.set<Components::Matrix>(result);
+
+	e.set<Components::Matrix>({ result });
 
 	if (e.has<Components::RenderableObject>()) {
 		Components::RenderableObject* object = e.get_mut<Components::RenderableObject>();

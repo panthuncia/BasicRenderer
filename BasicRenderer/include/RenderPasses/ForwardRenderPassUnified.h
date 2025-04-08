@@ -28,8 +28,6 @@ public:
     }
 
 	~ForwardRenderPassUnified() {
-		m_opaqueMeshInstancesQuery.destruct();
-		m_alphaTestMeshInstancesQuery.destruct();
 	}
 
     void Setup() override {

@@ -29,7 +29,11 @@ Scene::Scene(){
 
     //Initialize ECS scene
     auto& world = ECSManager::GetInstance().GetWorld();
-    ECSSceneRoot = world.entity().add<Components::SceneRoot>();
+    ECSSceneRoot = world.entity().add<Components::SceneRoot>()
+		.set<Components::Position>({0, 0, 0})
+		.set<Components::Rotation>({0, 0, 0, 1})
+		.set<Components::Scale>({1, 1, 1})
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity());
     world.set_pipeline(world.get<Components::GameScene>()->pipeline);
 }
 
@@ -118,7 +122,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
 	auto& world = ECSManager::GetInstance().GetWorld();
 	flecs::entity entity = world.entity();
-	PerObjectCB buffer;
+	PerObjectCB buffer = {};
 	entity.child_of(ECSSceneRoot)
 		.set_name((ws2s(name)+"_"+std::to_string(entity.id())).c_str())
 		.set<Components::RenderableObject>({buffer})
@@ -240,7 +244,7 @@ flecs::entity Scene::GetRoot() {
     return ECSSceneRoot;
 }
 
-void Scene::Update() {
+void Scene::Update(flecs::query<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix> hierarchyQuery) {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
@@ -265,7 +269,59 @@ void Scene::Update() {
 	}
 
     //this->sceneRoot.Update();
-	EvaluateTransformationHierarchy(ECSSceneRoot, &m_managerInterface);
+	//EvaluateTransformationHierarchy(ECSSceneRoot, &m_managerInterface);
+	hierarchyQuery.each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
+		XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
+		XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
+		XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
+		mOut.matrix = (matScale * matRotation * matTranslation);
+		if (matrix != nullptr) {
+			mOut.matrix = mOut.matrix * matrix->matrix;
+		}
+
+		if (entity.has<Components::RenderableObject>()) {
+			Components::RenderableObject* object = entity.get_mut<Components::RenderableObject>();
+			Components::ObjectDrawInfo* drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
+			auto& modelMatrix = object->perObjectCB.modelMatrix;
+			modelMatrix = mOut.matrix;
+			m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo->perObjectCBView.get(), object->perObjectCB);
+
+			XMMATRIX upperLeft3x3 = XMMatrixSet(
+				XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
+				XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
+				XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
+				0.0f, 0.0f, 0.0f, 1.0f
+			);
+			XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
+			m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
+		}
+
+		if (entity.has<Components::Camera>()) {
+			auto inverseMatrix = XMMatrixInverse(nullptr, mOut.matrix);
+
+			Components::Camera* camera = entity.get_mut<Components::Camera>();
+			camera->info.view = RemoveScalingFromMatrix(inverseMatrix);
+			camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
+
+			auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
+			camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
+
+			auto cameraBufferView = entity.get_mut<Components::CameraBufferView>();
+			auto buffer = cameraBufferView->view->GetBuffer();
+			buffer->UpdateView(cameraBufferView->view.get(), &camera->info);
+		}
+
+		if (entity.has<Components::Light>()) {
+			Components::Light* light = entity.get_mut<Components::Light>();
+			light->lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
+				mOut.matrix.r[3].m128_f32[1],  // _42
+				mOut.matrix.r[3].m128_f32[2],  // _43
+				1.0f);
+			XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+			light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
+		}
+
+		});
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }
@@ -320,6 +376,8 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
     m_pPrimaryCameraOpaqueIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Opaque);
 	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::AlphaTest);
 	m_pPrimaryCameraBlendIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Blend);
+
+	m_primaryCamera = entity;
 }
 
 flecs::entity& Scene::GetPrimaryCamera() {
@@ -342,10 +400,9 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
 void Scene::PostUpdate() {
 }
 
-std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
+void Scene::AppendScene(Scene& scene) {
 	auto root = scene.GetRoot();
 	root.child_of(ECSSceneRoot);
-      return nullptr;
 }
 
 void Scene::MakeResident() {

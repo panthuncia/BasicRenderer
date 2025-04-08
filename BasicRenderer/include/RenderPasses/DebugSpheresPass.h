@@ -19,9 +19,6 @@ public:
 		CreateDebugMeshPSO();
 	}
 	~DebugSpherePass() {
-		m_opaqueMeshInstancesQuery.destruct();
-		m_alphaTestMeshInstancesQuery.destruct();
-		m_blendMeshInstancesQuery.destruct();
 	}
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();

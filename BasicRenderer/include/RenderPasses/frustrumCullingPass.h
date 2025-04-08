@@ -16,7 +16,6 @@ public:
 	}
 
 	~FrustrumCullingPass() {
-		lightQuery.destruct();
 	}
 
 	void Setup() override {

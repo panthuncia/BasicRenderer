@@ -34,7 +34,6 @@ public:
 	}
 
 	~PPLLFillPassMS() {
-		m_blendMeshInstancesQuery.destruct();
 	}
 
 	void Setup() override {

@@ -13,7 +13,6 @@
 #include "Components.h"
 
 class ShadowMaps;
-class SceneNode;
 class IndirectCommandBufferManager;
 class CameraManager;
 class SortedUnsignedIntBuffer;

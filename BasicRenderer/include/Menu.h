@@ -48,8 +48,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
 
-    SceneNode* selectedNode = nullptr;
-
     FrameContext* WaitForNextFrameResources();
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
@@ -58,7 +56,7 @@ private:
 	void DrawOutputTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
-    void DisplaySceneNode(SceneNode* node, bool isOnlyChild);
+    //void DisplaySceneNode(SceneNode* node, bool isOnlyChild);
     void DisplaySceneGraph();
     void DisplaySelectedNode();
 
@@ -100,8 +98,6 @@ private:
 	std::function<void(bool)> setWireframeEnabled;
 
 	std::function < std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()> getRenderableObjects;
-	std::function<SceneNode& ()> getSceneRoot;
-	std::function < std::shared_ptr<SceneNode>(Scene& scene)> appendScene;
 
     bool allowTearing = false;
 	std::function<bool()> getAllowTearing;
@@ -186,9 +182,6 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         });
 
 	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
-	getRenderableObjects = settingsManager.getSettingGetter<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()>>("getRenderableObjects")();
-	getSceneRoot = settingsManager.getSettingGetter<std::function<SceneNode&()>>("getSceneRoot")();
-	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene")();
 
 	setMeshShaderEnabled = settingsManager.getSettingSetter<bool>("enableMeshShader");
 	getMeshShaderEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
@@ -410,7 +403,7 @@ inline void Menu::DrawLoadModelButton() {
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 			auto scene = LoadModel(ws2s(selectedFile));
 			//scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
-			appendScene(*scene);
+			//appendScene(*scene);
         }
         else
         {
@@ -419,20 +412,20 @@ inline void Menu::DrawLoadModelButton() {
     }
 }
 
-inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
-    if (!node) return;
-
-    // Set flags for automatically expanding nodes if they are the only child
-    ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-
-    // If the node is currently selected, add the ImGuiTreeNodeFlags_Selected flag
-    if (node == selectedNode) {
-        nodeFlags |= ImGuiTreeNodeFlags_Selected;
-    }
-
-    if (isOnlyChild) {
-        nodeFlags |= ImGuiTreeNodeFlags_DefaultOpen;
-    }
+//inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
+//    if (!node) return;
+//
+//    // Set flags for automatically expanding nodes if they are the only child
+//    ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+//
+//    // If the node is currently selected, add the ImGuiTreeNodeFlags_Selected flag
+//    if (node == selectedNode) {
+//        nodeFlags |= ImGuiTreeNodeFlags_Selected;
+//    }
+//
+//    if (isOnlyChild) {
+//        nodeFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+//    }
 
     // Show the node with its name
     //if (ImGui::TreeNodeEx(node, nodeFlags, "%S", node->m_name.c_str())) {
@@ -471,11 +464,11 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
     //        selectedNode = node;
     //    }
     //}
-}
+//}
 
 inline void Menu::DisplaySceneGraph() {
-    auto& root = getSceneRoot();
-    DisplaySceneNode(&root, true);
+    //auto& root = getSceneRoot();
+    //DisplaySceneNode(&root, true);
 }
 
 inline void Menu::DisplaySelectedNode() {

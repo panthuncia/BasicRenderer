@@ -5,7 +5,6 @@
 
 #include "AnimationClip.h"
 
-class SceneNode;
 class Animation {
 public:
 	Animation(std::string name) : name(name) {

@@ -305,14 +305,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
-    auto root1 =renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    renderer.GetCurrentScene()->AppendScene(*dragonScene);
     
 	for (int i = 0; i < 1; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-		auto root = renderer.GetCurrentScene()->AppendScene(*tigerScene);
+		renderer.GetCurrentScene()->AppendScene(*tigerScene);
 		auto point = randomPointInSphere(50.0);
         //tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
 	}

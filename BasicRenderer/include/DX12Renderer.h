@@ -29,6 +29,7 @@
 #include "ObjectManager.h"
 #include "IndirectCommandBufferManager.h"
 #include "MovementState.h"
+#include "Components.h"
 
 using namespace Microsoft::WRL;
 
@@ -53,7 +54,6 @@ public:
 	void SetIrradiance(std::shared_ptr<Texture> texture);
 	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
     void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
-    std::shared_ptr<SceneNode> AppendScene(Scene& scene);
 
 private:
     ComPtr<IDXGIFactory7> factory;
@@ -110,6 +110,7 @@ private:
     std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
 
 	ManagerInterface m_managerInterface;
+    flecs::query<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix> m_hierarchyQuery;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();

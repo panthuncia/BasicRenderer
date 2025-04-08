@@ -3,8 +3,6 @@
 #include "AnimationClip.h"
 #include "Components.h"
 
-class SceneNode;
-
 class AnimationController {
 public:
     std::shared_ptr<AnimationClip> animationClip;

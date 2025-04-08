@@ -158,7 +158,11 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
 	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
-	RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
+	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
+    m_hierarchyQuery =
+        world.query_builder<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
+        .term_at(3).parent().cascade()
+        .build();
 }
 
 void DX12Renderer::CreateGlobalResources() {
@@ -190,9 +194,6 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
         });
-	settingsManager.registerSetting<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene", [this](Scene& scene) -> std::shared_ptr<SceneNode> {
-		return AppendScene(scene);
-		});
     bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
@@ -533,7 +534,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
     verticalAngle = 0;
     horizontalAngle = 0;
 
-    currentScene->Update();
+    currentScene->Update(m_hierarchyQuery);
     auto camera = currentScene->GetPrimaryCamera();
     unsigned int cameraIndex = camera.get<Components::CameraBufferView>()->index;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
@@ -574,6 +575,10 @@ void DX12Renderer::Render() {
     m_context.frameFenceValue = m_currentFrameFenceValue;
     m_context.xRes = m_xRes;
     m_context.yRes = m_yRes;
+	m_context.cameraManager = m_pCameraManager.get();
+	m_context.objectManager = m_pObjectManager.get();
+	m_context.meshManager = m_pMeshManager.get();
+	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
 
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -711,7 +716,7 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 		DeletionManager::GetInstance().MarkForDelete(currentScene);
 	}
 	auto& ecs_world = ECSManager::GetInstance().GetWorld();
-	ecs_world.add<Components::ActiveScene>(newScene->GetRoot());
+	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
     currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;
@@ -1226,8 +1231,4 @@ void DX12Renderer::SetDebugTexture(Texture* texture) {
     else {
         spdlog::warn("Debug pass does not exist");
     }
-}
-
-std::shared_ptr<SceneNode> DX12Renderer::AppendScene(Scene& scene) {
-	return currentScene->AppendScene(scene);
 }
