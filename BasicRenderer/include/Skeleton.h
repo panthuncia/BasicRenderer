@@ -6,7 +6,6 @@
 #include <flecs.h>
 
 #include "Animation.h"
-#include "SceneNode.h"
 
 class Buffer;
 

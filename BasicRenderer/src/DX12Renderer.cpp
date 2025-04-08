@@ -50,6 +50,7 @@
 #include "ECSSystems.h"
 #include "IndirectCommandBufferManager.h"
 #include "MathUtils.h"
+#include "MovementState.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(

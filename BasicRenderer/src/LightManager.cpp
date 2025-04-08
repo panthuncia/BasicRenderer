@@ -5,7 +5,6 @@
 #include "Interfaces/ISceneNodeObserver.h"
 #include "Utilities.h"
 #include "SettingsManager.h"
-#include "SceneNode.h"
 #include "ShadowMaps.h"
 #include "DynamicResource.h"
 #include "IndirectCommandBufferManager.h"

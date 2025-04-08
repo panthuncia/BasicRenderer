@@ -15,7 +15,6 @@
 #include "RenderContext.h"
 #include "utilities.h"
 #include "OutputTypes.h"
-#include "SceneNode.h"
 #include "ModelLoader.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -436,11 +435,11 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
     }
 
     // Show the node with its name
-    if (ImGui::TreeNodeEx(node, nodeFlags, "%S", node->m_name.c_str())) {
-        // Detect if the node is clicked to select it
-        if (ImGui::IsItemClicked()) {
-            selectedNode = node;
-        }
+    //if (ImGui::TreeNodeEx(node, nodeFlags, "%S", node->m_name.c_str())) {
+    //    // Detect if the node is clicked to select it
+    //    if (ImGui::IsItemClicked()) {
+    //        selectedNode = node;
+    //    }
 
         // Display information specific to RenderableObject, if the node is of that type.
    //     auto renderableObject = dynamic_cast<RenderableObject*>(node);
@@ -459,19 +458,19 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
    //     }
 
         // Recursively display child nodes
-        for (const auto& childPair : node->children) {
-            bool childIsOnly = (node->children.size() == 1);
-            DisplaySceneNode(childPair.get(), childIsOnly);
-        }
+        //for (const auto& childPair : node->children) {
+        //    bool childIsOnly = (node->children.size() == 1);
+        //    DisplaySceneNode(childPair.get(), childIsOnly);
+        //}
 
-        ImGui::TreePop();
-    }
-    else {
-        // Allow selection
-        if (ImGui::IsItemClicked()) {
-            selectedNode = node;
-        }
-    }
+    //    ImGui::TreePop();
+    //}
+    //else {
+    //    // Allow selection
+    //    if (ImGui::IsItemClicked()) {
+    //        selectedNode = node;
+    //    }
+    //}
 }
 
 inline void Menu::DisplaySceneGraph() {
@@ -480,32 +479,32 @@ inline void Menu::DisplaySceneGraph() {
 }
 
 inline void Menu::DisplaySelectedNode() {
-    if (selectedNode) {
-        ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+  //  if (selectedNode) {
+  //      ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 
-        // Display the transform details
-        ImGui::Text("Position:");
-        XMFLOAT3 pos;
-        XMStoreFloat3(&pos, selectedNode->transform.pos);
-        if (ImGui::InputFloat3("Position", &pos.x)) {
-			selectedNode->transform.setLocalPosition(XMLoadFloat3(&pos));
-            selectedNode->transform.isDirty = true; // Mark as dirty if modified
-        }
-        ImGui::Text("Scale:");
-		XMFLOAT3 scale;
-		XMStoreFloat3(&scale, selectedNode->transform.scale);
-        if (ImGui::InputFloat("Scale", &scale.x)) {
-            selectedNode->transform.isDirty = true; // Mark as dirty if modified
-			scale.y = scale.x;
-			scale.z = scale.x;
-			selectedNode->transform.setLocalScale(XMLoadFloat3(&scale));
-        }
+  //      // Display the transform details
+  //      ImGui::Text("Position:");
+  //      XMFLOAT3 pos;
+  //      XMStoreFloat3(&pos, selectedNode->transform.pos);
+  //      if (ImGui::InputFloat3("Position", &pos.x)) {
+		//	selectedNode->transform.setLocalPosition(XMLoadFloat3(&pos));
+  //          selectedNode->transform.isDirty = true; // Mark as dirty if modified
+  //      }
+  //      ImGui::Text("Scale:");
+		//XMFLOAT3 scale;
+		//XMStoreFloat3(&scale, selectedNode->transform.scale);
+  //      if (ImGui::InputFloat("Scale", &scale.x)) {
+  //          selectedNode->transform.isDirty = true; // Mark as dirty if modified
+		//	scale.y = scale.x;
+		//	scale.z = scale.x;
+		//	selectedNode->transform.setLocalScale(XMLoadFloat3(&scale));
+  //      }
 
-        // Display rotation (you may want to convert it to Euler angles for readability)
-        XMFLOAT4 rotation;
-        XMStoreFloat4(&rotation, selectedNode->transform.rot);
-        ImGui::Text("Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)", rotation.x, rotation.y, rotation.z, rotation.w);
+  //      // Display rotation (you may want to convert it to Euler angles for readability)
+  //      XMFLOAT4 rotation;
+  //      XMStoreFloat4(&rotation, selectedNode->transform.rot);
+  //      ImGui::Text("Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)", rotation.x, rotation.y, rotation.z, rotation.w);
 
-        ImGui::End();
-    }
+  //      ImGui::End();
+  //  }
 }

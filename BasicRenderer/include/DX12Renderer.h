@@ -28,6 +28,7 @@
 #include "MeshManager.h"
 #include "ObjectManager.h"
 #include "IndirectCommandBufferManager.h"
+#include "MovementState.h"
 
 using namespace Microsoft::WRL;
 

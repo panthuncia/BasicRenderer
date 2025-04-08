@@ -1,5 +1,7 @@
 #include "MathUtils.h"
 
+using namespace DirectX;
+
 void ApplyMovement(Components::Position& pos, const Components::Rotation& rot, const MovementState& movement, float deltaTime){
     // Compute movement directions based on rotation.
     XMVECTOR forward = XMVector3Rotate(XMVectorSet(0, 0, -1, 0), rot.rot);

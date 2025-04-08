@@ -17,6 +17,7 @@
 #include "IndirectCommandBufferManager.h"
 #include "ECSSystems.h"
 #include "MeshInstance.h"
+#include "AnimationController.h"
 
 Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
