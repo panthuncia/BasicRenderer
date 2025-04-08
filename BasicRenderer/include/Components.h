@@ -73,13 +73,14 @@ namespace Components {
 	};
 	struct Light {
 		Light() = default;
-		Light(LightType type, DirectX::XMFLOAT3 color, DirectX::XMFLOAT3 attenuation, float range)
-			: type(type), color(color), attenuation(attenuation), range(range) {
+		Light(LightType type, DirectX::XMFLOAT3 color, DirectX::XMFLOAT3 attenuation, float range, LightInfo info)
+			: type(type), color(color), attenuation(attenuation), range(range), lightInfo(info) {
 		}
 		LightType type;
 		DirectX::XMFLOAT3 color;
 		DirectX::XMFLOAT3 attenuation;
 		float range;
+		LightInfo lightInfo;
 	}; // Represents a light source
 
 	struct Camera {
@@ -88,8 +89,9 @@ namespace Components {
 
 	struct CameraBufferView {
 		CameraBufferView() = default;
-		CameraBufferView(std::shared_ptr<BufferView> view) : view(view) {}
+		CameraBufferView(std::shared_ptr<BufferView> view, uint64_t index) : view(view), index(index) {}
 		std::shared_ptr<BufferView> view;
+		uint64_t index;
 	}; // Represents a camera buffer view;
 
 	struct ProjectionMatrix {
@@ -138,7 +140,6 @@ namespace Components {
 		std::shared_ptr<Texture> shadowMap;
 	};
 
-	struct Camera {}; // Represents a camera
 	struct SceneNode {}; // Represents a generic node in the scene graph
 	struct GlobalMeshLibrary {
 		std::unordered_map<uint64_t, std::shared_ptr<Mesh>> meshes;

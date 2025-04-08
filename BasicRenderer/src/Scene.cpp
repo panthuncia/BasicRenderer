@@ -15,6 +15,7 @@
 #include "MeshManager.h"
 #include "LightManager.h"
 #include "IndirectCommandBufferManager.h"
+#include "ECSSystems.h"
 
 Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
@@ -45,15 +46,7 @@ flecs::entity Scene::CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XM
 flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) {
 	auto& world = ECSManager::GetInstance().GetWorld();
 	float range = 5.0f;
-	flecs::entity entity = world.entity();
-	entity.child_of(ECSSceneRoot)
-		.set<Components::Light>({ type, color, XMFLOAT3(constantAttenuation, linearAttenuation, quadraticAttenuation), range })
-		.set<Components::Position>(position);
 
-	if (direction.x != 0 || direction.y != 0 || direction.z || 0) {
-		entity.set<Components::Rotation>(QuaternionFromAxisAngle(direction));
-	}
-	
 	LightInfo lightInfo;
 	lightInfo.type = type;
 	lightInfo.posWorldSpace = XMLoadFloat3(&position);
@@ -68,6 +61,20 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 	lightInfo.shadowViewInfoIndex = -1;
 	lightInfo.nearPlane = nearPlane;
 	lightInfo.farPlane = farPlane;
+
+	flecs::entity entity = world.entity();
+	entity.child_of(ECSSceneRoot)
+		.set<Components::Light>({ type, color, XMFLOAT3(constantAttenuation, linearAttenuation, quadraticAttenuation), range, lightInfo })
+		.set<Components::Position>(position)
+		.set<Components::Scale>({1, 1, 1});
+
+	if (direction.x != 0 || direction.y != 0 || direction.z || 0) {
+		entity.set<Components::Rotation>(QuaternionFromAxisAngle(direction));
+	}
+	else {
+		entity.set<Components::Rotation>({ 0, 0, 0, 1 });
+	}
+
 
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
 		auto viewInfo = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
@@ -256,6 +263,7 @@ void Scene::Update() {
 	}
 
     //this->sceneRoot.Update();
+	EvaluateTransformationHierarchy(ECSSceneRoot, &m_managerInterface);
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }
@@ -271,8 +279,9 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
 		m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
 
-		m_pCameraManager->RemoveCamera(pCamera->GetCameraBufferView());
-		pCamera->SetCameraBufferView(nullptr);
+		auto cameraBufferView = m_primaryCamera.get<Components::CameraBufferView>();
+		m_managerInterface.GetCameraManager()->RemoveCamera(cameraBufferView->view);
+		m_primaryCamera.remove<Components::CameraBufferView>();
     }
 
     //pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
@@ -288,25 +297,27 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	info.clippingPlanes[4] = planes[4];
 	info.clippingPlanes[5] = planes[5];
 
-	auto cameraBufferView = m_managerInterface.GetCameraManager()->AddCamera(info);
-
 	auto& world = ECSManager::GetInstance().GetWorld();
 	auto entity = world.entity()
-		.set<Components::Camera>({info})
-		.set<Components::CameraBufferView>(cameraBufferView)
-		.set<Components::Position>({0, 0, 0})
-		.set<Components::Rotation>({0, 0, 0})
-		.set<Components::Scale>({0, 0, 0})
-		.set<Components::Matrix>({});
+		.set<Components::Camera>({ info })
+		.set<Components::Position>({ 0, 0, 0 })
+		.set<Components::Rotation>({ 0, 0, 0 })
+		.set<Components::Scale>({ 1, 1, 1 })
+		.set<Components::Matrix>({})
+		.child_of(ECSSceneRoot);
+
+	if (ECSSceneRoot.has<Components::ActiveScene>()) {
+		auto cameraBufferView = m_managerInterface.GetCameraManager()->AddCamera(info);
+		entity.set<Components::CameraBufferView>({cameraBufferView, cameraBufferView->GetOffset()/sizeof(CameraInfo)});
+	}
 
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
-	if (lightManager != nullptr) {
-		lightManager->SetCurrentCamera(pCamera.get());
-	}
-    AddNode(pCamera);
-    m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Opaque);
-	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::AlphaTest);
-	m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Blend);
+	//if (lightManager != nullptr) {
+	//	lightManager->SetCurrentCamera(pCamera.get());
+	//}
+    m_pPrimaryCameraOpaqueIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Opaque);
+	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::AlphaTest);
+	m_pPrimaryCameraBlendIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Blend);
 }
 
 flecs::entity& Scene::GetPrimaryCamera() {

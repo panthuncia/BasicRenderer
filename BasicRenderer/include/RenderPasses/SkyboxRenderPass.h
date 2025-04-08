@@ -60,9 +60,9 @@ public:
         commandList->SetPipelineState(skyboxPSO.Get());
         commandList->SetGraphicsRootSignature(skyboxRootSignature.Get());
 
-		auto viewMatrix = context.currentScene->GetCamera()->GetViewMatrix();
+		auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.view;
 		viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
-		auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetCamera()->GetProjectionMatrix());
+		auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.projection);
         commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
 		commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo().index, 0);
         commandList->SetGraphicsRoot32BitConstant(2, m_texture->GetSamplerDescriptorIndex(), 0);

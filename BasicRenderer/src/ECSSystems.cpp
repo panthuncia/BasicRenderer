@@ -9,133 +9,72 @@
 #include "IndirectCommandBufferManager.h"
 #include "CameraManager.h"
 #include "MeshInstance.h"
+#include "ManagerInterface.h"
+#include "Utilities.h"
 
-void OnSceneActivated(flecs::world& world) {
-	// System: When a scene root gets ActiveScene removed, process all child entities
-	world.system<Components::ActiveScene>()
-		.kind(flecs::OnAdd)
-		.each([&](flecs::entity scene, const Components::ActiveScene&) {
-		spdlog::info("[System] Scene activated: {}", scene.name().c_str());
+void IterateTree(flecs::entity e, const DirectX::XMMATRIX& parentTransform, ManagerInterface* managers) {
+	// Get the current entity's transformation matrix.
+	XMMATRIX matRotation = XMMatrixRotationQuaternion(e.get<Components::Rotation>()->rot);
+	XMMATRIX matTranslation = XMMatrixTranslationFromVector(e.get<Components::Position>()->pos);
+	XMMATRIX matScale = XMMatrixScalingFromVector(e.get<Components::Scale>()->scale);
+	XMMATRIX result = (matScale * matRotation * matTranslation)* parentTransform;
+	e.set<Components::Matrix>(result);
 
-		// renderable objects
-		auto renderableObjectQuery = world.query_builder<Components::RenderableObject>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		renderableObjectQuery.each([&](flecs::entity child, Components::RenderableObject&) {
-			spdlog::info("[System] Processing descendant entity with RenderableObject: {}", child.name().c_str());
-			});
+	if (e.has<Components::RenderableObject>()) {
+		Components::RenderableObject* object = e.get_mut<Components::RenderableObject>();
+		Components::ObjectDrawInfo* drawInfo = e.get_mut<Components::ObjectDrawInfo>();
+		auto& modelMatrix = object->perObjectCB.modelMatrix;
+		modelMatrix = result;
+		managers->GetObjectManager()->UpdatePerObjectBuffer(drawInfo->perObjectCBView.get(), object->perObjectCB);
 
-		// Mesh instances
+		XMMATRIX upperLeft3x3 = XMMatrixSet(
+			XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
+			XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
+			XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
+			0.0f, 0.0f, 0.0f, 1.0f
+		);
+		XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
+		managers->GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
+	}
 
-		// Query for all entities that are descendants of the scene and have OpaqueMeshInstances.
-		auto opaqueMeshQuery = world.query_builder<Components::OpaqueMeshInstances>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		opaqueMeshQuery.each([&](flecs::entity child, Components::OpaqueMeshInstances&) {
-			spdlog::info("[System] Processing descendant entity with MeshInstances: {}", child.name().c_str());
-			});
-		// Query for all entities that are descendants of the scene and have AlphaTestMeshInstances.
-		auto alphaTestMeshQuery = world.query_builder<Components::AlphaTestMeshInstances>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		alphaTestMeshQuery.each([&](flecs::entity child, Components::AlphaTestMeshInstances&) {
-			spdlog::info("[System] Processing descendant entity with AlphaTestMeshInstances: {}", child.name().c_str());
-			});
-		// Query for all entities that are descendants of the scene and have BlendMeshInstances.
-		auto blendMeshQuery = world.query_builder<Components::BlendMeshInstances>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		blendMeshQuery.each([&](flecs::entity child, Components::BlendMeshInstances&) {
-			spdlog::info("[System] Processing descendant entity with BlendMeshInstances: {}", child.name().c_str());
-			});
+	if (e.has<Components::Camera>()) {
+		auto inverseMatrix = XMMatrixInverse(nullptr, result);
 
-		// Lights
-		auto lightQuery = world.query_builder<Components::Light>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		lightQuery.each([&](flecs::entity child, Components::Light&) {
-			spdlog::info("[System] Processing descendant entity with Light: {}", child.name().c_str());
-			});
+		Components::Camera* camera = e.get_mut<Components::Camera>();
+		camera->info.view = RemoveScalingFromMatrix(inverseMatrix);
+		camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
 
-		// Cameras
-		auto cameraQuery = world.query_builder<Components::Camera>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		cameraQuery.each([&](flecs::entity child, const Components::Camera&) {
-			spdlog::info("[System] Processing descendant entity with Camera: {}", child.name().c_str());
-			});
+		auto pos = GetGlobalPositionFromMatrix(result);
+		camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
 
-			});
+		auto cameraBufferView = e.get_mut<Components::CameraBufferView>();
+		auto buffer = cameraBufferView->view->GetBuffer();
+		buffer->UpdateView(cameraBufferView->view.get(), &camera->info);
+	}
+
+	if (e.has<Components::Light>()) {
+		Components::Light* light = e.get_mut<Components::Light>();
+		light->lightInfo.posWorldSpace = XMVectorSet(result.r[3].m128_f32[0],  // _41
+													result.r[3].m128_f32[1],  // _42
+													result.r[3].m128_f32[2],  // _43
+													1.0f);
+		XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+		light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, result));
+	}
+
+	// Iterate through all child entities.
+	e.children([&](flecs::entity child) {
+		IterateTree(child, result, managers);
+		});
 }
 
-void OnSceneDeactivated(flecs::world& world) {
-	// System: When a scene root gets ActiveScene removed, process all child entities
-	world.system<Components::ActiveScene>()
-		.kind(flecs::OnDelete)
-		.each([&](flecs::entity scene, const Components::ActiveScene&) {
-		spdlog::info("[System] Scene activated: {}", scene.name().c_str());
-
-		// renderable objects
-		auto renderableObjectQuery = world.query_builder<Components::RenderableObject>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		renderableObjectQuery.each([&](flecs::entity child, Components::RenderableObject&) {
-			spdlog::info("[System] Processing descendant entity with RenderableObject: {}", child.name().c_str());
-			});
-
-		// Mesh instances
-
-		// Query for all entities that are descendants of the scene and have OpaqueMeshInstances.
-		auto opaqueMeshQuery = world.query_builder<Components::OpaqueMeshInstances>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		opaqueMeshQuery.each([&](flecs::entity child, Components::OpaqueMeshInstances&) {
-			spdlog::info("[System] Processing descendant entity with MeshInstances: {}", child.name().c_str());
-			});
-		// Query for all entities that are descendants of the scene and have AlphaTestMeshInstances.
-		auto alphaTestMeshQuery = world.query_builder<Components::AlphaTestMeshInstances>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		alphaTestMeshQuery.each([&](flecs::entity child, Components::AlphaTestMeshInstances&) {
-			spdlog::info("[System] Processing descendant entity with AlphaTestMeshInstances: {}", child.name().c_str());
-			});
-		// Query for all entities that are descendants of the scene and have BlendMeshInstances.
-		auto blendMeshQuery = world.query_builder<Components::BlendMeshInstances>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		blendMeshQuery.each([&](flecs::entity child, Components::BlendMeshInstances&) {
-			spdlog::info("[System] Processing descendant entity with BlendMeshInstances: {}", child.name().c_str());
-			});
-
-		// Lights
-		auto lightQuery = world.query_builder<Components::Light>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		lightQuery.each([&](flecs::entity child, Components::Light&) {
-			spdlog::info("[System] Processing descendant entity with Light: {}", child.name().c_str());
-			});
-
-		// Cameras
-		auto cameraQuery = world.query_builder<Components::Camera>()
-			.with(flecs::ChildOf, scene)
-			.cascade() // Only consider entities that inherit from the scene.
-			.build();
-		cameraQuery.each([&](flecs::entity child, const Components::Camera&) {
-			spdlog::info("[System] Processing descendant entity with Camera: {}", child.name().c_str());
-			});
-
-			});
+void EvaluateTransformationHierarchy(flecs::entity root, ManagerInterface* managers) {
+	const DirectX::XMMATRIX* matrix = &root.get<Components::Matrix>()->matrix;
+	if (!matrix) {
+		root.set<Components::Matrix>(DirectX::XMMatrixIdentity());
+		matrix = &root.get_mut<Components::Matrix>()->matrix;
+	}
+	IterateTree(root, *matrix, managers);
 }
 
 void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshManager* meshManager, ObjectManager* objectManager, IndirectCommandBufferManager* indirectCommandManager, CameraManager* cameraManager) {
@@ -188,5 +127,22 @@ void RegisterAllSystems(flecs::world& world,  LightManager* lightManager, MeshMa
 			drawStats->numBlendDraws -= drawCountBlend;
 		}
 		spdlog::info("[System] DrawInfo removed from RenderableObject: {}", e.name().c_str());
+			});
+
+	world.system<Components::Position, Components::Rotation, Components::Scale, Components::Matrix>()
+		.each([](flecs::entity e, Components::Position& pos, Components::Rotation& rot, Components::Scale& scale, Components::Matrix& out_matrix) {
+		// Compute local matrix from Position, Rotation and Scale.
+		XMMATRIX local = XMMatrixScalingFromVector(scale.scale) *
+			XMMatrixRotationQuaternion(rot.rot) *
+			XMMatrixTranslationFromVector(pos.pos);
+
+		// Check for parent relationship; if present, get parent's global matrix.
+		auto parent = e.parent();  // flecs provides parent() if you use child_of
+		if (parent.is_valid() && parent.has<Components::Matrix>()) {
+			auto parent_matrix = parent.get<Components::Matrix>()->matrix;
+			out_matrix.matrix = local * parent_matrix;
+		} else {
+			out_matrix.matrix = local;
+		}
 			});
 }

@@ -49,6 +49,7 @@
 #include "ECSManager.h"
 #include "ECSSystems.h"
 #include "IndirectCommandBufferManager.h"
+#include "MathUtils.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -521,16 +522,19 @@ void DX12Renderer::Update(double elapsedSeconds) {
 		CreateRenderGraph();
     }
 
-    currentScene->GetCamera()->transform.applyMovement(movementState, elapsedSeconds);
-    currentScene->GetCamera()->transform.rotatePitchYaw(verticalAngle, horizontalAngle);
+	Components::Position& cameraPosition = *currentScene->GetPrimaryCamera().get_mut<Components::Position>();
+	Components::Rotation& cameraRotation = *currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
+	ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
+	RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+
     //spdlog::info("horizontal angle: {}", horizontalAngle);
     //spdlog::info("vertical angle: {}", verticalAngle);
     verticalAngle = 0;
     horizontalAngle = 0;
 
     currentScene->Update();
-    auto camera = currentScene->GetCamera();
-	unsigned int cameraIndex = camera->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+    auto camera = currentScene->GetPrimaryCamera();
+    unsigned int cameraIndex = camera.get<Components::CameraBufferView>()->index;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
 

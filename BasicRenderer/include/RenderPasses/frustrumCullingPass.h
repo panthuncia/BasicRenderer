@@ -77,7 +77,7 @@ public:
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int numCascades = getNumDirectionalLightCascades();
-
+		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::CameraBufferView>()->index;
 		// opaque buffer
 		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
@@ -93,7 +93,7 @@ public:
 			bufferIndices[MaxDrawIndex] = numOpaqueDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
@@ -125,7 +125,7 @@ public:
 			bufferIndices[MaxDrawIndex] = numAlphaTestDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 		
 			commandList->Dispatch(numThreadGroups, 1, 1);
@@ -158,7 +158,7 @@ public:
 			bufferIndices[MaxDrawIndex] = numBlendDraws - 1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
