@@ -21,3 +21,10 @@ void RotatePitchYaw(Components::Rotation& rot, float pitch, float yaw) {
     rot.rot = XMQuaternionMultiply(rot.rot, yawQuat); // Multiplication order is important. If this is reversed, you get a solidworks-style camera
     rot.rot = XMQuaternionMultiply(pitchQuat, rot.rot);
 }
+
+XMVECTOR GetForwardFromMatrix(const DirectX::XMMATRIX& matrix) {
+    return -XMVector3Normalize(matrix.r[2]);
+}
+XMVECTOR GetUpFromMatrix(const DirectX::XMMATRIX& matrix) {
+    return -XMVector3Normalize(matrix.r[1]);
+}

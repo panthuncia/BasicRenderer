@@ -307,9 +307,7 @@ DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR c
     return mat;
 }
 
-void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPlane, std::array<XMVECTOR, 8>& corners) {
-    float fovY = camera.GetFOV();
-    float aspectRatio = camera.GetAspect();
+void CalculateFrustumCorners(const DirectX::XMVECTOR& camPos, const DirectX::XMVECTOR& camDir, const DirectX::XMVECTOR& camUp, float nearPlane, float farPlane, float fovY, float aspectRatio, std::array<XMVECTOR, 8>& corners) {
 
     // Calculate the dimensions of the near and far planes
     float tanHalfFovy = tanf(fovY / 2.0f);
@@ -319,10 +317,6 @@ void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPla
     float farHeight = 2.0f * tanHalfFovy * farPlane;
     float farWidth = farHeight * aspectRatio;
 
-    // Get camera basis vectors
-    const XMVECTOR& camPos = camera.transform.pos;
-    XMVECTOR camDir = camera.transform.GetForward();
-    XMVECTOR camUp = camera.transform.GetUp();
     XMVECTOR camRight = XMVector3Cross(camDir, camUp);
 
     XMVECTOR nearCenter = camPos + camDir * nearPlane;
@@ -341,14 +335,14 @@ void CalculateFrustumCorners(const Camera& camera, float nearPlane, float farPla
     corners[7] = farCenter - (camUp * (farHeight / 2.0f)) + (camRight * (farWidth / 2.0f)); // Bottom-right
 }
 
-std::vector<Cascade> setupCascades(int numCascades, XMVECTOR& lightDir, Camera& camera, const std::vector<float>& cascadeSplits) {
+std::vector<Cascade> setupCascades(int numCascades, const XMVECTOR& lightDir, const DirectX::XMVECTOR& camPos, const DirectX::XMVECTOR& camDir, const DirectX::XMVECTOR& camUp, float nearPlane, float fovY, float aspectRatio, const std::vector<float>& cascadeSplits) {
     std::vector<Cascade> cascades;
 
     XMVECTOR lightPos = XMVectorZero(); // For directional lights, position can be zero
     XMVECTOR lightUp = XMVectorSet(0, 1, 0, 0);
     XMMATRIX lightViewMatrix = XMMatrixLookToRH(lightPos, lightDir, lightUp);
 
-    float prevSplitDist = camera.GetNear();
+    float prevSplitDist = nearPlane;
 
     for (int i = 0; i < numCascades; ++i)
     {
@@ -356,7 +350,7 @@ std::vector<Cascade> setupCascades(int numCascades, XMVECTOR& lightDir, Camera& 
 
         // Calculate frustum corners for the cascade
         std::array<XMVECTOR, 8> frustumCornersWorld;
-        CalculateFrustumCorners(camera, prevSplitDist, splitDist, frustumCornersWorld);
+        CalculateFrustumCorners(camPos, camDir, camUp, prevSplitDist, splitDist, fovY, aspectRatio, frustumCornersWorld);
 
         // Transform corners to light space
         std::array<XMVECTOR, 8> frustumCornersLightSpace;

@@ -5,7 +5,6 @@
 #include "Interfaces/ISceneNodeObserver.h"
 #include "Utilities.h"
 #include "SettingsManager.h"
-#include "Camera.h"
 #include "SceneNode.h"
 #include "ShadowMaps.h"
 #include "DynamicResource.h"
@@ -14,6 +13,7 @@
 #include "DeletionManager.h"
 #include "CameraManager.h"
 #include "SortedUnsignedIntBuffer.h"
+#include "MathUtils.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -38,7 +38,7 @@ LightManager::~LightManager() {
 	deletionManager.MarkForDelete(m_directionalViewInfo);
 }
 
-Components::LightViewInfo LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId, Camera* currentCamera) {
+Components::LightViewInfo LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
 
 	auto lightBufferView = m_lightBuffer->Add(*lightInfo);
 	auto lightIndex = lightBufferView->GetOffset() / sizeof(LightInfo);
@@ -46,7 +46,7 @@ Components::LightViewInfo LightManager::AddLight(LightInfo* lightInfo, uint64_t 
 
 	Components::LightViewInfo viewInfo = {};
 	if (lightInfo->shadowCaster) {
-		viewInfo = CreateLightViewInfo(*lightInfo, entityId, currentCamera);
+		viewInfo = CreateLightViewInfo(*lightInfo, entityId);
 		auto shadowMap = getCurrentShadowMapResourceGroup();
 		if (shadowMap != nullptr) {
 			auto map = shadowMap->AddMap(lightInfo, getShadowResolution());
@@ -81,7 +81,7 @@ unsigned int LightManager::GetNumLights() {
 	return m_activeLightIndices->Size();
 }
 
-Components::LightViewInfo LightManager::CreateLightViewInfo(LightInfo info, uint64_t entityId, Camera* camera) {
+Components::LightViewInfo LightManager::CreateLightViewInfo(LightInfo info, uint64_t entityId) {
 
     auto projectionMatrix = GetProjectionMatrixForLight(info);
 
@@ -129,7 +129,16 @@ Components::LightViewInfo LightManager::CreateLightViewInfo(LightInfo info, uint
 	case Components::LightType::Directional: {
 		auto numCascades = getNumDirectionalLightCascades();
 		viewInfo.viewInfoBufferIndex = m_directionalViewInfo->Size() / numCascades;
-		auto cascades = setupCascades(numCascades, info.dirWorldSpace, *camera, getDirectionalLightCascadeSplits());
+
+		if (!m_currentCamera.is_valid()) {
+			spdlog::warn("Camera must be provided for directional light shadow mapping");
+			return viewInfo;
+		}
+
+		auto camera = m_currentCamera.get<Components::Camera>();
+		auto& matrix = m_currentCamera.get<Components::Matrix>()->matrix;
+		auto posFloats = GetGlobalPositionFromMatrix(matrix);
+		auto cascades = setupCascades(numCascades, info.dirWorldSpace, XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera->zNear, camera->fov, camera->aspect, getDirectionalLightCascadeSplits());
 		std::vector<std::shared_ptr<BufferView>> views;
 		for (int i = 0; i < numCascades; i++) {
 			CameraInfo info = {};
@@ -193,13 +202,16 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		break;
 	}
 	case Components::LightType::Directional: {
-		if (m_currentCamera == nullptr) {
+		if (!m_currentCamera.is_valid()) {
 			spdlog::warn("Camera must be provided for directional light shadow mapping");
 			return;
 		}
 		auto numCascades = getNumDirectionalLightCascades();
 		auto dir = XMVector3Normalize(lightMatrix->matrix.r[2]);
-		auto cascades = setupCascades(numCascades, dir, *m_currentCamera, getDirectionalLightCascadeSplits());
+		auto camera = m_currentCamera.get<Components::Camera>();
+		auto& matrix = m_currentCamera.get<Components::Matrix>()->matrix;
+		auto posFloats = GetGlobalPositionFromMatrix(matrix);
+		auto cascades = setupCascades(numCascades, lightInfo->lightInfo.dirWorldSpace, XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera->zNear, camera->fov, camera->aspect, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
@@ -250,12 +262,8 @@ void LightManager::RemoveLightViewInfo(flecs::entity light) {
 	}
 }
 
-void LightManager::SetCurrentCamera(Camera* camera) {
-	if (m_currentCamera != nullptr) {
-		//m_currentCamera->RemoveObserver(this);
-	}
+void LightManager::SetCurrentCamera(flecs::entity camera) {
 	m_currentCamera = camera;
-	//m_currentCamera->AddObserver(this);
 }
 
 void LightManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {

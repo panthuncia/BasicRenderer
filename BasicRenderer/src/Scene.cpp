@@ -299,7 +299,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 
 	auto& world = ECSManager::GetInstance().GetWorld();
 	auto entity = world.entity()
-		.set<Components::Camera>({ info })
+		.set<Components::Camera>({ fov, aspect, zNear, zFar, info })
 		.set<Components::Position>({ 0, 0, 0 })
 		.set<Components::Rotation>({ 0, 0, 0 })
 		.set<Components::Scale>({ 1, 1, 1 })

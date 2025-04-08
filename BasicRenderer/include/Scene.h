@@ -8,7 +8,6 @@
 #include <ctime>  
 #include <functional>
 #include <flecs.h>
-#include "Camera.h"
 #include "Skeleton.h"
 #include "LightManager.h"
 #include "MeshData.h"

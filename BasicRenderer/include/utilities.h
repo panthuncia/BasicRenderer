@@ -6,16 +6,21 @@
 #include <wrl/client.h>
 #include <d3dcompiler.h>
 #include <stb_image.h>
+#include <array>
+#include <memory>
+#include <DirectXMath.h>
+#include <unordered_map>
 
 #include "MeshData.h"
-#include "Camera.h"
 #include "DescriptorHeap.h"
 #include "HeapIndexInfo.h"
+#include "buffers.h"
 
 class DescriptorHeap;
 class RenderableObject;
 class Mesh;
 class Sampler;
+class Texture;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -51,14 +56,14 @@ void CombineMaps(std::unordered_map<T1, T2>& dest, const std::unordered_map<T1, 
 
 struct Cascade {
     float size;
-    XMMATRIX orthoMatrix;
-    XMMATRIX viewMatrix;
+    DirectX::XMMATRIX orthoMatrix;
+    DirectX::XMMATRIX viewMatrix;
 	std::array<ClippingPlane, 6> frustumPlanes;
 };
 
 DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center);
 
-std::vector<Cascade> setupCascades(int numCascades, XMVECTOR& lightDir, Camera& camera, const std::vector<float>& cascadeSplits);
+std::vector<Cascade> setupCascades(int numCascades, const XMVECTOR& lightDir, const DirectX::XMVECTOR& camPos, const DirectX::XMVECTOR& camDir, const DirectX::XMVECTOR& camUp, float nearPlane, float fovY, float aspectRatio, const std::vector<float>& cascadeSplits);
 
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda = 0.9f);
 

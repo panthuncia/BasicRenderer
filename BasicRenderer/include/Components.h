@@ -84,6 +84,12 @@ namespace Components {
 	}; // Represents a light source
 
 	struct Camera {
+		Camera() = default;
+		Camera(float aspect, float fov, float zNear, float zFar, const CameraInfo& info) : info(info) {}
+		float aspect;
+		float fov;
+		float zNear;
+		float zFar;
 		CameraInfo info;
 	};
 
