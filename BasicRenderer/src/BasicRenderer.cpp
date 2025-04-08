@@ -16,7 +16,6 @@
 #include "Mesh.h"
 #include "DX12Renderer.h"
 #include "Utilities.h"
-#include "RenderableObject.h"
 #include "PSOManager.h"
 #include "Material.h"
 #include "Menu.h"

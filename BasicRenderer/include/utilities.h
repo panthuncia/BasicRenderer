@@ -29,7 +29,6 @@ void print(Args... args) {
     (std::cout << ... << args) << std::endl;
 }
 
-std::shared_ptr<RenderableObject> RenderableFromData(const std::vector<const MeshData*>& meshData, std::wstring name);
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);

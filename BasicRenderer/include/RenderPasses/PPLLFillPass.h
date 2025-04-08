@@ -6,7 +6,6 @@
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "RenderableObject.h"
 #include "mesh.h"
 #include "Scene.h"
 #include "Material.h"
@@ -16,6 +15,7 @@
 #include "ResourceHandles.h"
 #include "UploadManager.h"
 #include "ECSManager.h"
+#include "MeshInstance.h"
 
 class PPLLFillPass : public RenderPass {
 public:

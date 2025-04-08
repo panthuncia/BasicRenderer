@@ -24,7 +24,6 @@
 #include "Vertex.h"
 #include "MaterialFlags.h"
 #include "Mesh.h"
-#include "RenderableObject.h"
 #include "Components.h"
 
 void ThrowIfFailed(HRESULT hr) {
@@ -33,55 +32,6 @@ void ThrowIfFailed(HRESULT hr) {
         std::cerr << "HRESULT failed with error code: " << std::hex << hr << std::endl;
         throw std::runtime_error("HRESULT failed");
     }
-}
-
-std::shared_ptr<RenderableObject> RenderableFromData(const std::vector<const MeshData*>& meshData, std::wstring name) {
-    std::vector<std::shared_ptr<Mesh>> meshes;
-
-    for (auto geom : meshData) {
-        bool hasTexcoords = !geom->texcoords.empty();
-        bool hasJoints = !geom->joints.empty() && !geom->weights.empty();
-        unsigned int materialFlags = geom->material->m_materialData.materialFlags;
-
-        std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
-		unsigned int numVertices = geom->positions.size() / 3;
-		                    // position,        normal,            texcoord
-        uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
-		rawData->resize(numVertices * vertexSize);
-
-        for (unsigned int i = 0; i < numVertices; i++) {
-            size_t baseOffset = i * vertexSize;
-			memcpy(rawData->data() + baseOffset, &geom->positions[i * 3], sizeof(XMFLOAT3));
-            size_t offset = sizeof(XMFLOAT3);
-			memcpy(rawData->data() + baseOffset + offset, &geom->normals[i * 3], sizeof(XMFLOAT3));
-			offset += sizeof(XMFLOAT3);
-			if (hasTexcoords) {
-				memcpy(rawData->data() + baseOffset + offset, &geom->texcoords[i * 2], sizeof(XMFLOAT2));
-				offset += sizeof(XMFLOAT2);
-			}
-        }
-		                                  // position,       normal            joints,           weights
-		unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)  + sizeof(XMUINT4) + sizeof(XMFLOAT4);
-        std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
-        if (hasJoints) {
-			skinningData->resize(numVertices * skinningVertexSize);
-			for (unsigned int i = 0; i < numVertices; i++) {
-				size_t baseOffset = i * skinningVertexSize;
-				memcpy(skinningData->data() + baseOffset, &geom->positions[i * 3], sizeof(XMFLOAT3));
-                size_t offset = sizeof(XMFLOAT3);
-				memcpy(skinningData->data() + baseOffset + offset, &geom->normals[i * 3], sizeof(XMFLOAT3));
-				offset += sizeof(XMFLOAT3);
-				memcpy(skinningData->data() + baseOffset + offset, &geom->joints[i * 4], sizeof(XMUINT4));
-				offset += sizeof(XMUINT4);
-				memcpy(skinningData->data() + baseOffset + offset, &geom->weights[i * 4], sizeof(XMFLOAT4));
-			}
-        }
-
-        std::shared_ptr<Mesh> mesh = Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, geom->indices, geom->material, geom->flags);
-        meshes.push_back(std::move(mesh));
-    }
-
-    return std::make_shared<RenderableObject>(name, meshes);
 }
 
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {

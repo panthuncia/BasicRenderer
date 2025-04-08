@@ -4,9 +4,9 @@
 
 #include "ResourceManager.h"
 #include "LazyDynamicStructuredBuffer.h"
-#include "RenderableObject.h"
 #include "DynamicBuffer.h"
 #include "SortedUnsignedIntBuffer.h"
+#include "MeshInstance.h"
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();

@@ -16,7 +16,6 @@
 #include "utilities.h"
 #include "OutputTypes.h"
 #include "SceneNode.h"
-#include "RenderableObject.h"
 #include "ModelLoader.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -444,20 +443,20 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
         }
 
         // Display information specific to RenderableObject, if the node is of that type.
-        auto renderableObject = dynamic_cast<RenderableObject*>(node);
-        if (renderableObject) {
-            // Display meshes
-            ImGui::Text("Opaque Meshes: %d", renderableObject->GetOpaqueMeshes().size());
-            ImGui::Text("Transparent Meshes: %d", renderableObject->GetAlphaTestMeshes().size());
-			ImGui::Text("Blend Meshes: %d", renderableObject->GetBlendMeshes().size());
+   //     auto renderableObject = dynamic_cast<RenderableObject*>(node);
+   //     if (renderableObject) {
+   //         // Display meshes
+   //         ImGui::Text("Opaque Meshes: %d", renderableObject->GetOpaqueMeshes().size());
+   //         ImGui::Text("Transparent Meshes: %d", renderableObject->GetAlphaTestMeshes().size());
+			//ImGui::Text("Blend Meshes: %d", renderableObject->GetBlendMeshes().size());
 
-            if (renderableObject->HasSkinned()) {
-                ImGui::Text("Has Skinned: Yes");
-            }
-            else {
-                ImGui::Text("Has Skinned: No");
-            }
-        }
+   //         if (renderableObject->HasSkinned()) {
+   //             ImGui::Text("Has Skinned: Yes");
+   //         }
+   //         else {
+   //             ImGui::Text("Has Skinned: No");
+   //         }
+   //     }
 
         // Recursively display child nodes
         for (const auto& childPair : node->children) {
