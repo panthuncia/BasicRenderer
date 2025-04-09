@@ -155,6 +155,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
+	world.add<Components::GlobalMeshLibrary>();
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
 	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
@@ -162,6 +163,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_hierarchyQuery =
         world.query_builder<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
         .term_at(3).parent().cascade()
+        .cached().cache_kind(flecs::QueryCacheAll)
         .build();
 }
 
@@ -680,6 +682,11 @@ void DX12Renderer::Cleanup() {
 	StallPipeline();
     CloseHandle(m_frameFenceEvent);
 	currentScene = nullptr;
+	m_pIndirectCommandBufferManager.reset();
+	m_pCameraManager.reset();
+	m_pLightManager.reset();
+	m_pMeshManager.reset();
+	m_pObjectManager.reset();
     DeletionManager::GetInstance().Cleanup();
 }
 
@@ -1002,7 +1009,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddRenderPass(skyboxPass, skyboxPassParameters);
     }
 
-    newGraph->AddRenderPass(forwardPass, forwardPassParameters);
+    //newGraph->AddRenderPass(forwardPass, forwardPassParameters);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;

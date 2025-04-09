@@ -19,7 +19,11 @@
 #include "MeshInstance.h"
 #include "AnimationController.h"
 
+std::atomic<uint64_t> Scene::globalSceneCount = 0;
+
 Scene::Scene(){
+	m_sceneID = globalSceneCount.fetch_add(1, std::memory_order_relaxed);
+
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
@@ -83,8 +87,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 
 
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
-		auto viewInfo = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
-		entity.set<Components::LightViewInfo>({ viewInfo });
+		ActivateLight(entity);
 	}
 
 	float aspect = 1.0f;
@@ -119,6 +122,113 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 	return entity;
 }
 
+void Scene::ActivateRenderable(flecs::entity& entity) {
+	auto& world = ECSManager::GetInstance().GetWorld();
+
+	auto buffer = entity.get<Components::RenderableObject>()->perObjectCB;
+	auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
+	auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
+	auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+
+	auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
+	auto drawStats = world.get_mut<Components::DrawStats>();
+
+	if (opaqueMeshInstances) {
+		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
+		for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
+			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Opaque);
+			}
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+		}
+		drawStats->numOpaqueDraws += opaqueMeshInstances->meshInstances.size();
+		drawStats->numDrawsInScene += opaqueMeshInstances->meshInstances.size();
+	}
+	if (alphaTestMeshInstances) {
+		//e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
+		for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
+			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::AlphaTest);
+			}
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+		}
+		drawStats->numAlphaTestDraws += alphaTestMeshInstances->meshInstances.size();
+		drawStats->numDrawsInScene += alphaTestMeshInstances->meshInstances.size();
+	}
+	if (blendMeshInstances) {
+		//e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
+		for (auto& meshInstance : blendMeshInstances->meshInstances) {
+			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Blend);
+			}
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+		}
+		drawStats->numBlendDraws += blendMeshInstances->meshInstances.size();
+		drawStats->numDrawsInScene += blendMeshInstances->meshInstances.size();
+	}
+
+	auto drawInfo = m_managerInterface.GetObjectManager()->AddObject(buffer, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
+	entity.set<Components::ObjectDrawInfo>(drawInfo);
+	
+	if (drawInfo.opaque.has_value()) {
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Opaque, drawStats->numOpaqueDraws);
+	}
+	if (drawInfo.alphaTest.has_value()) {
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, drawStats->numAlphaTestDraws);
+	}
+	if (drawInfo.blend.has_value()) {
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Blend, drawStats->numBlendDraws);
+	}
+}
+
+void Scene::ActivateLight(flecs::entity& entity) {
+	auto lightInfo = entity.get_mut<Components::Light>()->lightInfo;
+	auto viewInfo = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
+	entity.set<Components::LightViewInfo>({ viewInfo });
+}
+
+void Scene::ActivateCamera(flecs::entity& entity) {
+	auto cameraInfo = entity.get_mut<Components::Camera>()->info;
+	auto cameraBufferView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
+	entity.set<Components::CameraBufferView>({cameraBufferView, cameraBufferView->GetOffset()/sizeof(CameraInfo)});
+}
+
+void Scene::ProcessEntitySkins() {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	auto query = world.query_builder<>().with<Components::RenderableObject>().build();
+	query.each([&](flecs::entity entity) {
+		auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
+		auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
+		auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+
+		if (opaqueMeshInstances) {
+			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
+				if (meshInstance->GetMesh()->HasBaseSkin() && !meshInstance->HasSkin()) {
+					meshInstance->SetSkeleton(meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton());
+				}
+			}
+		}
+		if (alphaTestMeshInstances) {
+			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
+				if (meshInstance->GetMesh()->HasBaseSkin() && !meshInstance->HasSkin()) {
+					auto baseSkeleton = meshInstance->GetMesh()->GetBaseSkin();
+					meshInstance->SetSkeleton(baseSkeleton->CopySkeleton());
+				}
+			}
+		}
+		if (blendMeshInstances) {
+			for (auto& meshInstance : blendMeshInstances->meshInstances) {
+				if (meshInstance->GetMesh()->HasBaseSkin() && !meshInstance->HasSkin()) {
+					meshInstance->SetSkeleton(meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton());
+				}
+			}
+		}
+		});
+}
+
 flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
 	auto& world = ECSManager::GetInstance().GetWorld();
 	flecs::entity entity = world.entity();
@@ -141,6 +251,7 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		case BlendState::BLEND_STATE_OPAQUE: {
 			opaqueMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
 			if (skinned) {
+				opaqueMeshInstances.meshInstances.back()->SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
 				entity.add<Components::OpaqueSkinned>();
 			}
 			break;
@@ -148,6 +259,7 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		case BlendState::BLEND_STATE_MASK: {
 			alphaTestMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
 			if (skinned) {
+				alphaTestMeshInstances.meshInstances.back()->SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
 				entity.add<Components::AlphaTestSkinned>();
 			}
 			break;
@@ -155,6 +267,7 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		case BlendState::BLEND_STATE_BLEND: {
 			blendMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
 			if (skinned) {
+				blendMeshInstances.meshInstances.back()->SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
 				entity.add<Components::BlendSkinned>();
 			}
 			break;
@@ -173,56 +286,7 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 
 	// If scene is active, add object & manage meshes
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
-		auto drawInfo = m_managerInterface.GetObjectManager()->AddObject(buffer, &opaqueMeshInstances, &alphaTestMeshInstances, &blendMeshInstances);
-		entity.set<Components::ObjectDrawInfo>(drawInfo);
-
-		auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
-		auto drawStats = world.get_mut<Components::DrawStats>();
-		if (drawInfo.opaque.has_value()) {
-			//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
-			for (auto& meshInstance : opaqueMeshInstances.meshInstances) {
-				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-					m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Opaque);
-				}
-				m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
-			}
-			drawStats->numOpaqueDraws += drawInfo.opaque.value().indices.size();
-			drawStats->numDrawsInScene += drawInfo.opaque.value().indices.size();
-		}
-		if (drawInfo.alphaTest.has_value()) {
-			//e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
-			for (auto& meshInstance : alphaTestMeshInstances.meshInstances) {
-				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-					m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::AlphaTest);
-				}
-				m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
-			}
-			drawStats->numAlphaTestDraws += drawInfo.alphaTest.value().indices.size();
-			drawStats->numDrawsInScene += drawInfo.alphaTest.value().indices.size();
-		}
-		if (drawInfo.blend.has_value()) {
-			//e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
-			for (auto& meshInstance : blendMeshInstances.meshInstances) {
-				if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-					globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-					m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Blend);
-				}
-				m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
-			}
-			drawStats->numBlendDraws += drawInfo.blend.value().indices.size();
-			drawStats->numDrawsInScene += drawInfo.blend.value().indices.size();
-		}
-		if (drawInfo.opaque.has_value()) {
-			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Opaque, drawStats->numOpaqueDraws);
-		}
-		if (drawInfo.alphaTest.has_value()) {
-			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, drawStats->numAlphaTestDraws);
-		}
-		if (drawInfo.blend.has_value()) {
-			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Blend, drawStats->numBlendDraws);
-		}
+		ActivateRenderable(entity);
 	}
 
     return entity;
@@ -365,8 +429,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		.child_of(ECSSceneRoot);
 
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
-		auto cameraBufferView = m_managerInterface.GetCameraManager()->AddCamera(info);
-		entity.set<Components::CameraBufferView>({cameraBufferView, cameraBufferView->GetOffset()/sizeof(CameraInfo)});
+		ActivateCamera(entity);
 	}
 
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
@@ -401,12 +464,46 @@ void Scene::PostUpdate() {
 }
 
 void Scene::AppendScene(Scene& scene) {
+	
 	auto root = scene.GetRoot();
+
+	if (root.has<Components::ActiveScene>()) {
+		return; // Scene already active, no need to process entities
+	}
+	else if (ECSSceneRoot.has<Components::ActiveScene>()) { // If this scene is active, activate the new scene
+		scene.Activate(m_managerInterface);
+	}
 	root.child_of(ECSSceneRoot);
+
 }
 
 void Scene::MakeResident() {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	world.defer_begin();
+	auto renderableQuery =world.query_builder<>()
+		.with<Components::RenderableObject>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	renderableQuery.each([&](flecs::entity entity) {
+		ActivateRenderable(entity);
+		});
 
+	auto camQuery = world.query_builder<>()
+		.with<Components::Camera>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	camQuery.each([&](flecs::entity entity) {
+		ActivateCamera(entity);
+		});
+
+	auto lightQuery = world.query_builder<>()
+		.with<Components::Light>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	lightQuery.each([&](flecs::entity entity) {
+		ActivateLight(entity);
+		});
+	world.defer_end();
 }
 
 void Scene::MakeNonResident() {

@@ -7,6 +7,7 @@
 #include <ctime>  
 #include <functional>
 #include <flecs.h>
+#include <atomic>
 #include "Skeleton.h"
 #include "LightManager.h"
 #include "MeshData.h"
@@ -35,9 +36,11 @@ public:
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
     std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
+    void ProcessEntitySkins();
 
 private:
-
+    static std::atomic<uint64_t> globalSceneCount;
+	uint64_t m_sceneID = 0;
     flecs::entity m_primaryCamera;
 
 	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;
@@ -64,5 +67,7 @@ private:
     void MakeResident();
 	void MakeNonResident();
     flecs::entity CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0);
-
+    void ActivateRenderable(flecs::entity& entity);
+	void ActivateLight(flecs::entity& entity);
+	void ActivateCamera(flecs::entity& entity);
 };

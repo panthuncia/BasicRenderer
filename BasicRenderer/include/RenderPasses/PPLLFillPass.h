@@ -50,7 +50,7 @@ public:
 			m_commandLists.push_back(commandList);
 		}
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().build();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {

@@ -753,5 +753,7 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
         }
 	}
 
+    scene->ProcessEntitySkins();
+
     return scene;
 }

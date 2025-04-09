@@ -33,7 +33,7 @@ public:
 			m_commandLists.push_back(commandList);
 		}
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().build();
+		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
 	}

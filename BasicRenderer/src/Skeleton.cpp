@@ -30,12 +30,13 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buff
 
 Skeleton::Skeleton(const Skeleton& other) {
 
-    std::unordered_map<uint64_t, uint64_t> boneMap;
+    std::unordered_map<uint64_t, uint64_t> oldBonesToNewBonesIDMap;
+	std::unordered_map<uint64_t, flecs::entity> oldBoneIDToNewBonesMap;
 	auto& ecs_world = ECSManager::GetInstance().GetWorld();
     // Clone each bone entity.
     for (auto& oldBone : other.m_bones) {
         // Create a new entity in the provided ECS world.
-        flecs::entity newBone = ecs_world.entity(oldBone.name().c_str());
+        flecs::entity newBone = ecs_world.entity();
 
         // Copy components (e.g., Transform) from oldBone to newBone.
 		newBone.set<Components::Rotation>({ oldBone.get<Components::Rotation>()->rot });
@@ -43,22 +44,25 @@ Skeleton::Skeleton(const Skeleton& other) {
 		newBone.set<Components::Scale>({ oldBone.get<Components::Scale>()->scale });
 		newBone.set<Components::Matrix>({ });
         newBone.set<AnimationController>({ *oldBone.get<AnimationController>() });
-        // Copy any additional bone-specific components here.
 
         // Save in mapping.
-        boneMap[oldBone.id()] = newBone.id();
+        oldBonesToNewBonesIDMap[oldBone.id()] = newBone.id();
+        oldBoneIDToNewBonesMap[oldBone.id()] = newBone;
         m_bones.push_back(newBone);
     }
 
     // Rebuild the hierarchy using flecs relationships.
     // For each old bone, if it had a parent, add the new bone as a child of the new parent.
     for (auto& oldBone : other.m_bones) {
-        flecs::entity newBone = ecs_world.entity(boneMap[oldBone]);
+        flecs::entity& newBone = oldBoneIDToNewBonesMap[oldBone.id()];
 
         flecs::entity oldParent = oldBone.parent();
-        if (oldParent.is_valid()) {
+        if (oldParent.is_valid() && oldBoneIDToNewBonesMap.contains(oldParent.id())) {
             // Add the new bone as a child of the new parent.
-            newBone.add(flecs::ChildOf, ecs_world.entity(boneMap[oldParent]));
+			auto& newParent = oldBoneIDToNewBonesMap[oldParent.id()];
+            if (newParent.is_valid()) {
+                newBone.child_of(newParent);
+            }
         }
         else {
             // This bone is a root
