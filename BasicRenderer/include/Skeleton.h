@@ -11,7 +11,7 @@ class Buffer;
 
 class Skeleton {
 public:
-	std::shared_ptr<Skeleton> CopySkeleton();
+	std::shared_ptr<Skeleton> CopySkeleton(bool retainIsBaseSkeleton = false);
     std::vector<flecs::entity> m_bones;
     std::vector<XMMATRIX> m_inverseBindMatrices;
     std::vector<float> m_boneTransforms;

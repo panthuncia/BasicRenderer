@@ -24,20 +24,20 @@ public:
     flecs::entity CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0);
 	flecs::entity CreateNodeECS(std::wstring name = L"");
 	flecs::entity CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name);
-    flecs::entity GetRoot();
+    flecs::entity GetRoot() const;
     void Update();
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
     flecs::entity& GetPrimaryCamera();
     void AddSkeleton(std::shared_ptr<Skeleton>);
     void PostUpdate();
-    flecs::entity AppendScene(std::shared_ptr<Scene> scene);
+    std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
     //LightManager& GetLightManager();
     void Activate(ManagerInterface managerInterface);
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
     std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
-    void ProcessEntitySkins();
-    std::shared_ptr<Scene> Clone();
+    void ProcessEntitySkins(bool overrideExistingSkins = false);
+    std::shared_ptr<Scene> Clone() const;
 
 private:
     static std::atomic<uint64_t> globalSceneCount;

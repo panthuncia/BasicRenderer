@@ -89,8 +89,10 @@ Skeleton::Skeleton(const Skeleton& other) {
     m_transformsBuffer->SetName(L"BoneTransforms");
 }
 
-std::shared_ptr<Skeleton> Skeleton::CopySkeleton() {
-	return std::make_shared<Skeleton>(*this);
+std::shared_ptr<Skeleton> Skeleton::CopySkeleton(bool retainIsBaseSkeleton) {
+	auto skeletonCopy = std::make_shared<Skeleton>(*this);
+	skeletonCopy->m_isBaseSkeleton = retainIsBaseSkeleton ? m_isBaseSkeleton : false;
+	return skeletonCopy;
 }
 
 Skeleton::~Skeleton() {
@@ -132,12 +134,6 @@ void Skeleton::SetAnimation(size_t index) {
 
 void Skeleton::UpdateTransforms() {
     for (size_t i = 0; i < m_bones.size(); ++i) {
-#if defined(_DEBUG)
-		if (!m_bones[i].has<Components::Matrix>()) {
-			spdlog::error("Bone {} does not have a Matrix component", m_bones[i].name().c_str());
-			continue;
-		}
-#endif
 		const Components::Matrix* transform = m_bones[i].get<Components::Matrix>();
         memcpy(&m_boneTransforms[i * 16], &transform->matrix, sizeof(XMMATRIX));
     }

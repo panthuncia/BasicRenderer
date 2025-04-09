@@ -562,6 +562,9 @@ static void buildAiNodeHierarchy(
     if (parent) {
 		entity.child_of(parent);
     }
+    else {
+		spdlog::warn("Node {} has no parent", nodeName);
+    }
     outNodes.push_back(entity);
 
 	nodeMap[nodeName] = entity;

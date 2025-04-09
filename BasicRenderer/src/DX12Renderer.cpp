@@ -163,8 +163,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
     m_hierarchyQuery =
         world.query_builder<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
+        .with<Components::Active>()
         .term_at(3).parent().cascade()
-        .with(flecs::Prefab).optional() // Scene roots are prefabs to simplify cloning
         .cached().cache_kind(flecs::QueryCacheAll)
         .build();
 }
@@ -528,6 +528,9 @@ void DX12Renderer::Update(double elapsedSeconds) {
 		CreateRenderGraph();
     }
 
+	auto& world = ECSManager::GetInstance().GetWorld();
+    world.progress();
+
 	Components::Position& cameraPosition = *currentScene->GetPrimaryCamera().get_mut<Components::Position>();
 	Components::Rotation& cameraRotation = *currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
 	ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
@@ -737,12 +740,14 @@ void DX12Renderer::Cleanup() {
     // Wait for all GPU frames to complete
 	StallPipeline();
     CloseHandle(m_frameFenceEvent);
-	currentScene = nullptr;
+    currentRenderGraph.reset();
+	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
 	m_pCameraManager.reset();
 	m_pLightManager.reset();
 	m_pMeshManager.reset();
 	m_pObjectManager.reset();
+	m_hierarchyQuery.destruct();
     DeletionManager::GetInstance().Cleanup();
 }
 

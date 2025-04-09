@@ -164,6 +164,8 @@ namespace Components {
 	struct AlphaTestSkinned {};
 	struct BlendSkinned {};
 
+	struct Active {}; // Represents an active entity in the scene
+
 	struct AnimationName {
 		AnimationName() = default;
 		AnimationName(std::string name) : name(std::move(name)) {}
