@@ -126,7 +126,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 void Scene::ActivateRenderable(flecs::entity& entity) {
 	auto& world = ECSManager::GetInstance().GetWorld();
 
-	auto buffer = entity.get<Components::RenderableObject>()->perObjectCB;
+	auto& buffer = entity.get_mut<Components::RenderableObject>()->perObjectCB;
 	auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
 	auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
 	auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
@@ -173,6 +173,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 
 	auto drawInfo = m_managerInterface.GetObjectManager()->AddObject(buffer, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
 	entity.set<Components::ObjectDrawInfo>(drawInfo);
+	buffer.normalMatrixBufferIndex = drawInfo.normalMatrixIndex;
 	
 	if (drawInfo.opaque.has_value()) {
 		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Opaque, drawStats->numOpaqueDraws);
