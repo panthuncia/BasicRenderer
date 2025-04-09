@@ -33,7 +33,7 @@ Scene::Scene(){
 
     //Initialize ECS scene
     auto& world = ECSManager::GetInstance().GetWorld();
-    ECSSceneRoot = world.entity().add<Components::SceneRoot>()
+    ECSSceneRoot = world.prefab().add<Components::SceneRoot>()
 		.set<Components::Position>({0, 0, 0})
 		.set<Components::Rotation>({0, 0, 0, 1})
 		.set<Components::Scale>({1, 1, 1})
@@ -452,18 +452,22 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
 void Scene::PostUpdate() {
 }
 
-void Scene::AppendScene(std::shared_ptr<Scene> scene) {
+flecs::entity Scene::AppendScene(std::shared_ptr<Scene> scene) {
 	
+	auto& world = ECSManager::GetInstance().GetWorld();
+
 	auto root = scene->GetRoot();
 
-	if (root.has<Components::ActiveScene>()) {
-		return; // Scene already active, no need to process entities
-	}
-	else if (ECSSceneRoot.has<Components::ActiveScene>()) { // If this scene is active, activate the new scene
+	//if (root.has<Components::ActiveScene>()) {
+	//	return; // Scene already active, no need to process entities
+	//}
+	root.child_of(ECSSceneRoot);
+	if (ECSSceneRoot.has<Components::ActiveScene>()) { // If this scene is active, activate the new scene
 		scene->Activate(m_managerInterface);
 	}
-	root.child_of(ECSSceneRoot);
 	m_childScenes.push_back(scene);
+
+	return root;
 }
 
 void Scene::MakeResident() {
@@ -506,6 +510,9 @@ Scene::~Scene() {
 void Scene::Activate(ManagerInterface managerInterface) {
 	m_managerInterface = managerInterface;
 	MakeResident();
+	//for (auto& child : m_childScenes) {
+	//	child->Activate(managerInterface);
+	//}
 }
 
 std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() {
@@ -518,4 +525,21 @@ std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraAlphaTest
 
 std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraBlendIndirectCommandBuffer() {
 	return m_pPrimaryCameraBlendIndirectCommandBuffer;
+}
+
+std::shared_ptr<Scene> Scene::Clone() {
+	auto newScene = std::make_shared<Scene>();
+	auto& world = ECSManager::GetInstance().GetWorld();
+	newScene->ECSSceneRoot = world.entity().is_a(ECSSceneRoot);
+	for (auto& childScene : m_childScenes) {
+		newScene->m_childScenes.push_back(childScene->Clone());
+	}
+	for (auto& skeleton : skeletons) {
+		if (!skeleton->IsBaseSkeleton()) {
+			continue;
+		}
+		newScene->skeletons.push_back(skeleton->CopySkeleton());
+	}
+	newScene->ProcessEntitySkins();
+	return newScene;
 }

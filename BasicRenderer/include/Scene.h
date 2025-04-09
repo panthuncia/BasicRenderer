@@ -30,13 +30,14 @@ public:
     flecs::entity& GetPrimaryCamera();
     void AddSkeleton(std::shared_ptr<Skeleton>);
     void PostUpdate();
-    void AppendScene(std::shared_ptr<Scene> scene);
+    flecs::entity AppendScene(std::shared_ptr<Scene> scene);
     //LightManager& GetLightManager();
     void Activate(ManagerInterface managerInterface);
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
     std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
     void ProcessEntitySkins();
+    std::shared_ptr<Scene> Clone();
 
 private:
     static std::atomic<uint64_t> globalSceneCount;
@@ -44,10 +45,8 @@ private:
     std::vector<std::shared_ptr<Scene>> m_childScenes;
     flecs::entity m_primaryCamera;
 
-	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;
 	std::unordered_map<uint64_t, flecs::entity> animatedEntitiesByID;
 	UINT numObjects = 0;
-	UINT nextNodeID = 0;
     std::vector<std::shared_ptr<Skeleton>> skeletons;
     std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
     std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();

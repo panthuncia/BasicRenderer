@@ -164,6 +164,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_hierarchyQuery =
         world.query_builder<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
         .term_at(3).parent().cascade()
+        .with(flecs::Prefab).optional() // Scene roots are prefabs to simplify cloning
         .cached().cache_kind(flecs::QueryCacheAll)
         .build();
 }
@@ -548,7 +549,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
             mOut.matrix = mOut.matrix * matrix->matrix;
         }
 
-        if (entity.has<Components::RenderableObject>()) {
+        if (entity.has<Components::RenderableObject>() && entity.has<Components::ObjectDrawInfo>()) {
             Components::RenderableObject* object = entity.get_mut<Components::RenderableObject>();
             Components::ObjectDrawInfo* drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
             auto& modelMatrix = object->perObjectCB.modelMatrix;
@@ -565,7 +566,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
             m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
         }
 
-        if (entity.has<Components::Camera>()) {
+        if (entity.has<Components::Camera>() && entity.has<Components::CameraBufferView>()) {
             auto inverseMatrix = XMMatrixInverse(nullptr, mOut.matrix);
 
             Components::Camera* camera = entity.get_mut<Components::Camera>();
