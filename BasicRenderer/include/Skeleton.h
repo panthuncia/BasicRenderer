@@ -34,9 +34,11 @@ public:
 	void DeleteAllAnimations();
 	void SetJoints(const std::vector<flecs::entity>& joints);
 	flecs::entity GetRoot() { return m_root; }
+	bool IsBaseSkeleton() { return m_isBaseSkeleton; }
 
 private:
     std::shared_ptr<Buffer> m_transformsBuffer;
     std::shared_ptr<Buffer> m_inverseBindMatricesBuffer;
 	flecs::entity m_root;
+	bool m_isBaseSkeleton = false;
 };

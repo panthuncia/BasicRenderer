@@ -51,6 +51,7 @@
 #include "IndirectCommandBufferManager.h"
 #include "MathUtils.h"
 #include "MovementState.h"
+#include "AnimationController.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -536,7 +537,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
     verticalAngle = 0;
     horizontalAngle = 0;
 
-    currentScene->Update(m_hierarchyQuery);
+    currentScene->Update();
 
     m_hierarchyQuery.each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
         XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);

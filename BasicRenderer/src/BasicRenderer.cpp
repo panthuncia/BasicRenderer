@@ -250,8 +250,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
     auto dragonScene = LoadModel("models/dragon.glb");
- //   dragonScene->GetRoot().transform.setLocalScale({5, 5, 5});
- //   dragonScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 0.0 });
+    dragonScene->GetRoot().set<Components::Scale>({5, 5, 5});
+    dragonScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 0.0 });
 	//dragonScene->GetRoot().m_name = L"dragonRoot";
 
     //auto tigerScene = LoadModel("models/tiger.glb");
@@ -269,8 +269,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//carScene->GetRoot().m_name = L"carRoot";
 
     auto mountainScene = LoadModel("models/terrain.glb");
-	//mountainScene->GetRoot().transform.setLocalScale({ 50.0, 50.0, 50.0 });
-	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
+	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
     //auto bistro = LoadModel("models/BistroExterior.fbx");
@@ -302,10 +302,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    renderer.GetCurrentScene()->AppendScene(*mountainScene);
+    renderer.GetCurrentScene()->AppendScene(mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
-    renderer.GetCurrentScene()->AppendScene(*dragonScene);
+    renderer.GetCurrentScene()->AppendScene(dragonScene);
     
 	for (int i = 0; i < 1; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);

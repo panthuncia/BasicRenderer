@@ -28,5 +28,5 @@ void MeshInstance::SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}
-	skeleton->SetAnimationSpeed(m_animationSpeed);
+	//skeleton->SetAnimationSpeed(m_animationSpeed);
 }

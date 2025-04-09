@@ -200,34 +200,61 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 void Scene::ProcessEntitySkins() {
 	auto& world = ECSManager::GetInstance().GetWorld();
 	auto query = world.query_builder<>().with<Components::RenderableObject>().build();
+	std::vector<std::shared_ptr<Skeleton>> skeletonsToAdd;
+	world.defer_begin();
 	query.each([&](flecs::entity entity) {
 		auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
 		auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
 		auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
 
 		if (opaqueMeshInstances) {
+			bool addSkin = false;
 			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
 				if (meshInstance->GetMesh()->HasBaseSkin() && !meshInstance->HasSkin()) {
-					meshInstance->SetSkeleton(meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton());
+					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
+					meshInstance->SetSkeleton(skeleton);
+					skeletonsToAdd.push_back(skeleton);
+					addSkin = true;
 				}
+			}
+			if (addSkin) {
+				entity.add<Components::OpaqueSkinned>();
 			}
 		}
 		if (alphaTestMeshInstances) {
+			bool addSkin = false;
 			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
 				if (meshInstance->GetMesh()->HasBaseSkin() && !meshInstance->HasSkin()) {
 					auto baseSkeleton = meshInstance->GetMesh()->GetBaseSkin();
-					meshInstance->SetSkeleton(baseSkeleton->CopySkeleton());
+					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
+					meshInstance->SetSkeleton(skeleton);
+					skeletonsToAdd.push_back(skeleton);
+					addSkin = true;
 				}
+			}
+			if (addSkin) {
+				entity.add<Components::AlphaTestSkinned>();
 			}
 		}
 		if (blendMeshInstances) {
+			bool addSkin = false;
 			for (auto& meshInstance : blendMeshInstances->meshInstances) {
 				if (meshInstance->GetMesh()->HasBaseSkin() && !meshInstance->HasSkin()) {
-					meshInstance->SetSkeleton(meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton());
+					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
+					meshInstance->SetSkeleton(skeleton);
+					skeletonsToAdd.push_back(skeleton);
+					addSkin = true;
 				}
+			}
+			if (addSkin) {
+				entity.add<Components::BlendSkinned>();
 			}
 		}
 		});
+	world.defer_end();
+	for (auto& skeleton : skeletonsToAdd) {
+		AddSkeleton(skeleton);
+	}
 }
 
 flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
@@ -253,7 +280,9 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		case BlendState::BLEND_STATE_OPAQUE: {
 			opaqueMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
 			if (skinned) {
-				opaqueMeshInstances.meshInstances.back()->SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
+				auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
+				opaqueMeshInstances.meshInstances.back()->SetSkeleton(skeleton);
+				AddSkeleton(skeleton);
 				entity.add<Components::OpaqueSkinned>();
 			}
 			break;
@@ -261,7 +290,9 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		case BlendState::BLEND_STATE_MASK: {
 			alphaTestMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
 			if (skinned) {
-				alphaTestMeshInstances.meshInstances.back()->SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
+				auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
+				alphaTestMeshInstances.meshInstances.back()->SetSkeleton(skeleton);
+				AddSkeleton(skeleton);
 				entity.add<Components::AlphaTestSkinned>();
 			}
 			break;
@@ -269,7 +300,9 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		case BlendState::BLEND_STATE_BLEND: {
 			blendMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
 			if (skinned) {
-				blendMeshInstances.meshInstances.back()->SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
+				auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
+				blendMeshInstances.meshInstances.back()->SetSkeleton(skeleton);
+				AddSkeleton(skeleton);
 				entity.add<Components::BlendSkinned>();
 			}
 			break;
@@ -298,7 +331,7 @@ flecs::entity Scene::CreateNodeECS(std::wstring name) {
 	auto& world = ECSManager::GetInstance().GetWorld();
 	flecs::entity entity = world.entity();
 	entity.child_of(ECSSceneRoot)
-		.set_name((ws2s(name)+"_"+std::to_string(entity.id())).c_str())
+		.set_name(ws2s(name).c_str())
 		.add<Components::SceneNode>()
 		.set<Components::Rotation>({ 0, 0, 0, 1 })
 		.set<Components::Position>({ 0, 0, 0 })
@@ -310,7 +343,7 @@ flecs::entity Scene::GetRoot() {
     return ECSSceneRoot;
 }
 
-void Scene::Update(flecs::query<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix> hierarchyQuery) {
+void Scene::Update() {
     auto currentTime = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
@@ -340,6 +373,10 @@ void Scene::Update(flecs::query<const Components::Position, const Components::Ro
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }
+
+	for (auto& scene : m_childScenes) {
+		scene->Update();
+	}
     PostUpdate();
 }
 
@@ -400,7 +437,7 @@ flecs::entity& Scene::GetPrimaryCamera() {
 
 void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
     skeletons.push_back(skeleton);
-    if (skeleton->animations.size() > 0) {
+    if (skeleton->animations.size() > 0 && !skeleton->IsBaseSkeleton()) {
         skeleton->SetAnimation(0);
         animatedSkeletons.push_back(skeleton);
     }
@@ -414,18 +451,18 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
 void Scene::PostUpdate() {
 }
 
-void Scene::AppendScene(Scene& scene) {
+void Scene::AppendScene(std::shared_ptr<Scene> scene) {
 	
-	auto root = scene.GetRoot();
+	auto root = scene->GetRoot();
 
 	if (root.has<Components::ActiveScene>()) {
 		return; // Scene already active, no need to process entities
 	}
 	else if (ECSSceneRoot.has<Components::ActiveScene>()) { // If this scene is active, activate the new scene
-		scene.Activate(m_managerInterface);
+		scene->Activate(m_managerInterface);
 	}
 	root.child_of(ECSSceneRoot);
-
+	m_childScenes.push_back(scene);
 }
 
 void Scene::MakeResident() {

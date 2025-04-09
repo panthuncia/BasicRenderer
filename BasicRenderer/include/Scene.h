@@ -25,12 +25,12 @@ public:
 	flecs::entity CreateNodeECS(std::wstring name = L"");
 	flecs::entity CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name);
     flecs::entity GetRoot();
-    void Update(flecs::query<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix> hierarchyQuery);
+    void Update();
     void SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
     flecs::entity& GetPrimaryCamera();
     void AddSkeleton(std::shared_ptr<Skeleton>);
     void PostUpdate();
-    void AppendScene(Scene& scene);
+    void AppendScene(std::shared_ptr<Scene> scene);
     //LightManager& GetLightManager();
     void Activate(ManagerInterface managerInterface);
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
@@ -41,6 +41,7 @@ public:
 private:
     static std::atomic<uint64_t> globalSceneCount;
 	uint64_t m_sceneID = 0;
+    std::vector<std::shared_ptr<Scene>> m_childScenes;
     flecs::entity m_primaryCamera;
 
 	std::unordered_map<UINT, std::shared_ptr<Mesh>> meshesByID;

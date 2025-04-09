@@ -18,6 +18,7 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XM
     m_inverseBindMatricesBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
 	m_inverseBindMatricesBuffer->SetName(L"InverseBindMatrices");
     UploadManager::GetInstance().UploadData(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesBuffer.get(), 0);
+	m_isBaseSkeleton = true;
 }
 
 Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buffer> inverseBindMatrices)
@@ -35,15 +36,16 @@ Skeleton::Skeleton(const Skeleton& other) {
 	auto& ecs_world = ECSManager::GetInstance().GetWorld();
     // Clone each bone entity.
     for (auto& oldBone : other.m_bones) {
-        // Create a new entity in the provided ECS world.
         flecs::entity newBone = ecs_world.entity();
 
-        // Copy components (e.g., Transform) from oldBone to newBone.
+        // Copy components from oldBone to newBone.
 		newBone.set<Components::Rotation>({ oldBone.get<Components::Rotation>()->rot });
 		newBone.set<Components::Position>({ oldBone.get<Components::Position>()->pos });
 		newBone.set<Components::Scale>({ oldBone.get<Components::Scale>()->scale });
-		newBone.set<Components::Matrix>({ });
-        newBone.set<AnimationController>({ *oldBone.get<AnimationController>() });
+		newBone.set<Components::Matrix>(DirectX::XMMatrixIdentity());
+		auto animationController = oldBone.get<AnimationController>();
+        newBone.set<AnimationController>(*animationController);
+		newBone.set<Components::AnimationName>({ oldBone.get<Components::AnimationName>()->name });
 
         // Save in mapping.
         oldBonesToNewBonesIDMap[oldBone.id()] = newBone.id();
@@ -51,8 +53,8 @@ Skeleton::Skeleton(const Skeleton& other) {
         m_bones.push_back(newBone);
     }
 
-    // Rebuild the hierarchy using flecs relationships.
-    // For each old bone, if it had a parent, add the new bone as a child of the new parent.
+    // Rebuild the hierarchy
+    // For each old bone, if it had a parent, add the new bone as a child of the new parent
     for (auto& oldBone : other.m_bones) {
         flecs::entity& newBone = oldBoneIDToNewBonesMap[oldBone.id()];
 
@@ -74,7 +76,7 @@ Skeleton::Skeleton(const Skeleton& other) {
     for (auto& anim : other.animations) {
         auto newAnim = std::make_shared<Animation>(anim->name);
         for (auto& pair : anim->nodesMap) {
-            newAnim->nodesMap[pair.first] = pair.second; // Assuming the AnimationClip can be reused or cloned.
+            newAnim->nodesMap[pair.first] = pair.second;
         }
         AddAnimation(newAnim);
     }
@@ -115,21 +117,28 @@ void Skeleton::SetAnimation(size_t index) {
 
     auto& animation = animations[index];
     for (auto& node : m_bones) {
-        if (animation->nodesMap.find(node.name().c_str()) != animation->nodesMap.end()) {
+		auto name = node.get<Components::AnimationName>();
+        if (animation->nodesMap.find(name->name.c_str()) != animation->nodesMap.end()) {
             AnimationController* controller = node.get_mut<AnimationController>();
 #ifdef _DEBUG
 			if (!controller) {
 				spdlog::warn("Skeleton node {} does not have an AnimationController component", node.name().c_str());
 			}
 #endif
-            controller->setAnimationClip(animation->nodesMap[node.name().c_str()]);
+            controller->setAnimationClip(animation->nodesMap[name->name.c_str()]);
         }
     }
 }
 
 void Skeleton::UpdateTransforms() {
     for (size_t i = 0; i < m_bones.size(); ++i) {
-		Components::Matrix* transform = m_bones[i].get_mut<Components::Matrix>();
+#if defined(_DEBUG)
+		if (!m_bones[i].has<Components::Matrix>()) {
+			spdlog::error("Bone {} does not have a Matrix component", m_bones[i].name().c_str());
+			continue;
+		}
+#endif
+		const Components::Matrix* transform = m_bones[i].get<Components::Matrix>();
         memcpy(&m_boneTransforms[i * 16], &transform->matrix, sizeof(XMMATRIX));
     }
     UploadManager::GetInstance().UploadData(m_boneTransforms.data(), m_bones.size() * sizeof(XMMATRIX), m_transformsBuffer.get(), 0);

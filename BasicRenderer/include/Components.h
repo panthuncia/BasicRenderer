@@ -7,6 +7,7 @@
 #include <vector>
 #include <array>
 #include <optional>
+#include <string>
 
 #include "BufferView.h"
 #include "buffers.h"
@@ -162,6 +163,12 @@ namespace Components {
 	struct OpaqueSkinned {};
 	struct AlphaTestSkinned {};
 	struct BlendSkinned {};
+
+	struct AnimationName {
+		AnimationName() = default;
+		AnimationName(std::string name) : name(std::move(name)) {}
+		std::string name;
+	}; // The name a bone is referenced by in animations that affect it
 
 	struct OpaqueIndirectDrawInfo {
 		OpaqueIndirectDrawInfo() = default;

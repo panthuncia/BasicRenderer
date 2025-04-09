@@ -684,6 +684,7 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
         if (!boneNode.has<AnimationController>()) {
 			// Create a new AnimationController for this bone
 			boneNode.add<AnimationController>();
+			boneNode.set<Components::AnimationName>({ boneName });
 		}
         jointNodes.push_back(boneNode);
     }
