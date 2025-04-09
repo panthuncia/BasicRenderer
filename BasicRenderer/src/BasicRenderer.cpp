@@ -268,7 +268,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
  //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 	//carScene->GetRoot().m_name = L"carRoot";
 
-    //auto mountainScene = LoadModel("models/terrain.glb");
+    auto mountainScene = LoadModel("models/terrain.glb");
 	//mountainScene->GetRoot().transform.setLocalScale({ 50.0, 50.0, 50.0 });
 	//mountainScene->GetRoot().transform.setLocalPosition({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
@@ -302,7 +302,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    //renderer.GetCurrentScene()->AppendScene(*mountainScene);
+    renderer.GetCurrentScene()->AppendScene(*mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     renderer.GetCurrentScene()->AppendScene(*dragonScene);
@@ -335,7 +335,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//DeletionManager::GetInstance().MarkForDelete(sponza);
 
 	//carScene.reset();
-	dragonScene.reset();
+	//dragonScene.reset();
 	//tigerScene.reset();
 	//mountainScene.reset();
 	//phoenixScene.reset();
