@@ -37,23 +37,26 @@ LightManager::~LightManager() {
 	deletionManager.MarkForDelete(m_directionalViewInfo);
 }
 
-Components::LightViewInfo LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
+std::pair<Components::LightViewInfo, std::optional<Components::ShadowMap>> LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
 
 	auto lightBufferView = m_lightBuffer->Add(*lightInfo);
 	auto lightIndex = lightBufferView->GetOffset() / sizeof(LightInfo);
 	m_activeLightIndices->Insert(lightIndex);
 
 	Components::LightViewInfo viewInfo = {};
+	std::optional<Components::ShadowMap> shadowMapComponent = std::nullopt;
 	if (lightInfo->shadowCaster) {
 		viewInfo = CreateLightViewInfo(*lightInfo, entityId);
-		auto shadowMap = getCurrentShadowMapResourceGroup();
-		if (shadowMap != nullptr) {
-			auto map = shadowMap->AddMap(lightInfo, getShadowResolution());
+		auto shadowMaps = getCurrentShadowMapResourceGroup();
+		if (shadowMaps != nullptr) {
+			auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
+			shadowMapComponent = Components::ShadowMap(map);
 		}
 	}
 	viewInfo.lightBufferIndex = lightIndex;
 	viewInfo.lightBufferView = lightBufferView;
-	return viewInfo;
+	
+	return { viewInfo, shadowMapComponent };
 }
 
 void LightManager::RemoveLight(LightInfo* light) {

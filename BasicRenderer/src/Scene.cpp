@@ -192,8 +192,11 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 
 void Scene::ActivateLight(flecs::entity& entity) {
 	auto lightInfo = entity.get_mut<Components::Light>()->lightInfo;
-	auto viewInfo = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
-	entity.set<Components::LightViewInfo>({ viewInfo });
+	auto viewInfoAndMap = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
+	entity.set<Components::LightViewInfo>({ viewInfoAndMap.first });
+	if (viewInfoAndMap.second.has_value()) {
+		entity.set<Components::ShadowMap>({ viewInfoAndMap.second.value() });
+	}
 }
 
 void Scene::ActivateCamera(flecs::entity& entity) {

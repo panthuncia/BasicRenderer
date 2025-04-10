@@ -144,6 +144,10 @@ namespace Components {
 		uint64_t viewInfoBufferIndex;
 	};
 	struct ShadowMap {
+		ShadowMap() = default;
+		ShadowMap(std::shared_ptr<Texture> shadowMap)
+			: shadowMap(shadowMap) {
+		}
 		std::shared_ptr<Texture> shadowMap;
 	};
 

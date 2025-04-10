@@ -23,7 +23,7 @@ public:
 		return std::unique_ptr<LightManager>(new LightManager());
 	}
     ~LightManager();
-    Components::LightViewInfo AddLight(LightInfo* lightInfo, uint64_t entityId);
+    std::pair<Components::LightViewInfo, std::optional<Components::ShadowMap>> AddLight(LightInfo* lightInfo, uint64_t entityId);
     void RemoveLight(LightInfo* light);
     unsigned int GetLightBufferDescriptorIndex();
 	unsigned int GetActiveLightIndicesBufferDescriptorIndex();
