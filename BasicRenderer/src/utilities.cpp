@@ -285,57 +285,182 @@ void CalculateFrustumCorners(const DirectX::XMVECTOR& camPos, const DirectX::XMV
     corners[7] = farCenter - (camUp * (farHeight / 2.0f)) + (camRight * (farWidth / 2.0f)); // Bottom-right
 }
 
-std::vector<Cascade> setupCascades(int numCascades, const XMVECTOR& lightDir, const DirectX::XMVECTOR& camPos, const DirectX::XMVECTOR& camDir, const DirectX::XMVECTOR& camUp, float nearPlane, float fovY, float aspectRatio, const std::vector<float>& cascadeSplits) {
+std::vector<Cascade> setupCascades(
+    int numCascades, 
+    const DirectX::XMVECTOR& lightDir, 
+    const DirectX::XMVECTOR& camPos, 
+    const DirectX::XMVECTOR& camDir, 
+    const DirectX::XMVECTOR& camUp, 
+    float nearPlane, 
+    float fovY, 
+    float aspectRatio, 
+    const std::vector<float>& cascadeSplits)
+{
+    using namespace DirectX;
     std::vector<Cascade> cascades;
+    cascades.reserve(numCascades);
 
-    XMVECTOR lightPos = XMVectorZero(); // For directional lights, position can be zero
-    XMVECTOR lightUp = XMVectorSet(0, 1, 0, 0);
-    XMMATRIX lightViewMatrix = XMMatrixLookToRH(lightPos, lightDir, lightUp);
+    // Compute the camera's right vector
+    XMVECTOR camRight = XMVector3Normalize(XMVector3Cross(XMVector3Normalize(camDir), XMVector3Normalize(camUp)));
 
-    float prevSplitDist = nearPlane;
-
+    // Loop over cascades.
     for (int i = 0; i < numCascades; ++i)
     {
-        float splitDist = cascadeSplits[i];
+        // Determine the near and far distances for this cascade
+        float cascadeNear = (i == 0) ? nearPlane : cascadeSplits[i - 1];
+        float cascadeFar  = cascadeSplits[i];
 
-        // Calculate frustum corners for the cascade
-        std::array<XMVECTOR, 8> frustumCornersWorld;
-        CalculateFrustumCorners(camPos, camDir, camUp, prevSplitDist, splitDist, fovY, aspectRatio, frustumCornersWorld);
+        // Compute the center of the near and far planes
+        XMVECTOR nearCenter = camPos + camDir * cascadeNear;
+        XMVECTOR farCenter  = camPos + camDir * cascadeFar;
 
-        // Transform corners to light space
-        std::array<XMVECTOR, 8> frustumCornersLightSpace;
+        // Calculate half-heights and half-widths at the near and far planes
+        float tanFov = tanf(fovY * 0.5f);
+        float nearHeight = tanFov * cascadeNear;
+        float nearWidth  = nearHeight * aspectRatio;
+        float farHeight  = tanFov * cascadeFar;
+        float farWidth   = farHeight * aspectRatio;
+
+        // Compute the 8 corners of the cascade frustum in world space
+        // Near plane corners
+        XMVECTOR nearTopLeft     = nearCenter + camUp * nearHeight - camRight * nearWidth;
+        XMVECTOR nearTopRight    = nearCenter + camUp * nearHeight + camRight * nearWidth;
+        XMVECTOR nearBottomLeft  = nearCenter - camUp * nearHeight - camRight * nearWidth;
+        XMVECTOR nearBottomRight = nearCenter - camUp * nearHeight + camRight * nearWidth;
+        // Far plane corners
+        XMVECTOR farTopLeft     = farCenter + camUp * farHeight - camRight * farWidth;
+        XMVECTOR farTopRight    = farCenter + camUp * farHeight + camRight * farWidth;
+        XMVECTOR farBottomLeft  = farCenter - camUp * farHeight - camRight * farWidth;
+        XMVECTOR farBottomRight = farCenter - camUp * farHeight + camRight * farWidth;
+
+        // Collect all eight frustum corners
+        XMVECTOR frustumCorners[8] = {
+            nearTopLeft, nearTopRight, nearBottomLeft, nearBottomRight,
+            farTopLeft, farTopRight, farBottomLeft, farBottomRight
+        };
+
+        // Compute the centroid of the frustum corners
+        XMVECTOR frustumCenter = XMVectorZero();
         for (int j = 0; j < 8; ++j)
         {
-            frustumCornersLightSpace[j] = XMVector3Transform(frustumCornersWorld[j], lightViewMatrix);
+            frustumCenter = XMVectorAdd(frustumCenter, frustumCorners[j]);
+        }
+        frustumCenter = XMVectorScale(frustumCenter, 1.0f / 8.0f);
+
+        // Determine the radius of a sphere that bounds all frustum corners
+        float radius = 0.0f;
+        for (int j = 0; j < 8; ++j)
+        {
+            float distance = XMVectorGetX(XMVector3Length(XMVectorSubtract(frustumCorners[j], frustumCenter)));
+            radius = std::max(radius, distance);
+        }
+        // Quantize the radius to reduce shimmering
+        radius = ceilf(radius * 16.0f) / 16.0f;
+
+        // Position the light so that it covers the cascade bounding sphere
+        // The light position is shifted back along the light direction
+        XMVECTOR lightPos = frustumCenter - lightDir * radius * 2.0f;
+        // Choose a suitable "up" vector for the light (avoid colinearity with the light direction)
+        XMVECTOR lightUp = (fabs(XMVectorGetY(lightDir)) > 0.99f) ? XMVectorSet(0, 0, -1, 0) : XMVectorSet(0, 1, 0, 0);
+        XMMATRIX lightView = XMMatrixLookAtRH(lightPos, frustumCenter, lightUp);
+
+        // Transform frustum corners into light space
+        XMVECTOR lightSpaceCorners[8];
+        for (int j = 0; j < 8; ++j)
+        {
+            lightSpaceCorners[j] = XMVector3TransformCoord(frustumCorners[j], lightView);
         }
 
-        // Compute the bounding box
-        XMVECTOR minPoint = frustumCornersLightSpace[0];
-        XMVECTOR maxPoint = frustumCornersLightSpace[0];
-
+        // Compute the axis-aligned bounding box in light space
+        XMVECTOR mins = lightSpaceCorners[0];
+        XMVECTOR maxs = lightSpaceCorners[0];
         for (int j = 1; j < 8; ++j)
         {
-            minPoint = XMVectorMin(minPoint, frustumCornersLightSpace[j]);
-            maxPoint = XMVectorMax(maxPoint, frustumCornersLightSpace[j]);
+            mins = XMVectorMin(mins, lightSpaceCorners[j]);
+            maxs = XMVectorMax(maxs, lightSpaceCorners[j]);
+        }
+        // Extract the bounds
+        float l = XMVectorGetX(mins);
+        float r = XMVectorGetX(maxs);
+        float b = XMVectorGetY(mins);
+        float t = XMVectorGetY(maxs);
+        float n = -XMVectorGetZ(maxs); // near
+        float f = -XMVectorGetZ(mins); // far
+
+        XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(l, r, b, t, n, f);
+
+        // Prepare the cascade.
+        Cascade cascade;
+        cascade.size = radius * 2.0f;
+        cascade.viewMatrix = lightView;
+        cascade.orthoMatrix = lightOrtho;
+
+        // Combine view and projection matrices for plane extraction
+        XMMATRIX comboMatrix = XMMatrixMultiply(lightView, lightOrtho);
+
+        // Helper lambda to extract one clipping plane from the combined matrix
+        auto ExtractPlane = [&comboMatrix](int planeIndex) -> ClippingPlane {
+            // Store the combined matrix into a float4x4 structure
+            XMFLOAT4X4 m;
+            XMStoreFloat4x4(&m, comboMatrix);
+            XMVECTOR planeVec;
+            // 0: left, 1: right, 2: bottom, 3: top, 4: near, 5: far
+            switch (planeIndex) {
+            case 0: // left
+                planeVec = XMVectorSet(m._14 + m._11,
+                    m._24 + m._21,
+                    m._34 + m._31,
+                    m._44 + m._41);
+                break;
+            case 1: // right
+                planeVec = XMVectorSet(m._14 - m._11,
+                    m._24 - m._21,
+                    m._34 - m._31,
+                    m._44 - m._41);
+                break;
+            case 2: // bottom
+                planeVec = XMVectorSet(m._14 + m._12,
+                    m._24 + m._22,
+                    m._34 + m._32,
+                    m._44 + m._42);
+                break;
+            case 3: // top
+                planeVec = XMVectorSet(m._14 - m._12,
+                    m._24 - m._22,
+                    m._34 - m._32,
+                    m._44 - m._42);
+                break;
+            case 4: // near
+                planeVec = XMVectorSet(m._13,
+                    m._23,
+                    m._33,
+                    m._43);
+                break;
+            case 5: // far
+                planeVec = XMVectorSet(m._14 - m._13,
+                    m._24 - m._23,
+                    m._34 - m._33,
+                    m._44 - m._43);
+                break;
+            default:
+                planeVec = XMVectorZero();
+                break;
+            }
+            // Normalize the plane
+            planeVec = XMPlaneNormalize(planeVec);
+            ClippingPlane result;
+            XMStoreFloat4(&result.plane, planeVec);
+            return result;
+            };
+
+        // Extract all six clipping planes
+        for (int p = 0; p < 6; ++p)
+        {
+            cascade.frustumPlanes[p] = ExtractPlane(p);
         }
 
-        float minX = XMVectorGetX(minPoint);
-        float maxX = XMVectorGetX(maxPoint);
-        float minY = XMVectorGetY(minPoint);
-        float maxY = XMVectorGetY(maxPoint);
-        float minZ = XMVectorGetZ(minPoint);
-        float maxZ = XMVectorGetZ(maxPoint);
-
-        // TODO: Figure out why the cascades are kinda broken. Hack by making them thicc for now.
-        XMMATRIX orthoMatrix = XMMatrixOrthographicOffCenterRH(minX, maxX, minY, maxY, minZ - 100.0f, maxZ + 100.0f);
-
-		auto clippingPlanes = GetFrustumPlanesOrthographic(minX, maxX, maxY, minY, minZ - 100.0f, maxZ + 100.0f);
-
-        cascades.push_back({ splitDist, orthoMatrix, lightViewMatrix, clippingPlanes });
-
-        prevSplitDist = splitDist;
+        cascades.push_back(cascade);
     }
-
     return cascades;
 }
 

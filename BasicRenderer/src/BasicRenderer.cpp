@@ -259,8 +259,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
-    auto phoenixScene = LoadModel("models/phoenix.glb");
-    phoenixScene->GetRoot().set<Components::Scale>({ 0.05, 0.05, 0.05 });
+    //auto phoenixScene = LoadModel("models/phoenix.glb");
+    //phoenixScene->GetRoot().set<Components::Scale>({ 0.05, 0.05, 0.05 });
     //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
     //auto carScene = LoadModel("models/porche.glb");
@@ -268,9 +268,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
  //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 	//carScene->GetRoot().m_name = L"carRoot";
 
- //   auto mountainScene = LoadModel("models/terrain.glb");
-	//mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-	//mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+    auto mountainScene = LoadModel("models/terrain.glb");
+	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
     //auto bistro = LoadModel("models/BistroExterior.fbx");
@@ -305,6 +305,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.SetCurrentScene(baseScene);
     //mountainScene->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
@@ -320,7 +321,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         tigerScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
-    renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
     //auto root = renderer.GetCurrentScene()->AppendScene(carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
@@ -383,7 +384,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
-	renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
+	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
+    renderer.SetDebugTexture(light.get<Components::ShadowMap>()->shadowMap);
 
     MSG msg = {};
     unsigned int frameIndex = 0;

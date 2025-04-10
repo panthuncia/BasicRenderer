@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
+
 #include "buffers.h"
 #include "Interfaces/ISceneNodeObserver.h"
 #include "DynamicResource.h"
@@ -17,13 +20,19 @@ class IndirectCommandBufferManager;
 class CameraManager;
 class SortedUnsignedIntBuffer;
 
+struct AddLightReturn {
+	Components::LightViewInfo lightViewInfo;
+	std::optional<Components::ShadowMap> shadowMap;
+	std::optional<Components::FrustrumPlanes> frustrumPlanes;
+};
+
 class LightManager {
 public:
 	static std::unique_ptr<LightManager> CreateUnique() {
 		return std::unique_ptr<LightManager>(new LightManager());
 	}
     ~LightManager();
-    std::pair<Components::LightViewInfo, std::optional<Components::ShadowMap>> AddLight(LightInfo* lightInfo, uint64_t entityId);
+    AddLightReturn AddLight(LightInfo* lightInfo, uint64_t entityId);
     void RemoveLight(LightInfo* light);
     unsigned int GetLightBufferDescriptorIndex();
 	unsigned int GetActiveLightIndicesBufferDescriptorIndex();
@@ -34,7 +43,8 @@ public:
     void SetCurrentCamera(flecs::entity camera);
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 	void SetCameraManager(CameraManager* cameraManager);
-
+	void UpdateLightBufferView(BufferView* view, LightInfo& data);
+    void UpdateLightViewInfo(flecs::entity light);
 
 private:
     LightManager();
@@ -59,7 +69,14 @@ private:
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
     CameraManager* m_pCameraManager = nullptr;
 
-    Components::LightViewInfo CreateLightViewInfo(LightInfo info, uint64_t entityId);
-    void UpdateLightViewInfo(flecs::entity light);
+	std::mutex m_lightUpdateMutex;
+
+    std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+        CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId);
+	std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+		CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId);
+	std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+		CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t entityId);
+
 	void RemoveLightViewInfo(flecs::entity light);
 };

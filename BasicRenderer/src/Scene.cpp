@@ -192,10 +192,16 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 
 void Scene::ActivateLight(flecs::entity& entity) {
 	auto lightInfo = entity.get_mut<Components::Light>()->lightInfo;
-	auto viewInfoAndMap = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
-	entity.set<Components::LightViewInfo>({ viewInfoAndMap.first });
-	if (viewInfoAndMap.second.has_value()) {
-		entity.set<Components::ShadowMap>({ viewInfoAndMap.second.value() });
+	AddLightReturn addInfo = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
+	entity.set<Components::LightViewInfo>({ addInfo.lightViewInfo });
+	if (addInfo.shadowMap.has_value()) {
+		entity.set<Components::ShadowMap>({ addInfo.shadowMap.value() });
+		lightInfo.shadowMapIndex = addInfo.shadowMap.value().shadowMap->GetBuffer()->GetSRVInfo().index;
+		lightInfo.shadowSamplerIndex = addInfo.shadowMap.value().shadowMap->GetSamplerDescriptorIndex();
+		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), lightInfo);
+	}
+	if (addInfo.frustrumPlanes.has_value()) {
+		entity.set<Components::FrustrumPlanes>({ addInfo.frustrumPlanes.value() });
 	}
 }
 
@@ -441,8 +447,14 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	info.clippingPlanes[5] = planes[5];
 
 	auto& world = ECSManager::GetInstance().GetWorld();
+	Components::Camera camera = {};
+	camera.fov = fov;
+	camera.aspect = aspect;
+	camera.zNear = zNear;
+	camera.zFar = zFar;
+	camera.info = info;
 	auto entity = world.entity()
-		.set<Components::Camera>({ fov, aspect, zNear, zFar, info })
+		.set<Components::Camera>(camera)
 		.set<Components::Position>({ 0, 0, 0 })
 		.set<Components::Rotation>({ 0, 0, 0 })
 		.set<Components::Scale>({ 1, 1, 1 })

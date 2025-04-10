@@ -151,6 +151,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pObjectManager = ObjectManager::CreateUnique();
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pCameraManager = CameraManager::CreateUnique();
+	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
+	m_pLightManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Also for indirect command buffers
 
 	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get());
 
@@ -214,6 +216,11 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
                 1.0f);
             XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
             light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
+            if (light->lightInfo.shadowCaster) {
+				const Components::LightViewInfo* viewInfo = entity.get<Components::LightViewInfo>();
+				m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo->lightBufferView.get(), light->lightInfo);
+				m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
+            }
         }
 
             });
@@ -1139,8 +1146,12 @@ void DX12Renderer::CreateRenderGraph() {
 	ResolvePassParameters.shaderResources.push_back(PPLLBuffer);
 	newGraph->AddRenderPass(ResolvePass, ResolvePassParameters);
 
-	//auto debugPass = std::make_shared<DebugRenderPass>();
-    //newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+	auto debugPass = std::make_shared<DebugRenderPass>();
+	if (m_currentDebugTexture != nullptr) {
+		debugPass->SetTexture(m_currentDebugTexture.get());
+		debugPassParameters.shaderResources.push_back(m_shadowMaps);
+	}
+    newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
 
     if (getDrawBoundingSpheres()) {
         auto debugSpherePass = std::make_shared<DebugSpherePass>();
@@ -1290,15 +1301,15 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	rebuildRenderGraph = true;
 }
 
-void DX12Renderer::SetDebugTexture(Texture* texture) {
-    if (currentRenderGraph == nullptr) {
-        spdlog::warn("Cannot set debug texture before render graph exists");
-        return;
-    }
+void DX12Renderer::SetDebugTexture(std::shared_ptr<Texture> texture) {
+    m_currentDebugTexture = texture;
+	if (currentRenderGraph == nullptr) {
+		return;
+	}
     auto pPass = currentRenderGraph->GetRenderPassByName("DebugPass");
     if (pPass != nullptr) {
         auto pDebugPass = std::dynamic_pointer_cast<DebugRenderPass>(pPass);
-        pDebugPass->SetTexture(texture);
+        pDebugPass->SetTexture(texture.get());
     }
     else {
         spdlog::warn("Debug pass does not exist");

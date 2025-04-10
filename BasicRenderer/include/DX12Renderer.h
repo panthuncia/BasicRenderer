@@ -48,7 +48,7 @@ public:
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
-    void SetDebugTexture(Texture* texture);
+    void SetDebugTexture(std::shared_ptr<Texture> texture);
     void SetEnvironment(std::string name);
     void SetSkybox(std::shared_ptr<Texture> texture);
 	void SetIrradiance(std::shared_ptr<Texture> texture);
@@ -101,6 +101,7 @@ private:
 	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
+	std::shared_ptr<Texture> m_currentDebugTexture = nullptr;
 
     // GPU resource managers
     std::unique_ptr<LightManager> m_pLightManager = nullptr;

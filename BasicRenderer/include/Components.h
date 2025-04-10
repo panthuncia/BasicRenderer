@@ -111,9 +111,9 @@ namespace Components {
 	struct FrustrumPlanes {
 		FrustrumPlanes() = default;
 		FrustrumPlanes(std::vector<std::array<ClippingPlane, 6>> frustumPlanes)
-			: m_frustumPlanes(std::move(frustumPlanes)) {
+			: frustumPlanes(std::move(frustumPlanes)) {
 		}
-		std::vector<std::array<ClippingPlane, 6>> m_frustumPlanes;
+		std::vector<std::array<ClippingPlane, 6>> frustumPlanes;
 	}; // A set of frustrum clipping planes
 
 	struct IndirectDrawInfo {
@@ -142,6 +142,7 @@ namespace Components {
 		std::shared_ptr<BufferView> lightBufferView;
 		uint64_t lightBufferIndex;
 		uint64_t viewInfoBufferIndex;
+		Matrix projectionMatrix;
 	};
 	struct ShadowMap {
 		ShadowMap() = default;
