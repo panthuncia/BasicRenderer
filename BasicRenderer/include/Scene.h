@@ -70,4 +70,6 @@ private:
     void ActivateRenderable(flecs::entity& entity);
 	void ActivateLight(flecs::entity& entity);
 	void ActivateCamera(flecs::entity& entity);
+
+	void ActivateAllAnimatedEntities();
 };

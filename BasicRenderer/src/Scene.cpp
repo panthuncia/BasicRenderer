@@ -452,10 +452,10 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         skeleton->SetAnimation(0);
         animatedSkeletons.push_back(skeleton);
     }
-	if (!skeleton->IsBaseSkeleton()) { // Base skeletons are orphaned and do not get ticked
-		auto entity = skeleton->GetRoot();
-		entity.child_of(ECSSceneRoot);
-	}
+	//if (!skeleton->IsBaseSkeleton()) { // Base skeletons are orphaned and do not get ticked
+	//	auto entity = skeleton->GetRoot();
+	//	entity.child_of(ECSSceneRoot);
+	//}
 	for (auto& node : skeleton->m_bones) {
 		animatedEntitiesByID[node.id()] = node;
 	}
@@ -534,15 +534,29 @@ void ActivateHierarchy(flecs::entity src) {
 	src.world().defer_end();
 }
 
+void Scene::ActivateAllAnimatedEntities() {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	world.defer_begin();
+	for (auto& e : animatedEntitiesByID) {
+		auto& entity = e.second;
+		entity.add<Components::Active>();
+	}
+	world.defer_end();
+	for (auto & child : m_childScenes) {
+		child->ActivateAllAnimatedEntities();
+	}
+}
+
 void Scene::Activate(ManagerInterface managerInterface) {
 	m_managerInterface = managerInterface;
 	auto& world = ECSManager::GetInstance().GetWorld();
 
 	ActivateHierarchy(ECSSceneRoot);
-	//for (auto& e : animatedEntitiesByID) {
-	//	auto& entity = e.second;
-	//	entity.add<Components::Active>();
-	//}
+	ActivateAllAnimatedEntities();
+	/*for (auto& e : animatedEntitiesByID) {
+		auto& entity = e.second;
+		entity.add<Components::Active>();
+	}*/
 	//ECSSceneRoot.add<Components::Active>();
 
 	MakeResident();
@@ -564,6 +578,9 @@ std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraBlendIndi
 }
 
 void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {
+	if (src.has<Components::SkeletonRoot>()) {
+		return; // Skip skeleton roots, they are handled separately
+	}
 	flecs::entity cloned = src.clone();
 
 	if (dst_parent.is_alive()) {
@@ -575,25 +592,28 @@ void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {
 		});
 }
 
-void CloneHierarchy(flecs::entity src, flecs::entity dst_parent = {}) {
+void CloneHierarchy(flecs::entity src, flecs::entity dst_parent) {
 	src.world().defer_begin();
-	recurse_hierarchy(src, dst_parent);
+	src.children([&](flecs::entity e) {
+		recurse_hierarchy(e, dst_parent);
+		});
 	src.world().defer_end();
 }
 
 std::shared_ptr<Scene> Scene::Clone() const {
 	auto newScene = std::make_shared<Scene>();
 	auto& world = ECSManager::GetInstance().GetWorld();
+	newScene->ECSSceneRoot = ECSSceneRoot.clone();
 	CloneHierarchy(ECSSceneRoot, newScene->ECSSceneRoot);
 	for (auto& childScene : m_childScenes) {
 		newScene->m_childScenes.push_back(childScene->Clone());
 	}
-	for (auto& skeleton : skeletons) {
-		if (!skeleton->IsBaseSkeleton()) {
-			continue;
-		}
-		newScene->skeletons.push_back(skeleton->CopySkeleton(true));
-	}
+	//for (auto& skeleton : skeletons) {
+	//	if (!skeleton->IsBaseSkeleton()) {
+	//		continue;
+	//	}
+	//	newScene->skeletons.push_back(skeleton->CopySkeleton(true));
+	//}
 	newScene->ProcessEntitySkins(true);
 	return newScene;
 }

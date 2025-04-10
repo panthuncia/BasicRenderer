@@ -41,4 +41,5 @@ private:
     std::shared_ptr<Buffer> m_inverseBindMatricesBuffer;
 	flecs::entity m_root;
 	bool m_isBaseSkeleton = false;
+    void FindRoot();
 };

@@ -163,8 +163,10 @@ namespace Components {
 	struct OpaqueSkinned {};
 	struct AlphaTestSkinned {};
 	struct BlendSkinned {};
+	struct SkeletonRoot {}; // Tags the root of a skeleton hierarchy
 
 	struct Active {}; // Represents an active entity in the scene
+	struct Animated {}; // Animated nodes are ticked separately
 
 	struct AnimationName {
 		AnimationName() = default;

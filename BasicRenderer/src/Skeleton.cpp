@@ -2,6 +2,8 @@
 #include <spdlog/spdlog.h>
 #include <unordered_map>
 #include <flecs.h>
+#include <unordered_set>
+
 #include "ResourceManager.h"
 #include "DeletionManager.h"
 #include "UploadManager.h"
@@ -19,6 +21,7 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XM
 	m_inverseBindMatricesBuffer->SetName(L"InverseBindMatrices");
     UploadManager::GetInstance().UploadData(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesBuffer.get(), 0);
 	m_isBaseSkeleton = true;
+    FindRoot();
 }
 
 Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buffer> inverseBindMatrices)
@@ -27,6 +30,7 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buff
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
     m_transformsBuffer->SetName(L"BoneTransforms");
+    FindRoot();
 }
 
 Skeleton::Skeleton(const Skeleton& other) {
@@ -69,6 +73,7 @@ Skeleton::Skeleton(const Skeleton& other) {
         else {
             // This bone is a root
             m_root = newBone;
+            m_root.add<Components::SkeletonRoot>();
         }
     }
 
@@ -87,6 +92,26 @@ Skeleton::Skeleton(const Skeleton& other) {
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(m_bones.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
     m_transformsBuffer->SetName(L"BoneTransforms");
+}
+
+void Skeleton::FindRoot() {
+    std::unordered_set<uint64_t> boneIDs;
+    for (auto& bone : m_bones) {
+		boneIDs.insert(bone.id());
+    }
+	for (auto& bone : m_bones) {
+		flecs::entity parent = bone.parent();
+		if (parent.is_valid() && boneIDs.contains(parent.id())) {
+			// This bone has a parent that is also in the list of bones
+			continue;
+		}
+		else {
+			// This bone is a root
+			m_root = bone;
+			m_root.add<Components::SkeletonRoot>();
+			return;
+		}
+	}
 }
 
 std::shared_ptr<Skeleton> Skeleton::CopySkeleton(bool retainIsBaseSkeleton) {

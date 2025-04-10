@@ -250,7 +250,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
     auto dragonScene = LoadModel("models/dragon.glb");
-    dragonScene->GetRoot().set<Components::Scale>({0.05, 0.05, 0.05});
+    dragonScene->GetRoot().set<Components::Scale>({0.02, 0.02, 0.02});
     dragonScene->GetRoot().set<Components::Position>({ 0.0, 0.1, 0.0 });
 	//dragonScene->GetRoot().m_name = L"dragonRoot";
 
@@ -302,7 +302,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    mountainScene->AppendScene(dragonScene);
+    mountainScene->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 

@@ -111,6 +111,7 @@ private:
 
 	ManagerInterface m_managerInterface;
     flecs::query<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix> m_hierarchyQuery;
+    flecs::query<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix> m_animatedHierarchyQuery;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
