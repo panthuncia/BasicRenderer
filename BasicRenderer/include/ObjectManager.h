@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <mutex>
 
 #include "LazyDynamicStructuredBuffer.h"
 #include "DynamicStructuredBuffer.h"
@@ -10,7 +11,6 @@
 #include "IndirectCommand.h"
 #include "Components.h"
 
-class RenderableObject;
 class BufferView;
 class DynamicBuffer;
 
@@ -58,7 +58,6 @@ public:
 
 private:
 	ObjectManager();
-	std::vector<std::shared_ptr<RenderableObject>> m_objects;
 	std::shared_ptr<DynamicBuffer> m_perObjectBuffers; // Per object constant buffer
 	std::shared_ptr<DynamicBuffer> m_masterIndirectCommandsBuffer; // Indirect draw command buffer
 	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>> m_normalMatrixBuffer; // Normal matrices for each object
@@ -66,4 +65,6 @@ private:
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeAlphaTestDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active alpha tested objects
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeBlendDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active blended objects
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshInstanceCB>> m_perMeshInstanceBuffers; // Indices into m_perObjectBuffers for each mesh instance in each object
+	std::mutex m_objectUpdateMutex; // Mutex for thread safety
+	std::mutex m_normalMatrixUpdateMutex; // Mutex for thread safety
 };

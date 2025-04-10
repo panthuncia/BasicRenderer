@@ -168,6 +168,13 @@ namespace Components {
 	struct Active {}; // Represents an active entity in the scene
 	struct Animated {}; // Animated nodes are ticked separately
 
+	struct Name {
+		Name() = default;
+		Name(std::string name) : name(std::move(name)) {}
+		Name(const char* name) : name(name) {}
+		std::string name;
+	}; // The name of the entity
+
 	struct AnimationName {
 		AnimationName() = default;
 		AnimationName(std::string name) : name(std::move(name)) {}

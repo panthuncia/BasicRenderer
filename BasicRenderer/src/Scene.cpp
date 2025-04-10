@@ -37,7 +37,8 @@ Scene::Scene(){
 		.set<Components::Position>({0, 0, 0})
 		.set<Components::Rotation>({0, 0, 0, 1})
 		.set<Components::Scale>({1, 1, 1})
-		.set<Components::Matrix>(DirectX::XMMatrixIdentity());
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>("Scene Root");
 	ECSSceneRoot = ECSSceneRoot;
     world.set_pipeline(world.get<Components::GameScene>()->pipeline);
 }
@@ -78,7 +79,8 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 		.set<Components::Light>({ type, color, XMFLOAT3(constantAttenuation, linearAttenuation, quadraticAttenuation), range, lightInfo })
 		.set<Components::Position>(position)
 		.set<Components::Scale>({ 1, 1, 1 })
-		.set<Components::Matrix>(DirectX::XMMatrixIdentity());
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>(ws2s(name));
 
 	if (direction.x != 0 || direction.y != 0 || direction.z || 0) {
 		entity.set<Components::Rotation>(QuaternionFromAxisAngle(direction));
@@ -295,7 +297,8 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		.set<Components::Rotation>({ 0, 0, 0, 1 })
 		.set<Components::Position>({ 0, 0, 0 })
 		.set<Components::Scale>({ 1, 1, 1 })
-		.set<Components::Matrix>(DirectX::XMMatrixIdentity());
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>(ws2s(name));
 	Components::OpaqueMeshInstances opaqueMeshInstances;
 	Components::AlphaTestMeshInstances alphaTestMeshInstances;
 	Components::BlendMeshInstances blendMeshInstances;
@@ -365,7 +368,8 @@ flecs::entity Scene::CreateNodeECS(std::wstring name) {
 		.set<Components::Rotation>({ 0, 0, 0, 1 })
 		.set<Components::Position>({ 0, 0, 0 })
 		.set<Components::Scale>({ 1, 1, 1 })
-		.set<Components::Matrix>(DirectX::XMMatrixIdentity());
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>(ws2s(name));
 	return entity;
 
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
@@ -382,10 +386,6 @@ void Scene::Update() {
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
 
-    //std::for_each(std::execution::par, animatedEntitiesByID.begin(), animatedEntitiesByID.end(), 
-    //    [elapsed = elapsed_seconds.count()](auto& node) {
-    //        node.second->animationController->update(elapsed);
-    //    });
 	for (auto& node : animatedEntitiesByID) {
 		auto& entity = node.second;
 		AnimationController* animationController = entity.get_mut<AnimationController>();
@@ -400,9 +400,6 @@ void Scene::Update() {
 		entity.set<Components::Position>(transform.pos);
 		entity.set<Components::Scale>(transform.scale);
 	}
-
-    //this->sceneRoot.Update();
-	//EvaluateTransformationHierarchy(ECSSceneRoot, &m_managerInterface);
 
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
@@ -428,7 +425,6 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		m_primaryCamera.remove<Components::CameraBufferView>();
     }
 
-    //pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
     CameraInfo info;
 	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
 	info.view = XMMatrixIdentity();
@@ -448,6 +444,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		.set<Components::Rotation>({ 0, 0, 0 })
 		.set<Components::Scale>({ 1, 1, 1 })
 		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>("Primary Camera")
 		.child_of(ECSSceneRoot);
 
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
@@ -476,10 +473,7 @@ void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
         skeleton->SetAnimation(0);
         animatedSkeletons.push_back(skeleton);
     }
-	//if (!skeleton->IsBaseSkeleton()) { // Base skeletons are orphaned and do not get ticked
-	//	auto entity = skeleton->GetRoot();
-	//	entity.child_of(ECSSceneRoot);
-	//}
+
 	for (auto& node : skeleton->m_bones) {
 		animatedEntitiesByID[node.id()] = node;
 	}
@@ -494,9 +488,6 @@ std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {
 
 	auto root = scene->GetRoot();
 
-	//if (root.has<Components::ActiveScene>()) {
-	//	return; // Scene already active, no need to process entities
-	//}
 	root.child_of(ECSSceneRoot);
 	if (ECSSceneRoot.has<Components::ActiveScene>()) { // If this scene is active, activate the new scene
 		scene->Activate(m_managerInterface);
@@ -536,7 +527,7 @@ void Scene::MakeResident() {
 }
 
 void Scene::MakeNonResident() {
-
+	// TODO
 }
 
 Scene::~Scene() {
@@ -577,16 +568,10 @@ void Scene::Activate(ManagerInterface managerInterface) {
 
 	ActivateHierarchy(ECSSceneRoot);
 	ActivateAllAnimatedEntities();
-	/*for (auto& e : animatedEntitiesByID) {
-		auto& entity = e.second;
-		entity.add<Components::Active>();
-	}*/
+
 	ECSSceneRoot.add<Components::Active>();
 
 	MakeResident();
-	//for (auto& child : m_childScenes) {
-	//	child->Activate(managerInterface);
-	//}
 }
 
 std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() {

@@ -16,5 +16,7 @@ void ECSManager::Initialize() {
 
 	// Creates REST server on default port (27750)
 	world.set<flecs::Rest>({});
+
+	world.set_threads(8);
 }
 

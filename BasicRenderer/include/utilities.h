@@ -17,7 +17,6 @@
 #include "buffers.h"
 
 class DescriptorHeap;
-class RenderableObject;
 class Mesh;
 class Sampler;
 class Texture;

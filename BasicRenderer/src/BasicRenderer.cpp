@@ -249,9 +249,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto baseScene = std::make_shared<Scene>();
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
-    //auto dragonScene = LoadModel("models/dragon.glb");
-    //dragonScene->GetRoot().set<Components::Scale>({0.02, 0.02, 0.02});
-    //dragonScene->GetRoot().set<Components::Position>({ 0.0, 0.1, 0.0 });
+    auto dragonScene = LoadModel("models/dragon.glb");
+    dragonScene->GetRoot().set<Components::Scale>({5, 5, 5});
+    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
 	//dragonScene->GetRoot().m_name = L"dragonRoot";
 
     auto tigerScene = LoadModel("models/tiger.glb");
@@ -259,8 +259,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
-    //auto phoenixScene = LoadModel("models/phoenix.glb");
-    //phoenixScene->GetRoot().transform.setLocalScale({ 0.05, 0.05, 0.05 });
+    auto phoenixScene = LoadModel("models/phoenix.glb");
+    phoenixScene->GetRoot().set<Components::Scale>({ 0.05, 0.05, 0.05 });
     //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
     //auto carScene = LoadModel("models/porche.glb");
@@ -304,13 +304,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.SetCurrentScene(baseScene);
     //mountainScene->AppendScene(dragonScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(mountainScene);
+    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 1; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
@@ -320,7 +320,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         tigerScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
-    //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
+    renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
     //auto root = renderer.GetCurrentScene()->AppendScene(carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);

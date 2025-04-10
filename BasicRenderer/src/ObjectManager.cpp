@@ -152,10 +152,12 @@ void ObjectManager::RemoveObject(const Components::ObjectDrawInfo* drawInfo) {
 }
 
 void ObjectManager::UpdatePerObjectBuffer(BufferView* view, PerObjectCB& data) {
+	std::lock_guard<std::mutex> lock(m_objectUpdateMutex);
 	m_perObjectBuffers->UpdateView(view, &data);
 }
 
 void ObjectManager::UpdateNormalMatrixBuffer(BufferView* view, void* data) {
+	std::lock_guard<std::mutex> lock(m_normalMatrixUpdateMutex);
 	m_normalMatrixBuffer->UpdateView(view, data);
 }
 

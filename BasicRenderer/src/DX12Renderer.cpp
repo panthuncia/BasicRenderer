@@ -161,12 +161,62 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
 	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
-    m_hierarchyQuery =
-        world.query_builder<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
+    m_hierarchySystem =
+        world.system<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
         .with<Components::Active>()
         .term_at(3).parent().cascade()
         .cached().cache_kind(flecs::QueryCacheAll)
-        .build();
+        .each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
+        XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
+        XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
+        XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
+        mOut.matrix = (matScale * matRotation * matTranslation);
+        if (matrix != nullptr) {
+            mOut.matrix = mOut.matrix * matrix->matrix;
+        }
+
+        if (entity.has<Components::RenderableObject>() && entity.has<Components::ObjectDrawInfo>()) {
+            Components::RenderableObject* object = entity.get_mut<Components::RenderableObject>();
+            Components::ObjectDrawInfo* drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
+            auto& modelMatrix = object->perObjectCB.modelMatrix;
+            modelMatrix = mOut.matrix;
+            m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo->perObjectCBView.get(), object->perObjectCB);
+
+            XMMATRIX upperLeft3x3 = XMMatrixSet(
+                XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
+                XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
+                XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
+            );
+            XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
+            m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
+        }
+
+        if (entity.has<Components::Camera>() && entity.has<Components::CameraBufferView>()) {
+            auto inverseMatrix = XMMatrixInverse(nullptr, mOut.matrix);
+
+            Components::Camera* camera = entity.get_mut<Components::Camera>();
+            camera->info.view = RemoveScalingFromMatrix(inverseMatrix);
+            camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
+
+            auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
+            camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
+
+            auto cameraBufferView = entity.get_mut<Components::CameraBufferView>();
+			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(cameraBufferView->view.get(), camera->info);
+        }
+
+        if (entity.has<Components::Light>()) {
+            Components::Light* light = entity.get_mut<Components::Light>();
+            light->lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
+                mOut.matrix.r[3].m128_f32[1],  // _42
+                mOut.matrix.r[3].m128_f32[2],  // _43
+                1.0f);
+            XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+            light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
+        }
+
+            });
 }
 
 void DX12Renderer::CreateGlobalResources() {
@@ -195,6 +245,9 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
+    settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
+        return currentScene->GetRoot();
+        });
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
         });
@@ -528,9 +581,6 @@ void DX12Renderer::Update(double elapsedSeconds) {
 		CreateRenderGraph();
     }
 
-	auto& world = ECSManager::GetInstance().GetWorld();
-    world.progress();
-
 	Components::Position& cameraPosition = *currentScene->GetPrimaryCamera().get_mut<Components::Position>();
 	Components::Rotation& cameraRotation = *currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
 	ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
@@ -543,58 +593,8 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     currentScene->Update();
 
-    m_hierarchyQuery.each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
-        XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
-        XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
-        XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
-        mOut.matrix = (matScale * matRotation * matTranslation);
-        if (matrix != nullptr) {
-            mOut.matrix = mOut.matrix * matrix->matrix;
-        }
-
-        if (entity.has<Components::RenderableObject>() && entity.has<Components::ObjectDrawInfo>()) {
-            Components::RenderableObject* object = entity.get_mut<Components::RenderableObject>();
-            Components::ObjectDrawInfo* drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
-            auto& modelMatrix = object->perObjectCB.modelMatrix;
-            modelMatrix = mOut.matrix;
-            m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo->perObjectCBView.get(), object->perObjectCB);
-
-            XMMATRIX upperLeft3x3 = XMMatrixSet(
-                XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
-                XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
-                XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
-                0.0f, 0.0f, 0.0f, 1.0f
-            );
-            XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
-            m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
-        }
-
-        if (entity.has<Components::Camera>() && entity.has<Components::CameraBufferView>()) {
-            auto inverseMatrix = XMMatrixInverse(nullptr, mOut.matrix);
-
-            Components::Camera* camera = entity.get_mut<Components::Camera>();
-            camera->info.view = RemoveScalingFromMatrix(inverseMatrix);
-            camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
-
-            auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
-            camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
-
-            auto cameraBufferView = entity.get_mut<Components::CameraBufferView>();
-            auto buffer = cameraBufferView->view->GetBuffer();
-            buffer->UpdateView(cameraBufferView->view.get(), &camera->info);
-        }
-
-        if (entity.has<Components::Light>()) {
-            Components::Light* light = entity.get_mut<Components::Light>();
-            light->lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
-                mOut.matrix.r[3].m128_f32[1],  // _42
-                mOut.matrix.r[3].m128_f32[2],  // _43
-                1.0f);
-            XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-            light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
-        }
-
-        });
+    auto& world = ECSManager::GetInstance().GetWorld();
+	world.progress();
 
     auto camera = currentScene->GetPrimaryCamera();
     unsigned int cameraIndex = camera.get<Components::CameraBufferView>()->index;
@@ -751,7 +751,7 @@ void DX12Renderer::Cleanup() {
 	m_pLightManager.reset();
 	m_pMeshManager.reset();
 	m_pObjectManager.reset();
-	m_hierarchyQuery.destruct();
+    m_hierarchySystem.destruct();
     DeletionManager::GetInstance().Cleanup();
 }
 
