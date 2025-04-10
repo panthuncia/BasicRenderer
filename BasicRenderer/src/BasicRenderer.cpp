@@ -249,13 +249,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto baseScene = std::make_shared<Scene>();
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
-    auto dragonScene = LoadModel("models/dragon.glb");
-    dragonScene->GetRoot().set<Components::Scale>({0.02, 0.02, 0.02});
-    dragonScene->GetRoot().set<Components::Position>({ 0.0, 0.1, 0.0 });
+    //auto dragonScene = LoadModel("models/dragon.glb");
+    //dragonScene->GetRoot().set<Components::Scale>({0.02, 0.02, 0.02});
+    //dragonScene->GetRoot().set<Components::Position>({ 0.0, 0.1, 0.0 });
 	//dragonScene->GetRoot().m_name = L"dragonRoot";
 
-    //auto tigerScene = LoadModel("models/tiger.glb");
- //   tigerScene->GetRoot().transform.setLocalScale({ 0.1, 0.1, 0.11 });
+    auto tigerScene = LoadModel("models/tiger.glb");
+    tigerScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
 	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
@@ -268,13 +268,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
  //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
 	//carScene->GetRoot().m_name = L"carRoot";
 
-    auto mountainScene = LoadModel("models/terrain.glb");
-	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+ //   auto mountainScene = LoadModel("models/terrain.glb");
+	//mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+	//mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
     //auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto bistro = LoadModel("models/bistro.glb");
+    //bistro->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
 
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
@@ -302,34 +303,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 
     renderer.SetCurrentScene(baseScene);
-    mountainScene->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(mountainScene);
+    //mountainScene->AppendScene(dragonScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(mountainScene);
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 1; i++) {
+	for (int i = 0; i < 3; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-		//renderer.GetCurrentScene()->AppendScene(*tigerScene);
+		renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 		auto point = randomPointInSphere(50.0);
-        //tigerScene->GetRoot().transform.setLocalPosition({ point.x, point.y, point.z});
+        tigerScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(*phoenixScene);
-    //auto root = renderer.GetCurrentScene()->AppendScene(*carScene);
+    //auto root = renderer.GetCurrentScene()->AppendScene(carScene);
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
-	//renderer.GetCurrentScene()->AppendScene(*bistro);
+	//renderer.GetCurrentScene()->AppendScene(bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);
 
     //renderer.GetCurrentScene()->AppendScene(*street);
 
 	//DeletionManager::GetInstance().MarkForDelete(carScene);
-    DeletionManager::GetInstance().MarkForDelete(dragonScene);
+    //DeletionManager::GetInstance().MarkForDelete(dragonScene);
     //DeletionManager::GetInstance().MarkForDelete(tigerScene);
     //DeletionManager::GetInstance().MarkForDelete(mountainScene);
 	//DeletionManager::GetInstance().MarkForDelete(phoenixScene);

@@ -212,6 +212,29 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 		auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
 		auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
 
+		// Discard old instances and add new ones
+		if (opaqueMeshInstances) {
+			Components::OpaqueMeshInstances meshInstances;
+			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
+				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
+			}
+			entity.set<Components::OpaqueMeshInstances>(meshInstances);
+		}
+		if (alphaTestMeshInstances) {
+			Components::AlphaTestMeshInstances meshInstances;
+			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
+				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
+			}
+			entity.set<Components::AlphaTestMeshInstances>(meshInstances);
+		}
+		if (blendMeshInstances) {
+			Components::BlendMeshInstances meshInstances;
+			for (auto& meshInstance : blendMeshInstances->meshInstances) {
+				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
+			}
+			entity.set<Components::BlendMeshInstances>(meshInstances);
+		}
+
 		if (opaqueMeshInstances) {
 			bool addSkin = false;
 			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
@@ -337,11 +360,12 @@ flecs::entity Scene::CreateNodeECS(std::wstring name) {
 	auto& world = ECSManager::GetInstance().GetWorld();
 	flecs::entity entity = world.entity();
 	entity.child_of(ECSSceneRoot)
-		.set_name(ws2s(name).c_str())
+		.set_name((ws2s(name) + "_" + std::to_string(entity.id())).c_str())
 		.add<Components::SceneNode>()
 		.set<Components::Rotation>({ 0, 0, 0, 1 })
 		.set<Components::Position>({ 0, 0, 0 })
-		.set<Components::Scale>({ 1, 1, 1 });
+		.set<Components::Scale>({ 1, 1, 1 })
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity());
 	return entity;
 
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {
@@ -557,7 +581,7 @@ void Scene::Activate(ManagerInterface managerInterface) {
 		auto& entity = e.second;
 		entity.add<Components::Active>();
 	}*/
-	//ECSSceneRoot.add<Components::Active>();
+	ECSSceneRoot.add<Components::Active>();
 
 	MakeResident();
 	//for (auto& child : m_childScenes) {
@@ -608,12 +632,6 @@ std::shared_ptr<Scene> Scene::Clone() const {
 	for (auto& childScene : m_childScenes) {
 		newScene->m_childScenes.push_back(childScene->Clone());
 	}
-	//for (auto& skeleton : skeletons) {
-	//	if (!skeleton->IsBaseSkeleton()) {
-	//		continue;
-	//	}
-	//	newScene->skeletons.push_back(skeleton->CopySkeleton(true));
-	//}
 	newScene->ProcessEntitySkins(true);
 	return newScene;
 }

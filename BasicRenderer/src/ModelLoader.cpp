@@ -560,6 +560,7 @@ static void buildAiNodeHierarchy(
 
     // Attach to parent
     if (parent) {
+		auto parentName = parent.name().c_str();
 		entity.child_of(parent);
     }
     else {
@@ -609,10 +610,10 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
             }
 
             // Ensure we have an AnimationClip for that node in this animation
-            if (animation->nodesMap.find(node.name().c_str()) == animation->nodesMap.end()) {
-                animation->nodesMap[node.name().c_str()] = std::make_shared<AnimationClip>();
+            if (animation->nodesMap.find(nodeName) == animation->nodesMap.end()) {
+                animation->nodesMap[nodeName] = std::make_shared<AnimationClip>();
             }
-            auto& clip = animation->nodesMap[node.name().c_str()];
+            auto& clip = animation->nodesMap[nodeName];
 
             // For position keys
             for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
@@ -699,7 +700,8 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
         auto jointNode = jointNodes[b];
         if (!jointNode) continue;
         for (auto& anim : animations) {
-            if (anim->nodesMap.find(jointNode.name().c_str()) != anim->nodesMap.end()) {
+			auto jointAnimationName = jointNode.get<Components::AnimationName>();
+            if (anim->nodesMap.contains(jointAnimationName->name.c_str())) {
                 skeleton->AddAnimation(anim);
             }
         }

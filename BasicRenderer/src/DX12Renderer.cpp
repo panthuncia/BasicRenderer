@@ -621,6 +621,9 @@ void DX12Renderer::Render() {
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
     auto& commandList = m_commandLists[m_frameIndex];
 
+	auto& world = ECSManager::GetInstance().GetWorld();
+	const Components::DrawStats* drawStats = world.get<Components::DrawStats>();
+
     m_context.currentScene = currentScene.get();
 	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
     m_context.commandList = commandList.Get();
@@ -640,6 +643,7 @@ void DX12Renderer::Render() {
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
+	m_context.drawStats = *drawStats;
 
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
