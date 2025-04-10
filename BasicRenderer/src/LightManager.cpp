@@ -64,6 +64,10 @@ unsigned int LightManager::GetLightBufferDescriptorIndex() {
     return m_lightBuffer->GetSRVInfo().index;
 }
 
+unsigned int LightManager::GetActiveLightIndicesBufferDescriptorIndex() {
+	return m_activeLightIndices->GetSRVInfo().index;
+}
+
 unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
 	return m_pointViewInfo->GetSRVInfo().index;
 }

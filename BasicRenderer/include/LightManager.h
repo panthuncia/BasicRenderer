@@ -26,6 +26,7 @@ public:
     Components::LightViewInfo AddLight(LightInfo* lightInfo, uint64_t entityId);
     void RemoveLight(LightInfo* light);
     unsigned int GetLightBufferDescriptorIndex();
+	unsigned int GetActiveLightIndicesBufferDescriptorIndex();
     unsigned int GetPointCubemapMatricesDescriptorIndex();
     unsigned int GetSpotMatricesDescriptorIndex();
     unsigned int GetDirectionalCascadeMatricesDescriptorIndex();

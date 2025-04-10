@@ -7,7 +7,7 @@ float unprojectDepth(float depth, float near, float far) {
     return near * far / (far - depth * (far - near));
 }
 
-float calculatePointShadow(float4 fragPosWorldSpace, int pointLightNum, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+float calculatePointShadow(float4 fragPosWorldSpace, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz - light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
     float3 worldDir = normalize(lightToFrag);

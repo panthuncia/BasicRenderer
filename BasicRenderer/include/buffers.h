@@ -17,6 +17,7 @@ struct PerFrameCB {
     DirectX::XMVECTOR ambientLighting;
     DirectX::XMVECTOR shadowCascadeSplits;
 	unsigned int mainCameraIndex;
+	unsigned int activeLightIndicesBufferIndex;
     unsigned int lightBufferIndex;
     unsigned int numLights;
     unsigned int pointLightCubemapBufferIndex;
