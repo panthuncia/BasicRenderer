@@ -456,9 +456,9 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	}
 
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
-	//if (lightManager != nullptr) {
-	//	lightManager->SetCurrentCamera(pCamera.get());
-	//}
+	if (m_managerInterface.GetLightManager() != nullptr) {
+		m_managerInterface.GetLightManager()->SetCurrentCamera(entity);
+	}
     m_pPrimaryCameraOpaqueIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Opaque);
 	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::AlphaTest);
 	m_pPrimaryCameraBlendIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Blend);
