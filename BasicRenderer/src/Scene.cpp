@@ -639,3 +639,16 @@ std::shared_ptr<Scene> Scene::Clone() const {
 	newScene->ProcessEntitySkins(true);
 	return newScene;
 }
+
+void Scene::DisableShadows() {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	world.defer_begin();
+	auto query = world.query_builder<>()
+		.with<Components::RenderableObject>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	query.each([&](flecs::entity entity) {
+		entity.add<Components::SkipShadowPass>();
+		});
+	world.defer_end();
+}

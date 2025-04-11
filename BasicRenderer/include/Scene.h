@@ -38,6 +38,7 @@ public:
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
     void ProcessEntitySkins(bool overrideExistingSkins = false);
     std::shared_ptr<Scene> Clone() const;
+	void DisableShadows();
 
 private:
     static std::atomic<uint64_t> globalSceneCount;

@@ -172,6 +172,7 @@ namespace Components {
 
 	struct Active {}; // Represents an active entity in the scene
 	struct Animated {}; // Animated nodes are ticked separately
+	struct SkipShadowPass {}; // Skip the shadow pass for this entity
 
 	struct Name {
 		Name() = default;

@@ -281,8 +281,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto street = LoadModel("models/street.obj");
 
     auto cubeScene = LoadModel("models/cube_blank.glb");
-    cubeScene->GetRoot().set<Components::Position>({0, 5, 0});
+    cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
 	cubeScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
+    cubeScene->DisableShadows();
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
     //auto heightMap = loadTextureFromFileSTBI("textures/height.jpg");
     //for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
@@ -365,7 +366,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto& scene = renderer.GetCurrentScene();
     scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
 
-    auto cubeMaterial = std::make_shared<Material>("cubeMaterial", MaterialFlags::MATERIAL_FLAGS_NONE, PSOFlags::PSO_FLAGS_NONE);
+    //auto cubeMaterial = std::make_shared<Material>("cubeMaterial", MaterialFlags::MATERIAL_FLAGS_NONE, PSOFlags::PSO_FLAGS_NONE);
     //auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, VertexFlags::VERTEX_COLORS);
     //std::vector<std::shared_ptr<Mesh>> vec = { cubeMesh };
     //std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>(L"CubeObject", vec);
