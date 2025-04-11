@@ -1,10 +1,15 @@
 #pragma once
 #include <wrl/client.h>
 #include <d3d12.h>
+#include <vector>
+#include <memory>
+#include <functional>
 
 #include "BufferView.h"
 #include "MemoryBlock.h"
 
+class Buffer;
+class Resource;
 
 class ResourceUpdate {
 public:

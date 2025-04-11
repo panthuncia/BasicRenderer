@@ -5,20 +5,20 @@
 #include "Interfaces/ISceneNodeObserver.h"
 #include "Utilities.h"
 #include "SettingsManager.h"
-#include "Light.h"
-#include "Camera.h"
-#include "SceneNode.h"
 #include "ShadowMaps.h"
 #include "DynamicResource.h"
 #include "IndirectCommandBufferManager.h"
 #include "MaterialBuckets.h"
 #include "DeletionManager.h"
 #include "CameraManager.h"
+#include "SortedUnsignedIntBuffer.h"
+#include "MathUtils.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
 
-    m_lightBuffer = resourceManager.CreateIndexedDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 10, L"lightBuffer<LightInfo>");
+	m_activeLightIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeLightIndices");
+    m_lightBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 10, L"lightBuffer<LightInfo>");
     m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
     m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
     m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");
@@ -37,66 +37,55 @@ LightManager::~LightManager() {
 	deletionManager.MarkForDelete(m_directionalViewInfo);
 }
 
-void LightManager::Initialize() {
-	
-}
+AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
+    auto lightBufferView = m_lightBuffer->Add(*lightInfo);
+    auto lightIndex = lightBufferView->GetOffset() / sizeof(LightInfo);
+    m_activeLightIndices->Insert(lightIndex);
 
-void LightManager::AddLight(Light* lightNode, Camera* currentCamera) {
-    if (lightNode->GetCurrentLightBufferIndex() != -1) {
-        RemoveLight(lightNode);
-    }
-    unsigned int index = CreateLightInfo(lightNode);
-    m_lights.push_back(lightNode);
-    switch (lightNode->GetLightType()) {
-	case LightType::Spot:
-		m_spotLights.push_back(lightNode);
-		break;
-	case LightType::Point:
-		m_pointLights.push_back(lightNode);
-		break;
-	case LightType::Directional:
-		m_directionalLights.push_back(lightNode);
-		break;
-    }
-    lightNode->SetLightBufferIndex(index);
-	if (lightNode->GetIsShadowCaster()) {
-		CreateLightViewInfo(lightNode, currentCamera);
-		auto shadowMap = getCurrentShadowMapResourceGroup();
-		if (shadowMap != nullptr) {
-			shadowMap->AddMap(lightNode, getShadowResolution());
-		}
-	}
-    lightNode->AddLightObserver(this);
-}
+    Components::LightViewInfo viewInfo;
+    std::optional<Components::ShadowMap> shadowMapComponent = std::nullopt;
+    std::optional<Components::FrustrumPlanes> planes = std::nullopt;
 
-unsigned int LightManager::CreateLightInfo(Light* node) {
-    m_lightBuffer->Add(node->GetLightInfo());
-    return m_lightBuffer->Size() - 1; // Return new light's index
-}
+    if (lightInfo->shadowCaster) {
+        switch (lightInfo->type) {
+            case Components::LightType::Point:
+                std::tie(viewInfo, planes) = CreatePointLightViewInfo(*lightInfo, entityId);
+                break;
+            case Components::LightType::Spot:
+                std::tie(viewInfo, planes) = CreateSpotLightViewInfo(*lightInfo, entityId);
+                break;
+            case Components::LightType::Directional:
+                std::tie(viewInfo, planes) = CreateDirectionalLightViewInfo(*lightInfo, entityId);
+                break;
+            default:
+                spdlog::warn("Unhandled light type");
+                break;
+        }
 
-void LightManager::RemoveLight(Light* light) {
-    int index = light->GetCurrentLightBufferIndex();
-    if (m_lights[index] != light) {
-        spdlog::warn("Light requested for removal does not belong to this scene");
-		return;
+        auto shadowMaps = getCurrentShadowMapResourceGroup();
+        if (shadowMaps != nullptr) {
+            auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
+            shadowMapComponent = Components::ShadowMap(map);
+        }
     }
+
+    viewInfo.lightBufferIndex = lightIndex;
+    viewInfo.lightBufferView = lightBufferView;
     
-    for (int i = index; i < m_lights.size(); i++) {
-        m_lights[i]->DecrementLightBufferIndex();
-    }
+    return { viewInfo, shadowMapComponent, planes };
+}
 
-    m_lights.erase(m_lights.begin() + index);
 
-    m_lightBuffer->RemoveAt(index);
-	light->RemoveLightObserver(this);
-	light->SetLightBufferIndex(-1);
-	RemoveLightViewInfo(light);
+void LightManager::RemoveLight(LightInfo* light) {
 
-	m_lightDrawSetBufferMap.erase(light->GetLocalID());
 }
 
 unsigned int LightManager::GetLightBufferDescriptorIndex() {
     return m_lightBuffer->GetSRVInfo().index;
+}
+
+unsigned int LightManager::GetActiveLightIndicesBufferDescriptorIndex() {
+	return m_activeLightIndices->GetSRVInfo().index;
 }
 
 unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
@@ -112,100 +101,147 @@ unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
 }
 
 unsigned int LightManager::GetNumLights() {
-    return m_lights.size();
+	return m_activeLightIndices->Size();
 }
 
-unsigned int LightManager::CreateLightViewInfo(Light* node, Camera* camera) {
-	if (m_pCameraManager == nullptr) {
-		spdlog::error("LightManager: Camera manager must be set for light shadow mapping");
-		return -1;
-	}
-    auto projectionMatrix = node->GetLightProjectionMatrix();
-	switch (node->GetLightType()) {
-	case LightType::Point: {
-		auto cubeViewIndex = m_pointViewInfo->Size() / 6;
-		node->SetLightViewInfoIndex(cubeViewIndex);
-		auto cubemapMatrices = GetCubemapViewMatrices(node->transform.getGlobalPosition());
-		std::vector<std::shared_ptr<BufferView>> views;
-		for (int i = 0; i < 6; i++) {
-			CameraInfo info = {};
-			auto pos = node->transform.getGlobalPosition();
-			info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
-			info.view = cubemapMatrices[i];
-			info.projection = projectionMatrix;
-			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], projectionMatrix);
-			auto view = m_pCameraManager->AddCamera(info);
-			views.push_back(view);
-			m_pointViewInfo->Add(view->GetOffset()/sizeof(CameraInfo));
-			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
-			node->AddPerViewAlphaTestIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::AlphaTest));
-			node->AddPerViewBlendIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Blend));
-		}
-		node->SetCameraBufferViews(views);
-		break;
-	}
-	case LightType::Spot: {
-		node->SetLightViewInfoIndex(m_spotViewInfo->Size());
+std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId) {
+	Components::LightViewInfo viewInfo = {};
+	// Assume each cubemap face uses the same projection but different view matrices.
+	auto cubeViewIndex = m_pointViewInfo->Size() / 6;
+	viewInfo.viewInfoBufferIndex = cubeViewIndex;
+	XMFLOAT3 pos;
+	XMStoreFloat3(&pos, info.posWorldSpace);
+	auto cubemapMatrices = GetCubemapViewMatrices(pos);
+
+	auto projection = GetProjectionMatrixForLight(info);
+
+	// For each face of the cubemap, create a camera view and command buffers.
+	for (int i = 0; i < 6; i++) {
 		CameraInfo camera = {};
-		auto pos = node->transform.getGlobalPosition();
-		camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
-		camera.view = node->GetLightViewMatrix();
-		camera.projection = projectionMatrix;
-		camera.viewProjection = XMMatrixMultiply(node->GetLightViewMatrix(), projectionMatrix);
+		camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
+		camera.view = cubemapMatrices[i];
+		camera.projection = projection;
+		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.projection);
+
 		auto view = m_pCameraManager->AddCamera(camera);
-		m_spotViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
-		node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
-		node->AddPerViewAlphaTestIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::AlphaTest));
-		node->AddPerViewBlendIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Blend));
-		node->SetCameraBufferViews({ view });
-		break;
-	}
-	case LightType::Directional: {
-		if (camera == nullptr) {
-			spdlog::warn("Camera must be provided for directional light shadow mapping");
-			return -1;
-		}
-		auto numCascades = getNumDirectionalLightCascades();
-		node->SetLightViewInfoIndex(m_directionalViewInfo->Size() / numCascades);
-		auto cascades = setupCascades(numCascades, *node, *camera, getDirectionalLightCascadeSplits());
-		std::vector<std::shared_ptr<BufferView>> views;
-		for (int i = 0; i < numCascades; i++) {
-			CameraInfo info = {};
-			auto pos = node->transform.getGlobalPosition();
-			info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
-			info.view = cascades[i].viewMatrix;
-			info.projection = cascades[i].orthoMatrix;
-			info.viewProjection = XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
-			auto view = m_pCameraManager->AddCamera(info);
-			views.push_back(view);
-			m_directionalViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
-			node->AddPerViewOpaqueIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Opaque));
-			node->AddPerViewAlphaTestIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::AlphaTest));
-			node->AddPerViewBlendIndirectCommandBuffer(m_pCommandBufferManager->CreateBuffer(node->GetLocalID(), MaterialBuckets::Blend));
-		}
-		node->SetCameraBufferViews(views);
-		break;
-	}
-	default:
-		spdlog::warn("Light type not recognized");
-		return -1;
-	}
+		viewInfo.cameraBufferViews.push_back(view);
+		m_pointViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
+
+		// Create and attach the command buffers.
+		viewInfo.commandBuffers.opaqueIndirectCommandBuffers.push_back(
+			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Opaque));
+		viewInfo.commandBuffers.alphaTestIndirectCommandBuffers.push_back(
+			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::AlphaTest));
+		viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
+			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
+	}	
+	
+	viewInfo.projectionMatrix = Components::Matrix(projection);
+
+	return { viewInfo, std::nullopt }; // Point lights don't need extra frustum data.
 }
 
-void LightManager::UpdateLightViewInfo(Light* light) {
-	auto projectionMatrix = light->GetLightProjectionMatrix();
-	auto& views = light->GetCameraBufferViews();
-	switch (light->GetLightType()) {
-	case LightType::Point: {
-		auto cubemapMatrices = GetCubemapViewMatrices(light->transform.getGlobalPosition());
-		auto planes = light->GetFrustumPlanes();
+std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) {
+	Components::LightViewInfo viewInfo = {};
+	viewInfo.viewInfoBufferIndex = m_spotViewInfo->Size();
+
+	XMFLOAT3 pos;
+	XMStoreFloat3(&pos, info.posWorldSpace);
+
+	CameraInfo camera = {};
+	camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
+	XMFLOAT3 up = { 0, 1, 0 };
+	camera.view = XMMatrixLookToRH(info.posWorldSpace, info.dirWorldSpace, XMLoadFloat3(&up));
+	camera.projection = GetProjectionMatrixForLight(info);
+	camera.viewProjection = XMMatrixMultiply(camera.view, camera.projection);
+
+	auto view = m_pCameraManager->AddCamera(camera);
+	viewInfo.cameraBufferViews.push_back(view);
+	m_spotViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
+
+	viewInfo.commandBuffers.opaqueIndirectCommandBuffers.push_back(
+		m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Opaque));
+	viewInfo.commandBuffers.alphaTestIndirectCommandBuffers.push_back(
+		m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::AlphaTest));
+	viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
+		m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
+
+	viewInfo.projectionMatrix = Components::Matrix(camera.projection);
+	return { viewInfo, std::nullopt };
+}
+
+std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t entityId) {
+	Components::LightViewInfo viewInfo = {};
+	std::optional<Components::FrustrumPlanes> cascadePlanes = std::nullopt;
+	auto numCascades = getNumDirectionalLightCascades();
+	viewInfo.viewInfoBufferIndex = m_directionalViewInfo->Size() / numCascades;
+
+	if (!m_currentCamera.is_valid()) {
+		spdlog::warn("Camera must be provided for directional light shadow mapping");
+		return { viewInfo, cascadePlanes };
+	}
+
+	auto camera = m_currentCamera.get<Components::Camera>();
+	auto& matrix = m_currentCamera.get<Components::Matrix>()->matrix;
+	auto posFloats = GetGlobalPositionFromMatrix(matrix);
+
+	// Compute cascades (each cascade carries its own view and ortho projection matrix).
+	auto cascades = setupCascades(numCascades, info.dirWorldSpace,
+		XMLoadFloat3(&posFloats), 
+		GetForwardFromMatrix(matrix),
+		GetUpFromMatrix(matrix),
+		camera->zNear, camera->fov, camera->aspect,
+		getDirectionalLightCascadeSplits());
+
+	// Collect the frustum planes from each cascade.
+	cascadePlanes = Components::FrustrumPlanes();
+	for (const auto& cascade : cascades) {
+		cascadePlanes->frustumPlanes.push_back(cascade.frustumPlanes);
+	}
+
+	// Create a camera and command buffers for each cascade.
+	for (int i = 0; i < numCascades; i++) {
+		CameraInfo cameraInfo = {};
+		cameraInfo.positionWorldSpace = { posFloats.x, posFloats.y, posFloats.z, 1.0f };
+		cameraInfo.view = cascades[i].viewMatrix;
+		cameraInfo.projection = cascades[i].orthoMatrix;
+		cameraInfo.viewProjection = XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
+
+		auto view = m_pCameraManager->AddCamera(cameraInfo);
+		viewInfo.cameraBufferViews.push_back(view);
+		m_directionalViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
+
+		viewInfo.commandBuffers.opaqueIndirectCommandBuffers.push_back(
+			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Opaque));
+		viewInfo.commandBuffers.alphaTestIndirectCommandBuffers.push_back(
+			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::AlphaTest));
+		viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
+			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
+	}
+	return { viewInfo, cascadePlanes };
+}
+
+
+void LightManager::UpdateLightViewInfo(flecs::entity light) {
+	//auto projectionMatrix = light.get<Components::ProjectionMatrix>();
+	auto viewInfo = light.get<Components::LightViewInfo>();
+	auto& views = viewInfo->cameraBufferViews;
+	auto lightInfo = light.get<Components::Light>();
+	auto lightMatrix = light.get<Components::Matrix>();
+	auto planes = light.get<Components::FrustrumPlanes>()->frustumPlanes;
+	auto globalPos = GetGlobalPositionFromMatrix(lightMatrix->matrix);
+	switch (lightInfo->type) {
+	case Components::LightType::Point: {
+		auto cubemapMatrices = GetCubemapViewMatrices(globalPos);
 		for (int i = 0; i < 6; i++) {
 			CameraInfo info = {};
-			auto pos = light->transform.getGlobalPosition();
-			info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
+			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cubemapMatrices[i];
-			info.projection = projectionMatrix;
-			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], projectionMatrix);
+			info.projection = viewInfo->projectionMatrix.matrix;
+			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], viewInfo->projectionMatrix.matrix);
 			info.clippingPlanes[0] = planes[i][0];
 			info.clippingPlanes[1] = planes[i][1];
 			info.clippingPlanes[2] = planes[i][2];
@@ -216,14 +252,13 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 		}
 		break;
 	}
-	case LightType::Spot: {
+	case Components::LightType::Spot: {
 		CameraInfo camera = {};
-		auto pos = light->transform.getGlobalPosition();
-		camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
-		camera.view = light->GetLightViewMatrix();
-		camera.projection = projectionMatrix;
-		camera.viewProjection = XMMatrixMultiply(light->GetLightViewMatrix(), projectionMatrix);
-		auto planes = light->GetFrustumPlanes();
+		camera.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
+		auto up = XMFLOAT3(0, 1, 0);
+		camera.view = XMMatrixLookToRH(XMLoadFloat3(&globalPos), XMVector3Normalize(lightMatrix->matrix.r[2]), XMLoadFloat3(&up));
+		camera.projection = viewInfo->projectionMatrix.matrix;
+		camera.viewProjection = XMMatrixMultiply(camera.view, viewInfo->projectionMatrix.matrix);
 		camera.clippingPlanes[0] = planes[0][0];
 		camera.clippingPlanes[1] = planes[0][1];
 		camera.clippingPlanes[2] = planes[0][2];
@@ -233,17 +268,20 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 		m_pCameraManager->UpdateCamera(views[0], camera);
 		break;
 	}
-	case LightType::Directional: {
-		if (m_currentCamera == nullptr) {
+	case Components::LightType::Directional: {
+		if (!m_currentCamera.is_valid()) {
 			spdlog::warn("Camera must be provided for directional light shadow mapping");
 			return;
 		}
 		auto numCascades = getNumDirectionalLightCascades();
-		auto cascades = setupCascades(numCascades, *light, *m_currentCamera, getDirectionalLightCascadeSplits());
+		auto dir = XMVector3Normalize(lightMatrix->matrix.r[2]);
+		auto camera = m_currentCamera.get<Components::Camera>();
+		auto& matrix = m_currentCamera.get<Components::Matrix>()->matrix;
+		auto posFloats = GetGlobalPositionFromMatrix(matrix);
+		auto cascades = setupCascades(numCascades, lightInfo->lightInfo.dirWorldSpace, XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera->zNear, camera->fov, camera->aspect, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			CameraInfo info = {};
-			auto pos = light->transform.getGlobalPosition();
-			info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
+			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cascades[i].viewMatrix;
 			info.projection = cascades[i].orthoMatrix;
 			info.viewProjection = XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
@@ -262,50 +300,27 @@ void LightManager::UpdateLightViewInfo(Light* light) {
 	}
 }
 
-void LightManager::RemoveLightViewInfo(Light* node) {
-	int viewInfoIndex = node->GetCurrentviewInfoIndex();
-	if (viewInfoIndex < 0) { // Not a shadow caster
-		return;
-	}
-	m_pCommandBufferManager->UnregisterBuffers(node->GetLocalID()); // Remove indirect command buffers
-	node->DeleteAllIndirectCommandBuffers();
-	switch (node->GetLightType()) {
-	case LightType::Point: {
-		// Erase light in point lights
-		m_pointLights.erase(m_pointLights.begin() + viewInfoIndex);
-		// Erase view info in structured buffer
-		auto& views = node->GetCameraBufferViews();
+void LightManager::RemoveLightViewInfo(flecs::entity light) {
+
+	m_pCommandBufferManager->UnregisterBuffers(light.id()); // Remove indirect command buffers
+	auto lightInfo = light.get<Components::Light>();
+	auto viewInfo = light.get<Components::LightViewInfo>();
+	switch (lightInfo->type) {
+	case Components::LightType::Point: {
+		auto& views = viewInfo->cameraBufferViews;
 		for (int i = 0; i < 6; i++) {
 			m_pCameraManager->RemoveCamera(views[i]);
 		}
-		// Update subsequent view info indices
-		for (int i = viewInfoIndex; i < m_pointLights.size(); i++) {
-			m_pointLights[i]->DecrementLightViewInfoIndex();
-		}
 		break;
 	}
-	case LightType::Spot: {
-		// Erase light in spot lights
-		m_spotLights.erase(m_spotLights.begin() + viewInfoIndex);
-		// Erase view info in structured buffer
-		m_pCameraManager->RemoveCamera(node->GetCameraBufferViews()[0]);
-		// Update subsequent view info indices
-		for (int i = viewInfoIndex; i < m_spotLights.size(); i++) {
-			m_spotLights[i]->DecrementLightViewInfoIndex();
-		}
+	case Components::LightType::Spot: {
+		m_pCameraManager->RemoveCamera(viewInfo->cameraBufferViews[0]);
 		break;
 	}
-	case LightType::Directional: {
-		// Erase light in directional lights
-		m_directionalLights.erase(m_directionalLights.begin() + viewInfoIndex);
-		// Erase view info in structured buffer
-		auto& views = node->GetCameraBufferViews();
+	case Components::LightType::Directional: {
+		auto& views = viewInfo->cameraBufferViews;
 		for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
 			m_pCameraManager->RemoveCamera(views[i]);
-		}
-		// Update subsequent view info indices
-		for (int i = viewInfoIndex; i < m_directionalLights.size(); i++) {
-			m_directionalLights[i]->DecrementLightViewInfoIndex();
 		}
 		break;
 	}
@@ -314,26 +329,8 @@ void LightManager::RemoveLightViewInfo(Light* node) {
 	}
 }
 
-void LightManager::SetCurrentCamera(Camera* camera) {
-	if (m_currentCamera != nullptr) {
-		m_currentCamera->RemoveObserver(this);
-	}
+void LightManager::SetCurrentCamera(flecs::entity camera) {
 	m_currentCamera = camera;
-	m_currentCamera->AddObserver(this);
-}
-
-void LightManager::OnNodeUpdated(SceneNode* camera) {
-	for (Light* light : m_directionalLights) {
-		if (light->GetLightInfo().shadowMapIndex != -1) {
-			UpdateLightViewInfo(light);
-		}
-	}
-}
-void LightManager::OnNodeUpdated(Light* light) {
-	m_lightBuffer->UpdateAt(light->GetCurrentLightBufferIndex(), light->GetLightInfo());
-	if (light->GetLightInfo().shadowMapIndex != -1) {
-		UpdateLightViewInfo(light);
-	}
 }
 
 void LightManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {
@@ -342,4 +339,9 @@ void LightManager::SetCommandBufferManager(IndirectCommandBufferManager* command
 
 void LightManager::SetCameraManager(CameraManager* cameraManager) {
 	m_pCameraManager = cameraManager;
+}
+
+void LightManager::UpdateLightBufferView(BufferView* view, LightInfo& data) {
+	std::lock_guard<std::mutex> lock(m_lightUpdateMutex);
+	m_lightBuffer->UpdateView(view, &data);
 }

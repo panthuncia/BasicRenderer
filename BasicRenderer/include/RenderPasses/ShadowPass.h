@@ -6,11 +6,12 @@
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "RenderableObject.h"
 #include "mesh.h"
 #include "Scene.h"
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
+#include "ECSManager.h"
+#include "MeshInstance.h"
 
 class ShadowPass : public RenderPass {
 public:
@@ -18,6 +19,10 @@ public:
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	}
+
+	~ShadowPass() {
+	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
@@ -31,6 +36,11 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::ShadowMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
@@ -57,9 +67,9 @@ public:
 
 		commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
 
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
-		auto& cameraManager = context.currentScene->GetCameraManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
+		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
@@ -69,6 +79,7 @@ public:
 		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
 
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
@@ -76,12 +87,10 @@ public:
 		auto drawObjects = [&]() {
 
 			// Opaque objects
-			for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-				auto& renderable = pair.second;
-				auto& meshes = renderable->GetOpaqueMeshes();
+			m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
+				auto& meshes = opaqueMeshes.meshInstances;
 
-				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
@@ -98,15 +107,13 @@ public:
 
 					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 				}
-			}
+				});
 
 			// Alpha test objects
-			for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
-				auto& renderable = pair.second;
-				auto& meshes = renderable->GetAlphaTestMeshes();
+			m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
+				auto& meshes = alphaTestMeshes.meshInstances;
 
-				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
@@ -123,15 +130,13 @@ public:
 
 					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 				}
-			}
+				});
 
 			// Blend objects
-			for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
-				auto& renderable = pair.second;
-				auto& meshes = renderable->GetBlendMeshes();
+			m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
+				auto& meshes = blendMeshes.meshInstances;
 
-				auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+				commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
@@ -146,33 +151,28 @@ public:
 
 					commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 				}
-			}
+				});
 		};
 
-		for (auto& lightPair : context.currentScene->GetLightIDMap()) {
-			auto& light = lightPair.second;
-			auto& shadowMap = light->getShadowMap();
-			if (!shadowMap) {
-				continue;
-			}
+		lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::ShadowMap shadowMap) {
 			float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
-			switch (light->GetLightType()) {
-			case LightType::Spot: {
-				auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
+			switch (light.type) {
+			case Components::LightType::Spot: {
+				auto& dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[0].cpuHandle;
 				commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 				commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-				int lightInfo[2] = { light->GetCurrentLightBufferIndex(), light->GetCurrentviewInfoIndex() };
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
 				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
 				drawObjects();
 				break;
 			}
-			case LightType::Point: {
-				int lightViewIndex = light->GetCurrentviewInfoIndex() * 6;
-				int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
+			case Components::LightType::Point: {
+				int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
 				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
 				for (int i = 0; i < 6; i++) {
-					D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
+					D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
 					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
 					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
@@ -181,22 +181,22 @@ public:
 				}
 				break;
 			}
-				case LightType::Directional: {
-					int lightViewIndex = light->GetCurrentviewInfoIndex() * getNumDirectionalLightCascades();
-					int lightInfo[2] = { light->GetCurrentLightBufferIndex(), lightViewIndex };
-					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
-					for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-						auto& dsvHandle = shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
-						commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-						commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-						commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
-						lightViewIndex += 1;
-						drawObjects();
+			case Components::LightType::Directional: {
+				int lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
+				int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+				commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+					auto& dsvHandle = shadowMap.shadowMap->GetBuffer()->GetDSVInfos()[i].cpuHandle;
+					commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
+					commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+					commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+					lightViewIndex += 1;
+					drawObjects();
 
-					}
 				}
 			}
-		}
+			}
+			});
 		commandList->Close();
 		return { { commandList.Get()} };
 	}
@@ -206,6 +206,10 @@ public:
 	}
 
 private:
+	flecs::query<Components::Light, Components::LightViewInfo, Components::ShadowMap> lightQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	std::function<uint8_t()> getNumDirectionalLightCascades;

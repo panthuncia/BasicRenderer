@@ -17,6 +17,7 @@ struct PerFrameBuffer {
     float4 ambientLighting;
     float4 shadowCascadeSplits;
     uint mainCameraIndex;
+    uint activeLightIndicesBufferIndex;
     uint lightBufferIndex;
     uint numLights;
     uint pointLightCubemapBufferIndex;
@@ -30,7 +31,7 @@ struct PerFrameBuffer {
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
     uint outputType;
-    uint pad[2];
+    uint pad[1];
 };
 
 struct LightInfo {
@@ -46,6 +47,8 @@ struct LightInfo {
     float farPlane;
     int shadowMapIndex;
     int shadowSamplerIndex;
+    bool shadowCaster;
+    uint pad[3];
 };
 
 struct MaterialInfo {

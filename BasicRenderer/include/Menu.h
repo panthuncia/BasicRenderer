@@ -8,15 +8,16 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 #include <functional>
+#define NOMINMAX
 #include <windows.h>
 #include <filesystem>
+#include <flecs.h>
 
 #include "RenderContext.h"
 #include "utilities.h"
 #include "OutputTypes.h"
-#include "SceneNode.h"
-#include "RenderableObject.h"
 #include "ModelLoader.h"
+#include "SettingsManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -49,7 +50,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
 
-    SceneNode* selectedNode = nullptr;
+    flecs::entity selectedNode;
 
     FrameContext* WaitForNextFrameResources();
 
@@ -59,7 +60,7 @@ private:
 	void DrawOutputTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
-    void DisplaySceneNode(SceneNode* node, bool isOnlyChild);
+    void DisplaySceneNode(flecs::entity node, bool isOnlyChild);
     void DisplaySceneGraph();
     void DisplaySelectedNode();
 
@@ -100,9 +101,7 @@ private:
 	std::function<bool()> getWireframeEnabled;
 	std::function<void(bool)> setWireframeEnabled;
 
-	std::function < std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()> getRenderableObjects;
-	std::function<SceneNode& ()> getSceneRoot;
-	std::function < std::shared_ptr<SceneNode>(Scene& scene)> appendScene;
+    std::function<flecs::entity ()> getSceneRoot;
 
     bool allowTearing = false;
 	std::function<bool()> getAllowTearing;
@@ -187,9 +186,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         });
 
 	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
-	getRenderableObjects = settingsManager.getSettingGetter<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>&()>>("getRenderableObjects")();
-	getSceneRoot = settingsManager.getSettingGetter<std::function<SceneNode&()>>("getSceneRoot")();
-	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene")();
+
+    getSceneRoot = settingsManager.getSettingGetter<std::function<flecs::entity()>>("getSceneRoot")();
 
 	setMeshShaderEnabled = settingsManager.getSettingSetter<bool>("enableMeshShader");
 	getMeshShaderEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
@@ -410,8 +408,8 @@ inline void Menu::DrawLoadModelButton() {
         {
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 			auto scene = LoadModel(ws2s(selectedFile));
-			scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
-			appendScene(*scene);
+			//scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
+			//appendScene(*scene);
         }
         else
         {
@@ -420,7 +418,7 @@ inline void Menu::DrawLoadModelButton() {
     }
 }
 
-inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
+inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
     if (!node) return;
 
     // Set flags for automatically expanding nodes if they are the only child
@@ -435,34 +433,62 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
         nodeFlags |= ImGuiTreeNodeFlags_DefaultOpen;
     }
 
+    // Check if the node has any children.
+    bool hasChild = false;
+    node.children([&hasChild](flecs::entity child) {
+        hasChild = true;
+        });
+    // If there are no children, mark it as a leaf node.
+    if (!hasChild) {
+        nodeFlags |= ImGuiTreeNodeFlags_Leaf;
+    }
+
     // Show the node with its name
-    if (ImGui::TreeNodeEx(node, nodeFlags, "%S", node->m_name.c_str())) {
+	auto nameComponent = node.get<Components::Name>();
+	std::string name = nameComponent ? nameComponent->name : "Unnamed Node";
+    void* uniqueId = reinterpret_cast<void*>(static_cast<intptr_t>(node.id()));
+    if (ImGui::TreeNodeEx(uniqueId, nodeFlags, "%s", name.c_str())) {
         // Detect if the node is clicked to select it
         if (ImGui::IsItemClicked()) {
             selectedNode = node;
         }
 
         // Display information specific to RenderableObject, if the node is of that type.
-        auto renderableObject = dynamic_cast<RenderableObject*>(node);
-        if (renderableObject) {
+		if (node.has<Components::RenderableObject>()) {
             // Display meshes
-            ImGui::Text("Opaque Meshes: %d", renderableObject->GetOpaqueMeshes().size());
-            ImGui::Text("Transparent Meshes: %d", renderableObject->GetAlphaTestMeshes().size());
-			ImGui::Text("Blend Meshes: %d", renderableObject->GetBlendMeshes().size());
+			auto opaqueMeshInstances = node.get<Components::OpaqueMeshInstances>();
+			auto alphaTestMeshInstances = node.get<Components::AlphaTestMeshInstances>();
+			auto blendMeshInstances = node.get<Components::BlendMeshInstances>();
+			if (opaqueMeshInstances) {
+				ImGui::Text("Opaque Meshes: %d", opaqueMeshInstances->meshInstances.size());
+			}
+			if (alphaTestMeshInstances) {
+                ImGui::Text("Alpha Test Meshes: %d", alphaTestMeshInstances->meshInstances.size());
+			}
+			if (blendMeshInstances) {
+                ImGui::Text("Blend Meshes: %d", blendMeshInstances->meshInstances.size());
+			}
 
-            if (renderableObject->HasSkinned()) {
+            if (node.has<Components::OpaqueSkinned>() || node.has<Components::AlphaTestSkinned>() || node.has<Components::BlendSkinned>()) {
                 ImGui::Text("Has Skinned: Yes");
             }
             else {
                 ImGui::Text("Has Skinned: No");
             }
-        }
+		}
 
         // Recursively display child nodes
-        for (const auto& childPair : node->children) {
-            bool childIsOnly = (node->children.size() == 1);
-            DisplaySceneNode(childPair.get(), childIsOnly);
-        }
+        // Count children
+        uint64_t num = 0;
+        node.children(([&num](flecs::entity) {
+            num++;
+            }));
+
+        bool childIsOnly = num <= 1;
+		node.children(([&](flecs::entity child) {
+			// Display the child node
+			DisplaySceneNode(child, childIsOnly);
+			}));
 
         ImGui::TreePop();
     }
@@ -475,8 +501,8 @@ inline void Menu::DisplaySceneNode(SceneNode* node, bool isOnlyChild) {
 }
 
 inline void Menu::DisplaySceneGraph() {
-    auto& root = getSceneRoot();
-    DisplaySceneNode(&root, true);
+    auto root = getSceneRoot();
+    DisplaySceneNode(root, true);
 }
 
 inline void Menu::DisplaySelectedNode() {
@@ -486,24 +512,25 @@ inline void Menu::DisplaySelectedNode() {
         // Display the transform details
         ImGui::Text("Position:");
         XMFLOAT3 pos;
-        XMStoreFloat3(&pos, selectedNode->transform.pos);
+        auto position = selectedNode.get<Components::Position>();
+        XMStoreFloat3(&pos, position->pos);
         if (ImGui::InputFloat3("Position", &pos.x)) {
-			selectedNode->transform.setLocalPosition(XMLoadFloat3(&pos));
-            selectedNode->transform.isDirty = true; // Mark as dirty if modified
+			selectedNode.set<Components::Position>(XMLoadFloat3(&pos));
+            //selectedNode->transform.isDirty = true;
         }
         ImGui::Text("Scale:");
 		XMFLOAT3 scale;
-		XMStoreFloat3(&scale, selectedNode->transform.scale);
+		XMStoreFloat3(&scale, selectedNode.get<Components::Scale>()->scale);
         if (ImGui::InputFloat("Scale", &scale.x)) {
-            selectedNode->transform.isDirty = true; // Mark as dirty if modified
+            //selectedNode->transform.isDirty = true;
 			scale.y = scale.x;
 			scale.z = scale.x;
-			selectedNode->transform.setLocalScale(XMLoadFloat3(&scale));
+			selectedNode.set<Components::Scale>(XMLoadFloat3(&scale));
         }
 
-        // Display rotation (you may want to convert it to Euler angles for readability)
+        // Display rotation
         XMFLOAT4 rotation;
-        XMStoreFloat4(&rotation, selectedNode->transform.rot);
+        XMStoreFloat4(&rotation, selectedNode.get<Components::Rotation>()->rot);
         ImGui::Text("Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)", rotation.x, rotation.y, rotation.z, rotation.w);
 
         ImGui::End();

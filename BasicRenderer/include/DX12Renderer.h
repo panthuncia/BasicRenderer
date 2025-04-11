@@ -5,6 +5,7 @@
 #ifndef DX12RENDERER_H
 #define DX12RENDERER_H
 
+#define NOMINMAX
 #include <windows.h>
 #include <wrl.h>
 #include <directx/d3d12.h>
@@ -12,6 +13,7 @@
 #include <directxmath.h>
 #include <memory>
 #include <functional>
+#include <flecs.h>
 
 #include "Mesh.h"
 #include "Buffers.h"
@@ -21,6 +23,13 @@
 #include "ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
+#include "CameraManager.h"
+#include "LightManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
+#include "IndirectCommandBufferManager.h"
+#include "MovementState.h"
+#include "Components.h"
 
 using namespace Microsoft::WRL;
 
@@ -28,6 +37,7 @@ class DX12Renderer {
 public:
     DX12Renderer() : m_gpuCrashTracker(m_markerMap){
     }
+
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
     void Update(double elapsedSeconds);
@@ -38,13 +48,12 @@ public:
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
-    void SetDebugTexture(Texture* texture);
+    void SetDebugTexture(std::shared_ptr<Texture> texture);
     void SetEnvironment(std::string name);
     void SetSkybox(std::shared_ptr<Texture> texture);
 	void SetIrradiance(std::shared_ptr<Texture> texture);
 	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
     void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
-    std::shared_ptr<SceneNode> AppendScene(Scene& scene);
 
 private:
     ComPtr<IDXGIFactory7> factory;
@@ -92,6 +101,17 @@ private:
 	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
+	std::shared_ptr<Texture> m_currentDebugTexture = nullptr;
+
+    // GPU resource managers
+    std::unique_ptr<LightManager> m_pLightManager = nullptr;
+    std::unique_ptr<MeshManager> m_pMeshManager = nullptr;
+    std::unique_ptr<ObjectManager> m_pObjectManager = nullptr;
+    std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
+    std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+
+	ManagerInterface m_managerInterface;
+    flecs::system m_hierarchySystem;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();

@@ -17,6 +17,7 @@ struct PerFrameCB {
     DirectX::XMVECTOR ambientLighting;
     DirectX::XMVECTOR shadowCascadeSplits;
 	unsigned int mainCameraIndex;
+	unsigned int activeLightIndicesBufferIndex;
     unsigned int lightBufferIndex;
     unsigned int numLights;
     unsigned int pointLightCubemapBufferIndex;
@@ -111,6 +112,8 @@ struct LightInfo {
     float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
+    bool shadowCaster;
+	unsigned int pad[3];
 };
 
 enum RootSignatureLayout {

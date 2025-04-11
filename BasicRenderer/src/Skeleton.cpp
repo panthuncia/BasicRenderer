@@ -1,11 +1,18 @@
 #include "Skeleton.h"
 #include <spdlog/spdlog.h>
+#include <unordered_map>
+#include <flecs.h>
+#include <unordered_set>
+
 #include "ResourceManager.h"
 #include "DeletionManager.h"
 #include "UploadManager.h"
+#include "ECSManager.h"
+#include "Components.h"
+#include "AnimationController.h"
 
-Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
-    : m_nodes(nodes), m_inverseBindMatrices(inverseBindMatrices) {
+Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
+    : m_bones(nodes), m_inverseBindMatrices(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
@@ -13,74 +20,104 @@ Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, const s
     m_inverseBindMatricesBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
 	m_inverseBindMatricesBuffer->SetName(L"InverseBindMatrices");
     UploadManager::GetInstance().UploadData(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesBuffer.get(), 0);
+	m_isBaseSkeleton = true;
+    FindRoot();
 }
 
-Skeleton::Skeleton(const std::vector<std::shared_ptr<SceneNode>>& nodes, std::shared_ptr<Buffer> inverseBindMatrices)
-    : m_nodes(nodes), m_inverseBindMatricesBuffer(inverseBindMatrices) {
+Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buffer> inverseBindMatrices)
+    : m_bones(nodes), m_inverseBindMatricesBuffer(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
     m_transformsBuffer->SetName(L"BoneTransforms");
+    FindRoot();
 }
 
 Skeleton::Skeleton(const Skeleton& other) {
-	// copy nodes
-	std::unordered_map<std::shared_ptr<SceneNode>, std::shared_ptr<SceneNode>> nodeMap;
-	std::unordered_map<SceneNode*, std::shared_ptr<SceneNode>> nodePtrMap;
-	for (auto& node : other.m_nodes) {
-		auto newNode = SceneNode::CreateShared(node->m_name);
-		newNode->transform = node->transform.copy();
-		m_nodes.push_back(newNode);
-		nodeMap[node] = newNode;
-		nodePtrMap[node.get()] = newNode;
-	}
-    
-	// Rebuild the hierarchy
-	for (auto& node : other.m_nodes) {
-		if (node->parent) {
-            auto parent = nodePtrMap[node->parent];
-            if (parent) {
-                parent->AddChild(nodeMap[node]);
-            }
-            else {
-                // Probably a root node
-				if (!m_root) {
-					m_root = nodeMap[node].get();
-				}
-                else {
-                    spdlog::warn("Multiple root nodes in skeleton?");
-                }
-            }
-		}
-        else {
-            if (!m_root) {
-                m_root = nodeMap[node].get();
-            }
-            else {
-                spdlog::warn("Multiple root nodes in skeleton?");
-            }
-        }
-	}
 
-    for (auto& animation : other.animations) {
-        auto newAnimation = std::make_shared<Animation>(animation->name);
-        for (auto& nodePair : animation->nodesMap) {
-            SceneNode* node = nodePair.first;
-            newAnimation->nodesMap[nodePtrMap[node].get()] = nodePair.second;
+    std::unordered_map<uint64_t, uint64_t> oldBonesToNewBonesIDMap;
+	std::unordered_map<uint64_t, flecs::entity> oldBoneIDToNewBonesMap;
+	auto& ecs_world = ECSManager::GetInstance().GetWorld();
+    // Clone each bone entity.
+    for (auto& oldBone : other.m_bones) {
+        flecs::entity newBone = ecs_world.entity();
+
+        // Copy components from oldBone to newBone.
+		newBone.set<Components::Rotation>({ oldBone.get<Components::Rotation>()->rot });
+		newBone.set<Components::Position>({ oldBone.get<Components::Position>()->pos });
+		newBone.set<Components::Scale>({ oldBone.get<Components::Scale>()->scale });
+		newBone.set<Components::Matrix>(DirectX::XMMatrixIdentity());
+		auto animationController = oldBone.get<AnimationController>();
+        newBone.set<AnimationController>(*animationController);
+		newBone.set<Components::AnimationName>({ oldBone.get<Components::AnimationName>()->name });
+
+        // Save in mapping.
+        oldBonesToNewBonesIDMap[oldBone.id()] = newBone.id();
+        oldBoneIDToNewBonesMap[oldBone.id()] = newBone;
+        m_bones.push_back(newBone);
+    }
+
+    // Rebuild the hierarchy
+    // For each old bone, if it had a parent, add the new bone as a child of the new parent
+    for (auto& oldBone : other.m_bones) {
+        flecs::entity& newBone = oldBoneIDToNewBonesMap[oldBone.id()];
+
+        flecs::entity oldParent = oldBone.parent();
+        if (oldParent.is_valid() && oldBoneIDToNewBonesMap.contains(oldParent.id())) {
+            // Add the new bone as a child of the new parent.
+			auto& newParent = oldBoneIDToNewBonesMap[oldParent.id()];
+            if (newParent.is_valid()) {
+                newBone.child_of(newParent);
+            }
         }
-        AddAnimation(newAnimation);
+        else {
+            // This bone is a root
+            m_root = newBone;
+            m_root.add<Components::SkeletonRoot>();
+        }
+    }
+
+    // Clone animations.
+    for (auto& anim : other.animations) {
+        auto newAnim = std::make_shared<Animation>(anim->name);
+        for (auto& pair : anim->nodesMap) {
+            newAnim->nodesMap[pair.first] = pair.second;
+        }
+        AddAnimation(newAnim);
     }
 
 	// copy inverse bind matrices
 	m_inverseBindMatrices = other.m_inverseBindMatrices;
-    m_boneTransforms.resize(m_nodes.size() * 16);
+    m_boneTransforms.resize(m_bones.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(m_nodes.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
+    m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(m_bones.size(), sizeof(DirectX::XMMATRIX), ResourceState::NON_PIXEL_SRV);
     m_transformsBuffer->SetName(L"BoneTransforms");
 }
 
-std::shared_ptr<Skeleton> Skeleton::CopySkeleton() {
-	return std::make_shared<Skeleton>(*this);
+void Skeleton::FindRoot() {
+    std::unordered_set<uint64_t> boneIDs;
+    for (auto& bone : m_bones) {
+		boneIDs.insert(bone.id());
+    }
+	for (auto& bone : m_bones) {
+		flecs::entity parent = bone.parent();
+		if (parent.is_valid() && boneIDs.contains(parent.id())) {
+			// This bone has a parent that is also in the list of bones
+			continue;
+		}
+		else {
+			// This bone is a root
+			m_root = bone;
+			m_root.add<Components::SkeletonRoot>();
+			return;
+		}
+	}
+}
+
+std::shared_ptr<Skeleton> Skeleton::CopySkeleton(bool retainIsBaseSkeleton) {
+	auto skeletonCopy = std::make_shared<Skeleton>(*this);
+	skeletonCopy->m_isBaseSkeleton = retainIsBaseSkeleton ? m_isBaseSkeleton : false;
+	return skeletonCopy;
 }
 
 Skeleton::~Skeleton() {
@@ -106,26 +143,26 @@ void Skeleton::SetAnimation(size_t index) {
     }
 
     auto& animation = animations[index];
-    for (auto& node : m_nodes) {
-        if (animation->nodesMap.find(node.get()) != animation->nodesMap.end()) {
-            node->animationController->setAnimationClip(animation->nodesMap[node.get()]);
+    for (auto& node : m_bones) {
+		auto name = node.get<Components::AnimationName>();
+        if (animation->nodesMap.find(name->name.c_str()) != animation->nodesMap.end()) {
+            AnimationController* controller = node.get_mut<AnimationController>();
+#ifdef _DEBUG
+			if (!controller) {
+				spdlog::warn("Skeleton node {} does not have an AnimationController component", node.name().c_str());
+			}
+#endif
+            controller->setAnimationClip(animation->nodesMap[name->name.c_str()]);
         }
     }
 }
 
 void Skeleton::UpdateTransforms() {
-    for (size_t i = 0; i < m_nodes.size(); ++i) {
-
-#if defined(_DEBUG)
-        //if (m_nodes[i]->transform.isDirty) {
-        //    spdlog::warn("Skeleton node wasn't updated!");
-        //    m_nodes[i]->Update();
-        //}
-#endif
-
-        memcpy(&m_boneTransforms[i * 16], &m_nodes[i]->transform.modelMatrix, sizeof(XMMATRIX));
+    for (size_t i = 0; i < m_bones.size(); ++i) {
+		const Components::Matrix* transform = m_bones[i].get<Components::Matrix>();
+        memcpy(&m_boneTransforms[i * 16], &transform->matrix, sizeof(XMMATRIX));
     }
-    UploadManager::GetInstance().UploadData(m_boneTransforms.data(), m_nodes.size() * sizeof(XMMATRIX), m_transformsBuffer.get(), 0);
+    UploadManager::GetInstance().UploadData(m_boneTransforms.data(), m_bones.size() * sizeof(XMMATRIX), m_transformsBuffer.get(), 0);
 }
 
 uint32_t Skeleton::GetTransformsBufferIndex() {
@@ -145,12 +182,18 @@ void Skeleton::DeleteAllAnimations() {
 	animationsByName.clear();
 }
 
-void Skeleton::SetJoints(const std::vector<std::shared_ptr<SceneNode>>& joints) {
-	m_nodes = joints;
+void Skeleton::SetJoints(const std::vector<flecs::entity>& joints) {
+    m_bones = joints;
 }
 
 void Skeleton::SetAnimationSpeed(float speed) {
-	for (auto& node : m_nodes) {
-		node->animationController->SetAnimationSpeed(speed);
+	for (auto& node : m_bones) {
+		AnimationController* controller = node.get_mut<AnimationController>();
+#ifdef _DEBUG
+		if (!controller) {
+			spdlog::warn("Skeleton node {} does not have an AnimationController component", node.name().c_str());
+		}
+#endif
+		controller->SetAnimationSpeed(speed);
 	}
 }

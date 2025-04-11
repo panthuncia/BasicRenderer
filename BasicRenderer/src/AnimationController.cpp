@@ -1,15 +1,17 @@
 #include "AnimationController.h"
-#include "Transform.h"
-#include "SceneNode.h"
 
-AnimationController::AnimationController(SceneNode* node)
-    : node(node), animationClip(nullptr), currentTime(0.0f), isPlaying(true) {
+AnimationController::AnimationController()
+    : animationClip(nullptr), currentTime(0.0f), isPlaying(true) {
+}
+
+AnimationController::AnimationController(const AnimationController& other)
+	: animationClip(other.animationClip), currentTime(other.currentTime), isPlaying(other.isPlaying) {
 }
 
 void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> animationClip) {
     this->animationClip = animationClip;
-    node->ForceUpdate();
-    updateTransform();
+    //node->ForceUpdate();
+    UpdateTransform();
 }
 
 void AnimationController::reset() {
@@ -24,13 +26,14 @@ void AnimationController::unpause() {
     isPlaying = true;
 }
 
-void AnimationController::update(float elapsedTime, bool force) {
-    if (!force && (!isPlaying || !animationClip)) return;
+Components::Transform& AnimationController::GetUpdatedTransform(float elapsedTime, bool force) {
+    if (!force && (!isPlaying || !animationClip)) return m_transform;
 
     currentTime += elapsedTime * m_animationSpeed;
     currentTime = fmod(currentTime, animationClip->duration);
 
-    updateTransform();
+    UpdateTransform();
+    return m_transform;
 }
 
 std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, std::vector<Keyframe>& keyframes, unsigned int& counter) {
@@ -59,8 +62,8 @@ std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, s
     return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
     };
 
-void AnimationController::updateTransform() {
-    if (!animationClip) return;
+void AnimationController::UpdateTransform() {
+    if (!animationClip) return ;
 
     auto lerpVec3 = [](const XMVECTOR& start, const XMVECTOR& end, float t) {
         XMVECTOR lerped = XMVectorLerp(start, end, t);
@@ -82,7 +85,8 @@ void AnimationController::updateTransform() {
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedPosition = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
-            node->transform.setLocalPosition(interpolatedPosition);
+            //node->transform.setLocalPosition(interpolatedPosition);
+			m_transform.pos = interpolatedPosition;
         }
     }
 
@@ -96,7 +100,8 @@ void AnimationController::updateTransform() {
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedRotation = lerpRotation(prevKeyframe->value, nextKeyframe->value, t);
-            node->transform.setLocalRotationFromQuaternion(interpolatedRotation);
+            //node->transform.setLocalRotationFromQuaternion(interpolatedRotation);
+			m_transform.rot = interpolatedRotation;
         }
     }
 
@@ -110,7 +115,8 @@ void AnimationController::updateTransform() {
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedScale = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
-            node->transform.setLocalScale(interpolatedScale);
+            //node->transform.setLocalScale(interpolatedScale);
+			m_transform.scale = interpolatedScale;
         }
     }
 }

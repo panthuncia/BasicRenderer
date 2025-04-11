@@ -280,16 +280,18 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
         StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
         
+        StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[perFrameBuffer.activeLightIndicesBufferIndex];
         StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
 
         for (uint i = 0; i < perFrameBuffer.numLights; i++) {
-            LightInfo light = lights[i];
+            unsigned int index = activeLightIndices[i];
+            LightInfo light = lights[index];
             float shadow = 0.0;
             if (enableShadows) {
                 if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
                     switch (light.type) {
                         case 0:{ // Point light
-                                shadow = calculatePointShadow(input.positionWorldSpace, i, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
+                                shadow = calculatePointShadow(input.positionWorldSpace, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
                         //return float4(shadow, shadow, shadow, 1.0);
                                 break;
                             }

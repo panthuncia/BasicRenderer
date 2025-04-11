@@ -6,7 +6,6 @@
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "RenderableObject.h"
 #include "mesh.h"
 #include "Scene.h"
 #include "Material.h"
@@ -15,6 +14,8 @@
 #include "TextureDescription.h"
 #include "ResourceHandles.h"
 #include "UploadManager.h"
+#include "ECSManager.h"
+#include "MeshInstance.h"
 
 class PPLLFillPass : public RenderPass {
 public:
@@ -31,6 +32,10 @@ public:
 		m_PPLLCounter = PPLLCounter;
 		m_numPPLLNodes = numPPLLNodes;
 	}
+
+	~PPLLFillPass() {
+	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
@@ -44,11 +49,13 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
 
-		auto numBlend = context.currentScene->GetNumBlendDraws();
+		auto numBlend = context.drawStats.numDrawsInScene;
 		if (numBlend == 0) {
 			return {};
 		}
@@ -91,9 +98,9 @@ public:
 		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
-		auto& cameraManager = context.currentScene->GetCameraManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
+		auto& cameraManager = context.cameraManager;
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
 		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
@@ -112,15 +119,10 @@ public:
 		}
 
 		// PPLL heads & buffer
-		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes };
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 4, &indices, 0);
+		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
+			auto& meshes = blendMeshes.meshInstances;
 
-		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetBlendMeshes();
-
-			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-			commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+			commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
@@ -137,7 +139,7 @@ public:
 
 				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
 			}
-		}
+			});
 
 		commandList->Close();
 		return { { commandList.Get() } };
@@ -154,6 +156,7 @@ public:
 	}
 
 private:
+	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;

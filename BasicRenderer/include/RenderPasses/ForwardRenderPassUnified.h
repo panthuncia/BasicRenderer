@@ -6,12 +6,16 @@
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "RenderableObject.h"
 #include "mesh.h"
 #include "Scene.h"
 #include "Material.h"
 #include "SettingsManager.h"
 #include "CommandSignatureManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
+#include "CameraManager.h"
+#include "ECSManager.h"
+#include "MeshInstance.h"
 
 class ForwardRenderPassUnified : public RenderPass {
 public:
@@ -22,6 +26,9 @@ public:
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
     }
+
+	~ForwardRenderPassUnified() {
+	}
 
     void Setup() override {
         auto& manager = DeviceManager::GetInstance();
@@ -38,6 +45,9 @@ public:
             m_allocators.push_back(allocator);
             m_commandLists.push_back(commandList7);
         }
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
     RenderPassReturn Execute(RenderContext& context) override {
@@ -108,9 +118,9 @@ private:
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
-        auto& meshManager = context.currentScene->GetMeshManager();
-        auto& objectManager = context.currentScene->GetObjectManager();
-        auto& cameraManager = context.currentScene->GetCameraManager();
+        auto& meshManager = context.meshManager;
+        auto& objectManager = context.objectManager;
+        auto& cameraManager = context.cameraManager;
 
         unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
         staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
@@ -134,15 +144,13 @@ private:
             localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
         }
 
-        auto& meshManager = context.currentScene->GetMeshManager();
+        auto& meshManager = context.meshManager;
 
         // Opaque objects
-        for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetOpaqueMeshes();
+        m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
+            auto& meshes = opaqueMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -158,15 +166,13 @@ private:
                 commandList->IASetIndexBuffer(&indexBufferView);
                 commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
             }
-        }
+            });
 
         // Alpha test objects
-        for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetAlphaTestMeshes();
+        m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
+            auto& meshes = alphaTestMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -182,7 +188,7 @@ private:
                 commandList->IASetIndexBuffer(&indexBufferView);
                 commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
             }
-        }
+            });
     }
 
     void ExecuteMeshShader(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -193,15 +199,13 @@ private:
             localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
         }
 
-        auto& meshManager = context.currentScene->GetMeshManager();
+        auto& meshManager = context.meshManager;
 
         // Opaque objects
-        for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetOpaqueMeshes();
+        m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
+            auto& meshes = opaqueMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -216,15 +220,13 @@ private:
                 // Mesh shaders use DispatchMesh
                 commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
-        }
+            });
 
         // Alpha test objects
-        for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
-            auto& renderable = pair.second;
-            auto& meshes = renderable->GetAlphaTestMeshes();
+        m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
+            auto& meshes = alphaTestMeshes.meshInstances;
 
-            auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
@@ -238,7 +240,7 @@ private:
 
                 commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
-        }
+            });
     }
 
     void ExecuteMeshShaderIndirect(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -249,11 +251,11 @@ private:
             localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
         }
 
-        auto& meshManager = context.currentScene->GetMeshManager();
+        auto& meshManager = context.meshManager;
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
         // Opaque indirect draws
-        auto numOpaque = context.currentScene->GetNumOpaqueDraws();
+        auto numOpaque = context.drawStats.numOpaqueDraws;
         if (numOpaque > 0) {
 
             auto opaqueIndirectBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
@@ -271,7 +273,7 @@ private:
         }
 
         // Alpha test indirect draws
-        auto numAlphaTest = context.currentScene->GetNumAlphaTestDraws();
+		auto numAlphaTest = context.drawStats.numAlphaTestDraws;
         if (numAlphaTest > 0) {
 
             auto alphaTestIndirectBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();
@@ -291,6 +293,8 @@ private:
     }
 
 private:
+	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
     bool m_wireframe;

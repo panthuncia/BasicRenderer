@@ -8,10 +8,16 @@
 #include "DeviceManager.h"
 #include "utilities.h"
 #include "SettingsManager.h"
+#include "MeshManager.h"
+#include "ObjectManager.h"
+#include "ECSManager.h"
 
 class SkinningPass : public ComputePass {
 public:
 	SkinningPass() {
+	}
+
+	~SkinningPass() {
 	}
 
 	void Setup() override {
@@ -28,6 +34,10 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		opaqueQuery = ecsWorld.query_builder<Components::OpaqueSkinned, Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		alphaTestQuery = ecsWorld.query_builder<Components::AlphaTestSkinned, Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		blendQuery = ecsWorld.query_builder<Components::BlendSkinned, Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		CreatePSO();
 	}
 
@@ -51,8 +61,8 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[PreSkinningVertexBufferDescriptorIndex] = meshManager->GetPreSkinningVertexBufferSRVIndex();
@@ -66,12 +76,10 @@ public:
 
 
 		unsigned int perMeshConstants[NumPerMeshRootConstants] = {};
-		for (auto& pair : context.currentScene->GetOpaqueSkinnedRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetOpaqueMeshes();
+		opaqueQuery.each([&](flecs::entity e, Components::OpaqueSkinned s, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances meshInstances) {
+			auto& meshes = meshInstances.meshInstances;
 
-			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
@@ -81,30 +89,12 @@ public:
 
 				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
 			}
-		}
-		for (auto& pair : context.currentScene->GetAlphaTestSkinnedRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetAlphaTestMeshes();
+			});
 
-			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+		alphaTestQuery.each([&](flecs::entity e, Components::AlphaTestSkinned s, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances meshInstances) {
+			auto& meshes = meshInstances.meshInstances;
 
-			for (auto& pMesh : meshes) {
-				auto& mesh = *pMesh->GetMesh();
-				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
-				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
-
-				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
-			}
-		}
-
-		for (auto& pair : context.currentScene->GetBlendSkinnedRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetBlendMeshes();
-
-			auto perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
-			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &perObjectIndex, PerObjectBufferIndex);
+			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
@@ -114,7 +104,22 @@ public:
 
 				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
 			}
-		}
+			});
+
+		blendQuery.each([&](flecs::entity e, Components::BlendSkinned s, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances meshInstances) {
+			auto& meshes = meshInstances.meshInstances;
+
+			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+
+			for (auto& pMesh : meshes) {
+				auto& mesh = *pMesh->GetMesh();
+				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
+
+				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
+			}
+			});
 
 		ThrowIfFailed(commandList->Close());
 
@@ -153,6 +158,9 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
+	flecs::query<Components::OpaqueSkinned, Components::ObjectDrawInfo, Components::OpaqueMeshInstances> opaqueQuery;
+	flecs::query<Components::AlphaTestSkinned, Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> alphaTestQuery;
+	flecs::query<Components::BlendSkinned, Components::ObjectDrawInfo, Components::BlendMeshInstances> blendQuery;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> m_PSO;

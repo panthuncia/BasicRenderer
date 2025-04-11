@@ -1,14 +1,16 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <mutex>
 
 #include "LazyDynamicStructuredBuffer.h"
 #include "DynamicStructuredBuffer.h"
 #include "buffers.h"
 #include "SortedUnsignedIntBuffer.h"
 #include "IndirectCommand.h"
+#include "Components.h"
 
-class RenderableObject;
 class BufferView;
 class DynamicBuffer;
 
@@ -17,36 +19,25 @@ public:
 	static std::unique_ptr<ObjectManager> CreateUnique() {
 		return std::unique_ptr<ObjectManager>(new ObjectManager());
 	}
-	void AddObject(std::shared_ptr<RenderableObject>& object);
-	void RemoveObject(std::shared_ptr<RenderableObject>& object);
-	unsigned int GetPerObjectBufferSRVIndex() const {
-		return m_perObjectBuffers->GetSRVInfo().index;
-	}
+	Components::ObjectDrawInfo AddObject(PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances);
+	void RemoveObject(const Components::ObjectDrawInfo* drawInfo);
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
 	void UpdateNormalMatrixBuffer(BufferView* view, void* data);
 	std::shared_ptr<DynamicBuffer>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}
 
-	unsigned int GetMasterIndirectCommandsBufferSRVIndex() const {
-		return m_masterIndirectCommandsBuffer->GetSRVInfo().index;
-	}
+	unsigned int GetPerObjectBufferSRVIndex() const;
 
-	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const {
-		return m_activeOpaqueDrawSetIndices->GetSRVInfo().index;
-	}
+	unsigned int GetMasterIndirectCommandsBufferSRVIndex() const;
 
-	unsigned int GetActiveAlphaTestDrawSetIndicesBufferSRVIndex() const {
-		return m_activeAlphaTestDrawSetIndices->GetSRVInfo().index;
-	}
+	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const;
 
-	unsigned int GetActiveBlendDrawSetIndicesBufferSRVIndex() const {
-		return m_activeBlendDrawSetIndices->GetSRVInfo().index;
-	}
+	unsigned int GetActiveAlphaTestDrawSetIndicesBufferSRVIndex() const;
 
-	unsigned int GetNormalMatrixBufferSRVIndex() const {
-		return m_normalMatrixBuffer->GetSRVInfo().index;
-	}
+	unsigned int GetActiveBlendDrawSetIndicesBufferSRVIndex() const;
+
+	unsigned int GetNormalMatrixBufferSRVIndex() const;
 
 	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveOpaqueDrawSetIndices() {
 		return m_activeOpaqueDrawSetIndices;
@@ -67,7 +58,6 @@ public:
 
 private:
 	ObjectManager();
-	std::vector<std::shared_ptr<RenderableObject>> m_objects;
 	std::shared_ptr<DynamicBuffer> m_perObjectBuffers; // Per object constant buffer
 	std::shared_ptr<DynamicBuffer> m_masterIndirectCommandsBuffer; // Indirect draw command buffer
 	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>> m_normalMatrixBuffer; // Normal matrices for each object
@@ -75,4 +65,6 @@ private:
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeAlphaTestDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active alpha tested objects
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeBlendDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active blended objects
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshInstanceCB>> m_perMeshInstanceBuffers; // Indices into m_perObjectBuffers for each mesh instance in each object
+	std::mutex m_objectUpdateMutex; // Mutex for thread safety
+	std::mutex m_normalMatrixUpdateMutex; // Mutex for thread safety
 };

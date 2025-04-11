@@ -5,51 +5,56 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
+
 #include "buffers.h"
 #include "Interfaces/ISceneNodeObserver.h"
 #include "DynamicResource.h"
+#include "LazyDynamicStructuredBuffer.h"
 #include "DynamicStructuredBuffer.h"
+#include "Components.h"
 
-class Camera;
-class Light;
 class ShadowMaps;
-class SceneNode;
 class IndirectCommandBufferManager;
 class CameraManager;
+class SortedUnsignedIntBuffer;
 
-class LightManager : public ISceneNodeObserver<Light>, public ISceneNodeObserver<SceneNode> {
+struct AddLightReturn {
+	Components::LightViewInfo lightViewInfo;
+	std::optional<Components::ShadowMap> shadowMap;
+	std::optional<Components::FrustrumPlanes> frustrumPlanes;
+};
+
+class LightManager {
 public:
 	static std::unique_ptr<LightManager> CreateUnique() {
 		return std::unique_ptr<LightManager>(new LightManager());
 	}
     ~LightManager();
-    void Initialize();
-    void AddLight(Light* lightNode, Camera* currentCamera = nullptr);
-    void RemoveLight(Light* light);
+    AddLightReturn AddLight(LightInfo* lightInfo, uint64_t entityId);
+    void RemoveLight(LightInfo* light);
     unsigned int GetLightBufferDescriptorIndex();
+	unsigned int GetActiveLightIndicesBufferDescriptorIndex();
     unsigned int GetPointCubemapMatricesDescriptorIndex();
     unsigned int GetSpotMatricesDescriptorIndex();
     unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
     unsigned int GetNumLights();
-    void SetCurrentCamera(Camera* camera);
-    void OnNodeUpdated(SceneNode* camera) override;
-    void OnNodeUpdated(Light* light) override;
+    void SetCurrentCamera(flecs::entity camera);
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 	void SetCameraManager(CameraManager* cameraManager);
-
+	void UpdateLightBufferView(BufferView* view, LightInfo& data);
+    void UpdateLightViewInfo(flecs::entity light);
 
 private:
     LightManager();
-    std::shared_ptr<DynamicStructuredBuffer<LightInfo>> m_lightBuffer;
+	flecs::entity m_currentCamera;
+    std::shared_ptr<LazyDynamicStructuredBuffer<LightInfo>> m_lightBuffer;
+	std::shared_ptr<SortedUnsignedIntBuffer> m_activeLightIndices; // Sorted list of active light indices
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_spotViewInfo; // Indices into camera buffer
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_pointViewInfo;
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_directionalViewInfo;
-    std::vector<Light*> m_lights; // Active light IDs
-    std::vector<Light*> m_spotLights;
-	std::vector<Light*> m_pointLights;
-	std::vector<Light*> m_directionalLights;
 
-	std::unordered_map<int, DynamicGloballyIndexedResource> m_lightDrawSetBufferMap;
     // TODO: The buffer size and increment size are low for testing.
     unsigned int m_commandBufferSize = 1;
 	bool m_resizeCommandBuffers = false;
@@ -64,10 +69,14 @@ private:
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
     CameraManager* m_pCameraManager = nullptr;
 
-    Camera* m_currentCamera = nullptr;
+	std::mutex m_lightUpdateMutex;
 
-    unsigned int CreateLightInfo(Light* node);
-    unsigned int CreateLightViewInfo(Light* node, Camera* camera = nullptr);
-    void UpdateLightViewInfo(Light* node);
-	void RemoveLightViewInfo(Light* node);
+    std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+        CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId);
+	std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+		CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId);
+	std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+		CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t entityId);
+
+	void RemoveLightViewInfo(flecs::entity light);
 };

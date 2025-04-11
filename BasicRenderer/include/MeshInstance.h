@@ -10,6 +10,9 @@ public:
 	static std::shared_ptr<MeshInstance> CreateShared(std::shared_ptr<Mesh> mesh) {
 		return std::shared_ptr<MeshInstance>(new MeshInstance(mesh));
 	}
+    static std::unique_ptr<MeshInstance> CreateUnique(std::shared_ptr<Mesh> mesh) {
+        return std::unique_ptr<MeshInstance>(new MeshInstance(mesh));
+    }
 
     //void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
     BufferView* GetPostSkinningVertexBufferView();
@@ -56,7 +59,7 @@ private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
         if (mesh->HasBaseSkin()) {
-			SetSkeleton(mesh->GetBaseSkin());
+            SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
         }
     }
 	PerMeshInstanceCB m_perMeshInstanceBufferData;

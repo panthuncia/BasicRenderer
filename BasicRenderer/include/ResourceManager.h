@@ -37,7 +37,7 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
     ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
-    void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
+    void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT activeLightIndicesBufferIndex, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex);
     std::shared_ptr<Buffer>& GetPerFrameBuffer() {
 		return perFrameBufferHandle;
     }

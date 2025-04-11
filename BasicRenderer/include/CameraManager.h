@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory.h>
+#include <mutex>
 
 #include "buffers.h"
 
@@ -27,7 +28,13 @@ public:
 		return m_pCameraBuffer;
 	}
 
+	void UpdatePerCameraBufferView(BufferView* view, CameraInfo& data) {
+		std::lock_guard<std::mutex> lock(m_cameraUpdateMutex);
+		m_pCameraBuffer->UpdateView(view, &data);
+	}
+
 private:
 	CameraManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
+	std::mutex m_cameraUpdateMutex;
 };

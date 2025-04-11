@@ -6,17 +6,19 @@
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "RenderableObject.h"
 #include "mesh.h"
 #include "Scene.h"
 #include "Material.h"
 #include "SettingsManager.h"
+#include "ECSManager.h"
 
 class DebugSpherePass : public RenderPass {
 public:
 	DebugSpherePass() {
 		CreateDebugRootSignature();
 		CreateDebugMeshPSO();
+	}
+	~DebugSpherePass() {
 	}
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
@@ -31,6 +33,10 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
@@ -80,14 +86,13 @@ public:
 		constants.center[2] = 0.0;
 		constants.radius = 1.0;
 		constants.perObjectIndex = 0;
-		constants.cameraBufferIndex = context.currentScene->GetCameraManager()->GetCameraBufferSRVIndex();
-		constants.objectBufferIndex = context.currentScene->GetObjectManager()->GetPerObjectBufferSRVIndex();
+		constants.cameraBufferIndex = context.cameraManager->GetCameraBufferSRVIndex();
+		constants.objectBufferIndex = context.objectManager->GetPerObjectBufferSRVIndex();
 
 		commandList->SetGraphicsRoot32BitConstants(0, 8, &constants, 0);
 
-		for (auto& pair : context.currentScene->GetOpaqueRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetOpaqueMeshes();
+		m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
+			auto& meshes = opaqueMeshes.meshInstances;
 
 			for (auto& pMesh : meshes) {
 				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
@@ -95,15 +100,14 @@ public:
 				constants.center[1] = meshData.boundingSphere.center.y;
 				constants.center[2] = meshData.boundingSphere.center.z;
 				constants.radius = meshData.boundingSphere.radius;
-				constants.perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				constants.perObjectIndex = drawInfo.perObjectCBIndex;
 				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
 				commandList->DispatchMesh(1, 1, 1);
 			}
-		}
+			});
 
-		for (auto& pair : context.currentScene->GetAlphaTestRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetAlphaTestMeshes();
+		m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
+			auto& meshes = alphaTestMeshes.meshInstances;
 
 			for (auto& pMesh : meshes) {
 				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
@@ -111,15 +115,14 @@ public:
 				constants.center[1] = meshData.boundingSphere.center.y;
 				constants.center[2] = meshData.boundingSphere.center.z;
 				constants.radius = meshData.boundingSphere.radius;
-				constants.perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				constants.perObjectIndex = drawInfo.perObjectCBIndex;
 				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
 				commandList->DispatchMesh(1, 1, 1);
 			}
-		}
+			});
 
-		for (auto& pair : context.currentScene->GetBlendRenderableObjectIDMap()) {
-			auto& renderable = pair.second;
-			auto& meshes = renderable->GetBlendMeshes();
+		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
+			auto& meshes = blendMeshes.meshInstances;
 
 			for (auto& pMesh : meshes) {
 				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
@@ -127,11 +130,11 @@ public:
 				constants.center[1] = meshData.boundingSphere.center.y;
 				constants.center[2] = meshData.boundingSphere.center.z;
 				constants.radius = meshData.boundingSphere.radius;
-				constants.perObjectIndex = renderable->GetCurrentPerObjectCBView()->GetOffset() / sizeof(PerObjectCB);
+				constants.perObjectIndex = drawInfo.perObjectCBIndex;
 				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
 				commandList->DispatchMesh(1, 1, 1);
 			}
-		}
+			});
 
 		commandList->Close();
 		return { { commandList.Get() } };
@@ -233,6 +236,9 @@ private:
 
 	}
 
+	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
 	ComPtr<ID3D12RootSignature> m_debugRootSignature;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;

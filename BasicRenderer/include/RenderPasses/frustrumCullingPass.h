@@ -15,6 +15,9 @@ public:
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
 
+	~FrustrumCullingPass() {
+	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
@@ -29,6 +32,8 @@ public:
 			m_allocators.push_back(allocator);
 			m_commandLists.push_back(commandList);
 		}
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
 	}
@@ -53,9 +58,9 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.currentScene->GetMeshManager();
-		auto& objectManager = context.currentScene->GetObjectManager();
-		auto& cameraManager = context.currentScene->GetCameraManager();
+		auto& meshManager = context.meshManager;
+		auto& objectManager = context.objectManager;
+		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
@@ -71,11 +76,11 @@ public:
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int numCascades = getNumDirectionalLightCascades();
-
+		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::CameraBufferView>()->index;
 		// opaque buffer
-		auto numOpaqueDraws = context.currentScene->GetNumOpaqueDraws();
+		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
-			unsigned int numThreadGroups = std::ceil(context.currentScene->GetNumOpaqueDraws() / 64.0);
+			unsigned int numThreadGroups = std::ceil(numOpaqueDraws / 64.0);
 			// First, process buffer for main camera
 			auto resource = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
 			auto apiResource = resource->GetAPIResource();
@@ -84,20 +89,18 @@ public:
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumOpaqueDraws()-1;
+			bufferIndices[MaxDrawIndex] = numOpaqueDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
-			//  Then, process buffer for each light
-			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
-				auto& light = lightPair.second;
-				auto& lightViews = light->GetCameraBufferViews();
+			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
-				for (auto& buffer : light->GetPerViewOpaqueIndirectCommandBuffers()) {
+				for (auto& buffer : lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers) {
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
@@ -105,10 +108,10 @@ public:
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
 				}
-			}
+				});
 		}
 		// alpha test buffer
-		auto numAlphaTestDraws = context.currentScene->GetNumAlphaTestDraws();
+		auto numAlphaTestDraws = context.drawStats.numAlphaTestDraws;
 		if (numAlphaTestDraws > 0) {
 			unsigned int numThreadGroups = std::ceil(numAlphaTestDraws / 64.0);
 			auto resource = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource();
@@ -118,19 +121,18 @@ public:
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveAlphaTestDrawSetIndicesBufferSRVIndex();
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumAlphaTestDraws()-1;
+			bufferIndices[MaxDrawIndex] = numAlphaTestDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 		
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
-			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
-				auto& light = lightPair.second;
-				auto& lightViews = light->GetCameraBufferViews();
+			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
-				for (auto& buffer : light->GetPerViewAlphaTestIndirectCommandBuffers()) {
+				for (auto& buffer : lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers) {
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
@@ -138,11 +140,11 @@ public:
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
 				}
-			}
+				});
 		}
 
 		// blend buffer
-		auto numBlendDraws = context.currentScene->GetNumBlendDraws();
+		auto numBlendDraws = context.drawStats.numBlendDraws;
 		if (numBlendDraws > 0) {
 			unsigned int numThreadGroups = std::ceil(numBlendDraws / 64.0);
 			auto resource = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource();
@@ -152,19 +154,18 @@ public:
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveBlendDrawSetIndicesBufferSRVIndex();
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
-			bufferIndices[MaxDrawIndex] = context.currentScene->GetNumBlendDraws() - 1;
+			bufferIndices[MaxDrawIndex] = numBlendDraws - 1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-			unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
-			for (auto& lightPair : context.currentScene->GetLightIDMap()) {
-				auto& light = lightPair.second;
-				auto& lightViews = light->GetCameraBufferViews();
+			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
-				for (auto& buffer : light->GetPerViewBlendIndirectCommandBuffers()) {
+				for (auto& buffer : lightViewInfo.commandBuffers.blendIndirectCommandBuffers) {
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
@@ -172,7 +173,7 @@ public:
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
 				}
-			}
+				});
 		}
 
 		ThrowIfFailed(commandList->Close());
@@ -211,6 +212,8 @@ private:
 		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
+	
+	flecs::query<Components::LightViewInfo> lightQuery;
 
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;

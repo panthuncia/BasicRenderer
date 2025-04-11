@@ -23,10 +23,10 @@ public:
 	}
 
     // Add a single buffer to an existing ID
-    std::shared_ptr<DynamicGloballyIndexedResource> CreateBuffer(const int entityID, MaterialBuckets bucket);
+    std::shared_ptr<DynamicGloballyIndexedResource> CreateBuffer(uint64_t entityID, MaterialBuckets bucket);
 
     // Remove buffers associated with an ID
-    void UnregisterBuffers(const int entityID);
+    void UnregisterBuffers(uint64_t entityID);
 
     // Update all buffers when the number of draws changes
     void UpdateBuffersForBucket(MaterialBuckets bucket, unsigned int numDraws);

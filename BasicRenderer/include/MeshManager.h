@@ -24,42 +24,18 @@ public:
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
 
-	unsigned int GetPreSkinningVertexBufferSRVIndex() const {
-		return m_preSkinningVertices->GetSRVInfo().index;
-	}
-	unsigned int GetPostSkinningVertexBufferSRVIndex() const {
-		return m_postSkinningVertices->GetSRVInfo().index;
-	}
-	unsigned int GetPostSkinningVertexBufferUAVIndex() const {
-		return m_postSkinningVertices->GetUAVShaderVisibleInfo().index;
-	}
-	unsigned int GetMeshletOffsetBufferSRVIndex() const {
-		return m_meshletOffsets->GetSRVInfo().index;
-	}
-	unsigned int GetMeshletIndexBufferSRVIndex() const {
-		return m_meshletIndices->GetSRVInfo().index;
-	}
-	unsigned int GetMeshletTriangleBufferSRVIndex() const {
-		return m_meshletTriangles->GetSRVInfo().index;
-	}
-	std::shared_ptr<ResourceGroup> GetResourceGroup() {
-		return m_resourceGroup;
-	}
-	unsigned int GetPerMeshBufferSRVIndex() const {
-		return m_perMeshBuffers->GetSRVInfo().index;
-	}
-	std::shared_ptr<DynamicBuffer>& GetPerMeshBuffers() {
-		return m_perMeshBuffers;
-	}
-	std::shared_ptr<DynamicBuffer>& GetPreSkinningVertices() {
-		return m_preSkinningVertices;
-	}
-	std::shared_ptr<DynamicBuffer>& GetPostSkinningVertices() {
-		return m_postSkinningVertices;
-	}
-	unsigned int GetPerMeshInstanceBufferSRVIndex() const {
-		return m_perMeshInstanceBuffers->GetSRVInfo().index;
-	}
+	unsigned int GetPreSkinningVertexBufferSRVIndex() const;
+	unsigned int GetPostSkinningVertexBufferSRVIndex() const;
+	unsigned int GetPostSkinningVertexBufferUAVIndex() const;
+	unsigned int GetMeshletOffsetBufferSRVIndex() const;
+	unsigned int GetMeshletIndexBufferSRVIndex() const;
+	unsigned int GetMeshletTriangleBufferSRVIndex() const;
+	std::shared_ptr<ResourceGroup> GetResourceGroup();
+	unsigned int GetPerMeshBufferSRVIndex() const;
+	std::shared_ptr<DynamicBuffer>& GetPerMeshBuffers();
+	std::shared_ptr<DynamicBuffer>& GetPreSkinningVertices();
+	std::shared_ptr<DynamicBuffer>& GetPostSkinningVertices();
+	unsigned int GetPerMeshInstanceBufferSRVIndex() const;
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);

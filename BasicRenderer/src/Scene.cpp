@@ -3,350 +3,395 @@
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <execution>
+#include <flecs.h>
 
 #include "Utilities.h"
 #include "SettingsManager.h"
 #include "CameraManager.h"
+#include "ECSManager.h"
+#include "Components.h"
+#include "material.h"
+#include "ObjectManager.h"
+#include "MeshManager.h"
+#include "LightManager.h"
+#include "IndirectCommandBufferManager.h"
+#include "ECSSystems.h"
+#include "MeshInstance.h"
+#include "AnimationController.h"
+
+std::atomic<uint64_t> Scene::globalSceneCount = 0;
 
 Scene::Scene(){
+	m_sceneID = globalSceneCount.fetch_add(1, std::memory_order_relaxed);
+
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
 
     // TODO: refactor indirect buffer manager and light manager so that GPU resources are destroyed on MakeNonResident
-	indirectCommandBufferManager = IndirectCommandBufferManager::CreateShared();
+	//indirectCommandBufferManager = IndirectCommandBufferManager::CreateShared();
+
+    //Initialize ECS scene
+    auto& world = ECSManager::GetInstance().GetWorld();
+    ECSSceneRoot = world.entity().add<Components::SceneRoot>()
+		.set<Components::Position>({0, 0, 0})
+		.set<Components::Rotation>({0, 0, 0, 1})
+		.set<Components::Scale>({1, 1, 1})
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>("Scene Root");
+	ECSSceneRoot = ECSSceneRoot;
+    world.set_pipeline(world.get<Components::GameScene>()->pipeline);
 }
 
-UINT Scene::AddObject(std::shared_ptr<RenderableObject> object) {
-    numObjects++;
-	object->SetLocalID(nextNodeID);
-    objectsByName[object->m_name] = object;
-    objectsByID[nextNodeID] = object;
-    nextNodeID++;
+flecs::entity Scene::CreateDirectionalLightECS(std::wstring name, XMFLOAT3 color, float intensity, XMFLOAT3 direction){
+	return CreateLightECS(name, Components::LightType::Directional, { 0, 0, 0 }, color, intensity, 0, 0, 0, direction);
+}
 
-    if (object->parent == nullptr) {
-        sceneRoot.AddChild(object);
-    }
-	for (auto& mesh : object->GetOpaqueMeshes()) {
-        m_numDrawsInScene++;
-		m_numOpaqueDraws++;
-        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
-		if (meshManager != nullptr) { // If mesh manager exists, this scene is active and we want to add the mesh immediately
-            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
-                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Opaque);
-            }
-            meshManager->AddMeshInstance(mesh.get());
-            if (mesh->GetMesh()->HasBaseSkin()) {
-                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
-				AddSkeleton(skeletonCopy);
-				mesh->SetSkeleton(skeletonCopy);
-            }
-        }
-        meshesByID[meshGlobaId] = mesh->GetMesh();
+flecs::entity Scene::CreatePointLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation) {
+	return CreateLightECS(name, Components::LightType::Point, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation);
+}
+
+flecs::entity Scene::CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation, float linearAttenuation, float quadraticAttenuation) {
+	return CreateLightECS(name, Components::LightType::Spot, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation, direction, innerConeAngle, outerConeAngle);
+}
+
+flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	float range = 20.0f;
+
+	LightInfo lightInfo;
+	lightInfo.type = type;
+	lightInfo.posWorldSpace = XMLoadFloat3(&position);
+	lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
+	lightInfo.color *= intensity;
+	float nearPlane = 0.01;
+	float farPlane = range;
+	lightInfo.attenuation = XMVectorSet(constantAttenuation, linearAttenuation, quadraticAttenuation, 0);
+	lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
+	lightInfo.innerConeAngle = cos(innerConeAngle);
+	lightInfo.outerConeAngle = cos(outerConeAngle);
+	lightInfo.shadowViewInfoIndex = -1;
+	lightInfo.nearPlane = nearPlane;
+	lightInfo.farPlane = farPlane;
+	lightInfo.shadowCaster = true;
+
+	flecs::entity entity = world.entity();
+	entity.child_of(ECSSceneRoot)
+		.set<Components::Light>({ type, color, XMFLOAT3(constantAttenuation, linearAttenuation, quadraticAttenuation), range, lightInfo })
+		.set<Components::Position>(position)
+		.set<Components::Scale>({ 1, 1, 1 })
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>(ws2s(name));
+
+	if (direction.x != 0 || direction.y != 0 || direction.z || 0) {
+		entity.set<Components::Rotation>(QuaternionFromAxisAngle(direction));
 	}
-    for (auto& mesh : object->GetAlphaTestMeshes()) {
-        m_numDrawsInScene++;
-		m_numAlphaTestDraws++;
-        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
-        if (meshManager != nullptr) {
-            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
-                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::AlphaTest);
-            }
-            meshManager->AddMeshInstance(mesh.get());
-            if (mesh->GetMesh()->HasBaseSkin()) {
-                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
-                AddSkeleton(skeletonCopy);
-                mesh->SetSkeleton(skeletonCopy);
-            }
-        }
-        meshesByID[mesh->GetMesh()->GetGlobalID()] = mesh->GetMesh();
-    }
-	for (auto& mesh : object->GetBlendMeshes()) {
-        m_numDrawsInScene++;
-		m_numBlendDraws++;
-        auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
-		if (meshManager != nullptr) {
-            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
-                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
-            }
-            meshManager->AddMeshInstance(mesh.get());
-            if (mesh->GetMesh()->HasBaseSkin()) {
-                auto skeletonCopy = mesh->GetMesh()->GetBaseSkin()->CopySkeleton();
-                AddSkeleton(skeletonCopy);
-                mesh->SetSkeleton(skeletonCopy);
-            }
-        }
-        meshesByID[mesh->GetMesh()->GetGlobalID()] = mesh->GetMesh();
+	else {
+		entity.set<Components::Rotation>({ 0, 0, 0, 1 });
 	}
 
-    if (object->HasOpaque()) {
-        opaqueObjectsByID[object->GetLocalID()] = object;
-		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
-    }
 
-    if (object->HasAlphaTest()) {
-        alphaTestObjectsByID[object->GetLocalID()] = object;
-		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, m_numAlphaTestDraws);
-    }
-
-	if (object->HasBlend()) {
-		blendObjectsByID[object->GetLocalID()] = object;
-		indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
+	if (ECSSceneRoot.has<Components::ActiveScene>()) {
+		ActivateLight(entity);
+		entity.add<Components::Active>();
 	}
 
-	if (objectManager != nullptr) {
-		objectManager->AddObject(object);
+	float aspect = 1.0f;
+
+	switch (type) {
+	case Components::LightType::Spot:
+		entity.set<Components::ProjectionMatrix>({ XMMatrixPerspectiveFovRH(outerConeAngle * 2, aspect, nearPlane, farPlane) });
+		break;
+	case Components::LightType::Point:
+		entity.set<Components::ProjectionMatrix>({ XMMatrixPerspectiveFovRH(XM_PI / 2, aspect, nearPlane, farPlane) });
+		break;
 	}
 
-	if (object->HasSkinned()) {
-		if (object->HasOpaque()) {
-			opaqueSkinnedObjectsByID[object->GetLocalID()] = object;
-		} if (object->HasAlphaTest()) {
-			alphaTestSkinnedObjectsByID[object->GetLocalID()] = object;
-		} if (object->HasBlend()) {
-			blendSkinnedObjectsByID[object->GetLocalID()] = object;
+	std::vector<std::array<ClippingPlane, 6>> frustrumPlanes;
+	switch (type) {
+	case Components::LightType::Directional:
+		break; // Directional is special-cased, frustrums are in world space, calculated during cascade setup
+	case Components::LightType::Spot: {
+		frustrumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, outerConeAngle * 2, nearPlane, farPlane));
+		entity.set<Components::FrustrumPlanes>({ frustrumPlanes });
+		break;
+	case Components::LightType::Point: {
+		for (int i = 0; i < 6; i++) {
+			frustrumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, XM_PI / 2, nearPlane, farPlane)); // TODO: All of these are the same.
 		}
+		entity.set<Components::FrustrumPlanes>({ frustrumPlanes });
+		break;
 	}
-
-    return object->GetLocalID();
-}
-
-UINT Scene::AddNode(std::shared_ptr<SceneNode> node, bool canAttachToRoot) {
-    node->SetLocalID(nextNodeID);
-
-    if (node->parent == nullptr && canAttachToRoot) {
-        sceneRoot.AddChild(node);
-    }
-
-    nodesByID[nextNodeID] = node;
-    nextNodeID++;
-    if (node->m_name != L"") {
-        nodesByName[node->m_name] = node;
-    }
-    return node->GetLocalID();
-}
-
-UINT Scene::AddLight(std::shared_ptr<Light> light) {
-    light->SetLocalID(nextNodeID);
-    if (light->parent == nullptr) {
-        sceneRoot.AddChild(light);
-    }
-
-    lightsByID[nextNodeID] = light;
-    nextNodeID++;
-
-    if (lightManager != nullptr) {
-        lightManager->AddLight(light.get(), pCamera.get());
-    }
-    return light->GetLocalID();
-}
-
-std::shared_ptr<SceneNode> Scene::CreateNode(std::wstring name) {
-    std::shared_ptr<SceneNode> node = SceneNode::CreateShared(name);
-    AddNode(node);
-    return node;
-}
-
-std::shared_ptr<RenderableObject> Scene::CreateRenderableObject(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
-    std::shared_ptr<RenderableObject> object = std::make_shared<RenderableObject>(name, meshes);
-    AddObject(object);
-    return object;
-}
-
-
-std::shared_ptr<RenderableObject> Scene::GetObjectByName(const std::wstring& name) {
-    auto it = objectsByName.find(name);
-    if (it != objectsByName.end()) {
-        return it->second;
-    }
-    return nullptr;
-}
-
-std::shared_ptr<RenderableObject> Scene::GetObjectByID(UINT id) {
-    auto it = objectsByID.find(id);
-    if (it != objectsByID.end()) {
-        return it->second;
-    }
-    return nullptr;
-}
-
-std::shared_ptr<SceneNode> Scene::GetEntityByID(UINT id) {
-    auto it = objectsByID.find(id);
-    if (it != objectsByID.end()) {
-        return it->second;
-    }
-    auto it1 = lightsByID.find(id);
-    if (it1 != lightsByID.end()) {
-        return it1->second;
-    }
-    auto it2 = nodesByID.find(id);
-    if (it2 != nodesByID.end()) {
-        return it2->second;
-    }
-    return nullptr;
-}
-
-void Scene::RemoveObjectByName(const std::wstring& name) {
-    auto it = objectsByName.find(name);
-	RemoveObjectByID(it->second->GetLocalID());
-}
-
-void Scene::RemoveObjectByID(UINT id) {
-    auto it = objectsByID.find(id);
-    if (it != objectsByID.end()) {
-        auto nameIt = std::find_if(objectsByName.begin(), objectsByName.end(),
-            [&](const auto& pair) { return pair.second == it->second; });
-        if (nameIt != objectsByName.end()) {
-            objectsByName.erase(nameIt);
-        }
-        opaqueObjectsByID.erase(it->second->GetLocalID());
-        alphaTestObjectsByID.erase(it->second->GetLocalID());
-		blendObjectsByID.erase(it->second->GetLocalID());
-
-        std::shared_ptr<SceneNode> node = it->second;
-        node->parent->RemoveChild(node);
-		if (objectManager != nullptr) {
-			objectManager->RemoveObject(it->second);
-		}
-        for (auto& mesh : it->second->GetOpaqueMeshes()) {
-            // TODO: Remove mesh from mesh manager, handling the case where the mesh is used by multiple objects
-            m_numDrawsInScene--;
-			m_numOpaqueDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
-        }
-        for (auto& mesh : it->second->GetAlphaTestMeshes()) {
-            m_numDrawsInScene--;
-			m_numAlphaTestDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, m_numAlphaTestDraws);
-        }
-		for (auto& mesh : it->second->GetBlendMeshes()) {
-			m_numDrawsInScene--;
-			m_numBlendDraws--;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Blend, m_numBlendDraws);
-		}
-		if (it->second->HasSkinned()) {
-			if (it->second->HasOpaque()) {
-				opaqueSkinnedObjectsByID.erase(it->second->GetLocalID());
-			} if (it->second->HasAlphaTest()) {
-				alphaTestSkinnedObjectsByID.erase(it->second->GetLocalID());
-            } if (it->second->HasBlend()) {
-                blendSkinnedObjectsByID.erase(it->second->GetLocalID());
-            }
-		}
-        DeletionManager::GetInstance().MarkForDelete(it->second); // defer deletion to the end of the frame
-        objectsByID.erase(it);
-    }
-}
-
-void Scene::RemoveLightByID(UINT id) {
-    auto it = lightsByID.find(id);
-    if (it != lightsByID.end()) {
-        auto& light = it->second;
-        light->parent->RemoveChild(it->second);
-        if (lightManager != nullptr) {
-            lightManager->RemoveLight(light.get());
-        }
-        lightsByID.erase(it);
-    }
-}
-
-void Scene::RemoveNodeByID(UINT id) {
-	auto it = nodesByID.find(id);
-	if (it != nodesByID.end()) {
-		auto& node = it->second;
-
-		std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
-        for (auto& childNode : node->children) {
-			childrenToRemove.push_back(childNode);
-        }
-		for (auto& childNode : childrenToRemove) {
-			node->parent->AddChild(childNode);
-		}
-
-		node->parent->RemoveChild(it->second);
-		nodesByID.erase(it);
 	}
+	}
+	
+	return entity;
 }
 
-void Scene::RemoveEntityByID(UINT id, bool recurse) {
-	auto it = objectsByID.find(id);
-	if (it != objectsByID.end()) {
-		if (recurse) {
-			auto& object = it->second;
-			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
-			for (auto& child : object->children) {
-				childrenToRemove.push_back(child);
+void Scene::ActivateRenderable(flecs::entity& entity) {
+	auto& world = ECSManager::GetInstance().GetWorld();
+
+	auto& buffer = entity.get_mut<Components::RenderableObject>()->perObjectCB;
+	auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
+	auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
+	auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+
+	auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
+	auto drawStats = world.get_mut<Components::DrawStats>();
+
+	if (opaqueMeshInstances) {
+		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
+		for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
+			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Opaque);
 			}
-			for (auto& child : childrenToRemove) {
-				RemoveEntityByID(child->GetLocalID(), recurse);
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+		}
+		drawStats->numOpaqueDraws += opaqueMeshInstances->meshInstances.size();
+		drawStats->numDrawsInScene += opaqueMeshInstances->meshInstances.size();
+	}
+	if (alphaTestMeshInstances) {
+		//e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
+		for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
+			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::AlphaTest);
+			}
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+		}
+		drawStats->numAlphaTestDraws += alphaTestMeshInstances->meshInstances.size();
+		drawStats->numDrawsInScene += alphaTestMeshInstances->meshInstances.size();
+	}
+	if (blendMeshInstances) {
+		//e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
+		for (auto& meshInstance : blendMeshInstances->meshInstances) {
+			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Blend);
+			}
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+		}
+		drawStats->numBlendDraws += blendMeshInstances->meshInstances.size();
+		drawStats->numDrawsInScene += blendMeshInstances->meshInstances.size();
+	}
+
+	auto drawInfo = m_managerInterface.GetObjectManager()->AddObject(buffer, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
+	entity.set<Components::ObjectDrawInfo>(drawInfo);
+	buffer.normalMatrixBufferIndex = drawInfo.normalMatrixIndex;
+	
+	if (drawInfo.opaque.has_value()) {
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Opaque, drawStats->numOpaqueDraws);
+	}
+	if (drawInfo.alphaTest.has_value()) {
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, drawStats->numAlphaTestDraws);
+	}
+	if (drawInfo.blend.has_value()) {
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Blend, drawStats->numBlendDraws);
+	}
+}
+
+void Scene::ActivateLight(flecs::entity& entity) {
+	auto lightInfo = entity.get<Components::Light>();
+	auto newInfo = Components::Light(*lightInfo);
+	AddLightReturn addInfo = m_managerInterface.GetLightManager()->AddLight(&newInfo.lightInfo, entity.id());
+	entity.set<Components::LightViewInfo>({ addInfo.lightViewInfo });
+	if (addInfo.shadowMap.has_value()) {
+		entity.set<Components::ShadowMap>({ addInfo.shadowMap.value() });
+		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().shadowMap->GetBuffer()->GetSRVInfo().index;
+		newInfo.lightInfo.shadowSamplerIndex = addInfo.shadowMap.value().shadowMap->GetSamplerDescriptorIndex();
+		newInfo.lightInfo.shadowViewInfoIndex = addInfo.lightViewInfo.viewInfoBufferIndex;
+		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), newInfo.lightInfo);
+		entity.set<Components::Light>(newInfo);
+	}
+	if (addInfo.frustrumPlanes.has_value()) {
+		entity.set<Components::FrustrumPlanes>({ addInfo.frustrumPlanes.value() });
+	}
+}
+
+void Scene::ActivateCamera(flecs::entity& entity) {
+	auto cameraInfo = entity.get_mut<Components::Camera>()->info;
+	auto cameraBufferView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
+	entity.set<Components::CameraBufferView>({cameraBufferView, cameraBufferView->GetOffset()/sizeof(CameraInfo)});
+}
+
+void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	auto query = world.query_builder<>().with<Components::RenderableObject>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	std::vector<std::shared_ptr<Skeleton>> skeletonsToAdd;
+	world.defer_begin();
+	query.each([&](flecs::entity entity) {
+		auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
+		auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
+		auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+
+		// Discard old instances and add new ones
+		if (opaqueMeshInstances) {
+			Components::OpaqueMeshInstances meshInstances;
+			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
+				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
+			}
+			entity.set<Components::OpaqueMeshInstances>(meshInstances);
+		}
+		if (alphaTestMeshInstances) {
+			Components::AlphaTestMeshInstances meshInstances;
+			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
+				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
+			}
+			entity.set<Components::AlphaTestMeshInstances>(meshInstances);
+		}
+		if (blendMeshInstances) {
+			Components::BlendMeshInstances meshInstances;
+			for (auto& meshInstance : blendMeshInstances->meshInstances) {
+				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
+			}
+			entity.set<Components::BlendMeshInstances>(meshInstances);
+		}
+
+		if (opaqueMeshInstances) {
+			bool addSkin = false;
+			for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
+				if (meshInstance->GetMesh()->HasBaseSkin() && (!meshInstance->HasSkin() || overrideExistingSkins)) {
+					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
+					meshInstance->SetSkeleton(skeleton);
+					skeletonsToAdd.push_back(skeleton);
+					addSkin = true;
+				}
+			}
+			if (addSkin) {
+				entity.add<Components::OpaqueSkinned>();
 			}
 		}
-		RemoveObjectByID(id);
-	}
-	auto it1 = lightsByID.find(id);
-	if (it1 != lightsByID.end()) {
-		if (recurse) {
-			auto& light = it1->second;
-			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
-			for (auto& child : light->children) {
-				childrenToRemove.push_back(child);
+		if (alphaTestMeshInstances) {
+			bool addSkin = false;
+			for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
+				if (meshInstance->GetMesh()->HasBaseSkin() && (!meshInstance->HasSkin() || overrideExistingSkins)) {
+					auto baseSkeleton = meshInstance->GetMesh()->GetBaseSkin();
+					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
+					meshInstance->SetSkeleton(skeleton);
+					skeletonsToAdd.push_back(skeleton);
+					addSkin = true;
+				}
 			}
-            for (auto& child : childrenToRemove) {
-                RemoveEntityByID(child->GetLocalID(), recurse);
-            }
-		}
-		RemoveLightByID(id);
-	}
-	auto it2 = nodesByID.find(id);
-	if (it2 != nodesByID.end()) {
-		if (recurse) {
-			auto& node = it2->second;
-			std::vector<std::shared_ptr<SceneNode>> childrenToRemove;
-			for (auto& child : node->children) {
-				childrenToRemove.push_back(child);
-			}
-			for (auto& child : childrenToRemove) {
-				RemoveEntityByID(child->GetLocalID(), recurse);
+			if (addSkin) {
+				entity.add<Components::AlphaTestSkinned>();
 			}
 		}
-		RemoveNodeByID(id);
+		if (blendMeshInstances) {
+			bool addSkin = false;
+			for (auto& meshInstance : blendMeshInstances->meshInstances) {
+				if (meshInstance->GetMesh()->HasBaseSkin() && (!meshInstance->HasSkin() || overrideExistingSkins)) {
+					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
+					meshInstance->SetSkeleton(skeleton);
+					skeletonsToAdd.push_back(skeleton);
+					addSkin = true;
+				}
+			}
+			if (addSkin) {
+				entity.add<Components::BlendSkinned>();
+			}
+		}
+		});
+	world.defer_end();
+	for (auto& skeleton : skeletonsToAdd) {
+		AddSkeleton(skeleton);
 	}
 }
 
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetRenderableObjectIDMap() {
-    return objectsByID;
+flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	flecs::entity entity = world.entity();
+	PerObjectCB buffer = {};
+	entity.child_of(ECSSceneRoot)
+		.set_name((ws2s(name) + "_" + std::to_string(entity.id())).c_str())
+		.set<Components::RenderableObject>({ buffer })
+		.set<Components::Rotation>({ 0, 0, 0, 1 })
+		.set<Components::Position>({ 0, 0, 0 })
+		.set<Components::Scale>({ 1, 1, 1 })
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>(ws2s(name));
+	Components::OpaqueMeshInstances opaqueMeshInstances;
+	Components::AlphaTestMeshInstances alphaTestMeshInstances;
+	Components::BlendMeshInstances blendMeshInstances;
+    for (auto& mesh : meshes) {
+		bool skinned = mesh->HasBaseSkin();
+		if (skinned) {
+			entity.add<Components::Skinned>();
+		}
+        switch (mesh->material->m_blendState) {
+		case BlendState::BLEND_STATE_OPAQUE: {
+			opaqueMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
+			if (skinned) {
+				auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
+				opaqueMeshInstances.meshInstances.back()->SetSkeleton(skeleton);
+				AddSkeleton(skeleton);
+				entity.add<Components::OpaqueSkinned>();
+			}
+			break;
+		}
+		case BlendState::BLEND_STATE_MASK: {
+			alphaTestMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
+			if (skinned) {
+				auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
+				alphaTestMeshInstances.meshInstances.back()->SetSkeleton(skeleton);
+				AddSkeleton(skeleton);
+				entity.add<Components::AlphaTestSkinned>();
+			}
+			break;
+		}
+		case BlendState::BLEND_STATE_BLEND: {
+			blendMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
+			if (skinned) {
+				auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
+				blendMeshInstances.meshInstances.back()->SetSkeleton(skeleton);
+				AddSkeleton(skeleton);
+				entity.add<Components::BlendSkinned>();
+			}
+			break;
+		}
+        }
+    }
+	if (!opaqueMeshInstances.meshInstances.empty()) {
+		entity.set<Components::OpaqueMeshInstances>(opaqueMeshInstances);
+	}
+	if (!alphaTestMeshInstances.meshInstances.empty()) {
+		entity.set<Components::AlphaTestMeshInstances>(alphaTestMeshInstances);
+	}
+	if (!blendMeshInstances.meshInstances.empty()) {
+		entity.set<Components::BlendMeshInstances>(blendMeshInstances);
+	}
+
+	// If scene is active, add object & manage meshes
+	if (ECSSceneRoot.has<Components::ActiveScene>()) {
+		ActivateRenderable(entity);
+		entity.add<Components::Active>();
+	}
+
+    return entity;
 }
 
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetOpaqueRenderableObjectIDMap() {
-    return opaqueObjectsByID;
+flecs::entity Scene::CreateNodeECS(std::wstring name) {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	flecs::entity entity = world.entity();
+	entity.child_of(ECSSceneRoot)
+		.set_name((ws2s(name) + "_" + std::to_string(entity.id())).c_str())
+		.add<Components::SceneNode>()
+		.set<Components::Rotation>({ 0, 0, 0, 1 })
+		.set<Components::Position>({ 0, 0, 0 })
+		.set<Components::Scale>({ 1, 1, 1 })
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>(ws2s(name));
+	return entity;
+
+	if (ECSSceneRoot.has<Components::ActiveScene>()) {
+		entity.add<Components::Active>();
+	}
 }
 
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetAlphaTestRenderableObjectIDMap() {
-    return alphaTestObjectsByID;
-}
-
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetBlendRenderableObjectIDMap() {
-	return blendObjectsByID;
-}
-
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetOpaqueSkinnedRenderableObjectIDMap() {
-	return opaqueSkinnedObjectsByID;
-}
-
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetAlphaTestSkinnedRenderableObjectIDMap() {
-	return alphaTestSkinnedObjectsByID;
-}
-
-std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& Scene::GetBlendSkinnedRenderableObjectIDMap() {
-	return blendSkinnedObjectsByID;
-}
-
-std::unordered_map<UINT, std::shared_ptr<Light>>& Scene::GetLightIDMap() {
-	return lightsByID;
-}
-
-SceneNode& Scene::GetRoot() {
-    return sceneRoot;
+flecs::entity Scene::GetRoot() const {
+    return ECSSceneRoot;
 }
 
 void Scene::Update() {
@@ -354,272 +399,198 @@ void Scene::Update() {
     std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
 
-    std::for_each(std::execution::par, animatedNodesByID.begin(), animatedNodesByID.end(), 
-        [elapsed = elapsed_seconds.count()](auto& node) {
-            node.second->animationController->update(elapsed);
-        });
+	for (auto& node : animatedEntitiesByID) {
+		auto& entity = node.second;
+		AnimationController* animationController = entity.get_mut<AnimationController>();
+#if defined(_DEBUG)
+		if (animationController == nullptr) {
+			spdlog::error("AnimationController is null for entity with ID: {}", node.first);
+			return;
+		}
+#endif
+	    auto& transform = animationController->GetUpdatedTransform(elapsed_seconds.count());
+		entity.set<Components::Rotation>(transform.rot);
+		entity.set<Components::Position>(transform.pos);
+		entity.set<Components::Scale>(transform.scale);
+	}
 
-    this->sceneRoot.Update();
     for (auto& skeleton : animatedSkeletons) {
         skeleton->UpdateTransforms();
     }
+
+	for (auto& scene : m_childScenes) {
+		scene->Update();
+	}
     PostUpdate();
 }
 
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
+		
+    if (m_primaryCamera.is_valid()) {
 
-    if (pCamera != nullptr) {
-        indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
+        m_managerInterface.GetIndirectCommandBufferManager()->UnregisterBuffers(m_primaryCamera.id());
         m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
 		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
 		m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
 
-		m_pCameraManager->RemoveCamera(pCamera->GetCameraBufferView());
-		pCamera->SetCameraBufferView(nullptr);
+		auto cameraBufferView = m_primaryCamera.get<Components::CameraBufferView>();
+		m_managerInterface.GetCameraManager()->RemoveCamera(cameraBufferView->view);
+		m_primaryCamera.remove<Components::CameraBufferView>();
     }
 
-    pCamera = std::make_shared<Camera>(L"MainCamera", lookAt, up, fov, aspect, zNear, zFar);
     CameraInfo info;
-	pCamera->SetCameraBufferView(m_pCameraManager->AddCamera(info));
+	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
+	info.view = XMMatrixIdentity();
+	info.projection = XMMatrixPerspectiveFovRH(fov, aspect, zNear, zFar);
+	info.viewProjection = info.projection;
+	info.clippingPlanes[0] = planes[0];
+	info.clippingPlanes[1] = planes[1];
+	info.clippingPlanes[2] = planes[2];
+	info.clippingPlanes[3] = planes[3];
+	info.clippingPlanes[4] = planes[4];
+	info.clippingPlanes[5] = planes[5];
+
+	auto& world = ECSManager::GetInstance().GetWorld();
+	Components::Camera camera = {};
+	camera.fov = fov;
+	camera.aspect = aspect;
+	camera.zNear = zNear;
+	camera.zFar = zFar;
+	camera.info = info;
+	auto entity = world.entity()
+		.set<Components::Camera>(camera)
+		.set<Components::Position>({ 0, 0, 0 })
+		.set<Components::Rotation>({ 0, 0, 0 })
+		.set<Components::Scale>({ 1, 1, 1 })
+		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
+		.set<Components::Name>("Primary Camera")
+		.child_of(ECSSceneRoot);
+
+	if (ECSSceneRoot.has<Components::ActiveScene>()) {
+		ActivateCamera(entity);
+		entity.add<Components::Active>();
+	}
 
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
-	if (lightManager != nullptr) {
-		lightManager->SetCurrentCamera(pCamera.get());
+	if (m_managerInterface.GetLightManager() != nullptr) {
+		m_managerInterface.GetLightManager()->SetCurrentCamera(entity);
 	}
-    AddNode(pCamera);
-    m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Opaque);
-	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::AlphaTest);
-	m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(pCamera->GetLocalID(), MaterialBuckets::Blend);
+    m_pPrimaryCameraOpaqueIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Opaque);
+	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::AlphaTest);
+	m_pPrimaryCameraBlendIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Blend);
+
+	m_primaryCamera = entity;
 }
 
-std::shared_ptr<Camera> Scene::GetCamera() {
-    return pCamera;
+flecs::entity& Scene::GetPrimaryCamera() {
+    return m_primaryCamera;
 }
 
 void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
     skeletons.push_back(skeleton);
-    if (skeleton->animations.size() > 0) {
+    if (skeleton->animations.size() > 0 && !skeleton->IsBaseSkeleton()) {
         skeleton->SetAnimation(0);
         animatedSkeletons.push_back(skeleton);
     }
-	for (auto& node : skeleton->m_nodes) {
-		if (node->GetLocalID() == -1) {
-			AddNode(node, true);
-		}
-		animatedNodesByID[node->GetLocalID()] = node;
+
+	for (auto& node : skeleton->m_bones) {
+		animatedEntitiesByID[node.id()] = node;
 	}
 }
 
 void Scene::PostUpdate() {
 }
 
-UINT Scene::GetNumLights() {
-    return lightsByID.size();
-}
+std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {
 
-UINT Scene::GetLightBufferDescriptorIndex() {
-    return lightManager->GetLightBufferDescriptorIndex();
-}
+	auto& world = ECSManager::GetInstance().GetWorld();
 
-UINT Scene::GetPointCubemapMatricesDescriptorIndex() {
-	return lightManager->GetPointCubemapMatricesDescriptorIndex();
-}
+	auto root = scene->GetRoot();
 
-UINT Scene::GetSpotMatricesDescriptorIndex() {
-	return lightManager->GetSpotMatricesDescriptorIndex();
-}
+	root.child_of(ECSSceneRoot);
+	if (ECSSceneRoot.has<Components::ActiveScene>()) { // If this scene is active, activate the new scene
+		scene->Activate(m_managerInterface);
+	}
+	m_childScenes.push_back(scene);
 
-UINT Scene::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return lightManager->GetDirectionalCascadeMatricesDescriptorIndex();
-}
-
-std::shared_ptr<SceneNode> Scene::AppendScene(Scene& scene) {
-    std::unordered_map<UINT, UINT> idMap;
-    auto oldRootID = scene.sceneRoot.GetLocalID();
-    auto newRootNode = SceneNode::CreateShared();
-    for (auto& child : scene.sceneRoot.children) {
-        auto dummyNode = SceneNode::CreateShared();
-		dummyNode->SetLocalID(child->GetLocalID());
-        newRootNode->AddChild(dummyNode);
-    }
-    newRootNode->transform = scene.sceneRoot.transform.copy();
-	newRootNode->m_name = scene.sceneRoot.m_name;
-    UINT newRootID = AddNode(newRootNode);
-    idMap[oldRootID] = newRootID;
-
-    std::vector<std::shared_ptr<SceneNode>> newEntities;
-
-    // Parse lights
-    for (auto& lightPair : scene.lightsByID) {
-        auto& light = lightPair.second;
-        UINT oldID = light->GetLocalID();
-		auto newLight = Light::CopyLight(light->GetLightInfo());
-        for (auto& child : light->children) {
-            auto dummyNode = SceneNode::CreateShared();
-			dummyNode->SetLocalID(child->GetLocalID());
-            newLight->AddChild(dummyNode);
-        }
-        newLight->transform = light->transform.copy();
-		newLight->m_name = light->m_name;
-        UINT newID = AddLight(newLight);
-        idMap[oldID] = newLight->GetLocalID();;
-        newEntities.push_back(newLight);
-    }
-
-    // Parse objects
-    for (auto& objectPair : scene.objectsByID) {
-        auto& object = objectPair.second;
-        UINT oldID = object->GetLocalID();
-        auto newObject = std::make_shared<RenderableObject>(object->m_name, object->GetOpaqueMeshes(), object->GetAlphaTestMeshes(), object->GetBlendMeshes());
-        for (auto& child : object->children) {
-            auto dummyNode = SceneNode::CreateShared();
-            dummyNode->SetLocalID(child->GetLocalID());
-            newObject->AddChild(dummyNode);
-        }
-        newObject->transform = object->transform.copy();
-        newObject->m_name = object->m_name;
-        UINT newID = AddObject(newObject);
-        newObject->SetAnimationSpeed(object->GetAnimationSpeed());
-        idMap[oldID] = newID;
-        newEntities.push_back(newObject);
-    }
-
-    // Parse nodes
-    for (auto& nodePair : scene.nodesByID) {
-        auto& node = nodePair.second;
-        UINT oldID = node->GetLocalID();
-        auto newNode = SceneNode::CreateShared();
-        for (auto& child : node->children) {
-            auto dummyNode = SceneNode::CreateShared();
-            dummyNode->SetLocalID(child->GetLocalID());
-            newNode->AddChild(dummyNode);
-        }
-        newNode->transform = node->transform.copy();
-		newNode->m_name = node->m_name;
-        UINT newID = AddNode(newNode);
-        idMap[oldID] = newID;
-        newEntities.push_back(newNode);
-    }
-
-    // Rebuild parent-child mapping
-    auto oldRootChildren = newRootNode->children; // Copy existing children
-    newRootNode->children.clear(); // Clear children
-
-    for (auto& child : oldRootChildren) {
-        if (idMap.find(child->GetLocalID()) != idMap.end()) {
-            auto mappedChild = GetEntityByID(idMap[child->GetLocalID()]);
-            if (mappedChild) {
-                newRootNode->AddChild(mappedChild);
-            }
-        }
-    }
-
-    for (auto& entity : newEntities) {
-        auto oldChildren = entity->children; // Copy existing children
-        entity->children.clear(); // Clear children
-
-        for (auto& child : oldChildren) {
-            if (idMap.find(child->GetLocalID()) != idMap.end()) {
-                auto mappedChild = GetEntityByID(idMap[child->GetLocalID()]);
-                if (mappedChild) {
-                    entity->AddChild(mappedChild);
-                }
-                else {
-                    spdlog::error("Node missing from id map: ID {}", child->GetLocalID());
-                }
-            }
-            else {
-                spdlog::error("Node missing from id map: ID {}", child->GetLocalID());
-            }
-        }
-    }
-    return newRootNode;
+	return scene;
 }
 
 void Scene::MakeResident() {
-	meshManager = MeshManager::CreateUnique();
-	for (auto& objectPair : objectsByID) {
-		auto& object = objectPair.second;
-		for (auto& mesh : object->GetOpaqueMeshes()) {
-            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
-            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
-                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Opaque);
-            }
-			meshManager->AddMeshInstance(mesh.get());
-		}
-		for (auto& mesh : object->GetAlphaTestMeshes()) {
-            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
-            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
-                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::AlphaTest);
-            }
-            meshManager->AddMeshInstance(mesh.get());
-		}
-		for (auto& mesh : object->GetBlendMeshes()) {
-            auto meshGlobaId = mesh->GetMesh()->GetGlobalID();
-            if (!meshesByID.contains(meshGlobaId) || meshesByID[meshGlobaId] != mesh->GetMesh()) {
-                meshManager->AddMesh(mesh->GetMesh(), MaterialBuckets::Blend);
-            }
-            meshManager->AddMeshInstance(mesh.get());
-		}
-		if (object->HasOpaque()) {
-			opaqueObjectsByID[object->GetLocalID()] = object;
-			indirectCommandBufferManager->UpdateBuffersForBucket(MaterialBuckets::Opaque, m_numOpaqueDraws);
-		}
-	}
-	objectManager = ObjectManager::CreateUnique();
-	for (auto& objectPair : objectsByID) {
-		auto& object = objectPair.second;
-		objectManager->AddObject(object);
-	}
-	if (GetCamera() != nullptr) {
-        m_pPrimaryCameraOpaqueIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Opaque);
-		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::AlphaTest);
-		m_pPrimaryCameraBlendIndirectCommandBuffer = indirectCommandBufferManager->CreateBuffer(GetCamera()->GetLocalID(), MaterialBuckets::Blend);
-    }
+	auto& world = ECSManager::GetInstance().GetWorld();
+	world.defer_begin();
+	auto renderableQuery =world.query_builder<>()
+		.with<Components::RenderableObject>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	renderableQuery.each([&](flecs::entity entity) {
+		ActivateRenderable(entity);
+		});
 
-    lightManager = LightManager::CreateUnique();
+	auto camQuery = world.query_builder<>()
+		.with<Components::Camera>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	camQuery.each([&](flecs::entity entity) {
+		ActivateCamera(entity);
+		});
 
-	m_pCameraManager = CameraManager::CreateUnique();
-
-	lightManager->SetCameraManager(m_pCameraManager.get());
-	if (pCamera != nullptr) {
-		lightManager->SetCurrentCamera(pCamera.get());
-	}
-    lightManager->SetCommandBufferManager(indirectCommandBufferManager.get());
+	auto lightQuery = world.query_builder<>()
+		.with<Components::Light>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	lightQuery.each([&](flecs::entity entity) {
+		ActivateLight(entity);
+		});
+	world.defer_end();
 }
 
 void Scene::MakeNonResident() {
-
-    auto& debugPtrManager = DebugSharedPtrManager::GetInstance();
-
-    meshManager = nullptr;
-	objectManager = nullptr;
-
-    if (GetCamera() != nullptr) {
-        indirectCommandBufferManager->UnregisterBuffers(GetCamera()->GetLocalID());
-        m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
-		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
-		m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
-    }
-
-	m_pCameraManager = nullptr;
-	lightManager = nullptr;
+	// TODO
 }
 
 Scene::~Scene() {
 	MakeNonResident();
 }
 
-void Scene::Activate() {
+void activate_hierarchy(flecs::entity src) {
+
+	src.add<Components::Active>();
+
+	src.children([&](flecs::entity e) {
+		activate_hierarchy(e);
+		});
+}
+
+void ActivateHierarchy(flecs::entity src) {
+	src.world().defer_begin();
+	activate_hierarchy(src);
+	src.world().defer_end();
+}
+
+void Scene::ActivateAllAnimatedEntities() {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	world.defer_begin();
+	for (auto& e : animatedEntitiesByID) {
+		auto& entity = e.second;
+		entity.add<Components::Active>();
+	}
+	world.defer_end();
+	for (auto & child : m_childScenes) {
+		child->ActivateAllAnimatedEntities();
+	}
+}
+
+void Scene::Activate(ManagerInterface managerInterface) {
+	m_managerInterface = managerInterface;
+	auto& world = ECSManager::GetInstance().GetWorld();
+
+	ActivateHierarchy(ECSSceneRoot);
+	ActivateAllAnimatedEntities();
+
+	ECSSceneRoot.add<Components::Active>();
+
 	MakeResident();
-}
-
-const std::unique_ptr<MeshManager>& Scene::GetMeshManager() {
-	return meshManager;
-}
-
-const std::unique_ptr<ObjectManager>& Scene::GetObjectManager() {
-	return objectManager;
 }
 
 std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() {
@@ -634,26 +605,50 @@ std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraBlendIndi
 	return m_pPrimaryCameraBlendIndirectCommandBuffer;
 }
 
-unsigned int Scene::GetNumDrawsInScene() {
-	return m_numDrawsInScene;
+void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {
+	if (src.has<Components::SkeletonRoot>()) {
+		return; // Skip skeleton roots, they are handled separately
+	}
+	flecs::entity cloned = src.clone();
+
+	if (dst_parent.is_alive()) {
+		cloned.child_of(dst_parent);
+	}
+
+	src.children([&](flecs::entity e) {
+		recurse_hierarchy(e, cloned);
+		});
 }
 
-unsigned int Scene::GetNumOpaqueDraws() {
-	return m_numOpaqueDraws;
+void CloneHierarchy(flecs::entity src, flecs::entity dst_parent) {
+	src.world().defer_begin();
+	src.children([&](flecs::entity e) {
+		recurse_hierarchy(e, dst_parent);
+		});
+	src.world().defer_end();
 }
 
-unsigned int Scene::GetNumAlphaTestDraws() {
-	return m_numAlphaTestDraws;
+std::shared_ptr<Scene> Scene::Clone() const {
+	auto newScene = std::make_shared<Scene>();
+	auto& world = ECSManager::GetInstance().GetWorld();
+	newScene->ECSSceneRoot = ECSSceneRoot.clone();
+	CloneHierarchy(ECSSceneRoot, newScene->ECSSceneRoot);
+	for (auto& childScene : m_childScenes) {
+		newScene->m_childScenes.push_back(childScene->Clone());
+	}
+	newScene->ProcessEntitySkins(true);
+	return newScene;
 }
 
-unsigned int Scene::GetNumBlendDraws() {
-    return m_numBlendDraws;
-}
-
-const std::shared_ptr<IndirectCommandBufferManager>& Scene::GetIndirectCommandBufferManager() {
-	return indirectCommandBufferManager;
-}
-
-const std::unique_ptr<CameraManager>& Scene::GetCameraManager() {
-	return m_pCameraManager;
+void Scene::DisableShadows() {
+	auto& world = ECSManager::GetInstance().GetWorld();
+	world.defer_begin();
+	auto query = world.query_builder<>()
+		.with<Components::RenderableObject>()
+		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
+		.build();
+	query.each([&](flecs::entity entity) {
+		entity.add<Components::SkipShadowPass>();
+		});
+	world.defer_end();
 }

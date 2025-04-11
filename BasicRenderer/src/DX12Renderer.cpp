@@ -9,6 +9,7 @@
 #include <dxgi1_6.h>
 #include <atlbase.h>
 #include <filesystem>
+
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "DeviceManager.h"
@@ -16,6 +17,7 @@
 #include "ResourceManager.h"
 #include "RenderContext.h"
 #include "RenderGraph.h"
+#include "DynamicBuffer.h"
 #include "RenderPass.h"
 #include "RenderPasses/ForwardRenderPassUnified.h"
 #include "RenderPasses/ShadowPass.h"
@@ -44,6 +46,12 @@
 #include "Aftermath/GFSDK_Aftermath.h"
 #include "NsightAftermathHelpers.h"
 #include "CommandSignatureManager.h"
+#include "ECSManager.h"
+#include "ECSSystems.h"
+#include "IndirectCommandBufferManager.h"
+#include "MathUtils.h"
+#include "MovementState.h"
+#include "AnimationController.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -134,8 +142,88 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
+	ECSManager::GetInstance().Initialize();
     CreateGlobalResources();
-    
+
+    // Initialize GPU resource managers
+    m_pLightManager = LightManager::CreateUnique();
+    m_pMeshManager = MeshManager::CreateUnique();
+	m_pObjectManager = ObjectManager::CreateUnique();
+	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
+	m_pCameraManager = CameraManager::CreateUnique();
+	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
+	m_pLightManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Also for indirect command buffers
+
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get());
+
+    auto& world = ECSManager::GetInstance().GetWorld();
+    world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
+	world.add<Components::GlobalMeshLibrary>();
+    world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
+    world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
+	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
+	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
+    m_hierarchySystem =
+        world.system<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
+        .with<Components::Active>()
+        .term_at(3).parent().cascade()
+        .cached().cache_kind(flecs::QueryCacheAll)
+        .each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
+        XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
+        XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
+        XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
+        mOut.matrix = (matScale * matRotation * matTranslation);
+        if (matrix != nullptr) {
+            mOut.matrix = mOut.matrix * matrix->matrix;
+        }
+
+        if (entity.has<Components::RenderableObject>() && entity.has<Components::ObjectDrawInfo>()) {
+            Components::RenderableObject* object = entity.get_mut<Components::RenderableObject>();
+            Components::ObjectDrawInfo* drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
+            auto& modelMatrix = object->perObjectCB.modelMatrix;
+            modelMatrix = mOut.matrix;
+            m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo->perObjectCBView.get(), object->perObjectCB);
+
+            XMMATRIX upperLeft3x3 = XMMatrixSet(
+                XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
+                XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
+                XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
+            );
+            XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
+            m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
+        }
+
+        if (entity.has<Components::Camera>() && entity.has<Components::CameraBufferView>()) {
+            auto inverseMatrix = XMMatrixInverse(nullptr, mOut.matrix);
+
+            Components::Camera* camera = entity.get_mut<Components::Camera>();
+            camera->info.view = RemoveScalingFromMatrix(inverseMatrix);
+            camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
+
+            auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
+            camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
+
+            auto cameraBufferView = entity.get_mut<Components::CameraBufferView>();
+			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(cameraBufferView->view.get(), camera->info);
+        }
+
+        if (entity.has<Components::Light>()) {
+            Components::Light* light = entity.get_mut<Components::Light>();
+            light->lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
+                mOut.matrix.r[3].m128_f32[1],  // _42
+                mOut.matrix.r[3].m128_f32[2],  // _43
+                1.0f);
+            XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+            light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
+            if (light->lightInfo.shadowCaster) {
+				const Components::LightViewInfo* viewInfo = entity.get<Components::LightViewInfo>();
+				m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo->lightBufferView.get(), light->lightInfo);
+				m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
+            }
+        }
+
+            });
 }
 
 void DX12Renderer::CreateGlobalResources() {
@@ -147,7 +235,7 @@ void DX12Renderer::SetSettings() {
 	auto& settingsManager = SettingsManager::GetInstance();
 
     uint8_t numDirectionalCascades = 4;
-	float maxShadowDistance = 10.0f;
+	float maxShadowDistance = 30.0f;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
@@ -164,15 +252,12 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
-	settingsManager.registerSetting<std::function<std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& ()>>("getRenderableObjects", [this]() -> std::unordered_map<UINT, std::shared_ptr<RenderableObject>>& {
-		return currentScene->GetRenderableObjectIDMap();
-		});
-    settingsManager.registerSetting<std::function<SceneNode&()>>("getSceneRoot", [this]() -> SceneNode& {
+    settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
         });
-	settingsManager.registerSetting<std::function<std::shared_ptr<SceneNode>(Scene& scene)>>("appendScene", [this](Scene& scene) -> std::shared_ptr<SceneNode> {
-		return AppendScene(scene);
-		});
+    settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
+        return currentScene->GetRoot();
+        });
     bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
@@ -503,23 +588,30 @@ void DX12Renderer::Update(double elapsedSeconds) {
 		CreateRenderGraph();
     }
 
-    currentScene->GetCamera()->transform.applyMovement(movementState, elapsedSeconds);
-    currentScene->GetCamera()->transform.rotatePitchYaw(verticalAngle, horizontalAngle);
+	Components::Position& cameraPosition = *currentScene->GetPrimaryCamera().get_mut<Components::Position>();
+	Components::Rotation& cameraRotation = *currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
+	ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
+	RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+
     //spdlog::info("horizontal angle: {}", horizontalAngle);
     //spdlog::info("vertical angle: {}", verticalAngle);
     verticalAngle = 0;
     horizontalAngle = 0;
 
     currentScene->Update();
-    auto camera = currentScene->GetCamera();
-	unsigned int cameraIndex = camera->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
+
+    auto& world = ECSManager::GetInstance().GetWorld();
+	world.progress();
+
+    auto camera = currentScene->GetPrimaryCamera();
+    unsigned int cameraIndex = camera.get<Components::CameraBufferView>()->index;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
 
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, currentScene->GetNumLights(), currentScene->GetLightBufferDescriptorIndex(), currentScene->GetPointCubemapMatricesDescriptorIndex(), currentScene->GetSpotMatricesDescriptorIndex(), currentScene->GetDirectionalCascadeMatricesDescriptorIndex());
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex());
 
 	currentRenderGraph->Update();
 
@@ -536,6 +628,9 @@ void DX12Renderer::Render() {
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
     auto& commandList = m_commandLists[m_frameIndex];
 
+	auto& world = ECSManager::GetInstance().GetWorld();
+	const Components::DrawStats* drawStats = world.get<Components::DrawStats>();
+
     m_context.currentScene = currentScene.get();
 	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
     m_context.commandList = commandList.Get();
@@ -551,6 +646,11 @@ void DX12Renderer::Render() {
     m_context.frameFenceValue = m_currentFrameFenceValue;
     m_context.xRes = m_xRes;
     m_context.yRes = m_yRes;
+	m_context.cameraManager = m_pCameraManager.get();
+	m_context.objectManager = m_pObjectManager.get();
+	m_context.meshManager = m_pMeshManager.get();
+	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
+	m_context.drawStats = *drawStats;
 
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -651,7 +751,14 @@ void DX12Renderer::Cleanup() {
     // Wait for all GPU frames to complete
 	StallPipeline();
     CloseHandle(m_frameFenceEvent);
-	currentScene = nullptr;
+    currentRenderGraph.reset();
+	currentScene.reset();
+	m_pIndirectCommandBufferManager.reset();
+	m_pCameraManager.reset();
+	m_pLightManager.reset();
+	m_pMeshManager.reset();
+	m_pObjectManager.reset();
+    m_hierarchySystem.destruct();
     DeletionManager::GetInstance().Cleanup();
 }
 
@@ -687,8 +794,10 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	if (currentScene) {
 		DeletionManager::GetInstance().MarkForDelete(currentScene);
 	}
+	auto& ecs_world = ECSManager::GetInstance().GetWorld();
+	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
-    currentScene->Activate();
+    currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;
 }
 
@@ -773,8 +882,8 @@ void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
     auto newGraph = std::make_unique<RenderGraph>();
 
-    auto& meshManager = currentScene->GetMeshManager();
-    auto& objectManager = currentScene->GetObjectManager();
+    auto& meshManager = m_pMeshManager;
+    auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
 	newGraph->AddResource(meshResourceGroup);
 
@@ -805,7 +914,7 @@ void DX12Renderer::CreateRenderGraph() {
 	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
 	newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
 
-	auto& cameraManager = currentScene->GetCameraManager();
+	auto& cameraManager = m_pCameraManager;
     auto& cameraBuffer = cameraManager->GetCameraBuffer();
     newGraph->AddResource(cameraBuffer);
 
@@ -820,7 +929,7 @@ void DX12Renderer::CreateRenderGraph() {
 	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
     if (indirect) {
         // Clear UAVs
-        indirectCommandBufferResourceGroup = currentScene->GetIndirectCommandBufferManager()->GetResourceGroup();
+        indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
         auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
         RenderPassParameters clearUAVsPassParameters;
@@ -1037,8 +1146,12 @@ void DX12Renderer::CreateRenderGraph() {
 	ResolvePassParameters.shaderResources.push_back(PPLLBuffer);
 	newGraph->AddRenderPass(ResolvePass, ResolvePassParameters);
 
-	//auto debugPass = std::make_shared<DebugRenderPass>();
-    //newGraph->AddPass(debugPass, debugPassParameters, "DebugPass");
+	auto debugPass = std::make_shared<DebugRenderPass>();
+	if (m_currentDebugTexture != nullptr) {
+		debugPass->SetTexture(m_currentDebugTexture.get());
+		//debugPassParameters.shaderResources.push_back(m_shadowMaps);
+	}
+    newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
 
     if (getDrawBoundingSpheres()) {
         auto debugSpherePass = std::make_shared<DebugSpherePass>();
@@ -1188,21 +1301,17 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	rebuildRenderGraph = true;
 }
 
-void DX12Renderer::SetDebugTexture(Texture* texture) {
-    if (currentRenderGraph == nullptr) {
-        spdlog::warn("Cannot set debug texture before render graph exists");
-        return;
-    }
+void DX12Renderer::SetDebugTexture(std::shared_ptr<Texture> texture) {
+    m_currentDebugTexture = texture;
+	if (currentRenderGraph == nullptr) {
+		return;
+	}
     auto pPass = currentRenderGraph->GetRenderPassByName("DebugPass");
     if (pPass != nullptr) {
         auto pDebugPass = std::dynamic_pointer_cast<DebugRenderPass>(pPass);
-        pDebugPass->SetTexture(texture);
+        pDebugPass->SetTexture(texture.get());
     }
     else {
         spdlog::warn("Debug pass does not exist");
     }
-}
-
-std::shared_ptr<SceneNode> DX12Renderer::AppendScene(Scene& scene) {
-	return currentScene->AppendScene(scene);
 }

@@ -2,7 +2,7 @@
 #include <typeindex>
 #include <memory>
 
-#include "DynamicBuffer.h"
+class ViewedDynamicBufferBase;
 
 class BufferView {
 public:

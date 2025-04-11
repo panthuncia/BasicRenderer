@@ -8,7 +8,6 @@
 #include "SettingsManager.h"
 #include "ResourceGroup.h"
 #include "Texture.h"
-#include "Light.h"
 #include "ResourceManager.h"
 #include "PixelBuffer.h"
 #include "Sampler.h"
@@ -22,7 +21,7 @@ public:
 		currentState = ResourceState::UNKNOWN;
 	}
 
-    void AddMap(Light* light, uint16_t shadowResolution) {
+    std::shared_ptr<Texture> AddMap(LightInfo* light, uint16_t shadowResolution) {
 		std::shared_ptr<PixelBuffer> shadowMap;
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		TextureDescription desc;
@@ -35,17 +34,17 @@ public:
 		desc.hasDSV = true;
 		desc.channels = 1;
 		desc.format = DXGI_FORMAT_R32_TYPELESS;
-		switch (light->GetLightType()) {
-		case LightType::Point: // Cubemap
+		switch (light->type) {
+		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
 			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"PointShadowMap: "+light->m_name);
+			shadowMap->SetName(L"PointShadowMap");
 			break;
-		case LightType::Spot: // 2D texture
+		case Components::LightType::Spot: // 2D texture
 			shadowMap = PixelBuffer::Create(desc);
 			shadowMap->SetName(L"SpotShadowMap");
 			break;
-		case LightType::Directional: // Texture array
+		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
 			shadowMap = PixelBuffer::Create(desc);
@@ -54,13 +53,13 @@ public:
 
 		}
 		std::shared_ptr<Texture> map = std::make_shared<Texture>(shadowMap, shadowSampler);
-		light->SetShadowMap(map);
+		//light->SetShadowMap(map);
         AddResource(map->GetBuffer());
+		return map;
     }
 
-	void RemoveMap(Light* light) {
-		auto map = light->getShadowMap();
-		if (map!= nullptr) {
+	void RemoveMap(std::shared_ptr<Texture> map) {
+		if (map != nullptr) {
 			RemoveResource(map.get());
 		}
 
