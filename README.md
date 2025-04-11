@@ -19,11 +19,12 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ## Technical features
 
-- A (very basic) render graph for automatic resource transitions and queue synchronization
+- A (basic) render graph for automatic resource transitions and queue synchronization
 - Async-compute
 - Compute-based skinning
 - GPU-driven rendering with frustrum culling & ExecuteIndirect
 - Meshlets & mesh shaders
+- Flecs ECS for scene management
 - A basic UI for feature toggles, importing new asset files, debug view selection, and scene graph introspection & modification
 
 ## Gallery
@@ -42,6 +43,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [spdlog](https://github.com/gabime/spdlog)
 - [ImGui](https://github.com/ocornut/imgui)
 - [assimp](https://github.com/assimp/assimp)
+- [flecs](https://www.flecs.dev/flecs/)
 
 ## Notable sources for development ideas
 
