@@ -191,14 +191,17 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 }
 
 void Scene::ActivateLight(flecs::entity& entity) {
-	auto lightInfo = entity.get_mut<Components::Light>()->lightInfo;
-	AddLightReturn addInfo = m_managerInterface.GetLightManager()->AddLight(&lightInfo, entity.id());
+	auto lightInfo = entity.get<Components::Light>();
+	auto newInfo = Components::Light(*lightInfo);
+	AddLightReturn addInfo = m_managerInterface.GetLightManager()->AddLight(&newInfo.lightInfo, entity.id());
 	entity.set<Components::LightViewInfo>({ addInfo.lightViewInfo });
 	if (addInfo.shadowMap.has_value()) {
 		entity.set<Components::ShadowMap>({ addInfo.shadowMap.value() });
-		lightInfo.shadowMapIndex = addInfo.shadowMap.value().shadowMap->GetBuffer()->GetSRVInfo().index;
-		lightInfo.shadowSamplerIndex = addInfo.shadowMap.value().shadowMap->GetSamplerDescriptorIndex();
-		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), lightInfo);
+		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().shadowMap->GetBuffer()->GetSRVInfo().index;
+		newInfo.lightInfo.shadowSamplerIndex = addInfo.shadowMap.value().shadowMap->GetSamplerDescriptorIndex();
+		newInfo.lightInfo.shadowViewInfoIndex = addInfo.lightViewInfo.viewInfoBufferIndex;
+		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), newInfo.lightInfo);
+		entity.set<Components::Light>(newInfo);
 	}
 	if (addInfo.frustrumPlanes.has_value()) {
 		entity.set<Components::FrustrumPlanes>({ addInfo.frustrumPlanes.value() });

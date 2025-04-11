@@ -359,7 +359,7 @@ std::vector<Cascade> setupCascades(
 
         // Position the light so that it covers the cascade bounding sphere
         // The light position is shifted back along the light direction
-        XMVECTOR lightPos = frustumCenter - lightDir * radius * 2.0f;
+        XMVECTOR lightPos = frustumCenter -lightDir * radius * 2.0;
         // Choose a suitable "up" vector for the light (avoid colinearity with the light direction)
         XMVECTOR lightUp = (fabs(XMVectorGetY(lightDir)) > 0.99f) ? XMVectorSet(0, 0, -1, 0) : XMVectorSet(0, 1, 0, 0);
         XMMATRIX lightView = XMMatrixLookAtRH(lightPos, frustumCenter, lightUp);
@@ -384,14 +384,14 @@ std::vector<Cascade> setupCascades(
         float r = XMVectorGetX(maxs);
         float b = XMVectorGetY(mins);
         float t = XMVectorGetY(maxs);
-        float n = -XMVectorGetZ(maxs); // near
+        float n = (std::min)(XMVectorGetZ(maxs), -10.0f); // TODO: hack to avoid near shadows disappearing on objects behind the camera. Is there a better way?
         float f = -XMVectorGetZ(mins); // far
 
         XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(l, r, b, t, n, f);
 
         // Prepare the cascade.
         Cascade cascade;
-        cascade.size = radius * 2.0f;
+        cascade.size = radius * 2;
         cascade.viewMatrix = lightView;
         cascade.orthoMatrix = lightOrtho;
 

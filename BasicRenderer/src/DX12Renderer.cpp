@@ -235,7 +235,7 @@ void DX12Renderer::SetSettings() {
 	auto& settingsManager = SettingsManager::GetInstance();
 
     uint8_t numDirectionalCascades = 4;
-	float maxShadowDistance = 10.0f;
+	float maxShadowDistance = 30.0f;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
@@ -1149,7 +1149,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto debugPass = std::make_shared<DebugRenderPass>();
 	if (m_currentDebugTexture != nullptr) {
 		debugPass->SetTexture(m_currentDebugTexture.get());
-		debugPassParameters.shaderResources.push_back(m_shadowMaps);
+		//debugPassParameters.shaderResources.push_back(m_shadowMaps);
 	}
     newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
 
