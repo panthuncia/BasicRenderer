@@ -57,7 +57,7 @@ flecs::entity Scene::CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XM
 
 flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle) {
 	auto& world = ECSManager::GetInstance().GetWorld();
-	float range = 5.0f;
+	float range = 20.0f;
 
 	LightInfo lightInfo;
 	lightInfo.type = type;
@@ -73,6 +73,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 	lightInfo.shadowViewInfoIndex = -1;
 	lightInfo.nearPlane = nearPlane;
 	lightInfo.farPlane = farPlane;
+	lightInfo.shadowCaster = true;
 
 	flecs::entity entity = world.entity();
 	entity.child_of(ECSSceneRoot)

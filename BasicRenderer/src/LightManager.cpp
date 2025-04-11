@@ -114,12 +114,14 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 	XMStoreFloat3(&pos, info.posWorldSpace);
 	auto cubemapMatrices = GetCubemapViewMatrices(pos);
 
+	auto projection = GetProjectionMatrixForLight(info);
+
 	// For each face of the cubemap, create a camera view and command buffers.
 	for (int i = 0; i < 6; i++) {
 		CameraInfo camera = {};
 		camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
 		camera.view = cubemapMatrices[i];
-		camera.projection = GetProjectionMatrixForLight(info);
+		camera.projection = projection;
 		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.projection);
 
 		auto view = m_pCameraManager->AddCamera(camera);
@@ -133,7 +135,10 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::AlphaTest));
 		viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
 			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
-	}
+	}	
+	
+	viewInfo.projectionMatrix = Components::Matrix(projection);
+
 	return { viewInfo, std::nullopt }; // Point lights don't need extra frustum data.
 }
 
@@ -163,6 +168,7 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
 		m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
 
+	viewInfo.projectionMatrix = Components::Matrix(camera.projection);
 	return { viewInfo, std::nullopt };
 }
 

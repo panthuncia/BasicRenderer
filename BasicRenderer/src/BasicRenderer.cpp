@@ -255,7 +255,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//dragonScene->GetRoot().m_name = L"dragonRoot";
 
     auto tigerScene = LoadModel("models/tiger.glb");
-    tigerScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
+    tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
@@ -280,8 +280,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
 
-    //auto cubeScene = LoadModel("models/cube_blank.glb");
-    //cubeScene->GetRoot().transform.setLocalScale({ 0.5, 0.5, 0.5 });
+    auto cubeScene = LoadModel("models/cube_blank.glb");
+    cubeScene->GetRoot().set<Components::Position>({0, 5, 0});
+	cubeScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
     //auto heightMap = loadTextureFromFileSTBI("textures/height.jpg");
     //for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
@@ -306,6 +307,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //mountainScene->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+	renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
@@ -384,8 +386,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
-	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
-    renderer.SetDebugTexture(light.get<Components::ShadowMap>()->shadowMap);
+	//auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
+    auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 5, 3), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);
+    //auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 10, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032);
+    renderer.SetDebugTexture(light3.get<Components::ShadowMap>()->shadowMap);
 
     MSG msg = {};
     unsigned int frameIndex = 0;
