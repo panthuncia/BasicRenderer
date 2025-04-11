@@ -298,7 +298,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
                         case 1:{ // Spot light
                                 uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
                                 Camera camera = cameraBuffer[spotShadowCameraIndex];
-                                shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, camera.viewProjection);
+                                shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
                                 break;
                             }
                         case 2:{// Directional light

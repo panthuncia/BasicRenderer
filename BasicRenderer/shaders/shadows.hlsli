@@ -91,18 +91,20 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace,
     return shadow;
 }
 
-float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix) {
-    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightMatrix);
-    float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
+float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix, float near, float far) {
+    float4 fragPosLightProjection = mul(fragPosWorldSpace, lightMatrix);
+    float3 uv = fragPosLightProjection.xyz / fragPosLightProjection.w;
     uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
     uv.y = 1.0 - uv.y;
-    
+        
     Texture2D<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.Sample(shadowSampler, uv.xy).r;
-    float currentDepth = uv.z;
-    //return closestDepth;
-    float bias = 0.0008;
+    float closestDepth = unprojectDepth(shadowMap.Sample(shadowSampler, uv.xy).r, near, far);
+    float currentDepth = fragPosLightProjection.z;
+    
+    // Scale bias with difference between light direction and normal
+    float bias = max(0.0005, 0.01 * (1.0 - dot(normal, light.dirWorldSpace.xyz)));
+    
     float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
 }
