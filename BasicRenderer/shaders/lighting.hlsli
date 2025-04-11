@@ -291,7 +291,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
                 if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
                     switch (light.type) {
                         case 0:{ // Point light
-                                shadow = calculatePointShadow(input.positionWorldSpace, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
+                                shadow = calculatePointShadow(input.positionWorldSpace, normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
                         //return float4(shadow, shadow, shadow, 1.0);
                                 break;
                             }

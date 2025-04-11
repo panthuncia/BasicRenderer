@@ -7,7 +7,7 @@ float unprojectDepth(float depth, float near, float far) {
     return near * far / (far - depth * (far - near));
 }
 
-float calculatePointShadow(float4 fragPosWorldSpace, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+float calculatePointShadow(float4 fragPosWorldSpace, float3 normal, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz - light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
     float3 worldDir = normalize(lightToFrag);
@@ -44,14 +44,16 @@ float calculatePointShadow(float4 fragPosWorldSpace, LightInfo light, Structured
     
     uint cameraIndex = pointShadowCameraIndexBuffer[light.shadowViewInfoIndex * 6 + faceIndex];
     Camera lightCamera = cameraBuffer[cameraIndex];
+    float closestDepth = unprojectDepth(depthSample, light.nearPlane, light.farPlane);
+
     
-    float4 fragPosLightSpace = mul(float4(fragPosWorldSpace.xyz, 1.0), lightCamera.viewProjection);
-    float dist = length(lightToFrag);
-    float lightSpaceDepth = fragPosLightSpace.z / fragPosLightSpace.w;
+    float4 fragPosLightProjection = mul(float4(fragPosWorldSpace.xyz, 1.0), lightCamera.viewProjection);
+    //float dist = length(lightToFrag);
+    float lightSpaceDepth = fragPosLightProjection.z;
     
     float shadow = 0.0;
-    float bias = 0.0005;
-    shadow = lightSpaceDepth - bias > depthSample ? 1.0 : 0.0;
+    float bias = max(0.0005, 0.02 * (1.0 - dot(normal, worldDir.xyz)));
+    shadow = lightSpaceDepth - bias > closestDepth ? 1.0 : 0.0;
     return shadow;
 }
 
