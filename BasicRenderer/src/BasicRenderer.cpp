@@ -389,8 +389,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	//auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
     //auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 5, 3), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);
-    auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 10, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032);
-    renderer.SetDebugTexture(light1.get<Components::ShadowMap>()->shadowMap);
+    auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 10, 0), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, false);
+    //renderer.SetDebugTexture(light1.get<Components::ShadowMap>()->shadowMap);
 
     MSG msg = {};
     unsigned int frameIndex = 0;
