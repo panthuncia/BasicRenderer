@@ -173,10 +173,13 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
             return float4(lightingOutput.f_dielectric_fresnel_ibl, opacity);
 #endif // IMAGE_BASED_LIGHTING
         case OUTPUT_MESHLETS:{
-                return lightMeshlets(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
+                return lightUints(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
             }
         case OUTPUT_MODEL_NORMALS:{
                 return float4(input.normalModelSpace * 0.5 + 0.5, opacity);
+            }
+        case OUTPUT_LIGHT_CLUSTER_ID:{
+                return lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
             }
         default:
             return float4(1.0, 0.0, 0.0, 1.0);

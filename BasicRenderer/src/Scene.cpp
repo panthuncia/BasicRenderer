@@ -58,7 +58,7 @@ flecs::entity Scene::CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XM
 
 flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, bool shadowCasting) {
 	auto& world = ECSManager::GetInstance().GetWorld();
-	float maxRange = 20.0f;
+	float maxRange = 5.0f;
 	maxRange = (std::min)(maxRange, CalculateLightRadius(intensity, constantAttenuation, linearAttenuation, quadraticAttenuation));
 
 	LightInfo lightInfo;
@@ -452,13 +452,17 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
 	info.view = XMMatrixIdentity();
 	info.projection = XMMatrixPerspectiveFovRH(fov, aspect, zNear, zFar);
-	info.viewProjection = info.projection;
+	info.viewProjection = DirectX::XMMatrixMultiply(info.view, info.projection);
+	info.projectionInverse = XMMatrixInverse(nullptr, info.projection);
 	info.clippingPlanes[0] = planes[0];
 	info.clippingPlanes[1] = planes[1];
 	info.clippingPlanes[2] = planes[2];
 	info.clippingPlanes[3] = planes[3];
 	info.clippingPlanes[4] = planes[4];
 	info.clippingPlanes[5] = planes[5];
+	info.zFar = zFar;
+	info.zNear = zNear;
+	info.aspectRatio = aspect;
 
 	auto& world = ECSManager::GetInstance().GetWorld();
 	Components::Camera camera = {};

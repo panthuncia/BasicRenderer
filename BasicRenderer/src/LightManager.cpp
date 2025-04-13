@@ -35,6 +35,13 @@ LightManager::LightManager() {
 	m_pLightBufferResourceGroup = std::make_shared<ResourceGroup>(L"LightBufferResourceGroup");
 	m_pLightBufferResourceGroup->AddResource(m_lightBuffer->GetBuffer());
 	m_pLightBufferResourceGroup->AddResource(m_activeLightIndices->GetBuffer());
+
+	auto getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
+	auto lightClusterSize = getClusterSize();
+
+	auto numClusters = lightClusterSize.x * lightClusterSize.y * lightClusterSize.z;
+	m_pClusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), ResourceState::UNORDERED_ACCESS, false, true, false);
+	m_pClusterBuffer->SetName(L"lightingClusterBuffer");
 }
 
 LightManager::~LightManager() {
@@ -360,4 +367,8 @@ std::shared_ptr<ResourceGroup>& LightManager::GetLightViewInfoResourceGroup() {
 }
 std::shared_ptr<ResourceGroup>& LightManager::GetLightBufferResourceGroup() {
 	return m_pLightBufferResourceGroup;
+}
+
+std::shared_ptr<Buffer>& LightManager::GetClusterBuffer() {
+	return m_pClusterBuffer;
 }

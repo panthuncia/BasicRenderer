@@ -41,6 +41,7 @@ struct LightingOutput { // Lighting + debug info
     float ao;
     float3 emissive;
     float3 viewDir;
+    uint clusterID;
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     float3 f_metal_brdf_ibl;
     float3 f_dielectric_brdf_ibl;
@@ -253,6 +254,8 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     
     float3 lighting = float3(0.0, 0.0, 0.0);
     
+    uint tileIndex = 0; // Which light cluster this fragment belongs to
+    
     if (enablePunctualLights) {
         LightingParameters lightingParameters;
         lightingParameters.fragPos = input.positionWorldSpace.xyz;
@@ -282,9 +285,19 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         
         StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[perFrameBuffer.activeLightIndicesBufferIndex];
         StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
+        
+        StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
+        
+        uint zTile = uint((log(abs(input.positionViewSpace.z) / mainCamera.zNear) * perFrameBuffer.lightClusterGridSizeZ) / log(mainCamera.zFar / mainCamera.zNear));
+        float2 tileSize = float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY) / float2(perFrameBuffer.lightClusterGridSizeX, perFrameBuffer.lightClusterGridSizeY);
+        uint3 tile = uint3(input.position.xy / tileSize, zTile);
+        tileIndex = tile.x + (tile.y * perFrameBuffer.lightClusterGridSizeX) + (tile.z * perFrameBuffer.lightClusterGridSizeX * perFrameBuffer.lightClusterGridSizeY);
+        
+        Cluster activeCluster = clusterBuffer[tileIndex];
 
-        for (uint i = 0; i < perFrameBuffer.numLights; i++) {
-            unsigned int index = activeLightIndices[i];
+        tileIndex = activeCluster.count;
+        for (uint i = 0; i < activeCluster.count; i++) {
+            unsigned int index = activeLightIndices[activeCluster.lightIndices[i]];
             LightInfo light = lights[index];
             float shadow = 0.0;
             if (enableShadows) {
@@ -385,6 +398,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     output.ao = ao;
     output.emissive = emissive;
     output.viewDir = viewDir;
+    output.clusterID = tileIndex;
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     output.f_metal_brdf_ibl = f_metal_brdf_ibl;
     output.f_dielectric_brdf_ibl = f_dielectric_brdf_ibl;

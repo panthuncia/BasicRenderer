@@ -94,6 +94,8 @@ public:
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
 		auto& cameraManager = context.cameraManager;
+		auto& lightManager = context.lightManager;
+
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
 		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
@@ -103,6 +105,7 @@ public:
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
 		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+		staticBufferIndices[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo().index;
 
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 

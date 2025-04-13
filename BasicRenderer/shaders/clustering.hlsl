@@ -37,8 +37,8 @@ void CSMain(uint3 groupID : SV_GroupID) {
 	float2 tileSize = screenDimensions / float2(perFrame.lightClusterGridSizeX, perFrame.lightClusterGridSizeY);
 	
 	// Determine the minimal and maximal screen-space coordinates of the tile.
-	float2 minTile_screenspace = float2(groupID.x, groupID.y) * tileSize;
-	float2 maxTile_screenspace = (float2(groupID.x, groupID.y) + 1.0) * tileSize;
+	float2 minTile_screenspace = groupID.xy * tileSize;
+	float2 maxTile_screenspace = (groupID.xy + 1.0) * tileSize;
 
 	StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
 	Camera mainCamera = cameras[perFrame.mainCameraIndex];

@@ -132,6 +132,7 @@ struct Cluster {
     DirectX::XMVECTOR maxPoint;
     unsigned int count;
     unsigned int lightIndices[100];
+    unsigned int pad[3];
 };
 
 enum RootSignatureLayout {

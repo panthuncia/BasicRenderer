@@ -38,8 +38,8 @@ float4 LoadFloat4(uint offset, ByteAddressBuffer buffer) {
     return result;
 }
 
-// Basic blinn-phong for meshlet visualization
-float4 lightMeshlets(uint meshletIndex, float3 normal, float3 viewDir) {
+// Basic blinn-phong for uint visualization
+float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {
     float ambientIntensity = 0.3;
     float3 lightColor = float3(1, 1, 1);
     float3 lightDir = -normalize(float3(1, -1, 1));

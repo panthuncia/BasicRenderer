@@ -625,7 +625,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex());
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex(), { m_xRes, m_yRes }, m_lightClusterSize);
 
 	currentRenderGraph->Update();
 
@@ -664,6 +664,7 @@ void DX12Renderer::Render() {
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
+	m_context.lightManager = m_pLightManager.get();
 	m_context.drawStats = *drawStats;
 
     // Indicate that the back buffer will be used as a render target
@@ -926,9 +927,7 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->AddResource(cameraBuffer);
 
     // Frustrum cluster creation
-    auto numClusters = m_lightClusterSize.x * m_lightClusterSize.y * m_lightClusterSize.z;
-    auto clusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), ResourceState::UNORDERED_ACCESS, false, true, false);
-	clusterBuffer->SetName(L"ClusterBuffer");
+	auto& clusterBuffer = m_pLightManager->GetClusterBuffer();
 	newGraph->AddResource(clusterBuffer, false, ResourceState::UNORDERED_ACCESS);
     auto clusterPass = std::make_shared<ClusterGenerationPass>(clusterBuffer);
 	ComputePassParameters clusterPassParameters;
@@ -994,6 +993,7 @@ void DX12Renderer::CreateRenderGraph() {
     //forwardPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	forwardPassParameters.shaderResources.push_back(postSkinningVertices);
 	forwardPassParameters.shaderResources.push_back(cameraBuffer);
+	forwardPassParameters.shaderResources.push_back(clusterBuffer);
 
     std::shared_ptr<RenderPass> forwardPass = nullptr;
 
