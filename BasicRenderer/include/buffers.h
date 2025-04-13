@@ -9,8 +9,13 @@ struct CameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX projection;
+    DirectX::XMMATRIX projectionInverse;
 	DirectX::XMMATRIX viewProjection;
 	ClippingPlane clippingPlanes[6];
+	float fov;
+	float aspectRatio;
+	float zNear;
+	float zFar;
 };
 
 struct PerFrameCB {
@@ -31,7 +36,11 @@ struct PerFrameCB {
 	unsigned int environmentBRDFLUTIndex;
 	unsigned int environmentBRDFLUTSamplerIndex;
     unsigned int outputType;
-	unsigned int pad[2];
+    unsigned int screenResX;
+    unsigned int screenResY;
+    unsigned int lightClusterGridSizeX;
+    unsigned int lightClusterGridSizeY;
+	unsigned int lightClusterGridSizeZ;
 };
 
 struct PerObjectCB {
@@ -113,7 +122,16 @@ struct LightInfo {
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
     bool shadowCaster;
-	unsigned int pad[3];
+	BoundingSphere boundingSphere;
+    float maxRange;
+	unsigned int pad[1];
+};
+
+struct Cluster {
+    DirectX::XMVECTOR minPoint;
+    DirectX::XMVECTOR maxPoint;
+    unsigned int count;
+    unsigned int lightIndices[100];
 };
 
 enum RootSignatureLayout {
@@ -162,6 +180,7 @@ enum StaticBufferRootConstants {
     CameraBufferDescriptorIndex,
     PerMeshInstanceBufferDescriptorIndex,
     DrawSetCommandBufferDescriptorIndex,
+    LightClusterBufferDescriptorIndex,
     NumStaticBufferRootConstants,
 };
 

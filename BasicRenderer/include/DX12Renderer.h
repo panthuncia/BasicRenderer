@@ -113,6 +113,8 @@ private:
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;
 
+    DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
+
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);

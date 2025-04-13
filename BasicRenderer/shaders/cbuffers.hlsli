@@ -34,6 +34,7 @@ cbuffer StaticBufferInfo : register(b5) {
     uint cameraBufferDescriptorIndex;
     uint perMeshInstanceBufferDescriptorIndex; // Used by skinned meshes for skinning
     uint drawSetCommandBufferDescriptorIndex;
+    uint lightClusterBufferDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {

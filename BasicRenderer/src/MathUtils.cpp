@@ -30,3 +30,36 @@ XMVECTOR GetForwardFromMatrix(const DirectX::XMMATRIX& matrix) {
 XMVECTOR GetUpFromMatrix(const DirectX::XMMATRIX& matrix) {
     return -XMVector3Normalize(matrix.r[1]);
 }
+
+float CalculateLightRadius(float intensity, float constant, float linear, float quadratic, float threshold) {
+	if (intensity <= 0.0f) return 0.0f;
+
+	float c = constant - intensity / threshold;
+
+	if (quadratic == 0.0f) {
+		if (linear == 0.0f)
+			return 0.0f;
+		return std::max((intensity / threshold - constant) / linear, 0.0f);
+	}
+
+	float discriminant = linear * linear - 4.0f * quadratic * c;
+	if (discriminant < 0.0f)
+		return 0.0f;
+
+	float d = (-linear + std::sqrt(discriminant)) / (2.0f * quadratic);
+	return std::max(d, 0.0f);
+}
+
+BoundingSphere ComputeConeBoundingSphere(const XMVECTOR& origin, const XMVECTOR& direction, float height, float halfAngle) {
+	float r = height * std::tan(halfAngle);
+
+	float t = (height * height + r * r) / (2.0f * height);
+
+	XMVECTOR center = origin + direction * t;
+
+	BoundingSphere sphere;
+	XMStoreFloat4(&sphere.center, center);
+	sphere.radius = t;
+
+	return sphere;
+}
