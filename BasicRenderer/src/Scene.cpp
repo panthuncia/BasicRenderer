@@ -463,6 +463,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	info.zFar = zFar;
 	info.zNear = zNear;
 	info.aspectRatio = aspect;
+	info.fov = fov;
 
 	auto& world = ECSManager::GetInstance().GetWorld();
 	Components::Camera camera = {};

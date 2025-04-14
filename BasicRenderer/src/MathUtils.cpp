@@ -53,9 +53,9 @@ float CalculateLightRadius(float intensity, float constant, float linear, float 
 BoundingSphere ComputeConeBoundingSphere(const XMVECTOR& origin, const XMVECTOR& direction, float height, float halfAngle) {
 	float r = height * std::tan(halfAngle);
 
-	float t = (height * height + r * r) / (2.0f * height);
+	float t = sqrt(height * height + r * r);
 
-	XMVECTOR center = origin + direction * t;
+	XMVECTOR center = origin + DirectX::XMVector4Normalize(direction) * height / 2;
 
 	BoundingSphere sphere;
 	XMStoreFloat4(&sphere.center, center);

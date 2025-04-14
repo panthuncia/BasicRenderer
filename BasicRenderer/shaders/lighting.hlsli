@@ -168,6 +168,32 @@ float3 calculateLightContributionPBR(LightFragmentData light, LightingParameters
     return lighting * lightingParameters.albedo;
 }
 
+uint3 ComputeClusterID(float4 svPos, float viewDepth,
+                         ConstantBuffer<PerFrameBuffer> perFrame, Camera mainCamera) {
+    // Compute normalized screen coordinates from SV_Position (assumed in pixel space)
+    float2 normalizedScreenPos = svPos.xy / float2(perFrame.screenResX, perFrame.screenResY);
+
+    // Determine the cluster indices in X and Y by scaling the normalized coordinates by the cluster grid dimensions.
+    uint clusterX = (uint) (normalizedScreenPos.x * perFrame.lightClusterGridSizeX);
+    uint clusterY = (uint) (normalizedScreenPos.y * perFrame.lightClusterGridSizeY);
+
+    // Compute the depth slice (Z dimension) using logarithmic partitioning:
+    // Since clusters are distributed logarithmically between zNear and zFar,
+    // we convert the view-space depth into a [0,1] slice value.
+    float logDepth = log(abs(viewDepth) / mainCamera.zNear);
+    float logRange = log(mainCamera.zFar / mainCamera.zNear);
+    // 'saturate' clamps the result between 0 and 1.
+    float depthSlice = saturate(logDepth / logRange);
+    uint clusterZ = (uint) (depthSlice * perFrame.lightClusterGridSizeZ);
+
+    // Clamp the indices to ensure they fall within valid bounds.
+    clusterX = min(clusterX, perFrame.lightClusterGridSizeX - 1);
+    clusterY = min(clusterY, perFrame.lightClusterGridSizeY - 1);
+    clusterZ = min(clusterZ, perFrame.lightClusterGridSizeZ - 1);
+
+    return uint3(clusterX, clusterY, clusterZ);
+}
+
 LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<MaterialInfo> materialInfo, PerMeshBuffer meshBuffer, ConstantBuffer<PerFrameBuffer> perFrameBuffer, bool isFrontFace) {
     uint materialFlags = materialInfo.materialFlags;
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
@@ -254,7 +280,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     
     float3 lighting = float3(0.0, 0.0, 0.0);
     
-    uint tileIndex = 0; // Which light cluster this fragment belongs to
+    uint clusterIndex = 0; // Which light cluster this fragment belongs to
     
     if (enablePunctualLights) {
         LightingParameters lightingParameters;
@@ -288,14 +314,15 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         
         StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
         
-        uint zTile = uint((log(abs(input.positionViewSpace.z) / mainCamera.zNear) * perFrameBuffer.lightClusterGridSizeZ) / log(mainCamera.zFar / mainCamera.zNear));
-        float2 tileSize = float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY) / float2(perFrameBuffer.lightClusterGridSizeX, perFrameBuffer.lightClusterGridSizeY);
-        uint3 tile = uint3(input.position.xy / tileSize, zTile);
-        tileIndex = tile.x + (tile.y * perFrameBuffer.lightClusterGridSizeX) + (tile.z * perFrameBuffer.lightClusterGridSizeX * perFrameBuffer.lightClusterGridSizeY);
+        float3 clusterID = ComputeClusterID(input.position, input.positionViewSpace.z, perFrameBuffer, cameraBuffer[perFrameBuffer.mainCameraIndex]);
+        clusterIndex = clusterID.x +
+                        clusterID.y * perFrameBuffer.lightClusterGridSizeX +
+                        clusterID.z * perFrameBuffer.lightClusterGridSizeX * perFrameBuffer.lightClusterGridSizeY;
         
-        Cluster activeCluster = clusterBuffer[tileIndex];
+        Cluster activeCluster = clusterBuffer[clusterIndex];
 
-        tileIndex = activeCluster.count;
+        //clusterIndex = activeCluster.count;
+        //roughness = activeCluster.near/10;
         for (uint i = 0; i < activeCluster.count; i++) {
             unsigned int index = activeLightIndices[activeCluster.lightIndices[i]];
             LightInfo light = lights[index];
@@ -323,6 +350,9 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
             }
             
             LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, input.positionWorldSpace.xyz);
+            if (lightFragmentInfo.distance > light.maxRange) {
+                continue;
+            }
             if (materialInfo.materialFlags & MATERIAL_PBR) {
                 lighting += (1.0 - shadow) * calculateLightContributionPBR(lightFragmentInfo, lightingParameters);
             }
@@ -398,7 +428,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     output.ao = ao;
     output.emissive = emissive;
     output.viewDir = viewDir;
-    output.clusterID = tileIndex;
+    output.clusterID = clusterIndex;
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     output.f_metal_brdf_ibl = f_metal_brdf_ibl;
     output.f_dielectric_brdf_ibl = f_dielectric_brdf_ibl;

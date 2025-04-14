@@ -140,7 +140,9 @@ struct Cluster {
     float4 maxPoint;
     uint count;
     uint lightIndices[100];
-    uint pad[3];
+    float near;
+    float far;
+    uint pad[1];
 };
 
 #endif // __STRUCTS_HLSL__
