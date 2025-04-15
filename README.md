@@ -12,13 +12,14 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 - Image-based lighting
 - Normal mapping & contact-refinement parallax heightmaps
-- Support for arbitrary numbers of point, spot, and directional lights
+- Support for arbitrary numbers of point, spot, and directional lights using clustered lighting
 - Shadow mapping for all light types
 - Skinned meshes
 - Order-independent transparency using a per-pixel linked-list
 
 ## Technical features
 
+- Clustered forward shading
 - A (basic) render graph for automatic resource transitions and queue synchronization
 - Async-compute
 - Compute-based skinning
