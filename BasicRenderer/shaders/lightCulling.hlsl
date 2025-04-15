@@ -2,15 +2,14 @@
 #include "structs.hlsli"
 
 // Returns true if a sphere (with a given center and radius) intersects an AABB
-// defined by aabbMin and aabbMax.
+// defined by aabbMin and aabbMax
 bool sphereAABBIntersection(float3 center, float radius, float3 aabbMin, float3 aabbMax) {
     // Determine the closest point on the AABB to the sphere center.
     float3 closestPoint = max(aabbMin, min(center, aabbMax));
     float3 distance = closestPoint - center;
-    return dot(distance, distance) < radius;
+    return dot(distance, distance) <= radius * radius;
 }
 
-// Helper function to test whether the point light at index 'i' intersects with the cluster.
 bool testSphereAABB(matrix viewMatrix, float3 position, float radius, Cluster cluster) {
     // Transform the point light position into view space.
     float3 center = mul(float4(position, 1.0), viewMatrix).xyz;
@@ -48,7 +47,7 @@ void CSMain(uint3 groupID : SV_GroupID,
         switch (light.type) {
             case 0: // Point light
             case 1: // Spot light
-                if (testSphereAABB(primaryCamera.view, light.boundingSphere.center.xyz, light.boundingSphere.radius * light.boundingSphere.radius, cluster) && cluster.count < 100) {
+                if (testSphereAABB(primaryCamera.view, light.boundingSphere.center.xyz, light.boundingSphere.radius, cluster) && cluster.count < 100) {
                     cluster.lightIndices[cluster.count] = i;
                     cluster.count++;
                 }

@@ -132,6 +132,9 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
         case OUTPUT_LIGHT_CLUSTER_ID:{
                 finalOutput = lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
             }
+        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
+                finalOutput = lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
+            }
         default:
             finalOutput = float4(1.0, 0.0, 0.0, 1.0);
             break;

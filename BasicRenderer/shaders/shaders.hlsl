@@ -181,6 +181,9 @@ float4 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         case OUTPUT_LIGHT_CLUSTER_ID:{
                 return lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
             }
+        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
+                return lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
+            }
         default:
             return float4(1.0, 0.0, 0.0, 1.0);
     }

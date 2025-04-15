@@ -281,7 +281,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto street = LoadModel("models/street.obj");
 
     auto cubeScene = LoadModel("models/cube_blank.glb");
-    cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
+    cubeScene->GetRoot().set<Components::Position>({0, 1, 3});
 	cubeScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
     cubeScene->DisableShadows();
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
@@ -389,7 +389,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	//auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
     //auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 5, 3), XMFLOAT3(1, 1, 1), 100.0, {0, -1, 0}, .5, .8, 1.0, 0.09, 0.032);
-    auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 5, 3), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, false);
+    auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 100.0, 1.0, 0.09, 0.032, false);
     //renderer.SetDebugTexture(light1.get<Components::ShadowMap>()->shadowMap);
 
     MSG msg = {};
