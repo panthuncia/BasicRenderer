@@ -32,22 +32,30 @@ XMVECTOR GetUpFromMatrix(const DirectX::XMMATRIX& matrix) {
 }
 
 float CalculateLightRadius(float intensity, float constant, float linear, float quadratic, float threshold) {
-	if (intensity <= 0.0f) return 0.0f;
 
-	float c = constant - intensity / threshold;
+    // Rearranged equation: quadratic * d^2 + linear * d + (constant - intensity/threshold) = 0
+    float a = quadratic;
+    float b = linear;
+    float c = constant - (intensity / threshold);
 
-	if (quadratic == 0.0f) {
-		if (linear == 0.0f)
-			return 0.0f;
-		return std::max((intensity / threshold - constant) / linear, 0.0f);
-	}
+    float d = 0.0;
+    // If quadratic term is significant, solve via quadratic formula
+    if (abs(a) > 1e-6) {
+        float discriminant = b * b - 4.0 * a * c;
+        // In case of a negative discriminant, there is no real solution. Return 0.
+        if (discriminant < 0.0)
+            d = 0.0;
+        else
+            d = (-b + sqrt(discriminant)) / (2.0 * a);
+    } 
+    else if (abs(b) > 1e-6) {  // Fall back to linear solution if a is negligible
+        d = -c / b;
+    }
+    else {
+        d = 0.0; // No attenuation factors; effective range is undefined.
+    }
 
-	float discriminant = linear * linear - 4.0f * quadratic * c;
-	if (discriminant < 0.0f)
-		return 0.0f;
-
-	float d = (-linear + std::sqrt(discriminant)) / (2.0f * quadratic);
-	return std::max(d, 0.0f);
+    return d;
 }
 
 BoundingSphere ComputeConeBoundingSphere(const XMVECTOR& origin, const XMVECTOR& direction, float height, float halfAngle) {

@@ -45,21 +45,24 @@ Scene::Scene(){
 }
 
 flecs::entity Scene::CreateDirectionalLightECS(std::wstring name, XMFLOAT3 color, float intensity, XMFLOAT3 direction, bool shadowCasting){
-	return CreateLightECS(name, Components::LightType::Directional, { 0, 0, 0 }, color, intensity, 0, 0, 0, direction, 0, 0, shadowCasting);
+	return CreateLightECS(name, Components::LightType::Directional, { 0, 0, 0 }, color, intensity, { 0, 0, 0 }, direction, 0, 0, shadowCasting);
 }
 
 flecs::entity Scene::CreatePointLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, bool shadowCasting) {
-	return CreateLightECS(name, Components::LightType::Point, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation, {0, 0, 0}, 0, 0, shadowCasting);
+	return CreateLightECS(name, Components::LightType::Point, position, color, intensity, { constantAttenuation, linearAttenuation, quadraticAttenuation }, {0, 0, 0}, 0, 0, shadowCasting);
 }
 
 flecs::entity Scene::CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, bool shadowCasting) {
-	return CreateLightECS(name, Components::LightType::Spot, position, color, intensity, constantAttenuation, linearAttenuation, quadraticAttenuation, direction, innerConeAngle, outerConeAngle, shadowCasting);
+	return CreateLightECS(name, Components::LightType::Spot, position, color, intensity, { constantAttenuation, linearAttenuation, quadraticAttenuation }, direction, innerConeAngle, outerConeAngle, shadowCasting);
 }
 
-flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation, float linearAttenuation, float quadraticAttenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, bool shadowCasting) {
+flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 attenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, bool shadowCasting) {
 	auto& world = ECSManager::GetInstance().GetWorld();
-	float maxRange = 5.0f;
-	maxRange = (std::min)(maxRange, CalculateLightRadius(intensity, constantAttenuation, linearAttenuation, quadraticAttenuation));
+	float maxRange = 20.0f;
+	XMVECTOR normalizedAttenuationVec = XMVector3Normalize(XMLoadFloat3(&attenuation));
+	XMFLOAT3 normalizedAttenuation;
+	XMStoreFloat3(&normalizedAttenuation, normalizedAttenuationVec);
+	maxRange = (std::min)(maxRange, CalculateLightRadius(intensity, normalizedAttenuation.x, normalizedAttenuation.y, normalizedAttenuation.z));
 
 	LightInfo lightInfo;
 	lightInfo.type = type;
@@ -68,7 +71,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 	lightInfo.color *= intensity;
 	float nearPlane = 0.01;
 	float farPlane = maxRange;
-	lightInfo.attenuation = XMVectorSet(constantAttenuation, linearAttenuation, quadraticAttenuation, 0);
+	lightInfo.attenuation = normalizedAttenuationVec;
 	lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
 	lightInfo.innerConeAngle = cos(innerConeAngle);
 	lightInfo.outerConeAngle = cos(outerConeAngle);
@@ -87,7 +90,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 
 	flecs::entity entity = world.entity();
 	entity.child_of(ECSSceneRoot)
-		.set<Components::Light>({ type, color, XMFLOAT3(constantAttenuation, linearAttenuation, quadraticAttenuation), maxRange, lightInfo })
+		.set<Components::Light>({ type, color, normalizedAttenuation, maxRange, lightInfo })
 		.set<Components::Position>(position)
 		.set<Components::Scale>({ 1, 1, 1 })
 		.set<Components::Matrix>(DirectX::XMMatrixIdentity())

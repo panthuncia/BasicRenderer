@@ -343,7 +343,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
             }
             
             LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, input.positionWorldSpace.xyz);
-            if (lightFragmentInfo.distance > light.maxRange) {
+            if (lightFragmentInfo.distance > light.maxRange && light.type != 2) {
                 continue;
             }
             if (materialInfo.materialFlags & MATERIAL_PBR) {
