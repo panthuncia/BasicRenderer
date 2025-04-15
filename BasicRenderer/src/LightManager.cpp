@@ -27,6 +27,21 @@ LightManager::LightManager() {
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	getCurrentShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<ShadowMaps*>("currentShadowMapsResourceGroup");
+
+	m_pLightViewInfoResourceGroup = std::make_shared<ResourceGroup>(L"LightViewInfo");
+	m_pLightViewInfoResourceGroup->AddResource(m_spotViewInfo->GetBuffer());
+	m_pLightViewInfoResourceGroup->AddResource(m_pointViewInfo->GetBuffer());
+
+	m_pLightBufferResourceGroup = std::make_shared<ResourceGroup>(L"LightBufferResourceGroup");
+	m_pLightBufferResourceGroup->AddResource(m_lightBuffer->GetBuffer());
+	m_pLightBufferResourceGroup->AddResource(m_activeLightIndices->GetBuffer());
+
+	auto getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
+	auto lightClusterSize = getClusterSize();
+
+	auto numClusters = lightClusterSize.x * lightClusterSize.y * lightClusterSize.z;
+	m_pClusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), ResourceState::UNORDERED_ACCESS, false, true, false);
+	m_pClusterBuffer->SetName(L"lightingClusterBuffer");
 }
 
 LightManager::~LightManager() {
@@ -35,6 +50,7 @@ LightManager::~LightManager() {
 	deletionManager.MarkForDelete(m_spotViewInfo);
 	deletionManager.MarkForDelete(m_pointViewInfo);
 	deletionManager.MarkForDelete(m_directionalViewInfo);
+	deletionManager.MarkForDelete(m_activeLightIndices);
 }
 
 AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
@@ -344,4 +360,15 @@ void LightManager::SetCameraManager(CameraManager* cameraManager) {
 void LightManager::UpdateLightBufferView(BufferView* view, LightInfo& data) {
 	std::lock_guard<std::mutex> lock(m_lightUpdateMutex);
 	m_lightBuffer->UpdateView(view, &data);
+}
+
+std::shared_ptr<ResourceGroup>& LightManager::GetLightViewInfoResourceGroup() {
+	return m_pLightViewInfoResourceGroup;
+}
+std::shared_ptr<ResourceGroup>& LightManager::GetLightBufferResourceGroup() {
+	return m_pLightBufferResourceGroup;
+}
+
+std::shared_ptr<Buffer>& LightManager::GetClusterBuffer() {
+	return m_pClusterBuffer;
 }

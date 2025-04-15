@@ -9,8 +9,13 @@ struct Camera {
     float4 positionWorldSpace;
     row_major matrix view;
     row_major matrix projection;
+    row_major matrix projectionInverse;
     row_major matrix viewProjection;
     ClippingPlane clippingPlanes[6];
+    float fov;
+    float aspectRatio;
+    float zNear;
+    float zFar;
 };
 
 struct PerFrameBuffer {
@@ -31,7 +36,16 @@ struct PerFrameBuffer {
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
     uint outputType;
-    uint pad[1];
+    uint screenResX;
+    uint screenResY;
+    uint lightClusterGridSizeX;
+    uint lightClusterGridSizeY;
+    uint lightClusterGridSizeZ;
+};
+
+struct BoundingSphere {
+    float4 center;
+    float radius;
 };
 
 struct LightInfo {
@@ -48,7 +62,9 @@ struct LightInfo {
     int shadowMapIndex;
     int shadowSamplerIndex;
     bool shadowCaster;
-    uint pad[3];
+    BoundingSphere boundingSphere;
+    float maxRange;
+    uint pad[1];
 };
 
 struct MaterialInfo {
@@ -97,11 +113,6 @@ struct PerObjectBuffer {
     uint pad[3];
 };
 
-struct BoundingSphere {
-    float4 center;
-    float radius;
-};
-
 struct PerMeshBuffer {
     uint materialDataIndex;
     uint vertexFlags;
@@ -121,6 +132,17 @@ struct PerMeshInstanceBuffer {
     uint boneTransformBufferIndex;
     uint postSkinningVertexBufferOffset;
     uint pad[2];
+};
+
+
+struct Cluster {
+    float4 minPoint;
+    float4 maxPoint;
+    uint count;
+    uint lightIndices[100];
+    float near;
+    float far;
+    uint pad[1];
 };
 
 #endif // __STRUCTS_HLSL__

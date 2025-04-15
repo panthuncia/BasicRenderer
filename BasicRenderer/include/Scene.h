@@ -19,9 +19,9 @@ class Scene {
 public:
     Scene();
     ~Scene();
-    flecs::entity CreateDirectionalLightECS(std::wstring name, XMFLOAT3 color, float intensity, XMFLOAT3 direction, bool shadowCasting = false);
-    flecs::entity CreatePointLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, bool shadowCasting = false);
-    flecs::entity CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, bool shadowCasting = false);
+    flecs::entity CreateDirectionalLightECS(std::wstring name, XMFLOAT3 color, float intensity, XMFLOAT3 direction, bool shadowCasting = true);
+    flecs::entity CreatePointLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, bool shadowCasting = true);
+    flecs::entity CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, bool shadowCasting = true);
 	flecs::entity CreateNodeECS(std::wstring name = L"");
 	flecs::entity CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name);
     flecs::entity GetRoot() const;
@@ -67,7 +67,7 @@ private:
 
     void MakeResident();
 	void MakeNonResident();
-    flecs::entity CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, float constantAttenuation = 0, float linearAttenuation = 0, float quadraticAttenuation = 0, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0, bool shadowCasting = false);
+    flecs::entity CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 attenuation = { 0, 0, 0 }, XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0, bool shadowCasting = false);
     void ActivateRenderable(flecs::entity& entity);
 	void ActivateLight(flecs::entity& entity);
 	void ActivateCamera(flecs::entity& entity);

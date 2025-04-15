@@ -122,12 +122,18 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
             break;
 #endif // IMAGE_BASED_LIGHTING
         case OUTPUT_MESHLETS:{
-                finalOutput = lightMeshlets(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
+                finalOutput = lightUints(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
                 break;
             }
         case OUTPUT_MODEL_NORMALS:{
                 finalOutput = float4(input.normalModelSpace * 0.5 + 0.5, lightingOutput.baseColor.a);
                 break;
+            }
+        case OUTPUT_LIGHT_CLUSTER_ID:{
+                finalOutput = lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
+            }
+        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
+                finalOutput = lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
             }
         default:
             finalOutput = float4(1.0, 0.0, 0.0, 1.0);

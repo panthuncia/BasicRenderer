@@ -38,6 +38,8 @@
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/SkinningPass.h"
 #include "ComputePass.h"
+#include "RenderPasses/ClusterGenerationPass.h"
+#include "RenderPasses/LightCullingPass.h"
 #include "TextureDescription.h"
 #include "Menu.h"
 #include "DeletionManager.h"
@@ -210,12 +212,23 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
         if (entity.has<Components::Light>()) {
             Components::Light* light = entity.get_mut<Components::Light>();
+            XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+            light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
             light->lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
                 mOut.matrix.r[3].m128_f32[1],  // _42
                 mOut.matrix.r[3].m128_f32[2],  // _43
                 1.0f);
-            XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-            light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
+            switch(light->lightInfo.type){
+            case Components::LightType::Spot:
+                light->lightInfo.boundingSphere = ComputeConeBoundingSphere(light->lightInfo.posWorldSpace, light->lightInfo.dirWorldSpace, light->lightInfo.maxRange, acos(light->lightInfo.outerConeAngle));
+                break;
+            case Components::LightType::Point:
+                light->lightInfo.boundingSphere = { {mOut.matrix.r[3].m128_f32[0],  // _41
+                    mOut.matrix.r[3].m128_f32[1],  // _42
+                    mOut.matrix.r[3].m128_f32[2],  // _43
+                    1.0f}, light->lightInfo.maxRange };
+            }
+
             if (light->lightInfo.shadowCaster) {
 				const Components::LightViewInfo* viewInfo = entity.get<Components::LightViewInfo>();
 				m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo->lightBufferView.get(), light->lightInfo);
@@ -251,6 +264,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<unsigned int>("outputType", 0);
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
+    settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -611,7 +625,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex());
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex(), { m_xRes, m_yRes }, m_lightClusterSize);
 
 	currentRenderGraph->Update();
 
@@ -650,6 +664,7 @@ void DX12Renderer::Render() {
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
+	m_context.lightManager = m_pLightManager.get();
 	m_context.drawStats = *drawStats;
 
     // Indicate that the back buffer will be used as a render target
@@ -904,6 +919,38 @@ void DX12Renderer::CreateRenderGraph() {
         useMeshShaders = false;
     }
 
+    //auto& perFrameBuffer = ResourceManager::GetInstance().GetPerFrameBuffer();
+    //newGraph->AddResource(perFrameBuffer, true, ResourceState::CONSTANT);
+
+    auto& cameraManager = m_pCameraManager;
+    auto& cameraBuffer = cameraManager->GetCameraBuffer();
+    newGraph->AddResource(cameraBuffer);
+
+    // Frustrum cluster creation
+	auto& clusterBuffer = m_pLightManager->GetClusterBuffer();
+	newGraph->AddResource(clusterBuffer, false, ResourceState::UNORDERED_ACCESS);
+    auto clusterPass = std::make_shared<ClusterGenerationPass>(clusterBuffer);
+	ComputePassParameters clusterPassParameters;
+    clusterPassParameters.shaderResources.push_back(cameraBuffer);
+	clusterPassParameters.unorderedAccessViews.push_back(clusterBuffer);
+	//clusterPassParameters.constantBuffers.push_back(perFrameBuffer);
+    newGraph->AddComputePass(clusterPass, clusterPassParameters, "ClusterGenerationPass");
+
+    auto& lightBufferResourceGroup = m_pLightManager->GetLightBufferResourceGroup();
+	newGraph->AddResource(lightBufferResourceGroup);
+
+	// Light cluster culling
+	auto lightCullingPass = std::make_shared<LightCullingPass>(clusterBuffer);
+	ComputePassParameters lightCullingPassParameters;
+	lightCullingPassParameters.shaderResources.push_back(cameraBuffer);
+	lightCullingPassParameters.shaderResources.push_back(lightBufferResourceGroup);
+	lightCullingPassParameters.unorderedAccessViews.push_back(clusterBuffer);
+	//lightCullingPassParameters.constantBuffers.push_back(perFrameBuffer);
+
+	newGraph->AddComputePass(lightCullingPass, lightCullingPassParameters, "LightCullingPass");
+
+
+
     // Skinning
 	auto skinningPass = std::make_shared<SkinningPass>();
 	ComputePassParameters skinningPassParameters;
@@ -913,13 +960,6 @@ void DX12Renderer::CreateRenderGraph() {
     skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
 	newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
-
-	auto& cameraManager = m_pCameraManager;
-    auto& cameraBuffer = cameraManager->GetCameraBuffer();
-    newGraph->AddResource(cameraBuffer);
-
-	auto& perFrameBuffer = ResourceManager::GetInstance().GetPerFrameBuffer();
-	newGraph->AddResource(perFrameBuffer, true, ResourceState::CONSTANT);
 
     // Frustrum culling
 	bool indirect = getIndirectDrawsEnabled();
@@ -949,9 +989,11 @@ void DX12Renderer::CreateRenderGraph() {
     auto forwardPassParameters = RenderPassParameters();
 	forwardPassParameters.shaderResources.push_back(perObjectBuffer);
 	forwardPassParameters.shaderResources.push_back(perMeshBuffer);
+    forwardPassParameters.shaderResources.push_back(lightBufferResourceGroup);
     //forwardPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	forwardPassParameters.shaderResources.push_back(postSkinningVertices);
 	forwardPassParameters.shaderResources.push_back(cameraBuffer);
+	forwardPassParameters.shaderResources.push_back(clusterBuffer);
 
     std::shared_ptr<RenderPass> forwardPass = nullptr;
 
@@ -1042,12 +1084,16 @@ void DX12Renderer::CreateRenderGraph() {
         forwardPassParameters.shaderResources.push_back(m_environmentIrradiance);
     }
 
+	auto& lightViewResourceGroup = m_pLightManager->GetLightViewInfoResourceGroup();
+	newGraph->AddResource(lightViewResourceGroup);
+
     auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
     if (drawShadows) {
         newGraph->AddResource(m_shadowMaps);
 
         std::shared_ptr<RenderPass> shadowPass = nullptr;
         auto shadowPassParameters = RenderPassParameters();
+		shadowPassParameters.shaderResources.push_back(lightViewResourceGroup);
         //shadowPassParameters.shaderResources.push_back(normalMatrixBuffer);
 		shadowPassParameters.shaderResources.push_back(postSkinningVertices);
 
@@ -1112,6 +1158,7 @@ void DX12Renderer::CreateRenderGraph() {
     std::shared_ptr<RenderPass> pPPLLFillPass;
     auto PPLLFillPassParameters = RenderPassParameters();
     //PPLLFillPassParameters.shaderResources.push_back(normalMatrixBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(lightBufferResourceGroup);
 	PPLLFillPassParameters.shaderResources.push_back(postSkinningVertices);
     if (indirect) {
         pPPLLFillPass = std::make_shared<PPLLFillPassMSIndirect>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);

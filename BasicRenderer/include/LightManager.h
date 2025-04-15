@@ -45,6 +45,9 @@ public:
 	void SetCameraManager(CameraManager* cameraManager);
 	void UpdateLightBufferView(BufferView* view, LightInfo& data);
     void UpdateLightViewInfo(flecs::entity light);
+	std::shared_ptr<ResourceGroup>& GetLightViewInfoResourceGroup();
+	std::shared_ptr<ResourceGroup>& GetLightBufferResourceGroup();
+	std::shared_ptr<Buffer>& GetClusterBuffer();
 
 private:
     LightManager();
@@ -54,6 +57,11 @@ private:
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_spotViewInfo; // Indices into camera buffer
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_pointViewInfo;
     std::shared_ptr<DynamicStructuredBuffer<unsigned int>> m_directionalViewInfo;
+
+	std::shared_ptr<ResourceGroup> m_pLightViewInfoResourceGroup;
+	std::shared_ptr<ResourceGroup> m_pLightBufferResourceGroup;
+
+	std::shared_ptr<Buffer> m_pClusterBuffer;
 
     // TODO: The buffer size and increment size are low for testing.
     unsigned int m_commandBufferSize = 1;

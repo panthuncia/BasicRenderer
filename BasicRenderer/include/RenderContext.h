@@ -9,6 +9,7 @@ class ObjectManager;
 class MeshManager;
 class IndirectCommandBufferManager;
 class CameraManager;
+class LightManager;
 
 class RenderContext {
 public:
@@ -17,6 +18,7 @@ public:
 	MeshManager* meshManager;
 	IndirectCommandBufferManager* indirectCommandBufferManager;
 	CameraManager* cameraManager;
+    LightManager* lightManager;
     Scene* currentScene;
     ID3D12Device* device;
     ID3D12GraphicsCommandList* commandList;
