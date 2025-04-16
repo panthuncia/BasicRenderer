@@ -1,7 +1,7 @@
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "IndirectCommand.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "PSOManager.h"
+#include "Managers/Singletons/PSOManager.h"
 #include "utilities.h"
 
 void CommandSignatureManager::Initialize() {

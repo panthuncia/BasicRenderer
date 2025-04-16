@@ -13,7 +13,7 @@
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "PSOManager.h"
+#include "Managers/Singletons/PSOManager.h"
 #include "ResourceManager.h"
 #include "RenderContext.h"
 #include "RenderGraph.h"

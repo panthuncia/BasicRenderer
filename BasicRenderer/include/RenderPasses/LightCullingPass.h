@@ -3,7 +3,7 @@
 #include <DirectX/d3dx12.h>
 
 #include "ComputePass.h"
-#include "PSOManager.h"
+#include "Managers/Singletons/PSOManager.h"
 #include "RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "utilities.h"
