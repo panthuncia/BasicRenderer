@@ -24,7 +24,7 @@
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
 #include "CameraManager.h"
-#include "LightManager.h"
+#include "Managers/LightManager.h"
 #include "MeshManager.h"
 #include "ObjectManager.h"
 #include "IndirectCommandBufferManager.h"

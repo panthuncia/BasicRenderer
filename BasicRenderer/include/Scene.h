@@ -9,7 +9,7 @@
 #include <flecs.h>
 #include <atomic>
 #include "Skeleton.h"
-#include "LightManager.h"
+#include "Managers/LightManager.h"
 #include "MeshData.h"
 #include "ManagerInterface.h"
 

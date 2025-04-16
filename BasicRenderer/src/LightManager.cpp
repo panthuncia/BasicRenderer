@@ -1,4 +1,4 @@
-#include "LightManager.h"
+#include "Managers/LightManager.h"
 
 #include "ResourceHandles.h"
 #include "ResourceManager.h"

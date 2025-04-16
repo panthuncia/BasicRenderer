@@ -16,7 +16,7 @@
 #include "CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"
-#include "LightManager.h"
+#include "Managers/LightManager.h"
 
 class ForwardRenderPass : public RenderPass {
 public:
