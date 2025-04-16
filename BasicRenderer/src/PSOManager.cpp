@@ -461,7 +461,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[7] = {};
+    D3D12_ROOT_PARAMETER1 parameters[8] = {};
 
     // PerObject buffer index
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -511,6 +511,13 @@ void PSOManager::createRootSignature() {
     parameters[6].Constants.RegisterSpace = 0;
     parameters[6].Constants.Num32BitValues = NumTransparencyInfoRootConstants;
     parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Light clustering info
+	parameters[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	parameters[7].Constants.ShaderRegister = 8;
+	parameters[7].Constants.RegisterSpace = 0;
+	parameters[7].Constants.Num32BitValues = NumLightClusterRootConstants;
+	parameters[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};

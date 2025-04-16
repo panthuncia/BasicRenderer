@@ -306,6 +306,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
         
         StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
+        StructuredBuffer<LightPage> lightPagesBuffer = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
         
         float3 clusterID = ComputeClusterID(input.position, input.positionViewSpace.z, perFrameBuffer, cameraBuffer[perFrameBuffer.mainCameraIndex]);
         clusterIndex = clusterID.x +
@@ -314,47 +315,52 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         
         Cluster activeCluster = clusterBuffer[clusterIndex];
 
-        clusterLightCount = activeCluster.count;
+        clusterLightCount = activeCluster.numLights;
         //roughness = activeCluster.near/10;
-        for (uint i = 0; i < activeCluster.count; i++) {
-            unsigned int index = activeLightIndices[activeCluster.lightIndices[i]];
-            LightInfo light = lights[index];
-            float shadow = 0.0;
-            if (enableShadows) {
-                if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
-                    switch (light.type) {
-                        case 0:{ // Point light
-                                shadow = calculatePointShadow(input.positionWorldSpace, normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
-                        //return float4(shadow, shadow, shadow, 1.0);
-                                break;
-                            }
-                        case 1:{ // Spot light
-                                uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
-                                Camera camera = cameraBuffer[spotShadowCameraIndex];
-                                shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
-                                break;
-                            }
-                        case 2:{// Directional light
-                                shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
-                                //break;
-                            }
+        // Loop through all pages of lights in the cluster
+        uint pageIndex = activeCluster.ptrFirstPage;
+        while (pageIndex != LIGHT_PAGE_ADDRESS_NULL) {
+            for (uint i = 0; i < lightPagesBuffer[pageIndex].numLightsInPage; i++) {
+                unsigned int index = activeLightIndices[lightPagesBuffer[pageIndex].lightIndices[i]];
+                LightInfo light = lights[index];
+                float shadow = 0.0;
+                if (enableShadows) {
+                    if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1) {
+                        switch (light.type) {
+                            case 0:{ // Point light
+                                    shadow = calculatePointShadow(input.positionWorldSpace, normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
+                            //return float4(shadow, shadow, shadow, 1.0);
+                                    break;
+                                }
+                            case 1:{ // Spot light
+                                    uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
+                                    Camera camera = cameraBuffer[spotShadowCameraIndex];
+                                    shadow = calculateSpotShadow(input.positionWorldSpace, normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
+                                    break;
+                                }
+                            case 2:{// Directional light
+                                    shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
+                                    //break;
+                                }
+                        }
                     }
                 }
-            }
             
-            LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, input.positionWorldSpace.xyz);
-            if (lightFragmentInfo.distance > light.maxRange && light.type != 2) {
-                continue;
+                LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, input.positionWorldSpace.xyz);
+                if (lightFragmentInfo.distance > light.maxRange && light.type != 2) {
+                    continue;
+                }
+                if (materialInfo.materialFlags & MATERIAL_PBR) {
+                    lighting += (1.0 - shadow) * calculateLightContributionPBR(lightFragmentInfo, lightingParameters);
+                }
+                else {
+                    lighting += (1.0 - shadow) * calculateLightContribution(lightFragmentInfo, lightingParameters);
+                }
+                if (materialInfo.materialFlags & MATERIAL_PARALLAX) {
+                    float parallaxShadow = getParallaxShadow(parallaxShadowParams);
+                }
             }
-            if (materialInfo.materialFlags & MATERIAL_PBR) {
-                lighting += (1.0 - shadow) * calculateLightContributionPBR(lightFragmentInfo, lightingParameters);
-            }
-            else {
-                lighting += (1.0 - shadow) * calculateLightContribution(lightFragmentInfo, lightingParameters);
-            }
-            if (materialInfo.materialFlags & MATERIAL_PARALLAX) {
-                float parallaxShadow = getParallaxShadow(parallaxShadowParams);
-            }
+            pageIndex = lightPagesBuffer[pageIndex].ptrNextPage;
         }
     }
     float ao = 1.0;

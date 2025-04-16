@@ -14,7 +14,7 @@
 
 class LightCullingPass : public ComputePass {
 public:
-	LightCullingPass(std::shared_ptr<GloballyIndexedResource> pClusterBuffer) : m_pClusterBuffer(pClusterBuffer) {
+	LightCullingPass(std::shared_ptr<GloballyIndexedResource> pClusterBuffer, std::shared_ptr<Buffer> pLightPagesBuffer, std::shared_ptr<Buffer> pLightPagesCounter) : m_pClusterBuffer(pClusterBuffer), m_pLightPagesBuffer(pLightPagesBuffer), m_pLightPagesCounter(pLightPagesCounter) {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
 	}
 
@@ -65,8 +65,14 @@ public:
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-		staticBufferIndices[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo().index;
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
+
+		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
+		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo().index;
+		lightClusterConstants[LightPagesBufferDescriptorIndex] = m_pLightPagesBuffer->GetUAVShaderVisibleInfo().index;
+		lightClusterConstants[LightPagesCounterDescriptorIndex] = m_pLightPagesCounter->GetUAVShaderVisibleInfo().index;
+		lightClusterConstants[LightPagesPoolSize] = context.lightManager->GetLightPagePoolSize();
+		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
 
 		auto clusterSize = getClusterSize();
 		unsigned int numThreadGroups = std::ceil(((float)(clusterSize.x * clusterSize.y * clusterSize.z)) / 128);
@@ -81,6 +87,12 @@ public:
 
 	void Cleanup(RenderContext& context) override {
 
+	}
+
+	virtual void Update() override {
+		// Reset UAV counter
+		uint32_t zero = 0;
+		UploadManager::GetInstance().UploadData(&zero, sizeof(uint32_t), m_pLightPagesCounter.get(), 0);
 	}
 
 private:
@@ -109,6 +121,8 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
+	std::shared_ptr<Buffer> m_pLightPagesBuffer;
+	std::shared_ptr<Buffer> m_pLightPagesCounter;
 	std::function<DirectX::XMUINT3()> getClusterSize;
 	std::shared_ptr<GloballyIndexedResource> m_pClusterBuffer;
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;

@@ -48,6 +48,8 @@ public:
 	std::shared_ptr<ResourceGroup>& GetLightViewInfoResourceGroup();
 	std::shared_ptr<ResourceGroup>& GetLightBufferResourceGroup();
 	std::shared_ptr<Buffer>& GetClusterBuffer();
+	std::shared_ptr<Buffer>& GetLightPagesBuffer();
+	unsigned int GetLightPagePoolSize() { return m_lightPagePoolSize; }
 
 private:
     LightManager();
@@ -62,6 +64,7 @@ private:
 	std::shared_ptr<ResourceGroup> m_pLightBufferResourceGroup;
 
 	std::shared_ptr<Buffer> m_pClusterBuffer;
+	std::shared_ptr<Buffer> m_pLightPagesBuffer;
 
     // TODO: The buffer size and increment size are low for testing.
     unsigned int m_commandBufferSize = 1;
@@ -76,6 +79,7 @@ private:
     std::function<void(std::shared_ptr<void>)> markForDelete;
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
     CameraManager* m_pCameraManager = nullptr;
+	unsigned int m_lightPagePoolSize = 0;
 
 	std::mutex m_lightUpdateMutex;
 

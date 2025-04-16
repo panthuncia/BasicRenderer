@@ -134,15 +134,20 @@ struct PerMeshInstanceBuffer {
     uint pad[2];
 };
 
+#define LIGHTS_PER_PAGE 50
+#define LIGHT_PAGE_ADDRESS_NULL 0xFFFFFFFF
+struct LightPage {
+    uint ptrNextPage;
+    uint numLightsInPage;
+    uint lightIndices[LIGHTS_PER_PAGE];
+};
 
 struct Cluster {
     float4 minPoint;
     float4 maxPoint;
-    uint count;
-    uint lightIndices[100];
-    float near;
-    float far;
-    uint pad[1];
+    uint numLights;
+    uint ptrFirstPage;
+    uint pad[2];
 };
 
 #endif // __STRUCTS_HLSL__

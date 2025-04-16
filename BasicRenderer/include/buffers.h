@@ -127,12 +127,19 @@ struct LightInfo {
 	unsigned int pad[1];
 };
 
+#define LIGHTS_PER_PAGE 50
+struct LightPage {
+    unsigned int ptrNextPage;
+    unsigned int numLightsInPage;
+    unsigned int lightIndices[LIGHTS_PER_PAGE];
+};
+
 struct Cluster {
     DirectX::XMVECTOR minPoint;
     DirectX::XMVECTOR maxPoint;
-    unsigned int count;
-    unsigned int lightIndices[100];
-    unsigned int pad[3];
+    unsigned int numLights;
+    unsigned int ptrFirstPage;
+    unsigned int pad[2];
 };
 
 enum RootSignatureLayout {
@@ -143,6 +150,7 @@ enum RootSignatureLayout {
 	StaticBufferRootSignatureIndex,
 	VariableBufferRootSignatureIndex,
 	TransparencyInfoRootSignatureIndex,
+	LightClusterRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -181,7 +189,6 @@ enum StaticBufferRootConstants {
     CameraBufferDescriptorIndex,
     PerMeshInstanceBufferDescriptorIndex,
     DrawSetCommandBufferDescriptorIndex,
-    LightClusterBufferDescriptorIndex,
     NumStaticBufferRootConstants,
 };
 
@@ -196,6 +203,14 @@ enum TransparencyInfoRootConstants {
 	PPLLHeadBufferDescriptorIndex,
 	PPLLNodeBufferDescriptorIndex,
 	PPLLCounterBufferDescriptorIndex,
-	PPLLNodeSize,
+    PPLLNodePoolSize,
 	NumTransparencyInfoRootConstants
+};
+
+enum LightClusterRootConstants {
+	LightClusterBufferDescriptorIndex,
+	LightPagesBufferDescriptorIndex,
+	LightPagesCounterDescriptorIndex,
+    LightPagesPoolSize,
+	NumLightClusterRootConstants
 };

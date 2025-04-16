@@ -34,7 +34,6 @@ cbuffer StaticBufferInfo : register(b5) {
     uint cameraBufferDescriptorIndex;
     uint perMeshInstanceBufferDescriptorIndex; // Used by skinned meshes for skinning
     uint drawSetCommandBufferDescriptorIndex;
-    uint lightClusterBufferDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {
@@ -48,6 +47,13 @@ cbuffer transparencyInfo : register(b7) {
     uint PPLLNodesDescriptorIndex;
     uint PPLLNodesCounterDescriptorIndex;
     uint PPLLNodePoolSize;
+}
+
+cbuffer LightClusterInfo : register(b8) {
+    uint lightClusterBufferDescriptorIndex;
+    uint lightPagesBufferDescriptorIndex;
+    uint lightPagesCounterDescriptorIndex;
+    uint lightPagesPoolSize;
 }
 
 #endif // __CBUFFERS_HLSL__
