@@ -8,10 +8,10 @@
 #include <string>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Buffer.h"
+#include "Buffers/Buffer.h"
 #include "Resource.h"
-#include "DynamicBufferBase.h"
-#include "DeletionManager.h"
+#include "Buffers/DynamicBufferBase.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 using Microsoft::WRL::ComPtr;

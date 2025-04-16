@@ -1,10 +1,10 @@
-#include "DynamicBuffer.h"
+#include "Buffers/DynamicBuffer.h"
 
 #include <spdlog/spdlog.h>
 
 #include "DirectX/d3dx12.h"
-#include "BufferView.h"
-#include "DeletionManager.h"
+#include "Buffers/BufferView.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {

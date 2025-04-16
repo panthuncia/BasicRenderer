@@ -12,9 +12,9 @@
 #include <typeindex>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Buffer.h"
+#include "Buffers/Buffer.h"
 #include "Resource.h"
-#include "DynamicBufferBase.h"
+#include "Buffers/DynamicBufferBase.h"
 #include "MemoryBlock.h"
 
 using Microsoft::WRL::ComPtr;

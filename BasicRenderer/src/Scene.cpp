@@ -17,7 +17,7 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "ECSSystems.h"
 #include "MeshInstance.h"
-#include "AnimationController.h"
+#include "Animation/AnimationController.h"
 #include "MathUtils.h"
 
 std::atomic<uint64_t> Scene::globalSceneCount = 0;
@@ -28,9 +28,6 @@ Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
-
-    // TODO: refactor indirect buffer manager and light manager so that GPU resources are destroyed on MakeNonResident
-	//indirectCommandBufferManager = IndirectCommandBufferManager::CreateShared();
 
     //Initialize ECS scene
     auto& world = ECSManager::GetInstance().GetWorld();

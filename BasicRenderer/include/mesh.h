@@ -11,7 +11,7 @@
 #include "MeshData.h"
 #include "buffers.h"
 #include "meshoptimizer.h"
-#include "BufferView.h"
+#include "Buffers/BufferView.h"
 using namespace Microsoft::WRL;
 
 class Material;

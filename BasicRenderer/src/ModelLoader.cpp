@@ -16,7 +16,7 @@
 #include "Mesh.h"
 #include "Skeleton.h"
 #include "Components.h"
-#include "AnimationController.h"
+#include "Animation/AnimationController.h"
 
 D3D12_TEXTURE_ADDRESS_MODE aiTextureMapModeToD3D12(aiTextureMapMode mode) {
     switch (mode) {

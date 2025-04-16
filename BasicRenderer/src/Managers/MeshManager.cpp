@@ -4,9 +4,9 @@
 #include "ResourceStates.h"
 #include "Mesh.h"
 #include "ResourceGroup.h"
-#include "BufferView.h"
+#include "Buffers/BufferView.h"
 #include "MeshInstance.h"
-#include "DynamicBuffer.h"
+#include "Buffers/DynamicBuffer.h"
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();

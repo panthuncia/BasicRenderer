@@ -9,7 +9,7 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/CameraManager.h"
 #include "MeshInstance.h"
-#include "ManagerInterface.h"
+#include "Managers/ManagerInterface.h"
 #include "Utilities.h"
 
 void IterateTree(flecs::entity e, const DirectX::XMMATRIX& parentTransform, ManagerInterface* managers) {

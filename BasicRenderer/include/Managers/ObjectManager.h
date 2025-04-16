@@ -5,7 +5,7 @@
 #include <mutex>
 
 #include "LazyDynamicStructuredBuffer.h"
-#include "DynamicStructuredBuffer.h"
+#include "Buffers/DynamicStructuredBuffer.h"
 #include "buffers.h"
 #include "SortedUnsignedIntBuffer.h"
 #include "IndirectCommand.h"

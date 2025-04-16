@@ -1,12 +1,12 @@
 #include "Managers/IndirectCommandBufferManager.h"
 
 #include "ResourceManager.h"
-#include "DeletionManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "ResourceGroup.h"
 #include "GloballyIndexedResource.h"
 #include "IndirectCommand.h"
 #include "PSOManager.h"
-#include "CommandSignatureManager.h"
+#include "Managers/Singletons/CommandSignatureManager.h"
 #include "DynamicResource.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {

@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <string>
 
-#include "DirectX/dxcapi.h"
+#include "ThirdParty/DirectX/dxcapi.h"
 #include "BlendState.h"
 #include "PSOFlags.h"
 

@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <flecs.h>
 
-#include "Animation.h"
+#include "Animation/Animation.h"
 
 class Buffer;
 

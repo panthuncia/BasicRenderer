@@ -10,7 +10,7 @@
 #include "Scene.h"
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
-#include "CommandSignatureManager.h"
+#include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/CameraManager.h"

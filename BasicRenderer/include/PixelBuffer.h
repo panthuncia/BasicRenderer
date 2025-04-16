@@ -1,7 +1,7 @@
 #pragma once
 #include <initguid.h> // Why is this needed? Without it I get a linker error for IID_ID3D12Device.
 #include "wrl.h"
-#include "stb/stb_image.h"
+#include "ThirdParty/stb/stb_image.h"
 #include "DirectX/d3dx12.h"
 #include <d3d12.h>
 

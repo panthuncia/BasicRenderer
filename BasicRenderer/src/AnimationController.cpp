@@ -1,4 +1,4 @@
-#include "AnimationController.h"
+#include "Animation/AnimationController.h"
 
 AnimationController::AnimationController()
     : animationClip(nullptr), currentTime(0.0f), isPlaying(true) {

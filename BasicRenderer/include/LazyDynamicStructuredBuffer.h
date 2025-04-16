@@ -11,12 +11,12 @@
 #include <deque>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Buffer.h"
+#include "Buffers/Buffer.h"
 #include "Resource.h"
-#include "DynamicBufferBase.h"
+#include "Buffers/DynamicBufferBase.h"
 #include "Concepts/HasIsValid.h"
-#include "BufferView.h"
-#include "DeletionManager.h"
+#include "Buffers/BufferView.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 using Microsoft::WRL::ComPtr;

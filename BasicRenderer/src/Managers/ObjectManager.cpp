@@ -4,7 +4,7 @@
 
 #include "ResourceManager.h"
 #include "LazyDynamicStructuredBuffer.h"
-#include "DynamicBuffer.h"
+#include "Buffers/DynamicBuffer.h"
 #include "SortedUnsignedIntBuffer.h"
 #include "MeshInstance.h"
 

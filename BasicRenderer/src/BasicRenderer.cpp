@@ -12,7 +12,7 @@
 #include <imgui.h>
 #include <random>
 
-#include "pix/pix3.h"
+#include "ThirdParty/pix/pix3.h"
 #include "Mesh.h"
 #include "DX12Renderer.h"
 #include "Utilities.h"
@@ -21,7 +21,7 @@
 #include "Menu.h"
 #include "MaterialFlags.h"
 #include "PSOFlags.h"
-#include "DeletionManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "ModelLoader.h"
 
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs

@@ -5,7 +5,7 @@
 #include <memory>
 #include <functional>
 
-#include "BufferView.h"
+#include "Buffers/BufferView.h"
 #include "MemoryBlock.h"
 
 class Buffer;

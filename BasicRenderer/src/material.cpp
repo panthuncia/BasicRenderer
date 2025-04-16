@@ -6,7 +6,7 @@
 #include "TextureDescription.h"
 #include "MaterialFlags.h"
 #include "Managers/Singletons/UploadManager.h"
-#include "DeletionManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 
 Material::Material(const std::string& name,
     UINT materialFlags, UINT psoFlags)

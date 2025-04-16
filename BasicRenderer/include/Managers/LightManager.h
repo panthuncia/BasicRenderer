@@ -9,10 +9,9 @@
 #include <optional>
 
 #include "buffers.h"
-#include "Interfaces/ISceneNodeObserver.h"
 #include "DynamicResource.h"
 #include "LazyDynamicStructuredBuffer.h"
-#include "DynamicStructuredBuffer.h"
+#include "Buffers/DynamicStructuredBuffer.h"
 #include "Components.h"
 
 class ShadowMaps;

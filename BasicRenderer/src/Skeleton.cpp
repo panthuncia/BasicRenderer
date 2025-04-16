@@ -5,11 +5,11 @@
 #include <unordered_set>
 
 #include "ResourceManager.h"
-#include "DeletionManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Components.h"
-#include "AnimationController.h"
+#include "Animation/AnimationController.h"
 
 Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)
     : m_bones(nodes), m_inverseBindMatrices(inverseBindMatrices) {

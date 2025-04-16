@@ -5,7 +5,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Utilities.h"
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb/stb_image.h"
+#include "ThirdParty/stb/stb_image.h"
 #include "ResourceManager.h"
 #include "RenderContext.h"
 

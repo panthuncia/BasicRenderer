@@ -11,7 +11,7 @@
 #include "Skeleton.h"
 #include "Managers/LightManager.h"
 #include "MeshData.h"
-#include "ManagerInterface.h"
+#include "Managers/ManagerInterface.h"
 
 class DynamicGloballyIndexedResource;
 

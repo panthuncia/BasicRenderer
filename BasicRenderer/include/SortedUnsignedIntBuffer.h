@@ -8,9 +8,9 @@
 #include <algorithm> // For std::lower_bound, std::upper_bound
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Buffer.h"
+#include "Buffers/Buffer.h"
 #include "Resource.h"
-#include "DynamicBufferBase.h"
+#include "Buffers/DynamicBufferBase.h"
 
 using Microsoft::WRL::ComPtr;
 

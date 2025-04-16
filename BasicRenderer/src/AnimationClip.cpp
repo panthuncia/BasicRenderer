@@ -1,4 +1,4 @@
-#include "AnimationClip.h"
+#include "Animation/AnimationClip.h"
 
 AnimationClip::AnimationClip() : duration(0.0f) {}
 

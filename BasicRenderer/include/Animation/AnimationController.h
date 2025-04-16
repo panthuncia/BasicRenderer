@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AnimationClip.h"
+#include "Animation/AnimationClip.h"
 #include "Components.h"
 
 class AnimationController {

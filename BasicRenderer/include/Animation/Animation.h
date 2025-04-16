@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <string>
 
-#include "AnimationClip.h"
+#include "Animation/AnimationClip.h"
 
 class Animation {
 public:

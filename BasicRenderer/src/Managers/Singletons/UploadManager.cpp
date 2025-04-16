@@ -1,10 +1,10 @@
 #include "Managers/Singletons/UploadManager.h"
 
 
-#include "Buffer.h"
+#include "Buffers/Buffer.h"
 #include "Resource.h"
 #include "SettingsManager.h"
-#include "DeletionManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 
