@@ -305,6 +305,8 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[perFrameBuffer.activeLightIndicesBufferIndex];
         StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
         
+#if defined(PSO_CLUSTERED_LIGHTING)
+        
         StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
         StructuredBuffer<LightPage> lightPagesBuffer = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
         
@@ -322,6 +324,10 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
         while (pageIndex != LIGHT_PAGE_ADDRESS_NULL) {
             for (uint i = 0; i < lightPagesBuffer[pageIndex].numLightsInPage; i++) {
                 unsigned int index = activeLightIndices[lightPagesBuffer[pageIndex].lightIndices[i]];
+#else
+        for (uint i = 0; i < perFrameBuffer.numLights; i++) {
+                unsigned int index = activeLightIndices[i];
+#endif
                 LightInfo light = lights[index];
                 float shadow = 0.0;
                 if (enableShadows) {
@@ -360,8 +366,10 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
                     float parallaxShadow = getParallaxShadow(parallaxShadowParams);
                 }
             }
+#if defined(PSO_CLUSTERED_LIGHTING)
             pageIndex = lightPagesBuffer[pageIndex].ptrNextPage;
         }
+#endif
     }
     float ao = 1.0;
     if (materialInfo.materialFlags & MATERIAL_AO_TEXTURE) {

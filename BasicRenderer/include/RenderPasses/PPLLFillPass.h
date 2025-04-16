@@ -126,11 +126,6 @@ public:
 		transparencyInfo[PPLLNodePoolSize] = m_numPPLLNodes;
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
 
-		unsigned int localPSOFlags = 0;
-		if (getImageBasedLightingEnabled()) {
-			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
-		}
-
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
 			auto& meshes = blendMeshes.meshInstances;
 
@@ -138,7 +133,7 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto pso = psoManager.GetPPLLPSO(localPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
+				auto pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};

@@ -146,10 +146,6 @@ private:
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
-        unsigned int localPSOFlags = 0;
-        if (getImageBasedLightingEnabled()) {
-            localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
-        }
 
         auto& meshManager = context.meshManager;
 
@@ -161,7 +157,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -183,7 +179,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -201,10 +197,6 @@ private:
     void ExecuteMeshShader(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
-        unsigned int localPSOFlags = 0;
-        if (getImageBasedLightingEnabled()) {
-            localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
-        }
 
         auto& meshManager = context.meshManager;
 
@@ -216,7 +208,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -237,7 +229,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPSO(localPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -253,10 +245,6 @@ private:
     void ExecuteMeshShaderIndirect(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
         // Mesh shading with ExecuteIndirect
         auto& psoManager = PSOManager::GetInstance();
-        unsigned int localPSOFlags = 0;
-        if (getImageBasedLightingEnabled()) {
-            localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
-        }
 
         auto& meshManager = context.meshManager;
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
@@ -266,7 +254,7 @@ private:
         if (numOpaque > 0) {
 
             auto opaqueIndirectBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
-            auto pso = psoManager.GetMeshPSO(localPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
+            auto pso = psoManager.GetMeshPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
             commandList->SetPipelineState(pso.Get());
 
             auto apiResource = opaqueIndirectBuffer->GetAPIResource();
@@ -284,7 +272,7 @@ private:
         if (numAlphaTest > 0) {
 
             auto alphaTestIndirectBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();
-            auto pso = psoManager.GetMeshPSO(localPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
+            auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
                 BlendState::BLEND_STATE_MASK, m_wireframe);
             commandList->SetPipelineState(pso.Get());
 

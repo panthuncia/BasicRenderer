@@ -348,6 +348,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
 		macro.Name = L"PSO_BLEND";
 		defines.insert(defines.begin(), macro);
 	}
+	if (psoFlags & PSOFlags::PSO_CLUSTERED_LIGHTING) {
+		DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_CLUSTERED_LIGHTING";
+		defines.insert(defines.begin(), macro);
+	}
     return defines;
 }
 

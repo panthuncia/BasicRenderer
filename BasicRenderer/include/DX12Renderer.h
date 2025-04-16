@@ -133,6 +133,8 @@ private:
 
 	// Settings
 	bool m_allowTearing = false;
+	bool m_clusteredLighting = true;
+    bool m_imageBasedLighting = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;
@@ -149,7 +151,7 @@ private:
     std::function<bool()> getIndirectDrawsEnabled;
 	std::function<uint8_t()> getNumFramesInFlight;
     std::function<bool()> getDrawBoundingSpheres;
-
+	std::function<bool()> getImageBasedLightingEnabled;
 
     GpuCrashTracker::MarkerMap m_markerMap;
     // Nsight Aftermath instrumentation

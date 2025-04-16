@@ -110,6 +110,10 @@ private:
     bool drawBoundingSpheres = false;
 	std::function<bool()> getDrawBoundingSpheres;
 	std::function<void(bool)> setDrawBoundingSpheres;
+
+    bool clusteredLighting = true;
+	std::function<bool()> getClusteredLightingEnabled;
+	std::function<void(bool)> setClusteredLightingEnabled;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -209,6 +213,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 	drawBoundingSpheres = getDrawBoundingSpheres();
 
+	setClusteredLightingEnabled = settingsManager.getSettingSetter<bool>("enableClusteredLighting");
+	getClusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting");
+	clusteredLighting = getClusteredLightingEnabled();
+
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 }
 
@@ -268,6 +276,9 @@ inline void Menu::Render(const RenderContext& context) {
 		if (ImGui::Checkbox("Draw Bounding Spheres", &drawBoundingSpheres)) {
 			setDrawBoundingSpheres(drawBoundingSpheres);
 		}
+        if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
+			setClusteredLightingEnabled(clusteredLighting);
+        }
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();

@@ -34,5 +34,5 @@ public:
 	UINT64 frameFenceValue;
     UINT xRes;
     UINT yRes;
-    
+    unsigned int globalPSOFlags;
 };
