@@ -8,8 +8,8 @@
 #include "RenderContext.h"
 #include "mesh.h"
 #include "Scene.h"
-#include "ResourceGroup.h"
-#include "SettingsManager.h"
+#include "Resources/ResourceGroup.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"
 

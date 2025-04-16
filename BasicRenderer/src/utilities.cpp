@@ -20,7 +20,7 @@
 #include "DescriptorHeap.h"
 #include "ReadbackRequest.h"
 #include "Material.h"
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Vertex.h"
 #include "MaterialFlags.h"
 #include "Mesh.h"

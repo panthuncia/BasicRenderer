@@ -4,7 +4,7 @@
 #include <wrl.h>
 #include <DirectXMath.h>
 #include <string>
-#include "Texture.h"
+#include "Resources/Texture.h"
 #include "ResourceManager.h"
 #include "BlendState.h"
 

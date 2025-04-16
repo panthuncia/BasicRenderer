@@ -2,7 +2,7 @@
 
 #include "RenderContext.h"
 #include "utilities.h"
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ReadbackManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 

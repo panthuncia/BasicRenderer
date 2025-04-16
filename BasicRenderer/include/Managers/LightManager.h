@@ -9,9 +9,9 @@
 #include <optional>
 
 #include "buffers.h"
-#include "DynamicResource.h"
-#include "LazyDynamicStructuredBuffer.h"
-#include "Buffers/DynamicStructuredBuffer.h"
+#include "Resources/DynamicResource.h"
+#include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
+#include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Components.h"
 
 class ShadowMaps;

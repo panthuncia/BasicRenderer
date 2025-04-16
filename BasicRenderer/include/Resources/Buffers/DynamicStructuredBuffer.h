@@ -8,9 +8,9 @@
 #include <string>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Buffers/Buffer.h"
-#include "Resource.h"
-#include "Buffers/DynamicBufferBase.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Resources/Resource.h"
+#include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 

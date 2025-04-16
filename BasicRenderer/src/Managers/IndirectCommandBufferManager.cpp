@@ -2,12 +2,12 @@
 
 #include "ResourceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "ResourceGroup.h"
-#include "GloballyIndexedResource.h"
+#include "Resources/ResourceGroup.h"
+#include "Resources/GloballyIndexedResource.h"
 #include "IndirectCommand.h"
 #include "PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
-#include "DynamicResource.h"
+#include "Resources/DynamicResource.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");

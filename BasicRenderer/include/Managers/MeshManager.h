@@ -5,7 +5,7 @@
 #include <wrl/client.h>
 
 #include "buffers.h"
-#include "LazyDynamicStructuredBuffer.h"
+#include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "MaterialBuckets.h"
 
 class Mesh;

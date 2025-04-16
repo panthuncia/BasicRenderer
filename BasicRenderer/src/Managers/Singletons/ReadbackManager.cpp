@@ -2,8 +2,8 @@
 
 #include <DirectXTex.h>
 
-#include "Texture.h"
-#include "PixelBuffer.h"
+#include "Resources/Texture.h"
+#include "Resources/PixelBuffer.h"
 
 std::unique_ptr<ReadbackManager> ReadbackManager::instance = nullptr;
 bool ReadbackManager::initialized = false;

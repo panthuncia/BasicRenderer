@@ -11,11 +11,11 @@
 #include <deque>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Buffers/Buffer.h"
-#include "Resource.h"
-#include "Buffers/DynamicBufferBase.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Resources/Resource.h"
+#include "Resources/Buffers/DynamicBufferBase.h"
 #include "Concepts/HasIsValid.h"
-#include "Buffers/BufferView.h"
+#include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 

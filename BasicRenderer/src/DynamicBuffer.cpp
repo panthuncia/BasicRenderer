@@ -1,9 +1,9 @@
-#include "Buffers/DynamicBuffer.h"
+#include "Resources/Buffers/DynamicBuffer.h"
 
 #include <spdlog/spdlog.h>
 
 #include "DirectX/d3dx12.h"
-#include "Buffers/BufferView.h"
+#include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 

@@ -3,9 +3,9 @@
 #include <d3d12.h>
 
 #include "ResourceManager.h"
-#include "LazyDynamicStructuredBuffer.h"
-#include "Buffers/DynamicBuffer.h"
-#include "SortedUnsignedIntBuffer.h"
+#include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
+#include "Resources/Buffers/DynamicBuffer.h"
+#include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "MeshInstance.h"
 
 ObjectManager::ObjectManager() {

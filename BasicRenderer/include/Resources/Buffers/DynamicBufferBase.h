@@ -4,7 +4,7 @@
 
 #include "RenderContext.h"
 #include "ResourceStates.h"
-#include "GloballyIndexedResource.h"
+#include "Resources/GloballyIndexedResource.h"
 
 class Buffer;
 class BufferView;

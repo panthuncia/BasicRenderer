@@ -4,8 +4,8 @@
 
 #include <memory>
 #include <string>
-#include "Resource.h"
-#include "GloballyIndexedResource.h"
+#include "Resources/Resource.h"
+#include "Resources/GloballyIndexedResource.h"
 
 class DynamicResource : public Resource {
 public:

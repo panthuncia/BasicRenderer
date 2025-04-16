@@ -20,7 +20,7 @@
 #include "Scene.h"
 #include "Managers/InputManager.h"
 #include "RenderGraph.h"
-#include "ShadowMaps.h"
+#include "Resources/ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
 #include "Managers/CameraManager.h"

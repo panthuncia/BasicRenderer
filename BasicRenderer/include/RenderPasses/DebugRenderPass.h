@@ -3,9 +3,9 @@
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "Texture.h"
+#include "Resources/Texture.h"
 #include "ResourceHandles.h"
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 class DebugRenderPass : public RenderPass {

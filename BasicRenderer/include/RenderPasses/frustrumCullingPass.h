@@ -7,7 +7,7 @@
 #include "RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "utilities.h"
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 class FrustrumCullingPass : public ComputePass {
 public:

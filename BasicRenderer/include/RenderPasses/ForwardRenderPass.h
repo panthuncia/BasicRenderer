@@ -9,7 +9,7 @@
 #include "mesh.h"
 #include "Scene.h"
 #include "Material.h"
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"

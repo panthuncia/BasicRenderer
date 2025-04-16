@@ -1,9 +1,9 @@
 #include "Managers/Singletons/UploadManager.h"
 
 
-#include "Buffers/Buffer.h"
-#include "Resource.h"
-#include "SettingsManager.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Resources/Resource.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "utilities.h"
 #include "Managers/Singletons/DeviceManager.h"

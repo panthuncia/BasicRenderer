@@ -6,7 +6,7 @@
 #include <flecs.h>
 
 #include "Utilities.h"
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Components.h"

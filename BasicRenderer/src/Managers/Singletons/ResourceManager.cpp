@@ -2,10 +2,10 @@
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Buffers/DynamicStructuredBuffer.h"
-#include "SettingsManager.h"
-#include "Buffers/DynamicBuffer.h"
-#include "SortedUnsignedIntBuffer.h"
+#include "Resources/Buffers/DynamicStructuredBuffer.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Resources/Buffers/DynamicBuffer.h"
+#include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Managers/Singletons/UploadManager.h"
 void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//for (int i = 0; i < 3; i++) {

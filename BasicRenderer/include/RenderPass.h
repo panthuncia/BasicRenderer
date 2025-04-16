@@ -4,7 +4,7 @@
 #include <directx/d3d12.h>
 #include <wrl/client.h>
 
-#include "Resource.h"
+#include "Resources/Resource.h"
 #include "RenderContext.h"
 #include "ResourceStates.h"
 

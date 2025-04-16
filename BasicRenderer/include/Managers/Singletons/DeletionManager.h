@@ -1,7 +1,7 @@
 #pragma once
 #include <memory>
 #include <vector>
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 class DeletionManager {
 public:

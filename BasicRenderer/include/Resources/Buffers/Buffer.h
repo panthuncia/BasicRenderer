@@ -7,7 +7,7 @@
 #include <memory>
 #include "DescriptorHeap.h"
 #include "HeapIndexInfo.h"
-#include "GloballyIndexedResource.h"
+#include "Resources/GloballyIndexedResource.h"
 enum class ResourceCPUAccessType {
 	READ,
 	WRITE,

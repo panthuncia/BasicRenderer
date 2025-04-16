@@ -9,7 +9,7 @@
 #include <optional>
 #include <string>
 
-#include "Buffers/BufferView.h"
+#include "Resources/Buffers/BufferView.h"
 #include "buffers.h"
 
 class MeshInstance;

@@ -3,7 +3,7 @@
 
 #include "ResourceHandles.h"
 #include "ResourceStates.h"
-#include "Resource.h"
+#include "Resources/Resource.h"
 #include "Filetypes.h"
 
 class PixelBuffer;

@@ -8,16 +8,16 @@
 #include "DirectX/d3dx12.h"
 #include "Buffers.h"
 #include "spdlog/spdlog.h"
-#include "Buffers/DynamicStructuredBuffer.h"
+#include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "ResourceHandles.h"
-#include "PixelBuffer.h"
-#include "Buffers/Buffer.h"
+#include "Resources/PixelBuffer.h"
+#include "Resources/Buffers/Buffer.h"
 #include "DescriptorHeap.h"
 #include "ResourceStates.h"
 #include "RenderContext.h"
 #include "utilities.h"
 #include "TextureDescription.h"
-#include "LazyDynamicStructuredBuffer.h"
+#include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 
 using namespace Microsoft::WRL;
 

@@ -7,7 +7,7 @@
 
 #include "ResourceStates.h"
 #include "ResourceHandles.h"
-#include "GloballyIndexedResource.h"
+#include "Resources/GloballyIndexedResource.h"
 #include "TextureDescription.h"
 using Microsoft::WRL::ComPtr;
 

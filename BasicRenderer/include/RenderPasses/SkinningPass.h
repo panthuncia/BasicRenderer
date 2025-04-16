@@ -7,7 +7,7 @@
 #include "RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "utilities.h"
-#include "SettingsManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"

@@ -3,8 +3,8 @@
 #include <string>
 #include <unordered_map>
 #include <memory>
-#include "Resource.h"
-#include "GloballyIndexedResource.h"
+#include "Resources/Resource.h"
+#include "Resources/GloballyIndexedResource.h"
 #include "RenderContext.h"
 
 class ResourceGroup : public Resource {

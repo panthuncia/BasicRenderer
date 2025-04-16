@@ -5,11 +5,11 @@
 #include <string>
 #include <spdlog/spdlog.h>
 
-#include "SettingsManager.h"
-#include "ResourceGroup.h"
-#include "Texture.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Resources/ResourceGroup.h"
+#include "Resources/Texture.h"
 #include "ResourceManager.h"
-#include "PixelBuffer.h"
+#include "Resources/PixelBuffer.h"
 #include "Sampler.h"
 #include "utilities.h"
 #include "TextureDescription.h"

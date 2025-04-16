@@ -1,4 +1,4 @@
-#include "PixelBuffer.h"
+#include "Resources/PixelBuffer.h"
 #include <string>
 #include <stdexcept>
 

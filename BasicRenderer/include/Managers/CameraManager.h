@@ -5,7 +5,7 @@
 
 #include "buffers.h"
 
-#include "LazyDynamicStructuredBuffer.h"
+#include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 
 class CameraManager {
 public:
