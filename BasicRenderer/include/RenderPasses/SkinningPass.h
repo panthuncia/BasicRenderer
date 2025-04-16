@@ -8,7 +8,7 @@
 #include "DeviceManager.h"
 #include "utilities.h"
 #include "SettingsManager.h"
-#include "MeshManager.h"
+#include "Managers/MeshManager.h"
 #include "ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 

@@ -11,7 +11,7 @@
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
 #include "CommandSignatureManager.h"
-#include "MeshManager.h"
+#include "Managers/MeshManager.h"
 #include "ObjectManager.h"
 #include "CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"

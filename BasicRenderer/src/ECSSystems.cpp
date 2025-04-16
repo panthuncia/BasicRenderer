@@ -4,7 +4,7 @@
 
 #include "Components.h"
 #include "ObjectManager.h"
-#include "MeshManager.h"
+#include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"
 #include "IndirectCommandBufferManager.h"
 #include "CameraManager.h"

@@ -9,7 +9,7 @@
 #include "ResourceManager.h"
 #include "Material.h"
 #include "Vertex.h"
-#include "MeshManager.h"
+#include "Managers/MeshManager.h"
 #include "Skeleton.h"
 
 std::atomic<uint64_t> Mesh::globalMeshCount = 0;
