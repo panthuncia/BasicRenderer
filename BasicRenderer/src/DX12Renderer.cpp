@@ -928,7 +928,15 @@ void DX12Renderer::CreateRenderGraph() {
 
     // Frustrum cluster creation
 	auto& clusterBuffer = m_pLightManager->GetClusterBuffer();
+	auto& lightPagesBuffer = m_pLightManager->GetLightPagesBuffer();
 	newGraph->AddResource(clusterBuffer, false, ResourceState::UNORDERED_ACCESS);
+	newGraph->AddResource(lightPagesBuffer, false, ResourceState::UNORDERED_ACCESS);
+
+    // light pages counter
+    auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+	lightPagesCounter->SetName(L"Light Pages Counter");
+    newGraph->AddResource(lightPagesCounter, false, ResourceState::UNORDERED_ACCESS);
+
     auto clusterPass = std::make_shared<ClusterGenerationPass>(clusterBuffer);
 	ComputePassParameters clusterPassParameters;
     clusterPassParameters.shaderResources.push_back(cameraBuffer);
@@ -940,16 +948,16 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(lightBufferResourceGroup);
 
 	// Light cluster culling
-	auto lightCullingPass = std::make_shared<LightCullingPass>(clusterBuffer);
+	auto lightCullingPass = std::make_shared<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
 	ComputePassParameters lightCullingPassParameters;
 	lightCullingPassParameters.shaderResources.push_back(cameraBuffer);
 	lightCullingPassParameters.shaderResources.push_back(lightBufferResourceGroup);
 	lightCullingPassParameters.unorderedAccessViews.push_back(clusterBuffer);
+	lightCullingPassParameters.unorderedAccessViews.push_back(lightPagesBuffer);
+	lightCullingPassParameters.unorderedAccessViews.push_back(lightPagesCounter);
 	//lightCullingPassParameters.constantBuffers.push_back(perFrameBuffer);
 
 	newGraph->AddComputePass(lightCullingPass, lightCullingPassParameters, "LightCullingPass");
-
-
 
     // Skinning
 	auto skinningPass = std::make_shared<SkinningPass>();
@@ -994,6 +1002,7 @@ void DX12Renderer::CreateRenderGraph() {
 	forwardPassParameters.shaderResources.push_back(postSkinningVertices);
 	forwardPassParameters.shaderResources.push_back(cameraBuffer);
 	forwardPassParameters.shaderResources.push_back(clusterBuffer);
+	forwardPassParameters.shaderResources.push_back(lightPagesBuffer);
 
     std::shared_ptr<RenderPass> forwardPass = nullptr;
 
@@ -1182,6 +1191,8 @@ void DX12Renderer::CreateRenderGraph() {
 	PPLLFillPassParameters.shaderResources.push_back(m_environmentIrradiance);
     PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
 	PPLLFillPassParameters.shaderResources.push_back(cameraBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(clusterBuffer);
+	PPLLFillPassParameters.shaderResources.push_back(lightPagesBuffer);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
 	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);

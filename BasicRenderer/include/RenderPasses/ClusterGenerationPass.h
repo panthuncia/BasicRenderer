@@ -65,8 +65,11 @@ public:
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-		staticBufferIndices[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo().index;
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
+
+		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
+		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo().index;
+		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
 
 		auto clusterSize = getClusterSize();
 		commandList->Dispatch(clusterSize.x, clusterSize.y, clusterSize.z);

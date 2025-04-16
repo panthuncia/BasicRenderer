@@ -13,6 +13,7 @@
 #include "CameraManager.h"
 #include "SortedUnsignedIntBuffer.h"
 #include "MathUtils.h"
+#include "buffers.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -42,6 +43,11 @@ LightManager::LightManager() {
 	auto numClusters = lightClusterSize.x * lightClusterSize.y * lightClusterSize.z;
 	m_pClusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), ResourceState::UNORDERED_ACCESS, false, true, false);
 	m_pClusterBuffer->SetName(L"lightingClusterBuffer");
+
+	static const size_t avgPagesPerCluster = 2;
+	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
+	m_pLightPagesBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), ResourceState::UNORDERED_ACCESS, false, true, false);
+	m_pLightPagesBuffer->SetName(L"lightPagesBuffer");
 }
 
 LightManager::~LightManager() {
@@ -371,4 +377,8 @@ std::shared_ptr<ResourceGroup>& LightManager::GetLightBufferResourceGroup() {
 
 std::shared_ptr<Buffer>& LightManager::GetClusterBuffer() {
 	return m_pClusterBuffer;
+}
+
+std::shared_ptr<Buffer>& LightManager::GetLightPagesBuffer() {
+	return m_pLightPagesBuffer;
 }

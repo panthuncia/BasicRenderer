@@ -18,6 +18,22 @@ bool testSphereAABB(matrix viewMatrix, float3 position, float radius, Cluster cl
     return sphereAABBIntersection(center, radius, aabbMin, aabbMax);
 }
 
+unsigned int AllocatePage(RWStructuredBuffer<uint> LinkedListCounter) {
+    // Allocate a new page for the light.
+    uint index;
+    InterlockedAdd(LinkedListCounter[0], 1, index);
+    if (index > lightPagesPoolSize)
+        index = LIGHT_PAGE_ADDRESS_NULL;
+    
+    return index;
+}
+
+int MakePageLink(int nAddress, int nNewHeadAddress, RWStructuredBuffer<Cluster> lightClustersUAV) {
+    int nOldHeadAddress;
+    InterlockedExchange(lightClustersUAV[nAddress].ptrFirstPage, nNewHeadAddress, nOldHeadAddress);
+    return nOldHeadAddress;
+}
+
 // Compute shader entry point.
 // Each thread is responsible for processing a single cluster.
 [numthreads(128, 1, 1)]
@@ -37,28 +53,61 @@ void CSMain(uint3 groupID : SV_GroupID,
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera primaryCamera = cameras[perFrameBuffer.mainCameraIndex];
 
-    // Reset count since culling runs every frame.
-    cluster.count = 0;
+    // Light pages, clusters index into linked list
+    RWStructuredBuffer<LightPage> lightPages = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
+    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[lightPagesCounterDescriptorIndex];
 
     // Process every point light.
+    
+    // Start with a new page for the light.
+    unsigned int pageIndex = AllocatePage(LinkedListCounter);
+    cluster.numLights = 0;
+    cluster.ptrFirstPage = pageIndex;
+
+    if (pageIndex == LIGHT_PAGE_ADDRESS_NULL) {
+        // No more pages available.
+        clusters[index] = cluster;
+        return;
+    }
+    
+    lightPages[pageIndex].ptrNextPage = LIGHT_PAGE_ADDRESS_NULL; // Initialize the next page pointer to null.]
+    
+    uint numLightsInPage = 0;
     for (uint i = 0; i < lightCount; ++i) {
-        // If the light intersects the cluster and the cluster has not reached its light limit...
+        
+        // When we process LIGHTS_PER_PAGE lights, we need to allocate a new page.
+        if (numLightsInPage >= LIGHTS_PER_PAGE) {
+            lightPages[pageIndex].numLightsInPage = LIGHTS_PER_PAGE; // Store the number of lights in the current page.
+            uint oldPageIndex = pageIndex; // Store the current page index.
+            pageIndex = AllocatePage(LinkedListCounter); // Allocate a new page.
+            lightPages[pageIndex].ptrNextPage = oldPageIndex; // Link the new page to the old page.
+            cluster.ptrFirstPage = pageIndex; // Update the cluster with the new page index.
+            numLightsInPage = 0;
+        }
+        
+        // If the light intersects the cluster
         LightInfo light = lights[activeLightIndices[i]];
         switch (light.type) {
             case 0: // Point light
             case 1: // Spot light
-                if (testSphereAABB(primaryCamera.view, light.boundingSphere.center.xyz, light.boundingSphere.radius, cluster) && cluster.count < 100) {
-                    cluster.lightIndices[cluster.count] = i;
-                    cluster.count++;
+                if (testSphereAABB(primaryCamera.view, light.boundingSphere.center.xyz, light.boundingSphere.radius, cluster)) {
+                    lightPages[pageIndex].lightIndices[numLightsInPage] = activeLightIndices[i];
+                    numLightsInPage++;
+                    cluster.numLights++;
                 }
                 break;
             case 2:
                 // Directional lights always intersect the cluster.
-                cluster.lightIndices[cluster.count] = i;
-                cluster.count++;
+                lightPages[pageIndex].lightIndices[numLightsInPage] = activeLightIndices[i];
+                numLightsInPage++;
+                cluster.numLights++;
                 break;
         }
     }
+    
+    // Update last page count
+    lightPages[pageIndex].numLightsInPage = numLightsInPage;
+    
     // Write back the updated cluster.
     clusters[index] = cluster;
 }

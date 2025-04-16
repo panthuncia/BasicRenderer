@@ -180,6 +180,24 @@ point randomPointInSphere(float radius) {
     return {x, y, z};
 }
 
+point getRandomPointInVolume(double xmin, double xmax, 
+    double ymin, double ymax, 
+    double zmin, double zmax)
+{
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::uniform_real_distribution<> distX(xmin, xmax);
+    std::uniform_real_distribution<> distY(ymin, ymax);
+    std::uniform_real_distribution<> distZ(zmin, zmax);
+
+    point p;
+    p.x = distX(gen);
+    p.y = distY(gen);
+    p.z = distZ(gen);
+    return p;
+}
+
 float randomFloat(float min, float max) {
 	static std::random_device rd;
 	static std::mt19937 gen(rd());
@@ -387,9 +405,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
-	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
-    auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 10.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
-    auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 10.0, 0.0, 0.0, 1.0);
+	//auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 20.0, XMFLOAT3(0, -1, 0));
+ //   auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 10.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
+    auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 1.0, 0.0, 0.0, 1.0);
+    
+    for (int i = 0; i < 1500; i++) {
+		auto point = getRandomPointInVolume(-20, 20, -2, 0, -20, 20);
+		auto color = XMFLOAT3(randomFloat(0.0, 1.0), randomFloat(0.0, 1.0), randomFloat(0.0, 1.0));
+        auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light"+std::to_wstring(i), XMFLOAT3(point.x, point.y, point.z), color, 3.0, 0.0, 0.0, 1.0, false);
+    }
+
     //renderer.SetDebugTexture(light1.get<Components::ShadowMap>()->shadowMap);
 
     MSG msg = {};
