@@ -6,8 +6,8 @@
 
 #include "ResourceManager.h"
 #include "DeletionManager.h"
-#include "UploadManager.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "Components.h"
 #include "AnimationController.h"
 

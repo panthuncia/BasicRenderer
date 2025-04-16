@@ -13,7 +13,7 @@
 #include "ResourceManager.h"
 #include "TextureDescription.h"
 #include "ResourceHandles.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 
 class PPLLResolvePass : public RenderPass {
 public:

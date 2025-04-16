@@ -6,7 +6,7 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "SettingsManager.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 
 class DebugRenderPass : public RenderPass {
 public:

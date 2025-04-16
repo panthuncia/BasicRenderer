@@ -14,7 +14,7 @@
 #include "MeshManager.h"
 #include "ObjectManager.h"
 #include "CameraManager.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"
 #include "LightManager.h"
 

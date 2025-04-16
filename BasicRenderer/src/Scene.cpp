@@ -8,7 +8,7 @@
 #include "Utilities.h"
 #include "SettingsManager.h"
 #include "CameraManager.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "Components.h"
 #include "material.h"
 #include "ObjectManager.h"

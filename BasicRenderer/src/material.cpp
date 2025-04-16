@@ -5,7 +5,7 @@
 #include "utilities.h"
 #include "TextureDescription.h"
 #include "MaterialFlags.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 #include "DeletionManager.h"
 
 Material::Material(const std::string& name,

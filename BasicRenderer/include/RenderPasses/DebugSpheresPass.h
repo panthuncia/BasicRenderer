@@ -10,7 +10,7 @@
 #include "Scene.h"
 #include "Material.h"
 #include "SettingsManager.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 
 class DebugSpherePass : public RenderPass {
 public:

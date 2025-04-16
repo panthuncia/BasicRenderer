@@ -6,7 +6,7 @@
 #include "SettingsManager.h"
 #include "DynamicBuffer.h"
 #include "SortedUnsignedIntBuffer.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();

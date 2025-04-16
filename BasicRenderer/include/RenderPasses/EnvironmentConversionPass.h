@@ -9,7 +9,7 @@
 #include "Texture.h"
 #include "ResourceHandles.h"
 #include "Utilities.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 #include "ReadbackManager.h"
 
 class EnvironmentConversionPass : public RenderPass {

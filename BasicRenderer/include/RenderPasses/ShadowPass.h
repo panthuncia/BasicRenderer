@@ -10,7 +10,7 @@
 #include "Scene.h"
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"
 
 class ShadowPass : public RenderPass {

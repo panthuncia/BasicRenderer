@@ -12,7 +12,7 @@
 #include "Resource.h"
 #include "DynamicBufferBase.h"
 #include "DeletionManager.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 
 using Microsoft::WRL::ComPtr;
 

@@ -8,7 +8,7 @@
 #include "RenderContext.h"
 #include "Texture.h"
 #include "ResourceHandles.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 #include "ReadbackRequest.h"
 #include "utilities.h"
 #include "DeviceManager.h"

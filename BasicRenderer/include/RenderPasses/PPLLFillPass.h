@@ -13,8 +13,8 @@
 #include "ResourceManager.h"
 #include "TextureDescription.h"
 #include "ResourceHandles.h"
-#include "UploadManager.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"
 
 class PPLLFillPass : public RenderPass {

@@ -1,4 +1,4 @@
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 
 
 #include "Buffer.h"

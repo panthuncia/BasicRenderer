@@ -5,7 +5,7 @@
 #include "DirectX/d3dx12.h"
 #include "BufferView.h"
 #include "DeletionManager.h"
-#include "UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
     size_t requiredSize = size;

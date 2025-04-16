@@ -10,7 +10,7 @@
 #include "IndirectCommand.h"
 #include "ResourceManager.h"
 #include "Scene.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "Components.h"
 
 class ClearUAVsPass : public RenderPass {
@@ -45,7 +45,7 @@ public:
 		auto resource = currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
 		auto counterOffset = resource->GetUAVCounterOffset();
 		auto apiResource = resource->GetAPIResource();
-		
+
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
 		// Alpha test buffer

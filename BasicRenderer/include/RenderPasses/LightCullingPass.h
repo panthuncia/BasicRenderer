@@ -10,7 +10,7 @@
 #include "SettingsManager.h"
 #include "MeshManager.h"
 #include "ObjectManager.h"
-#include "ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 
 class LightCullingPass : public ComputePass {
 public:
