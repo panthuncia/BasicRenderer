@@ -281,9 +281,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //phoenixScene->GetRoot().set<Components::Scale>({ 0.05, 0.05, 0.05 });
     //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
 
-    //auto carScene = LoadModel("models/porche.glb");
- //   carScene->GetRoot().transform.setLocalScale({ 0.6, 0.6, 0.6 });
- //   carScene->GetRoot().transform.setLocalPosition({ 1.0, 0.0, 1.0 });
+    auto carScene = LoadModel("models/porche.glb");
+    carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
 	//carScene->GetRoot().m_name = L"carRoot";
 
     auto mountainScene = LoadModel("models/terrain.glb");
@@ -343,7 +343,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
-    //auto root = renderer.GetCurrentScene()->AppendScene(carScene);
+    auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(bistro);
@@ -409,7 +409,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
  //   auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 10.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
     auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 1.0, 0.0, 0.0, 1.0);
     
-    for (int i = 0; i < 1500; i++) {
+    for (int i = 0; i < 100; i++) {
 		auto point = getRandomPointInVolume(-20, 20, -2, 0, -20, 20);
 		auto color = XMFLOAT3(randomFloat(0.0, 1.0), randomFloat(0.0, 1.0), randomFloat(0.0, 1.0));
         auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light"+std::to_wstring(i), XMFLOAT3(point.x, point.y, point.z), color, 3.0, 0.0, 0.0, 1.0, false);
