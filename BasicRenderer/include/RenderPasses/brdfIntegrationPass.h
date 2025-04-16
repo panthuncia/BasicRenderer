@@ -1,33 +1,33 @@
 #pragma once
 
-#include "RenderPass.h"
-#include "PSOManager.h"
-#include "RenderContext.h"
-#include "Texture.h"
-#include "ResourceHandles.h"
-#include "utilities.h"
-#include "UploadManager.h"
-#include "ReadbackManager.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Resources/Texture.h"
+#include "Resources/ResourceHandles.h"
+#include "Utilities/Utilities.h"
+#include "Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/ReadbackManager.h"
 class BRDFIntegrationPass : public RenderPass {
 public:
     BRDFIntegrationPass(std::shared_ptr<Texture> lutTexture) {
-		m_lutTexture = lutTexture;
+        m_lutTexture = lutTexture;
     }
 
     void Setup() override {
         auto& manager = DeviceManager::GetInstance();
-		auto& device = manager.GetDevice();
-		m_vertexBufferView = CreateFullscreenQuadVertexBuffer(device.Get());
+        auto& device = manager.GetDevice();
+        m_vertexBufferView = CreateFullscreenQuadVertexBuffer(device.Get());
         ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 
-		m_commandList->Close();
-		
+        m_commandList->Close();
+
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_copyCommandList)));
         m_copyCommandList->Close();
 
         CreateRootSignature();
-		CreatePSO();
+        CreatePSO();
     }
 
     RenderPassReturn Execute(RenderContext& context) override {
@@ -57,7 +57,7 @@ public:
         invalidated = false;
 
         auto path = GetCacheFilePath(L"lut.dds", L"luts");
-		ReadbackManager::GetInstance().RequestReadback(m_lutTexture, path, nullptr, false);
+        ReadbackManager::GetInstance().RequestReadback(m_lutTexture, path, nullptr, false);
 
         return { { commandList.Get() }, nullptr, 0 };
     }
@@ -67,13 +67,13 @@ public:
     }
 
 private:
-	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
     std::shared_ptr<Texture> m_lutTexture = nullptr;
 
-	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ComPtr<ID3D12GraphicsCommandList> m_commandList;
     ComPtr<ID3D12GraphicsCommandList> m_copyCommandList;
-	ComPtr<ID3D12CommandAllocator> m_allocator;
+    ComPtr<ID3D12CommandAllocator> m_allocator;
 
     ComPtr<ID3D12RootSignature> rootSignature;
     ComPtr<ID3D12PipelineState> PSO;
@@ -104,7 +104,7 @@ private:
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
         vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenQuadVertices);
-		UploadManager::GetInstance().UploadData((void*)fullscreenQuadVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
+        UploadManager::GetInstance().UploadData((void*)fullscreenQuadVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
@@ -144,8 +144,8 @@ private:
         PSOManager::GetInstance().CompileShader(L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
         static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
         };
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};

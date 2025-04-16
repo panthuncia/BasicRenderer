@@ -1,12 +1,12 @@
 #pragma once
 
-#include "RenderPass.h"
-#include "PSOManager.h"
-#include "RenderContext.h"
-#include "Texture.h"
-#include "ResourceHandles.h"
-#include "SettingsManager.h"
-#include "UploadManager.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Resources/Texture.h"
+#include "Resources/ResourceHandles.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/UploadManager.h"
 
 class DebugRenderPass : public RenderPass {
 public:

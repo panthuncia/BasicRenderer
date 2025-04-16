@@ -3,15 +3,15 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPass.h"
-#include "PSOManager.h"
-#include "RenderContext.h"
-#include "mesh.h"
-#include "Scene.h"
-#include "ResourceGroup.h"
-#include "SettingsManager.h"
-#include "ECSManager.h"
-#include "MeshInstance.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Mesh/Mesh.h"
+#include "Scene/Scene.h"
+#include "Resources/ResourceGroup.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/ECSManager.h"
+#include "Mesh/MeshInstance.h"
 
 class ShadowPass : public RenderPass {
 public:

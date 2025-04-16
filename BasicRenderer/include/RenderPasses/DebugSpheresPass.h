@@ -3,14 +3,14 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPass.h"
-#include "PSOManager.h"
-#include "RenderContext.h"
-#include "mesh.h"
-#include "Scene.h"
-#include "Material.h"
-#include "SettingsManager.h"
-#include "ECSManager.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Mesh/Mesh.h"
+#include "Scene/Scene.h"
+#include "Materials/Material.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/ECSManager.h"
 
 class DebugSpherePass : public RenderPass {
 public:

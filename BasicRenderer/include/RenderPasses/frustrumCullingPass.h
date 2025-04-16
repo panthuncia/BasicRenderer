@@ -2,12 +2,12 @@
 
 #include <DirectX/d3dx12.h>
 
-#include "RenderPass.h"
-#include "PSOManager.h"
-#include "RenderContext.h"
-#include "DeviceManager.h"
-#include "utilities.h"
-#include "SettingsManager.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Managers/Singletons/DeviceManager.h"
+#include "Utilities/Utilities.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 class FrustrumCullingPass : public ComputePass {
 public:

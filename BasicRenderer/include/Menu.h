@@ -13,11 +13,11 @@
 #include <filesystem>
 #include <flecs.h>
 
-#include "RenderContext.h"
-#include "utilities.h"
-#include "OutputTypes.h"
-#include "ModelLoader.h"
-#include "SettingsManager.h"
+#include "Render/RenderContext.h"
+#include "Utilities/Utilities.h"
+#include "Render/OutputTypes.h"
+#include "Import/ModelLoader.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 

@@ -2,16 +2,16 @@
 
 #include <DirectX/d3dx12.h>
 
-#include "RenderPass.h"
-#include "PSOManager.h"
-#include "RenderContext.h"
-#include "DeviceManager.h"
-#include "utilities.h"
-#include "IndirectCommand.h"
-#include "ResourceManager.h"
-#include "Scene.h"
-#include "ECSManager.h"
-#include "Components.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Managers/Singletons/DeviceManager.h"
+#include "Utilities/Utilities.h"
+#include "Render/IndirectCommand.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Scene/Scene.h"
+#include "Managers/Singletons/ECSManager.h"
+#include "Scene/Components.h"
 
 class ClearUAVsPass : public RenderPass {
 public:
@@ -45,7 +45,7 @@ public:
 		auto resource = currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
 		auto counterOffset = resource->GetUAVCounterOffset();
 		auto apiResource = resource->GetAPIResource();
-		
+
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
 		// Alpha test buffer

@@ -3,19 +3,19 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPass.h"
-#include "PSOManager.h"
-#include "RenderContext.h"
-#include "mesh.h"
-#include "Scene.h"
-#include "Material.h"
-#include "SettingsManager.h"
-#include "ResourceManager.h"
-#include "TextureDescription.h"
-#include "ResourceHandles.h"
-#include "UploadManager.h"
-#include "ECSManager.h"
-#include "MeshInstance.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Mesh/Mesh.h"
+#include "Scene/Scene.h"
+#include "Materials/Material.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Resources/TextureDescription.h"
+#include "Resources/ResourceHandles.h"
+#include "Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/ECSManager.h"
+#include "Mesh/MeshInstance.h"
 
 class PPLLFillPass : public RenderPass {
 public:

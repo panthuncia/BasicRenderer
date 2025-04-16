@@ -12,17 +12,17 @@
 #include <imgui.h>
 #include <random>
 
-#include "pix/pix3.h"
-#include "Mesh.h"
+#include "ThirdParty/pix/pix3.h"
+#include "Mesh/Mesh.h"
 #include "DX12Renderer.h"
-#include "Utilities.h"
-#include "PSOManager.h"
-#include "Material.h"
+#include "Utilities/Utilities.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Materials/Material.h"
 #include "Menu.h"
-#include "MaterialFlags.h"
-#include "PSOFlags.h"
-#include "DeletionManager.h"
-#include "ModelLoader.h"
+#include "Materials/MaterialFlags.h"
+#include "Render/PSOFlags.h"
+#include "Managers/Singletons/DeletionManager.h"
+#include "Import/ModelLoader.h"
 
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
