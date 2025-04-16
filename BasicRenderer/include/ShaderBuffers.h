@@ -41,6 +41,9 @@ struct PerFrameCB {
     unsigned int lightClusterGridSizeX;
     unsigned int lightClusterGridSizeY;
 	unsigned int lightClusterGridSizeZ;
+    unsigned int nearClusterCount; // how many uniform slices up close
+    float clusterZSplitDepth; // view-space depth to switch to log
+	unsigned int pad[2];
 };
 
 struct PerObjectCB {

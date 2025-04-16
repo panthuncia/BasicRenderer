@@ -91,6 +91,8 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UIN
 	perFrameCBData.lightClusterGridSizeX = clusterSizes.x;
 	perFrameCBData.lightClusterGridSizeY = clusterSizes.y;
 	perFrameCBData.lightClusterGridSizeZ = clusterSizes.z;
+	perFrameCBData.nearClusterCount = 4;
+	perFrameCBData.clusterZSplitDepth = 6.0f;
 
 	UploadManager::GetInstance().UploadData(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
 }

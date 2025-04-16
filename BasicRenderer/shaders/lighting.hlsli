@@ -172,18 +172,33 @@ float3 calculateLightContributionPBR(LightFragmentData light, LightingParameters
 uint3 ComputeClusterID(float4 svPos, float viewDepth,
                          ConstantBuffer<PerFrameBuffer> perFrame, Camera mainCamera) {
 
-    float logDepth = log(abs(viewDepth) / mainCamera.zNear);
-    float logRange = log(mainCamera.zFar / mainCamera.zNear);
-    // 'saturate' clamps the result between 0 and 1.
-    float depthSlice = logDepth / logRange;
-    uint clusterZ = (uint) (depthSlice * perFrame.lightClusterGridSizeZ);
-
     float2 tileSize = float2(perFrame.screenResX, perFrame.screenResY) / float2(perFrame.lightClusterGridSizeX, perFrame.lightClusterGridSizeY);
-    
-    //svPos.y = perFrame.screenResY - svPos.y; // Flip Y coordinate to match the cluster grid
     uint2 tile = uint2(svPos.xy / tileSize);
     
-    return uint3(tile.x, tile.y, clusterZ);
+    // Z slice piecewise
+    float z = abs(viewDepth);
+    uint totalZ = perFrame.lightClusterGridSizeZ;
+    uint nearSlices = perFrame.nearClusterCount;
+    float zSplit = perFrame.clusterZSplitDepth;
+    float zNear = mainCamera.zNear;
+    float zFar = mainCamera.zFar;
+    uint sliceZ;
+
+    if (z < zSplit) {
+        // uniform up close
+        float t = (z - zNear) / (zSplit - zNear);
+        sliceZ = uint(t * nearSlices);
+    }
+    else {
+        // logarithmic beyond zSplit
+        float logStart = log(zSplit / zNear);
+        float logEnd = log(zFar / zNear);
+        float logZ = log(z / zNear);
+        float u = (logZ - logStart) / (logEnd - logStart);
+        sliceZ = nearSlices + uint(u * (totalZ - nearSlices));
+    }
+    
+    return uint3(tile.x, tile.y, sliceZ);
 }
 
 LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<MaterialInfo> materialInfo, PerMeshBuffer meshBuffer, ConstantBuffer<PerFrameBuffer> perFrameBuffer, bool isFrontFace) {
@@ -316,6 +331,8 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
                         clusterID.z * perFrameBuffer.lightClusterGridSizeX * perFrameBuffer.lightClusterGridSizeY;
         
         Cluster activeCluster = clusterBuffer[clusterIndex];
+        
+        clusterIndex = clusterID.z;
 
         clusterLightCount = activeCluster.numLights;
         //roughness = activeCluster.near/10;

@@ -41,6 +41,9 @@ struct PerFrameBuffer {
     uint lightClusterGridSizeX;
     uint lightClusterGridSizeY;
     uint lightClusterGridSizeZ;
+    uint nearClusterCount; // how many uniform slices up close
+    float clusterZSplitDepth; // view-space depth to switch to log
+    unsigned int pad[2];
 };
 
 struct BoundingSphere {

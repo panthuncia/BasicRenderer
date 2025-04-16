@@ -51,9 +51,31 @@ void CSMain(uint3 groupID : SV_GroupID) {
     float3 minTile = screenToView(float3(minTile_screenspace, 1.0), screenDimensions, mainCamera.projectionInverse);
     float3 maxTile = screenToView(float3(maxTile_screenspace, 1.0), screenDimensions, mainCamera.projectionInverse);
 
-    // Compute the near and far Z-values for the current depth slice (grid cell in z).
-    float planeNear = -mainCamera.zNear * pow(mainCamera.zFar / mainCamera.zNear, (float) groupID.z / (float) perFrame.lightClusterGridSizeZ);
-    float planeFar = -mainCamera.zNear * pow(mainCamera.zFar / mainCamera.zNear, ((float) groupID.z + 1.0) / (float) perFrame.lightClusterGridSizeZ);
+    // Compute the near and far Z-values for the current depth slice.
+    uint sliceZ = groupID.z;
+    uint totalZ = perFrame.lightClusterGridSizeZ;
+    uint nearSlices = perFrame.nearClusterCount;
+    float zSplit = perFrame.clusterZSplitDepth;
+    float zNear = mainCamera.zNear;
+    float zFar = mainCamera.zFar;
+
+    float planeNear, planeFar;
+
+    if (sliceZ < nearSlices) {
+    // Uniform slices from zNear to zSplit
+        float sliceSize = (zSplit - zNear) / nearSlices;
+        planeNear = -(zNear + sliceZ * sliceSize);
+        planeFar = -(zNear + (sliceZ + 1) * sliceSize);
+    }
+    else {
+    // Log slices from zSplit to zFar
+        float logStart = log(zSplit / zNear);
+        float logEnd = log(zFar / zNear);
+        float t0 = (sliceZ - nearSlices) / float(totalZ - nearSlices);
+        float t1 = (sliceZ + 1 - nearSlices) / float(totalZ - nearSlices);
+        planeNear = -zNear * exp(logStart + t0 * (logEnd - logStart));
+        planeFar = -zNear * exp(logStart + t1 * (logEnd - logStart));
+    }
 
     // For each tile, compute the intersection points between lines through the tile and the near/far planes.
     float3 p0 = lineIntersectionWithZPlane(float3(0, 0, 0), minTile, planeNear);
