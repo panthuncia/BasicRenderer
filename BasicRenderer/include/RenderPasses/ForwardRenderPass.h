@@ -18,9 +18,9 @@
 #include "MeshInstance.h"
 #include "LightManager.h"
 
-class ForwardRenderPassUnified : public RenderPass {
+class ForwardRenderPass : public RenderPass {
 public:
-    ForwardRenderPassUnified(bool wireframe, bool meshShaders, bool indirect)
+    ForwardRenderPass(bool wireframe, bool meshShaders, bool indirect)
         : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
@@ -28,7 +28,7 @@ public:
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
     }
 
-	~ForwardRenderPassUnified() {
+	~ForwardRenderPass() {
 	}
 
     void Setup() override {

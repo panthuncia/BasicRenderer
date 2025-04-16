@@ -19,7 +19,7 @@
 #include "RenderGraph.h"
 #include "DynamicBuffer.h"
 #include "RenderPass.h"
-#include "RenderPasses/ForwardRenderPassUnified.h"
+#include "RenderPasses/ForwardRenderPass.h"
 #include "RenderPasses/ShadowPass.h"
 #include "RenderPasses/ShadowPassMS.h"
 #include "RenderPasses/ShadowPassMSIndirect.h"
@@ -33,8 +33,6 @@
 #include "RenderPasses/frustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
 #include "RenderPasses/PPLLFillPass.h"
-#include "RenderPasses/PPLLFillPassMS.h"
-#include "RenderPasses/PPLLFillPassMSIndirect.h"
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/SkinningPass.h"
 #include "ComputePass.h"
@@ -1034,15 +1032,15 @@ void DX12Renderer::CreateRenderGraph() {
     if (useMeshShaders) {
         forwardPassParameters.shaderResources.push_back(meshResourceGroup);
 		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-            forwardPass = std::make_shared<ForwardRenderPassUnified>(getWireframeEnabled(), true, true);
+            forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled(), true, true);
             forwardPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
         }
         else {
-            forwardPass = std::make_shared<ForwardRenderPassUnified>(getWireframeEnabled(), true, false);
+            forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled(), true, false);
         }
 	}
     else {
-        forwardPass = std::make_shared<ForwardRenderPassUnified>(getWireframeEnabled(), false, false);
+        forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled(), false, false);
     }
 
     auto debugPassParameters = RenderPassParameters();
@@ -1194,18 +1192,18 @@ void DX12Renderer::CreateRenderGraph() {
     //PPLLFillPassParameters.shaderResources.push_back(normalMatrixBuffer);
 	PPLLFillPassParameters.shaderResources.push_back(lightBufferResourceGroup);
 	PPLLFillPassParameters.shaderResources.push_back(postSkinningVertices);
-    if (indirect) {
-        pPPLLFillPass = std::make_shared<PPLLFillPassMSIndirect>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
-		PPLLFillPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+
+    if (useMeshShaders) {
+        if (indirect) {
+            pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, true, true);
+            PPLLFillPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+        }
+        pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, true, false);
     }
     else {
-        if (useMeshShaders) {
-            pPPLLFillPass = std::make_shared<PPLLFillPassMS>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
-        }
-        else {
-            pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes);
-        }
+        pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, false, false);
     }
+
 	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
 	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
 	PPLLFillPassParameters.shaderResources.push_back(perMeshBuffer);
