@@ -1,14 +1,14 @@
-#include "Mesh.h"
+#include "Mesh/Mesh.h"
 
 #include <meshoptimizer.h>
 
 #include "DirectX/d3dx12.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "PSOFlags.h"
+#include "Render/PSOFlags.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Materials/Material.h"
-#include "VertexFlags.h"
+#include "Mesh/VertexFlags.h"
 #include "Managers/MeshManager.h"
 #include "Animation/Skeleton.h"
 

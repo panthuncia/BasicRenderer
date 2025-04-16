@@ -15,11 +15,11 @@
 #include <functional>
 #include <flecs.h>
 
-#include "Mesh.h"
-#include "Buffers.h"
-#include "Scene.h"
+#include "Mesh/Mesh.h"
+#include "ShaderBuffers.h"
+#include "Scene/Scene.h"
 #include "Managers/InputManager.h"
-#include "RenderGraph.h"
+#include "Render/RenderGraph.h"
 #include "Resources/ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
@@ -28,8 +28,8 @@
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "MovementState.h"
-#include "Components.h"
+#include "Scene/MovementState.h"
+#include "Scene/Components.h"
 
 using namespace Microsoft::WRL;
 

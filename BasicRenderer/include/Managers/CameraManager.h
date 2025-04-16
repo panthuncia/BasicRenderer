@@ -3,7 +3,7 @@
 #include <memory.h>
 #include <mutex>
 
-#include "buffers.h"
+#include "ShaderBuffers.h"
 
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 

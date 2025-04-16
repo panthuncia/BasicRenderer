@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Resources/Resource.h"
-#include "DescriptorHeap.h"
+#include "Render/DescriptorHeap.h"
 #include "spdlog/spdlog.h"
 #include "Resources/HeapIndexInfo.h"
 

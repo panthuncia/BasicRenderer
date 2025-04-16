@@ -9,13 +9,13 @@
 
 #include "Materials/Material.h"
 #include "Materials/MaterialFlags.h"
-#include "PSOFlags.h"
-#include "Sampler.h"
-#include "Filetypes.h"
-#include "Scene.h"
-#include "Mesh.h"
+#include "Render/PSOFlags.h"
+#include "Resources/Sampler.h"
+#include "Import/Filetypes.h"
+#include "Scene/Scene.h"
+#include "Mesh/Mesh.h"
 #include "Animation/Skeleton.h"
-#include "Components.h"
+#include "Scene/Components.h"
 #include "Animation/AnimationController.h"
 
 D3D12_TEXTURE_ADDRESS_MODE aiTextureMapModeToD3D12(aiTextureMapMode mode) {

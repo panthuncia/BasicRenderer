@@ -6,13 +6,13 @@
 #include <stdexcept>
 #include <queue>
 #include "DirectX/d3dx12.h"
-#include "Buffers.h"
+#include "ShaderBuffers.h"
 #include "spdlog/spdlog.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Resources/ResourceHandles.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
-#include "DescriptorHeap.h"
+#include "Render/DescriptorHeap.h"
 #include "Resources/ResourceStates.h"
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"

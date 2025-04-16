@@ -4,7 +4,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/GloballyIndexedResource.h"
-#include "IndirectCommand.h"
+#include "Render/IndirectCommand.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Resources/DynamicResource.h"

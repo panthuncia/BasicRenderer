@@ -1,5 +1,5 @@
 #include "Managers/Singletons/CommandSignatureManager.h"
-#include "IndirectCommand.h"
+#include "Render/IndirectCommand.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Utilities/Utilities.h"

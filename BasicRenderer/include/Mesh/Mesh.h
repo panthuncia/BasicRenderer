@@ -7,9 +7,9 @@
 #include <memory>
 #include <atomic>
 
-#include "VertexFlags.h"
+#include "Mesh/VertexFlags.h"
 #include "Import/MeshData.h"
-#include "buffers.h"
+#include "ShaderBuffers.h"
 #include "meshoptimizer.h"
 #include "Resources/Buffers/BufferView.h"
 using namespace Microsoft::WRL;

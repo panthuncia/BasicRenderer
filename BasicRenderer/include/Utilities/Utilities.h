@@ -12,9 +12,9 @@
 #include <unordered_map>
 
 #include "Import/MeshData.h"
-#include "DescriptorHeap.h"
+#include "Render/DescriptorHeap.h"
 #include "Resources/HeapIndexInfo.h"
-#include "buffers.h"
+#include "ShaderBuffers.h"
 
 class DescriptorHeap;
 class Mesh;

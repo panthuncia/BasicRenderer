@@ -1,4 +1,4 @@
-#include "MeshInstance.h"
+#include "Mesh/MeshInstance.h"
 #include "Managers/MeshManager.h"
 
 BufferView* MeshInstance::GetPostSkinningVertexBufferView() {

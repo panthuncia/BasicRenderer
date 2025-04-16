@@ -10,7 +10,7 @@
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Resources/PixelBuffer.h"
-#include "Sampler.h"
+#include "Resources/Sampler.h"
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
 class ShadowMaps : public ResourceGroup {

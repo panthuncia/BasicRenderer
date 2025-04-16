@@ -1,5 +1,5 @@
 #pragma once
-#include "VertexFlags.h"
+#include "Mesh/VertexFlags.h"
 
 class Material;
 

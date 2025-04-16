@@ -16,7 +16,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Render/RenderContext.h"
-#include "RenderGraph.h"
+#include "Render/RenderGraph.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
@@ -47,10 +47,9 @@
 #include "NsightAftermathHelpers.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/ECSManager.h"
-#include "ECSSystems.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "MathUtils.h"
-#include "MovementState.h"
+#include "Utilities/MathUtils.h"
+#include "Scene/MovementState.h"
 #include "Animation/AnimationController.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 

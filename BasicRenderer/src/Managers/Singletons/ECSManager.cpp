@@ -2,7 +2,7 @@
 
 #include <thread>
 
-#include "Components.h"
+#include "Scene/Components.h"
 
 void ECSManager::Initialize() {
 	world.component<Components::ActiveScene>().add(flecs::Exclusive);

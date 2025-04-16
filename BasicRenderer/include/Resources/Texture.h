@@ -4,7 +4,7 @@
 #include "Resources/ResourceHandles.h"
 #include "Resources/ResourceStates.h"
 #include "Resources/Resource.h"
-#include "Filetypes.h"
+#include "Import/Filetypes.h"
 
 class PixelBuffer;
 class Sampler;

@@ -1,7 +1,7 @@
 #include "Materials/Material.h"
 #include <string>
-#include "PSOFlags.h"
-#include "Sampler.h"
+#include "Render/PSOFlags.h"
+#include "Resources/Sampler.h"
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
 #include "Materials/MaterialFlags.h"

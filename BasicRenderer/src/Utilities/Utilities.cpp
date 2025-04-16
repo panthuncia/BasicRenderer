@@ -13,18 +13,18 @@
 #include <math.h>
 #include <optional>
 
-#include "PSOFlags.h"
+#include "Render/PSOFlags.h"
 #include "DirectX/d3dx12.h"
 #include "DefaultDirection.h"
-#include "Sampler.h"
-#include "DescriptorHeap.h"
-#include "ReadbackRequest.h"
+#include "Resources/Sampler.h"
+#include "Render/DescriptorHeap.h"
+#include "Resources/ReadbackRequest.h"
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "VertexFlags.h"
+#include "Mesh/VertexFlags.h"
 #include "Materials/MaterialFlags.h"
-#include "Mesh.h"
-#include "Components.h"
+#include "Mesh/Mesh.h"
+#include "Scene/Components.h"
 
 using namespace DirectX;
 

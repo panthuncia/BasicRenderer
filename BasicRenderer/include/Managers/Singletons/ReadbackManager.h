@@ -9,7 +9,7 @@
 #include "Resources/Texture.h"
 #include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/UploadManager.h"
-#include "ReadbackRequest.h"
+#include "Resources/ReadbackRequest.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 

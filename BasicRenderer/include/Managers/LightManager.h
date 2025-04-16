@@ -8,11 +8,11 @@
 #include <mutex>
 #include <optional>
 
-#include "buffers.h"
+#include "ShaderBuffers.h"
 #include "Resources/DynamicResource.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
-#include "Components.h"
+#include "Scene/Components.h"
 
 class ShadowMaps;
 class IndirectCommandBufferManager;

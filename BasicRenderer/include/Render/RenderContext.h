@@ -2,7 +2,7 @@
 
 #include <directx/d3d12.h>
 #include "wrl/client.h"
-#include "Components.h"
+#include "Scene/Components.h"
 
 class Scene;
 class ObjectManager;

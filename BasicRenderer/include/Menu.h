@@ -15,7 +15,7 @@
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
-#include "OutputTypes.h"
+#include "Render/OutputTypes.h"
 #include "Import/ModelLoader.h"
 #include "Managers/Singletons/SettingsManager.h"
 

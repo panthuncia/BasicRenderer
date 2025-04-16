@@ -4,7 +4,7 @@
 #include <directx/d3d12.h>
 #include <wrl/client.h>
 
-#include "buffers.h"
+#include "ShaderBuffers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Materials/MaterialBuckets.h"
 

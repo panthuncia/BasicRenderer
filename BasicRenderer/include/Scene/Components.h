@@ -10,7 +10,7 @@
 #include <string>
 
 #include "Resources/Buffers/BufferView.h"
-#include "buffers.h"
+#include "ShaderBuffers.h"
 
 class MeshInstance;
 class DynamicGloballyIndexedResource;

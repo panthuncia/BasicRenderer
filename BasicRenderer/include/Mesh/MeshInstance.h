@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include "Mesh.h"
+#include "Mesh/Mesh.h"
 #include "Animation/Skeleton.h"
 
 class MeshInstance {

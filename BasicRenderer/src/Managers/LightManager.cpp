@@ -11,8 +11,8 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/CameraManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
-#include "MathUtils.h"
-#include "buffers.h"
+#include "Utilities/MathUtils.h"
+#include "ShaderBuffers.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();

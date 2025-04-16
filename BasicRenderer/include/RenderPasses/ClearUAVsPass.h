@@ -7,11 +7,11 @@
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Utilities/Utilities.h"
-#include "IndirectCommand.h"
+#include "Render/IndirectCommand.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Scene.h"
+#include "Scene/Scene.h"
 #include "Managers/Singletons/ECSManager.h"
-#include "Components.h"
+#include "Scene/Components.h"
 
 class ClearUAVsPass : public RenderPass {
 public:

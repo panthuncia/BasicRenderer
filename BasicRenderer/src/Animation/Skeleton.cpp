@@ -8,7 +8,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
-#include "Components.h"
+#include "Scene/Components.h"
 #include "Animation/AnimationController.h"
 
 Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XMMATRIX>& inverseBindMatrices)

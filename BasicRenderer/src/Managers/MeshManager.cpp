@@ -2,10 +2,10 @@
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Resources/ResourceStates.h"
-#include "Mesh.h"
+#include "Mesh/Mesh.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Buffers/BufferView.h"
-#include "MeshInstance.h"
+#include "Mesh/MeshInstance.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 
 MeshManager::MeshManager() {

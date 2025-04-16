@@ -1,4 +1,4 @@
-#include "Scene.h"
+#include "Scene/Scene.h"
 
 #include <spdlog/spdlog.h>
 #include <algorithm>
@@ -9,16 +9,15 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
-#include "Components.h"
+#include "Scene/Components.h"
 #include "Materials/Material.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "ECSSystems.h"
-#include "MeshInstance.h"
+#include "Mesh/MeshInstance.h"
 #include "Animation/AnimationController.h"
-#include "MathUtils.h"
+#include "Utilities/MathUtils.h"
 
 std::atomic<uint64_t> Scene::globalSceneCount = 0;
 

@@ -6,8 +6,8 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "mesh.h"
-#include "Scene.h"
+#include "Mesh/Mesh.h"
+#include "Scene/Scene.h"
 #include "Resources/ResourceGroup.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
@@ -15,7 +15,7 @@
 #include "Managers/ObjectManager.h"
 #include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
-#include "MeshInstance.h"
+#include "Mesh/MeshInstance.h"
 
 class ShadowPassMSIndirect : public RenderPass {
 public:

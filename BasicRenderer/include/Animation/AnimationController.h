@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Animation/AnimationClip.h"
-#include "Components.h"
+#include "Scene/Components.h"
 
 class AnimationController {
 public:

@@ -6,7 +6,7 @@
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
-#include "MeshInstance.h"
+#include "Mesh/MeshInstance.h"
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();

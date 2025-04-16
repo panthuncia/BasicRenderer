@@ -1,5 +1,5 @@
 #include "Resources/Texture.h"
-#include "Sampler.h"
+#include "Resources/Sampler.h"
 #include "Resources/PixelBuffer.h"
 #include "Render/RenderContext.h"
 

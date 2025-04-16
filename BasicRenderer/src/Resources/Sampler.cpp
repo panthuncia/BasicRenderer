@@ -1,4 +1,4 @@
-#include "Sampler.h"
+#include "Resources/Sampler.h"
 
 std::shared_ptr<Sampler> Sampler::m_defaultSampler = nullptr;
 std::shared_ptr<Sampler> Sampler::m_defaultShadowSampler = nullptr;

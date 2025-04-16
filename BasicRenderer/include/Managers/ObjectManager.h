@@ -6,10 +6,10 @@
 
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
-#include "buffers.h"
+#include "ShaderBuffers.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
-#include "IndirectCommand.h"
-#include "Components.h"
+#include "Render/IndirectCommand.h"
+#include "Scene/Components.h"
 
 class BufferView;
 class DynamicBuffer;
