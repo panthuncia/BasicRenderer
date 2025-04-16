@@ -1,7 +1,7 @@
 #include "ResourceManager.h"
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "DynamicStructuredBuffer.h"
 #include "SettingsManager.h"
 #include "DynamicBuffer.h"

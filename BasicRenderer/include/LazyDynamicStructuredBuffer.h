@@ -10,7 +10,7 @@
 #include <memory>
 #include <deque>
 
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Buffer.h"
 #include "Resource.h"
 #include "DynamicBufferBase.h"

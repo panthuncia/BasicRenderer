@@ -10,7 +10,7 @@
 #include "ResourceHandles.h"
 #include "Utilities.h"
 #include "Managers/Singletons/UploadManager.h"
-#include "ReadbackManager.h"
+#include "Managers/Singletons/ReadbackManager.h"
 
 class EnvironmentConversionPass : public RenderPass {
 public:

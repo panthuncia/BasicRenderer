@@ -3,7 +3,7 @@
 #include <wrl/client.h>
 #include <directx/d3d12.h>
 #include <DirectXMath.h>
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 using Microsoft::WRL::ComPtr;
 
 template <typename T>

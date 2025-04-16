@@ -1,6 +1,6 @@
 #include "CommandSignatureManager.h"
 #include "IndirectCommand.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "PSOManager.h"
 #include "utilities.h"
 

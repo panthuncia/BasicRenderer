@@ -4,7 +4,7 @@
 
 #include "DirectX/d3dx12.h"
 #include "Utilities.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "PSOFlags.h"
 #include "ResourceManager.h"
 #include "Material.h"

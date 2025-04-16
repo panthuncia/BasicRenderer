@@ -3,11 +3,11 @@
 #include <spdlog/spdlog.h>
 
 #include "Components.h"
-#include "ObjectManager.h"
+#include "Managers/ObjectManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"
-#include "IndirectCommandBufferManager.h"
-#include "CameraManager.h"
+#include "Managers/IndirectCommandBufferManager.h"
+#include "Managers/CameraManager.h"
 #include "MeshInstance.h"
 #include "ManagerInterface.h"
 #include "Utilities.h"

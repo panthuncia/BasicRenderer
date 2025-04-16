@@ -11,7 +11,7 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "ReadbackRequest.h"
 #include "utilities.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 
 struct ReadbackInfo {
     bool cubemap;

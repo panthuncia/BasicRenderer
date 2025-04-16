@@ -12,8 +12,8 @@
 #include "SettingsManager.h"
 #include "CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
-#include "ObjectManager.h"
-#include "CameraManager.h"
+#include "Managers/ObjectManager.h"
+#include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"
 

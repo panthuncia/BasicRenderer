@@ -5,11 +5,11 @@
 #include "ComputePass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "utilities.h"
 #include "SettingsManager.h"
 #include "Managers/MeshManager.h"
-#include "ObjectManager.h"
+#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 
 class ClusterGenerationPass : public ComputePass {

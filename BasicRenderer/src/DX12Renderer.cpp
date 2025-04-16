@@ -12,7 +12,7 @@
 
 #include "Utilities.h"
 #include "DirectX/d3dx12.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "PSOManager.h"
 #include "ResourceManager.h"
 #include "RenderContext.h"
@@ -48,7 +48,7 @@
 #include "CommandSignatureManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "ECSSystems.h"
-#include "IndirectCommandBufferManager.h"
+#include "Managers/IndirectCommandBufferManager.h"
 #include "MathUtils.h"
 #include "MovementState.h"
 #include "AnimationController.h"

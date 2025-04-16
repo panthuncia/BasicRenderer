@@ -7,7 +7,7 @@
 #include "ResourceHandles.h"
 #include "utilities.h"
 #include "Managers/Singletons/UploadManager.h"
-#include "ReadbackManager.h"
+#include "Managers/Singletons/ReadbackManager.h"
 class BRDFIntegrationPass : public RenderPass {
 public:
     BRDFIntegrationPass(std::shared_ptr<Texture> lutTexture) {

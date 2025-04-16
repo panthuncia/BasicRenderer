@@ -10,7 +10,7 @@
 #include "ResourceHandles.h"
 #include "Utilities.h"
 #include "Managers/Singletons/UploadManager.h"
-#include "ReadbackManager.h"
+#include "Managers/Singletons/ReadbackManager.h"
 
 class EnvironmentFilterPass : public RenderPass {
 public:

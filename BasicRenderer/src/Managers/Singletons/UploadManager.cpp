@@ -6,7 +6,7 @@
 #include "SettingsManager.h"
 #include "DeletionManager.h"
 #include "utilities.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 
 void UploadManager::Initialize() {
 	auto& device = DeviceManager::GetInstance().GetDevice();

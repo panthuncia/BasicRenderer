@@ -7,7 +7,7 @@
 #include <string>
 #include <algorithm> // For std::lower_bound, std::upper_bound
 
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Buffer.h"
 #include "Resource.h"
 #include "DynamicBufferBase.h"

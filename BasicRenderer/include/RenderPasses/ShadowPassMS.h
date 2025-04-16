@@ -11,7 +11,7 @@
 #include "ResourceGroup.h"
 #include "SettingsManager.h"
 #include "Managers/MeshManager.h"
-#include "ObjectManager.h"
+#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"
 

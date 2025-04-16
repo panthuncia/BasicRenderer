@@ -1,4 +1,4 @@
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 
 static std::string AutoBreadcrumbOpToString(D3D12_AUTO_BREADCRUMB_OP op) {
     switch (op) {

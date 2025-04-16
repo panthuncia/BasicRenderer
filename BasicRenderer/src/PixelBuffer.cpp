@@ -2,7 +2,7 @@
 #include <string>
 #include <stdexcept>
 
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Utilities.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"

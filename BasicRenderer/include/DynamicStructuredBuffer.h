@@ -7,7 +7,7 @@
 #include <typeinfo>
 #include <string>
 
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Buffer.h"
 #include "Resource.h"
 #include "DynamicBufferBase.h"

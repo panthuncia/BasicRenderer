@@ -5,7 +5,7 @@
 #include "RenderPass.h"
 #include "PSOManager.h"
 #include "RenderContext.h"
-#include "DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "utilities.h"
 #include "SettingsManager.h"
 
