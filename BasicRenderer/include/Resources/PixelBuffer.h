@@ -5,10 +5,10 @@
 #include "DirectX/d3dx12.h"
 #include <d3d12.h>
 
-#include "ResourceStates.h"
-#include "ResourceHandles.h"
+#include "Resources/ResourceStates.h"
+#include "Resources/ResourceHandles.h"
 #include "Resources/GloballyIndexedResource.h"
-#include "TextureDescription.h"
+#include "Resources/TextureDescription.h"
 using Microsoft::WRL::ComPtr;
 
 class PixelBuffer : public GloballyIndexedResource {

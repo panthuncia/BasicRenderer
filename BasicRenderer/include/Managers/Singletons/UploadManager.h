@@ -6,7 +6,7 @@
 #include <functional>
 
 #include "Resources/Buffers/BufferView.h"
-#include "MemoryBlock.h"
+#include "Resources/Buffers/MemoryBlock.h"
 
 class Buffer;
 class Resource;

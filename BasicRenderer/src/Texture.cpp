@@ -1,7 +1,7 @@
 #include "Resources/Texture.h"
 #include "Sampler.h"
 #include "Resources/PixelBuffer.h"
-#include "RenderContext.h"
+#include "Render/RenderContext.h"
 
 Texture::Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler) {
 	m_image = image;

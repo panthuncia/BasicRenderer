@@ -1,7 +1,7 @@
 #pragma once
 #include <directx/d3d12.h>
 #include <memory>
-#include "ResourceManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 
 struct SamplerDescHasher {
     std::size_t operator()(const D3D12_SAMPLER_DESC& desc) const {

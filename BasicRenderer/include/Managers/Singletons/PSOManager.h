@@ -6,7 +6,7 @@
 #include <string>
 
 #include "ThirdParty/DirectX/dxcapi.h"
-#include "BlendState.h"
+#include "Materials/BlendState.h"
 #include "PSOFlags.h"
 
 using Microsoft::WRL::ComPtr;

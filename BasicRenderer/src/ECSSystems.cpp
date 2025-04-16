@@ -10,7 +10,7 @@
 #include "Managers/CameraManager.h"
 #include "MeshInstance.h"
 #include "Managers/ManagerInterface.h"
-#include "Utilities.h"
+#include "Utilities/Utilities.h"
 
 void IterateTree(flecs::entity e, const DirectX::XMMATRIX& parentTransform, ManagerInterface* managers) {
 	// Get the current entity's transformation matrix.

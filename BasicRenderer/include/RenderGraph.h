@@ -8,9 +8,9 @@
 #include <wrl/client.h>
 #include <variant>
 
-#include "RenderPass.h"
-#include "ComputePass.h"
-#include "ResourceStates.h"
+#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/ComputePass.h"
+#include "Resources/ResourceStates.h"
 
 class Resource;
 

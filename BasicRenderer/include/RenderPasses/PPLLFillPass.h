@@ -3,16 +3,16 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPass.h"
+#include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "RenderContext.h"
+#include "Render/RenderContext.h"
 #include "mesh.h"
 #include "Scene.h"
-#include "Material.h"
+#include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "ResourceManager.h"
-#include "TextureDescription.h"
-#include "ResourceHandles.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Resources/TextureDescription.h"
+#include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "MeshInstance.h"

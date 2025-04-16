@@ -3,14 +3,14 @@
 #include <meshoptimizer.h>
 
 #include "DirectX/d3dx12.h"
-#include "Utilities.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "PSOFlags.h"
-#include "ResourceManager.h"
-#include "Material.h"
-#include "Vertex.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Materials/Material.h"
+#include "VertexFlags.h"
 #include "Managers/MeshManager.h"
-#include "Skeleton.h"
+#include "Animation/Skeleton.h"
 
 std::atomic<uint64_t> Mesh::globalMeshCount = 0;
 

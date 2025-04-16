@@ -2,7 +2,7 @@
 #include "IndirectCommand.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "utilities.h"
+#include "Utilities/Utilities.h"
 
 void CommandSignatureManager::Initialize() {
     D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[3] = {};

@@ -5,8 +5,8 @@
 #include <wrl/client.h>
 
 #include "Resources/Resource.h"
-#include "RenderContext.h"
-#include "ResourceStates.h"
+#include "Render/RenderContext.h"
+#include "Resources/ResourceStates.h"
 
 struct RenderPassParameters {
     std::vector<std::shared_ptr<Resource>> shaderResources;

@@ -1,7 +1,7 @@
 #include "Managers/MeshManager.h"
 
-#include "ResourceManager.h"
-#include "ResourceStates.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Resources/ResourceStates.h"
 #include "Mesh.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Buffers/BufferView.h"

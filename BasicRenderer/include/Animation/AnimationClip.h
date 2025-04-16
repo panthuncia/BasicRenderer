@@ -1,5 +1,7 @@
 #pragma once
 #include <vector>
+#include <DirectXMath.h>
+
 #include "Animation/Keyframe.h"
 
 class AnimationClip {
@@ -10,9 +12,9 @@ public:
     float duration;
     AnimationClip();
 
-    void addPositionKeyframe(float time, const XMFLOAT3& position);
-    void addRotationKeyframe(float time, const XMVECTOR& rotation);
-    void addScaleKeyframe(float time, const XMFLOAT3& scale);
+    void addPositionKeyframe(float time, const DirectX::XMFLOAT3& position);
+    void addRotationKeyframe(float time, const DirectX::XMVECTOR& rotation);
+    void addScaleKeyframe(float time, const DirectX::XMFLOAT3& scale);
 
     std::pair<Keyframe, Keyframe> findBoundingKeyframes(float currentTime, const std::vector<Keyframe>& keyframes) const;
 

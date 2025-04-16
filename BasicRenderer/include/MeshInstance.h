@@ -2,7 +2,7 @@
 
 #include <memory>
 #include "Mesh.h"
-#include "Skeleton.h"
+#include "Animation/Skeleton.h"
 
 class MeshInstance {
 public:

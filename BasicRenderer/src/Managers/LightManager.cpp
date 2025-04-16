@@ -1,13 +1,13 @@
 #include "Managers/LightManager.h"
 
-#include "ResourceHandles.h"
-#include "ResourceManager.h"
-#include "Utilities.h"
+#include "Resources/ResourceHandles.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ShadowMaps.h"
 #include "Resources/DynamicResource.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "MaterialBuckets.h"
+#include "Materials/MaterialBuckets.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/CameraManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
@@ -131,8 +131,8 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 	// Assume each cubemap face uses the same projection but different view matrices.
 	auto cubeViewIndex = m_pointViewInfo->Size() / 6;
 	viewInfo.viewInfoBufferIndex = cubeViewIndex;
-	XMFLOAT3 pos;
-	XMStoreFloat3(&pos, info.posWorldSpace);
+	DirectX::XMFLOAT3 pos;
+	DirectX::XMStoreFloat3(&pos, info.posWorldSpace);
 	auto cubemapMatrices = GetCubemapViewMatrices(pos);
 
 	auto projection = GetProjectionMatrixForLight(info);
@@ -168,15 +168,15 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	Components::LightViewInfo viewInfo = {};
 	viewInfo.viewInfoBufferIndex = m_spotViewInfo->Size();
 
-	XMFLOAT3 pos;
-	XMStoreFloat3(&pos, info.posWorldSpace);
+	DirectX::XMFLOAT3 pos;
+	DirectX::XMStoreFloat3(&pos, info.posWorldSpace);
 
 	CameraInfo camera = {};
 	camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
-	XMFLOAT3 up = { 0, 1, 0 };
-	camera.view = XMMatrixLookToRH(info.posWorldSpace, info.dirWorldSpace, XMLoadFloat3(&up));
+	DirectX::XMFLOAT3 up = { 0, 1, 0 };
+	camera.view = DirectX::XMMatrixLookToRH(info.posWorldSpace, info.dirWorldSpace, DirectX::XMLoadFloat3(&up));
 	camera.projection = GetProjectionMatrixForLight(info);
-	camera.viewProjection = XMMatrixMultiply(camera.view, camera.projection);
+	camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, camera.projection);
 
 	auto view = m_pCameraManager->AddCamera(camera);
 	viewInfo.cameraBufferViews.push_back(view);
@@ -211,7 +211,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 
 	// Compute cascades (each cascade carries its own view and ortho projection matrix).
 	auto cascades = setupCascades(numCascades, info.dirWorldSpace,
-		XMLoadFloat3(&posFloats), 
+		DirectX::XMLoadFloat3(&posFloats), 
 		GetForwardFromMatrix(matrix),
 		GetUpFromMatrix(matrix),
 		camera->zNear, camera->fov, camera->aspect,
@@ -229,7 +229,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.positionWorldSpace = { posFloats.x, posFloats.y, posFloats.z, 1.0f };
 		cameraInfo.view = cascades[i].viewMatrix;
 		cameraInfo.projection = cascades[i].orthoMatrix;
-		cameraInfo.viewProjection = XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
+		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 
 		auto view = m_pCameraManager->AddCamera(cameraInfo);
 		viewInfo.cameraBufferViews.push_back(view);
@@ -276,10 +276,10 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	case Components::LightType::Spot: {
 		CameraInfo camera = {};
 		camera.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
-		auto up = XMFLOAT3(0, 1, 0);
-		camera.view = XMMatrixLookToRH(XMLoadFloat3(&globalPos), XMVector3Normalize(lightMatrix->matrix.r[2]), XMLoadFloat3(&up));
+		auto up = DirectX::XMFLOAT3(0, 1, 0);
+		camera.view = DirectX::XMMatrixLookToRH(DirectX::XMLoadFloat3(&globalPos), DirectX::XMVector3Normalize(lightMatrix->matrix.r[2]), XMLoadFloat3(&up));
 		camera.projection = viewInfo->projectionMatrix.matrix;
-		camera.viewProjection = XMMatrixMultiply(camera.view, viewInfo->projectionMatrix.matrix);
+		camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, viewInfo->projectionMatrix.matrix);
 		camera.clippingPlanes[0] = planes[0][0];
 		camera.clippingPlanes[1] = planes[0][1];
 		camera.clippingPlanes[2] = planes[0][2];
@@ -295,17 +295,17 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			return;
 		}
 		auto numCascades = getNumDirectionalLightCascades();
-		auto dir = XMVector3Normalize(lightMatrix->matrix.r[2]);
+		auto dir = DirectX::XMVector3Normalize(lightMatrix->matrix.r[2]);
 		auto camera = m_currentCamera.get<Components::Camera>();
 		auto& matrix = m_currentCamera.get<Components::Matrix>()->matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
-		auto cascades = setupCascades(numCascades, lightInfo->lightInfo.dirWorldSpace, XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera->zNear, camera->fov, camera->aspect, getDirectionalLightCascadeSplits());
+		auto cascades = setupCascades(numCascades, lightInfo->lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera->zNear, camera->fov, camera->aspect, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cascades[i].viewMatrix;
 			info.projection = cascades[i].orthoMatrix;
-			info.viewProjection = XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
+			info.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 			info.clippingPlanes[0] = cascades[i].frustumPlanes[0];
 			info.clippingPlanes[1] = cascades[i].frustumPlanes[1];
 			info.clippingPlanes[2] = cascades[i].frustumPlanes[2];

@@ -1,6 +1,6 @@
 #include "Managers/CameraManager.h"
 
-#include "ResourceManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 
 CameraManager::CameraManager() {
 	auto& resourceManager = ResourceManager::GetInstance();

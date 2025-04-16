@@ -8,7 +8,7 @@
 #include <spdlog/spdlog.h>
 #include <cctype>
 
-#include "InputAction.h"
+#include "Input/InputAction.h"
 
 enum class InputMode {
     wasd,

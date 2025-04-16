@@ -5,7 +5,7 @@
 #include "Resources/Resource.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "utilities.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 
 void UploadManager::Initialize() {

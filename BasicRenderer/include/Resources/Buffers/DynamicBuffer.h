@@ -15,7 +15,7 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
-#include "MemoryBlock.h"
+#include "Resources/Buffers/MemoryBlock.h"
 
 using Microsoft::WRL::ComPtr;
 

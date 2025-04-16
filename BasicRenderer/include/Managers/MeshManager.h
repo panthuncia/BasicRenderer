@@ -6,7 +6,7 @@
 
 #include "buffers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
-#include "MaterialBuckets.h"
+#include "Materials/MaterialBuckets.h"
 
 class Mesh;
 class MeshInstance;

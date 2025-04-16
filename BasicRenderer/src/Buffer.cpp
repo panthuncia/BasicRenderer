@@ -4,8 +4,8 @@
 
 #include "DirectX/d3dx12.h"
 #include "spdlog/spdlog.h"
-#include "RenderContext.h"
-#include "ResourceStates.h"
+#include "Render/RenderContext.h"
+#include "Resources/ResourceStates.h"
 
 using namespace Microsoft::WRL;
 

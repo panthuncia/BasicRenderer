@@ -5,12 +5,12 @@
 #include <execution>
 #include <flecs.h>
 
-#include "Utilities.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Components.h"
-#include "material.h"
+#include "Materials/Material.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"

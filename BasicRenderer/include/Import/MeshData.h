@@ -1,5 +1,5 @@
 #pragma once
-#include "Vertex.h"
+#include "VertexFlags.h"
 
 class Material;
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Windowsx.h>
-#include "InputContext.h"
+#include "Input/InputContext.h"
 #include <spdlog/spdlog.h>
 
 class InputManager {

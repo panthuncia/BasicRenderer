@@ -1,7 +1,7 @@
 #include "RenderGraph.h"
 
-#include "RenderContext.h"
-#include "utilities.h"
+#include "Render/RenderContext.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ReadbackManager.h"
 #include "Managers/Singletons/DeviceManager.h"

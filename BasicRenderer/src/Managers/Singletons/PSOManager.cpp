@@ -5,7 +5,7 @@
 #include <filesystem>
 
 #include <directx/d3dx12.h>
-#include "Utilities.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 
 #pragma comment(lib, "dxcompiler.lib")

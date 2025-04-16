@@ -2,11 +2,11 @@
 
 #include <DirectX/d3dx12.h>
 
-#include "ComputePass.h"
+#include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "RenderContext.h"
+#include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "utilities.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"

@@ -1,5 +1,5 @@
-#include "ResourceManager.h"
-#include "Utilities.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Utilities/Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
@@ -22,21 +22,21 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 
 	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
-	perFrameCBData.ambientLighting = XMVectorSet(0.1, 0.1, 0.1, 1.0);
+	perFrameCBData.ambientLighting = DirectX::XMVectorSet(0.1, 0.1, 0.1, 1.0);
 	perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
 	auto shadowCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits")();
 	switch (perFrameCBData.numShadowCascades) {
 	case 1:
-		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], 0, 0, 0);
+		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], 0, 0, 0);
 		break;
 	case 2:
-		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], 0, 0);
+		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], 0, 0);
 		break;
 	case 3:
-		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], 0);
+		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], 0);
 		break;
 	case 4:
-		perFrameCBData.shadowCascadeSplits = XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], shadowCascadeSplits[3]);
+		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], shadowCascadeSplits[3]);
 	}
 
 	//InitializeUploadHeap();

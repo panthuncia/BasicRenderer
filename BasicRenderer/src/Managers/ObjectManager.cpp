@@ -2,7 +2,7 @@
 
 #include <d3d12.h>
 
-#include "ResourceManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"

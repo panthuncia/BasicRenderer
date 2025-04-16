@@ -3,14 +3,14 @@
 #include <vector>
 #include "Managers/Singletons/SettingsManager.h"
 
-#include "RenderPass.h"
+#include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "RenderContext.h"
+#include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "ResourceHandles.h"
+#include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "ReadbackRequest.h"
-#include "utilities.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 
 struct ReadbackInfo {

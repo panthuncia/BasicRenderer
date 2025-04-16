@@ -5,8 +5,8 @@
 #include <DirectXMath.h>
 #include <string>
 #include "Resources/Texture.h"
-#include "ResourceManager.h"
-#include "BlendState.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Materials/BlendState.h"
 
 using Microsoft::WRL::ComPtr;
 

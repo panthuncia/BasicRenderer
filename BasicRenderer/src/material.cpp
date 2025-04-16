@@ -1,10 +1,10 @@
-#include "Material.h"
+#include "Materials/Material.h"
 #include <string>
 #include "PSOFlags.h"
 #include "Sampler.h"
-#include "utilities.h"
-#include "TextureDescription.h"
-#include "MaterialFlags.h"
+#include "Utilities/Utilities.h"
+#include "Resources/TextureDescription.h"
+#include "Materials/MaterialFlags.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 

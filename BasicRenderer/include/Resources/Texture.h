@@ -1,8 +1,8 @@
 #pragma once
 #include <memory>
 
-#include "ResourceHandles.h"
-#include "ResourceStates.h"
+#include "Resources/ResourceHandles.h"
+#include "Resources/ResourceStates.h"
 #include "Resources/Resource.h"
 #include "Filetypes.h"
 

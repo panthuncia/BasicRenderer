@@ -3,12 +3,12 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPass.h"
+#include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "RenderContext.h"
+#include "Render/RenderContext.h"
 #include "mesh.h"
 #include "Scene.h"
-#include "Material.h"
+#include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"

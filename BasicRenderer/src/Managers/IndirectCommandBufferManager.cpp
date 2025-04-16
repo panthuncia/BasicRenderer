@@ -1,6 +1,6 @@
 #include "Managers/IndirectCommandBufferManager.h"
 
-#include "ResourceManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/GloballyIndexedResource.h"

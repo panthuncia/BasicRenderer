@@ -5,7 +5,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 
-#include "MaterialBuckets.h"
+#include "Materials/MaterialBuckets.h"
 
 class DynamicGloballyIndexedResource;
 class ResourceGroup;

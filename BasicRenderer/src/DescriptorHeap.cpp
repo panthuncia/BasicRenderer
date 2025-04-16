@@ -2,7 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include "Utilities.h"
+#include "Utilities/Utilities.h"
 
 DescriptorHeap::DescriptorHeap(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible)
     : m_type(type), m_shaderVisible(shaderVisible), m_numDescriptorsAllocated(0) {

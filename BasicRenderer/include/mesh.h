@@ -7,8 +7,8 @@
 #include <memory>
 #include <atomic>
 
-#include "Vertex.h"
-#include "MeshData.h"
+#include "VertexFlags.h"
+#include "Import/MeshData.h"
 #include "buffers.h"
 #include "meshoptimizer.h"
 #include "Resources/Buffers/BufferView.h"

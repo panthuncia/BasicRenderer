@@ -3,11 +3,11 @@
 #include <stdexcept>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Utilities.h"
+#include "Utilities/Utilities.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "ThirdParty/stb/stb_image.h"
-#include "ResourceManager.h"
-#include "RenderContext.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Render/RenderContext.h"
 
 PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();

@@ -15,14 +15,14 @@
 #include "ThirdParty/pix/pix3.h"
 #include "Mesh.h"
 #include "DX12Renderer.h"
-#include "Utilities.h"
+#include "Utilities/Utilities.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "Material.h"
+#include "Materials/Material.h"
 #include "Menu.h"
-#include "MaterialFlags.h"
+#include "Materials/MaterialFlags.h"
 #include "PSOFlags.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "ModelLoader.h"
+#include "Import/ModelLoader.h"
 
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {

@@ -1,10 +1,10 @@
-#include "Skeleton.h"
+#include "Animation/Skeleton.h"
 #include <spdlog/spdlog.h>
 #include <unordered_map>
 #include <flecs.h>
 #include <unordered_set>
 
-#include "ResourceManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"

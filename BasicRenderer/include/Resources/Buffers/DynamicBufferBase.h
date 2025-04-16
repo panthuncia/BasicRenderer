@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include "RenderContext.h"
-#include "ResourceStates.h"
+#include "Render/RenderContext.h"
+#include "Resources/ResourceStates.h"
 #include "Resources/GloballyIndexedResource.h"
 
 class Buffer;

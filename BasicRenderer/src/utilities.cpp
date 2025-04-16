@@ -1,4 +1,4 @@
-#include "utilities.h"
+#include "Utilities/Utilities.h"
 
 #include <wrl.h>
 #include <stdexcept>
@@ -19,12 +19,14 @@
 #include "Sampler.h"
 #include "DescriptorHeap.h"
 #include "ReadbackRequest.h"
-#include "Material.h"
+#include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Vertex.h"
-#include "MaterialFlags.h"
+#include "VertexFlags.h"
+#include "Materials/MaterialFlags.h"
 #include "Mesh.h"
 #include "Components.h"
+
+using namespace DirectX;
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {

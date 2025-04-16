@@ -5,7 +5,7 @@
 #include <wrl/client.h>
 
 #include "DirectX/d3dx12.h"
-#include "HeapIndexInfo.h"
+#include "Resources/HeapIndexInfo.h"
 
 class DescriptorHeap;
 

@@ -5,7 +5,7 @@
 #include <memory>
 #include "Resources/Resource.h"
 #include "Resources/GloballyIndexedResource.h"
-#include "RenderContext.h"
+#include "Render/RenderContext.h"
 
 class ResourceGroup : public Resource {
 public:

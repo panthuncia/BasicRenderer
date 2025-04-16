@@ -1,4 +1,4 @@
-#include "ModelLoader.h"
+#include "Import/ModelLoader.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -7,14 +7,14 @@
 #include <DirectXMath.h>
 #include <vector>
 
-#include "Material.h"
-#include "MaterialFlags.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialFlags.h"
 #include "PSOFlags.h"
 #include "Sampler.h"
 #include "Filetypes.h"
 #include "Scene.h"
 #include "Mesh.h"
-#include "Skeleton.h"
+#include "Animation/Skeleton.h"
 #include "Components.h"
 #include "Animation/AnimationController.h"
 
@@ -525,7 +525,7 @@ static void buildAiNodeHierarchy(
     // Convert it to an XMMATRIX
     aiMatrix4x4 m = ainode->mTransformation;
 
-	XMMATRIX transform = XMMatrixSet( // Transpose
+    DirectX::XMMATRIX transform = XMMatrixSet( // Transpose
         m.a1, m.b1, m.c1, m.d1,
         m.a2, m.b2, m.c2, m.d2,
         m.a3, m.b3, m.c3, m.d3,
@@ -619,7 +619,7 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
             for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
                 float time = static_cast<float>(channel->mPositionKeys[k].mTime)/aiAnim->mTicksPerSecond;
                 const aiVector3D& v = channel->mPositionKeys[k].mValue;
-                clip->addPositionKeyframe(time, XMFLOAT3(v.x, v.y, v.z));
+                clip->addPositionKeyframe(time, DirectX::XMFLOAT3(v.x, v.y, v.z));
             }
 
             // For rotation keys
@@ -635,7 +635,7 @@ static std::vector<std::shared_ptr<Animation>> parseAiAnimations(
             for (unsigned int k = 0; k < channel->mNumScalingKeys; k++) {
                 float time = static_cast<float>(channel->mScalingKeys[k].mTime)/aiAnim->mTicksPerSecond;
                 const aiVector3D& s = channel->mScalingKeys[k].mValue;
-                clip->addScaleKeyframe(time, XMFLOAT3(s.x, s.y, s.z));
+                clip->addScaleKeyframe(time, DirectX::XMFLOAT3(s.x, s.y, s.z));
             }
         }
 
@@ -663,7 +663,7 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
 
         // Convert offset matrix
         aiMatrix4x4 o = bone->mOffsetMatrix;
-        XMMATRIX offset = XMMatrixSet( // Transpose
+        DirectX::XMMATRIX offset = XMMatrixSet( // Transpose
             o.a1, o.b1, o.c1, o.d1,
             o.a2, o.b2, o.c2, o.d2,
             o.a3, o.b3, o.c3, o.d3,

@@ -3,7 +3,7 @@
 #include "Resources/Resource.h"
 #include "DescriptorHeap.h"
 #include "spdlog/spdlog.h"
-#include "HeapIndexInfo.h"
+#include "Resources/HeapIndexInfo.h"
 
 class GloballyIndexedResourceBase : public Resource {
 public:

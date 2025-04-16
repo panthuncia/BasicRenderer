@@ -11,9 +11,9 @@
 #include <DirectXMath.h>
 #include <unordered_map>
 
-#include "MeshData.h"
+#include "Import/MeshData.h"
 #include "DescriptorHeap.h"
-#include "HeapIndexInfo.h"
+#include "Resources/HeapIndexInfo.h"
 #include "buffers.h"
 
 class DescriptorHeap;
@@ -30,7 +30,7 @@ void print(Args... args) {
 
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
-XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix);
+DirectX::XMMATRIX RemoveScalingFromMatrix(DirectX::XMMATRIX& initialMatrix);
 std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::shared_ptr<Sampler> sampler = nullptr);
 std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
@@ -59,9 +59,9 @@ struct Cascade {
 	std::array<ClippingPlane, 6> frustumPlanes;
 };
 
-DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center);
+DirectX::XMMATRIX createDirectionalLightViewMatrix(DirectX::XMVECTOR lightDir, DirectX::XMVECTOR center);
 
-std::vector<Cascade> setupCascades(int numCascades, const XMVECTOR& lightDir, const DirectX::XMVECTOR& camPos, const DirectX::XMVECTOR& camDir, const DirectX::XMVECTOR& camUp, float nearPlane, float fovY, float aspectRatio, const std::vector<float>& cascadeSplits);
+std::vector<Cascade> setupCascades(int numCascades, const DirectX::XMVECTOR& lightDir, const DirectX::XMVECTOR& camPos, const DirectX::XMVECTOR& camDir, const DirectX::XMVECTOR& camUp, float nearPlane, float fovY, float aspectRatio, const std::vector<float>& cascadeSplits);
 
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda = 0.9f);
 
@@ -152,7 +152,7 @@ void UploadTextureData(
     int height,
     int channels);
 
-std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(XMFLOAT3 pos);
+std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(DirectX::XMFLOAT3 pos);
 
 std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& directory);
 
@@ -182,7 +182,7 @@ DirectX::XMFLOAT3 Add(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b);
 
 DirectX::XMFLOAT3 Scale(const DirectX::XMFLOAT3& a, const float scalar);
 
-XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix);
+DirectX::XMFLOAT3X3 GetUpperLeft3x3(const DirectX::XMMATRIX& matrix);
 
 template <class T>
 inline void hash_combine(std::size_t & s, const T & v)
@@ -195,6 +195,6 @@ std::string GetFileExtension(const std::string& filePath);
 
 DirectX::XMMATRIX GetProjectionMatrixForLight(LightInfo info);
 
-DirectX::XMVECTOR QuaternionFromAxisAngle(const XMFLOAT3& dir);
+DirectX::XMVECTOR QuaternionFromAxisAngle(const DirectX::XMFLOAT3& dir);
 
-XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat);
+DirectX::XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat);
