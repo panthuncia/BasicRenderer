@@ -42,75 +42,72 @@ void CSMain(uint3 groupID : SV_GroupID,
     // Compute the global index for the cluster.
     uint index = groupID.x * 128 + threadID.x;
     
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
-    StructuredBuffer<uint> activeLightIndices = ResourceDescriptorHeap[perFrame.activeLightIndicesBufferIndex];
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrame.lightBufferIndex];
-    uint lightCount = perFrame.numLights;
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[perFrameBuffer.activeLightIndicesBufferIndex];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
+    uint lightCount = perFrameBuffer.numLights;
+    
     RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
-    Camera cam = cameras[perFrame.mainCameraIndex];
-    RWStructuredBuffer<LightPage> lightPages = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
-    RWStructuredBuffer<uint> pageCounter = ResourceDescriptorHeap[lightPagesCounterDescriptorIndex];
-
     Cluster cluster = clusters[index];
+    
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    Camera primaryCamera = cameras[perFrameBuffer.mainCameraIndex];
+
+    // Light pages, clusters index into linked list
+    RWStructuredBuffer<LightPage> lightPages = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
+    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[lightPagesCounterDescriptorIndex];
+
+    // Process every point light.
+    
+    // Start with a new page for the light.
+    unsigned int pageIndex = AllocatePage(LinkedListCounter);
     cluster.numLights = 0;
-    cluster.ptrFirstPage = LIGHT_PAGE_ADDRESS_NULL;
+    cluster.ptrFirstPage = pageIndex;
 
-    // We haven't allocated any page yet
-    uint pageIndex = LIGHT_PAGE_ADDRESS_NULL;
+    if (pageIndex == LIGHT_PAGE_ADDRESS_NULL) {
+        // No more pages available.
+        clusters[index] = cluster;
+        return;
+    }
+    
+    lightPages[pageIndex].ptrNextPage = LIGHT_PAGE_ADDRESS_NULL; // Initialize the next page pointer to null.]
+    
     uint numLightsInPage = 0;
-
     for (uint i = 0; i < lightCount; ++i) {
-        LightInfo L = lights[activeLightIndices[i]];
-
-        bool intersects = false;
-        if (L.type == 0 || L.type == 1) {
-            intersects = testSphereAABB(cam.view, L.boundingSphere.center.xyz, L.boundingSphere.radius, cluster);
-        }
-        else {
-            intersects = true; // directional
-        }
-
-        if (!intersects)
-            continue;
-
-        // First light in this cluster?  Allocate head page.
-        if (pageIndex == LIGHT_PAGE_ADDRESS_NULL) {
-            pageIndex = AllocatePage(pageCounter);
-            if (pageIndex == LIGHT_PAGE_ADDRESS_NULL) {
-                // Out of pages- stop
-                break;
-            }
-            lightPages[pageIndex].ptrNextPage = LIGHT_PAGE_ADDRESS_NULL;
-            lightPages[pageIndex].numLightsInPage = 0;
-            cluster.ptrFirstPage = pageIndex;
-            numLightsInPage = 0;
-        }
-
-        // If current page is full, allocate a new one and push it onto the front of the list
+        
+        // When we process LIGHTS_PER_PAGE lights, we need to allocate a new page.
         if (numLightsInPage >= LIGHTS_PER_PAGE) {
-            lightPages[pageIndex].numLightsInPage = LIGHTS_PER_PAGE;
-            uint old = pageIndex;
-            pageIndex = AllocatePage(pageCounter);
-            if (pageIndex == LIGHT_PAGE_ADDRESS_NULL) {
-                // No more pages— stop
-                break;
-            }
-            lightPages[pageIndex].ptrNextPage = old;
-            lightPages[pageIndex].numLightsInPage = 0;
-            cluster.ptrFirstPage = pageIndex;
+            lightPages[pageIndex].numLightsInPage = LIGHTS_PER_PAGE; // Store the number of lights in the current page.
+            uint oldPageIndex = pageIndex; // Store the current page index.
+            pageIndex = AllocatePage(LinkedListCounter); // Allocate a new page.
+            lightPages[pageIndex].ptrNextPage = oldPageIndex; // Link the new page to the old page.
+            cluster.ptrFirstPage = pageIndex; // Update the cluster with the new page index.
             numLightsInPage = 0;
         }
-
-        // Write this light into the current page
-        lightPages[pageIndex].lightIndices[numLightsInPage++] = activeLightIndices[i];
-        cluster.numLights++;
+        
+        // If the light intersects the cluster
+        LightInfo light = lights[activeLightIndices[i]];
+        switch (light.type) {
+            case 0: // Point light
+            case 1: // Spot light
+                if (testSphereAABB(primaryCamera.view, light.boundingSphere.center.xyz, light.boundingSphere.radius, cluster)) {
+                    lightPages[pageIndex].lightIndices[numLightsInPage] = activeLightIndices[i];
+                    numLightsInPage++;
+                    cluster.numLights++;
+                }
+                break;
+            case 2:
+                // Directional lights always intersect the cluster.
+                lightPages[pageIndex].lightIndices[numLightsInPage] = activeLightIndices[i];
+                numLightsInPage++;
+                cluster.numLights++;
+                break;
+        }
     }
-
-    // If we ever allocated a page, write out its final count
-    if (pageIndex != LIGHT_PAGE_ADDRESS_NULL) {
-        lightPages[pageIndex].numLightsInPage = numLightsInPage;
-    }
-
+    
+    // Update last page count
+    lightPages[pageIndex].numLightsInPage = numLightsInPage;
+    
+    // Write back the updated cluster.
     clusters[index] = cluster;
 }

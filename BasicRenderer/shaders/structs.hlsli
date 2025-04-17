@@ -137,7 +137,7 @@ struct PerMeshInstanceBuffer {
     uint pad[2];
 };
 
-#define LIGHTS_PER_PAGE 50
+#define LIGHTS_PER_PAGE 10
 #define LIGHT_PAGE_ADDRESS_NULL 0xFFFFFFFF
 struct LightPage {
     uint ptrNextPage;

@@ -43,7 +43,7 @@ LightManager::LightManager() {
 	m_pClusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), ResourceState::UNORDERED_ACCESS, false, true, false);
 	m_pClusterBuffer->SetName(L"lightingClusterBuffer");
 
-	static const size_t avgPagesPerCluster = 2;
+	static const size_t avgPagesPerCluster = 10;
 	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
 	m_pLightPagesBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), ResourceState::UNORDERED_ACCESS, false, true, false);
 	m_pLightPagesBuffer->SetName(L"lightPagesBuffer");

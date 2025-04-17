@@ -130,7 +130,7 @@ struct LightInfo {
 	unsigned int pad[1];
 };
 
-#define LIGHTS_PER_PAGE 50
+#define LIGHTS_PER_PAGE 10
 struct LightPage {
     unsigned int ptrNextPage;
     unsigned int numLightsInPage;
