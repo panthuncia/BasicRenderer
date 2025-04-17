@@ -48,21 +48,21 @@ private:
 	void ReleaseData(size_t size, size_t offset);
 	void GrowBuffer(size_t newCapacity);
 
-	size_t m_currentCapacity = 0;
-	std::shared_ptr<Buffer> m_uploadBuffer;
-	std::vector<MemoryBlock> m_memoryBlocks;
+	size_t                 m_currentCapacity = 0;
+	size_t                 m_headOffset      = 0;   // oldest in flight allocation
+	size_t                 m_tailOffset      = 0;   // where next allocation comes from
+	std::vector<size_t>    m_frameStart;            // for each frame, the tailOffset at frame start
+
+	std::shared_ptr<Buffer>         m_uploadBuffer;
+	uint8_t                         m_numFramesInFlight = 0;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
 
 	std::function<uint8_t()> getNumFramesInFlight;
 	std::vector<ResourceUpdate> m_resourceUpdates;
-	std::vector<std::vector<ReleaseRequest>> m_pendingReleases;
 
 	std::vector<ResourceCopy> queuedResourceCopies;
-
-	uint8_t m_numFramesInFlight = 0;
-
 };
 
 inline UploadManager& UploadManager::GetInstance() {

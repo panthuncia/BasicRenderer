@@ -10,132 +10,90 @@
 
 void UploadManager::Initialize() {
 	auto& device = DeviceManager::GetInstance().GetDevice();
-    unsigned int initialCapacity = 10000;
-	m_currentCapacity = initialCapacity;
-	m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, initialCapacity, true, false);
-    m_memoryBlocks.push_back({ 0, initialCapacity, true });
-    auto& manager = DeviceManager::GetInstance();
 
-	m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-	m_pendingReleases.resize(m_numFramesInFlight);
+	m_numFramesInFlight = SettingsManager::GetInstance()
+		.getSettingGetter<uint8_t>("numFramesInFlight")();
+
+	m_currentCapacity = 1024 * 1024 * 4; // 4MB
+	m_uploadBuffer = Buffer::CreateShared(
+		device.Get(),
+		ResourceCPUAccessType::WRITE,
+		m_currentCapacity,
+		/*isUpload*/true,
+		/*isReadBack*/false
+	);
+
+	// ring buffer pointers
+	m_headOffset = 0;
+	m_tailOffset = 0;
+	m_frameStart.assign(m_numFramesInFlight, 0);
+
+	// create one allocator+list per frame
 	for (int i = 0; i < m_numFramesInFlight; i++) {
-		ComPtr<ID3D12CommandAllocator> allocator;
-		ComPtr<ID3D12GraphicsCommandList> commandList;
-		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-		commandList->Close();
-		m_commandAllocators.push_back(allocator);
-		m_commandLists.push_back(commandList);
+		ComPtr<ID3D12CommandAllocator> alloc;
+		ComPtr<ID3D12GraphicsCommandList> list;
+		ThrowIfFailed(device->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc)));
+		ThrowIfFailed(device->CreateCommandList(
+			0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+			alloc.Get(), nullptr, IID_PPV_ARGS(&list)));
+		list->Close();
+
+		m_commandAllocators.push_back(alloc);
+		m_commandLists.push_back(list);
 	}
 
-    getNumFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
-    m_numFramesInFlight = getNumFramesInFlight();
+	getNumFramesInFlight =
+		SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
 }
 
 void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset) {
-	//auto view = BufferView::CreateShared(m_uploadBuffer.get(), 0, size, typeid(T));
+	// check space before wrap
+	auto freeAtEnd = (m_headOffset > m_tailOffset)
+		? m_headOffset - m_tailOffset
+		: m_currentCapacity - m_tailOffset;
 
-	size_t requiredSize = size;
+	size_t uploadOffset = 0;
+	if (freeAtEnd >= size) {
+		// allocate straight
+		uploadOffset = m_tailOffset;
+		m_tailOffset += size;
+	} else {
+		// try wrapping to front
+		if (m_headOffset < size) {
+			// not enough free space anywhere, grow
+			GrowBuffer(m_currentCapacity + (std::max)(m_currentCapacity, size));
+			return UploadData(data, size, resourceToUpdate, dataBufferOffset);
+		}
+		// wrap
+		uploadOffset = 0;
+		m_tailOffset = size;
+	}
 
-	// Search for a free block
-    for (auto it = m_memoryBlocks.begin(); it != m_memoryBlocks.end(); ++it)
-    {
-        if (it->isFree && it->size >= requiredSize)
-        {
-            size_t remainingSize = it->size - requiredSize;
-            size_t offset = it->offset;
+	uint8_t* mapped = nullptr;
+	CD3DX12_RANGE readRange(0,0);
+	m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&mapped));
+	memcpy(mapped + uploadOffset, data, size);
+	m_uploadBuffer->m_buffer->Unmap(0, nullptr);
 
-            it->isFree = false;
-            it->size = requiredSize;
-
-            if (remainingSize > 0)
-            {
-                // Split the block
-                m_memoryBlocks.insert(it + 1, { offset + requiredSize, remainingSize, true });
-            }
-
-			// Copy the data to the upload buffer
-            unsigned char* mappedData = nullptr;
-			CD3DX12_RANGE readRange(0, 0);
-			m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&mappedData));
-
-			memcpy(mappedData + offset, data, size);
-
-			m_uploadBuffer->m_buffer->Unmap(0, nullptr);
-
-
-			ResourceUpdate update;
-			update.size = size;
-			update.resourceToUpdate = resourceToUpdate;
-			update.uploadBuffer = m_uploadBuffer;
-			update.uploadBufferOffset = offset;
-			update.dataBufferOffset = dataBufferOffset;
-			m_resourceUpdates.push_back(update);
-
-			return;
-        }
-    }
-
-    // No suitable block found, need to grow the buffer
-
-    // Delete the last block if it is free
-    size_t newBlockSize = (std::max)(m_currentCapacity, requiredSize);
-    size_t growBy = newBlockSize;
-    if (!m_memoryBlocks.empty() && m_memoryBlocks.back().isFree)
-    {
-        growBy -= m_memoryBlocks.back().size;
-        m_memoryBlocks.pop_back();
-    }
-    size_t newCapacity = m_currentCapacity + growBy;
-
-    GrowBuffer(newCapacity);
-    //spdlog::info("Growing buffer to {} bytes", newCapacity);
-    // Try allocating again
-    UploadData(data, size, resourceToUpdate, dataBufferOffset);
-}
-
-void UploadManager::ReleaseData(size_t size, size_t offset) {
-
-    // Find the block
-    for (auto it = m_memoryBlocks.begin(); it != m_memoryBlocks.end(); ++it)
-    {
-        if (it->offset == offset && it->size == size && !it->isFree)
-        {
-            it->isFree = true;
-
-            // Coalesce with previous block if free
-            if (it != m_memoryBlocks.begin())
-            {
-                auto prevIt = it - 1;
-                if (prevIt->isFree)
-                {
-                    prevIt->size += it->size;
-                    m_memoryBlocks.erase(it);
-                    it = prevIt;
-                }
-            }
-
-            // Coalesce with next block if free
-            if ((it + 1) != m_memoryBlocks.end())
-            {
-                auto nextIt = it + 1;
-                if (nextIt->isFree)
-                {
-                    it->size += nextIt->size;
-                    m_memoryBlocks.erase(nextIt);
-                }
-            }
-
-            break;
-        }
-    }
+	// queue up the GPU copy
+	ResourceUpdate update;
+	update.size = size;
+	update.resourceToUpdate = resourceToUpdate;
+	update.uploadBuffer = m_uploadBuffer;
+	update.uploadBufferOffset = uploadOffset;
+	update.dataBufferOffset = dataBufferOffset;
+	m_resourceUpdates.push_back(update);
 }
 
 void UploadManager::ProcessDeferredReleases(uint8_t frameIndex) {
-	for (const auto& request : m_pendingReleases[frameIndex]) {
-		ReleaseData(request.size, request.offset);
-	}
-	m_pendingReleases[frameIndex].clear();
+	// reclaim the region that frameIndex last allocated
+	m_headOffset = m_frameStart[frameIndex];
+
+	// record the start of this frame’s allocations
+	m_frameStart[frameIndex] = m_tailOffset;
+
+	m_commandAllocators[frameIndex]->Reset();
 }
 
 void UploadManager::GrowBuffer(size_t newCapacity) {
@@ -143,12 +101,8 @@ void UploadManager::GrowBuffer(size_t newCapacity) {
 
     DeletionManager::GetInstance().MarkForDelete(m_uploadBuffer);
     m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, newCapacity, true, false);
-    m_memoryBlocks.clear();
-    m_memoryBlocks.push_back({ 0, newCapacity, true });
+
 	m_currentCapacity = newCapacity;
-	for (auto& vec : m_pendingReleases) {
-		vec.clear(); // Pending releases are no longer valid
-	}
 }
 
 void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue) {
@@ -212,11 +166,6 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 	ID3D12CommandList* commandLists[] = { commandList.Get() };
 	queue->ExecuteCommandLists(1, commandLists);
 
-	for (auto& update : m_resourceUpdates) {
-		if (update.uploadBuffer == m_uploadBuffer) { // If these are not the same, the upload buffer was reallocated and will be deleted anyway
-			m_pendingReleases[frameIndex].push_back({ update.size, update.uploadBufferOffset });
-		}
-	}
 	m_resourceUpdates.clear();
 }
 

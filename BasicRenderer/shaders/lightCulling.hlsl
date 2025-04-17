@@ -82,6 +82,7 @@ void CSMain(uint3 groupID : SV_GroupID,
                 break;
             }
             lightPages[pageIndex].ptrNextPage = LIGHT_PAGE_ADDRESS_NULL;
+            lightPages[pageIndex].numLightsInPage = 0;
             cluster.ptrFirstPage = pageIndex;
             numLightsInPage = 0;
         }
@@ -96,6 +97,7 @@ void CSMain(uint3 groupID : SV_GroupID,
                 break;
             }
             lightPages[pageIndex].ptrNextPage = old;
+            lightPages[pageIndex].numLightsInPage = 0;
             cluster.ptrFirstPage = pageIndex;
             numLightsInPage = 0;
         }
