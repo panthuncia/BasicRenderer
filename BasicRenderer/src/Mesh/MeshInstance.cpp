@@ -7,16 +7,23 @@ BufferView* MeshInstance::GetPostSkinningVertexBufferView() {
 
 void MeshInstance::SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> perMeshInstanceBufferView) {
 	m_postSkinningVertexBufferView = std::move(postSkinningVertexBufferView);
-	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = m_postSkinningVertexBufferView->GetOffset();
 	m_perMeshInstanceBufferView = std::move(perMeshInstanceBufferView);
+	if (m_postSkinningVertexBufferView == nullptr) {
+		return; // no need to update
+	}
+	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = m_postSkinningVertexBufferView->GetOffset();
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}
 }
 
 void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView) {
-	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = m_mesh->GetPostSkinningVertexBufferView()->GetOffset();
 	m_perMeshInstanceBufferView = std::move(perMeshInstanceBufferView);
+	auto postSkinningView = m_mesh->GetPostSkinningVertexBufferView();
+	if (postSkinningView == nullptr || m_perMeshInstanceBufferView == nullptr) {
+		return; // no need to update
+	}
+	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = postSkinningView->GetOffset();
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}

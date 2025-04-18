@@ -301,6 +301,7 @@ void DX12Renderer::SetSettings() {
 		ResourceManager::GetInstance().SetOutputType(newValue);
 		});
 	settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
+		ToggleMeshShaders(newValue);
 		rebuildRenderGraph = true;
 		});
 	settingsManager.addObserver<bool>("enableWireframe", [this](const bool& newValue) {
@@ -324,6 +325,69 @@ void DX12Renderer::SetSettings() {
 		});
 
     m_numFramesInFlight = getNumFramesInFlight();
+}
+
+void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
+    // We need to:
+    // 1. Remove all meshes in the global mesh library from the mesh manager
+	// 2. Re-add them to the mesh manager
+    // 3. Get all mesh instances by querying the ECS
+	// 4. Remove and re-add them to the mesh manager
+
+	auto& world = ECSManager::GetInstance().GetWorld();
+	auto& meshLibrary = world.get_mut<Components::GlobalMeshLibrary>()->meshes;
+
+	// Remove all meshes from the mesh manager
+	for (auto& meshPair : meshLibrary) {
+		auto& mesh = meshPair.second;
+		m_pMeshManager->RemoveMesh(mesh.get());
+	}
+	// Re-add them to the mesh manager
+	for (auto& meshPair : meshLibrary) {
+		auto& mesh = meshPair.second;
+        MaterialBuckets bucket;
+        switch (mesh->material->m_blendState) {
+        case BlendState::BLEND_STATE_OPAQUE:
+			bucket = MaterialBuckets::Opaque;
+			break;
+		case BlendState::BLEND_STATE_MASK:
+			bucket = MaterialBuckets::AlphaTest;
+			break;
+		case BlendState::BLEND_STATE_BLEND:
+			bucket = MaterialBuckets::Blend;
+			break;
+        }
+        m_pMeshManager->AddMesh(mesh, bucket, useMeshShaders);
+	}
+
+	// Get all active mesh instances by querying the ECS
+    auto query = world.query_builder<>().with<Components::RenderableObject>().with<Components::Active>()
+        .build();
+
+    query.each([&](flecs::entity entity) {
+        auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
+        auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
+        auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+
+        if (opaqueMeshInstances) {
+            for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
+                m_pMeshManager->RemoveMeshInstance(meshInstance.get());
+                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
+            }
+        }
+        if (alphaTestMeshInstances) {
+            for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
+                m_pMeshManager->RemoveMeshInstance(meshInstance.get());
+                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
+            }
+        }
+        if (blendMeshInstances) {
+            for (auto& meshInstance : blendMeshInstances->meshInstances) {
+                m_pMeshManager->RemoveMeshInstance(meshInstance.get());
+                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
+            }
+        }
+            });
 }
 
 void EnableShaderBasedValidation() {

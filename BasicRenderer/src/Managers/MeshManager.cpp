@@ -25,9 +25,11 @@ MeshManager::MeshManager() {
 	m_perMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, ResourceState::ALL_SRV, L"perMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 }
 
-void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
-	auto& vertices = mesh->GetVertices();
-	auto& skinningVertices = mesh->GetSkinningVertices();
+void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, bool useMeshletReorderedVertices) {
+	mesh->SetCurrentMeshManager(this);
+	auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
+	auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
+	auto numVertices = mesh->GetNumVertices(useMeshletReorderedVertices);
     if (vertices.empty()) {
         // Handle empty vertices case
 		throw std::runtime_error("Mesh vertices are empty");
@@ -40,11 +42,10 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
-		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), mesh->GetNumVertices() * skinningVertexByteSize, skinningVertexByteSize);
-		//postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
+		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), numVertices * skinningVertexByteSize, skinningVertexByteSize);
 	}
 	else {
-		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetNumVertices() * vertexByteSize, vertexByteSize);
+		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexByteSize, vertexByteSize);
 	}
 
 	auto& meshlets = mesh->GetMeshlets();
@@ -58,28 +59,61 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket) {
 	auto& meshletTriangles = mesh->GetMeshletTriangles();
 	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), sizeof(unsigned char));
 
-	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
-
-
 	// Per mesh buffer
 	auto perMeshBufferView = m_perMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
+
+	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
 }
 
-// TODO: finish
 void MeshManager::RemoveMesh(Mesh* mesh) {
+
+	// Things to remove:
+	// - Meshlet offsets
+	// - Meshlet vertices
+	// - Meshlet triangles
+	// - Pre-skinning vertices, if any
+	// - Post-skinning vertices
+
+	auto meshletOffsetsView = mesh->GetMeshletOffsetsBufferView();
+	if (meshletOffsetsView != nullptr) {
+		m_meshletOffsets->Deallocate(meshletOffsetsView);
+	}
+	auto meshletVerticesView = mesh->GetMeshletVerticesBufferView();
+	if (meshletVerticesView != nullptr) {
+		m_meshletIndices->Deallocate(meshletVerticesView);
+	}
+	auto meshletTrianglesView = mesh->GetMeshletTrianglesBufferView();
+	if (meshletTrianglesView != nullptr) {
+		m_meshletTriangles->Deallocate(meshletTrianglesView);
+	}
 	auto preSkinningView = mesh->GetPreSkinningVertexBufferView();
 	if (preSkinningView != nullptr) {
 		m_preSkinningVertices->Deallocate(preSkinningView);
 	}
+	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
+	if (postSkinningView != nullptr) {
+		m_postSkinningVertices->Deallocate(postSkinningView);
+	}
+	// Deallocate the per mesh buffer view
+	auto& perMeshBufferView = mesh->GetPerMeshBufferView();
+	if (perMeshBufferView != nullptr) {
+		m_perMeshBuffers->Deallocate(perMeshBufferView.get());
+	}
+
+	mesh->SetPerMeshBufferView(nullptr);
+	mesh->SetBufferViews(nullptr, nullptr, nullptr, nullptr, nullptr);
+	mesh->SetCurrentMeshManager(nullptr);
 }
 
-void MeshManager::AddMeshInstance(MeshInstance* mesh) {
+void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
-	auto& vertices = mesh->GetMesh()->GetVertices();
+	auto& vertices = useMeshletReorderedVertices ? mesh->GetMesh()->GetMeshletReorderedVertices() : mesh->GetMesh()->GetVertices();
+	auto numVertices = mesh->GetMesh()->GetNumVertices(useMeshletReorderedVertices);
+
 	auto vertexSize = mesh->GetMesh()->GetPerMeshCBData().vertexByteSize;
 	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
-		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), mesh->GetMesh()->GetNumVertices() * vertexSize, vertexSize);
+		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize);
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
 		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
 	}
@@ -90,7 +124,19 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh) {
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
-	m_postSkinningVertices->Deallocate(mesh->GetPostSkinningVertexBufferView());
+	
+	// Things to remove:
+	// - Post-skinning vertices
+	// - Per-mesh instance buffer
+
+	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
+	if (postSkinningView != nullptr) {
+		m_postSkinningVertices->Deallocate(postSkinningView);
+	}
+	auto perMeshInstanceBufferView = mesh->GetPerMeshInstanceBufferView();
+	if (perMeshInstanceBufferView != nullptr) {
+		m_perMeshInstanceBuffers->Deallocate(perMeshInstanceBufferView);
+	}
 	mesh->SetBufferViews(nullptr, nullptr);
 }
 

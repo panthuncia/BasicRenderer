@@ -16,6 +16,7 @@ public:
 
     //void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
     BufferView* GetPostSkinningVertexBufferView();
+	BufferView* GetPerMeshInstanceBufferView() { return m_perMeshInstanceBufferView.get(); }
 
 	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> perMeshInstanceBufferView);
     void SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView);

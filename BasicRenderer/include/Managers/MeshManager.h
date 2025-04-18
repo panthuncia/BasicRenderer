@@ -19,8 +19,8 @@ public:
 	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
-	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket);
-	void AddMeshInstance(MeshInstance* mesh);
+	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, bool useMeshletReorderedVertices);
+	void AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices);
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
 

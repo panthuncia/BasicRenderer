@@ -15,6 +15,7 @@
 class SkinningPass : public ComputePass {
 public:
 	SkinningPass() {
+		getMeshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader");
 	}
 
 	~SkinningPass() {
@@ -74,6 +75,7 @@ public:
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
+		auto meshShadersEnabled = getMeshShadersEnabled();
 
 		unsigned int perMeshConstants[NumPerMeshRootConstants] = {};
 		opaqueQuery.each([&](flecs::entity e, Components::OpaqueSkinned s, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances meshInstances) {
@@ -86,8 +88,9 @@ public:
 				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
-
-				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
+				
+				unsigned int numGroups = std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0);
+				commandList->Dispatch(numGroups, 1, 1);
 			}
 			});
 
@@ -102,7 +105,8 @@ public:
 				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
-				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
+				unsigned int numGroups = std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0);
+				commandList->Dispatch(numGroups, 1, 1);
 			}
 			});
 
@@ -117,7 +121,8 @@ public:
 				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
-				commandList->Dispatch(mesh.GetNumVertices(), 1, 1);
+				unsigned int numGroups = std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0);
+				commandList->Dispatch(numGroups, 1, 1);
 			}
 			});
 
@@ -164,4 +169,6 @@ private:
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> m_PSO;
+
+	std::function<bool()> getMeshShadersEnabled;
 };

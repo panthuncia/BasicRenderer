@@ -14,9 +14,11 @@
 
 std::atomic<uint64_t> Mesh::globalMeshCount = 0;
 
-Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::unique_ptr<std::vector<std::byte>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
     m_vertices = std::move(vertices);
-	m_skinningVertices = std::move(skinningVertices);
+	if (skinningVertices.has_value()) {
+		m_skinningVertices = std::move(skinningVertices.value());
+	}
 	m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
@@ -44,32 +46,25 @@ void Mesh::CreateVertexBuffer() {
 void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 	unsigned int maxVertices = 64;
 	unsigned int maxPrimitives = 64;
+
 	size_t maxMeshlets = meshopt_buildMeshletsBound(indices.size(), maxVertices, maxPrimitives);
+
+	m_meshlets.resize(maxMeshlets);
+	m_meshletVertices.resize(maxMeshlets * maxVertices);
+	m_meshletTriangles.resize(maxMeshlets * maxPrimitives * 3);
+
     m_meshlets = std::vector<meshopt_Meshlet>(maxMeshlets);
 	m_meshletVertices = std::vector<unsigned int>(maxMeshlets*maxVertices);
 	m_meshletTriangles = std::vector<unsigned char>(maxMeshlets * maxPrimitives * 3);
-    meshopt_buildMeshlets(m_meshlets.data(), m_meshletVertices.data(), m_meshletTriangles.data(), indices.data(), indices.size(), (float*)m_vertices->data(), m_vertices->size()/m_perMeshBufferData.vertexByteSize, m_perMeshBufferData.vertexByteSize, maxVertices, maxPrimitives, 0);
+    
+	auto meshletCount = meshopt_buildMeshlets(m_meshlets.data(), m_meshletVertices.data(), m_meshletTriangles.data(), indices.data(), indices.size(), (float*)m_vertices->data(), m_vertices->size()/m_perMeshBufferData.vertexByteSize, m_perMeshBufferData.vertexByteSize, maxVertices, maxPrimitives, 0);
+	m_meshlets.resize(meshletCount);
 }
 
 void Mesh::ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max) {
 	// Initialize min and max vectors
 	min.x = min.y = min.z = std::numeric_limits<float>::infinity();
 	max.x = max.y = max.z = -std::numeric_limits<float>::infinity();
-
-	// Loop through each vertex and update min and max
-	//for (const auto& v : vertices) {
-	//	// Update min
-	//	min.x = (std::min)(min.x, v.position.x);
-	//	min.y = (std::min)(min.y, v.position.y);
-	//	min.z = (std::min)(min.z, v.position.z);
-
-	//	// Update max
-	//	max.x = (std::max)(max.x, v.position.x);
-	//	max.y = (std::max)(max.y, v.position.y);
-	//	max.z = (std::max)(max.z, v.position.z);
-	//}
-
-	// Change to use new, interpereted byte buffer
 
 	unsigned int positionsByteStride = m_perMeshBufferData.vertexByteSize;
 	unsigned int positionsOffset = 0;
@@ -104,9 +99,53 @@ void Mesh::ComputeBoundingSphere(const std::vector<UINT32>& indices) {
 	m_perMeshBufferData.boundingSphere = sphere;
 }
 
+void Mesh::CreateMeshletReorderedVertices() {
+	const size_t meshletCount    = m_meshlets.size();
+	const size_t vertexByteSize  = m_perMeshBufferData.vertexByteSize;
+
+	size_t totalVerts = 0;
+	for (auto& ml : m_meshlets) {
+		totalVerts += ml.vertex_count;
+	}
+
+	m_meshletReorderedVertices.resize(totalVerts * vertexByteSize);
+	m_meshletReorderedSkinningVertices.resize(totalVerts * m_skinningVertexSize);
+
+	// Post-skinning vertices
+	std::byte* dst = m_meshletReorderedVertices.data();
+	for (const auto& ml : m_meshlets) {
+		for (unsigned int i = 0; i < ml.vertex_count; ++i) {
+			unsigned int globalIndex = 
+				m_meshletVertices[ml.vertex_offset + i];
+
+			std::byte* src = m_vertices->data()
+				+ globalIndex * vertexByteSize;
+
+			std::copy_n(src, vertexByteSize, dst);
+			dst += vertexByteSize;
+		}
+	}
+
+	// Skinning vertices, if we have them
+	std::byte* dstSkinning = m_meshletReorderedSkinningVertices.data();
+	if (m_skinningVertices) {
+		for (const auto& ml : m_meshlets) {
+			for (unsigned int i = 0; i < ml.vertex_count; ++i) {
+				unsigned int globalIndex =
+					m_meshletVertices[ml.vertex_offset + i];
+				std::byte* src = m_skinningVertices->data()
+					+ globalIndex * m_skinningVertexSize;
+				std::copy_n(src, m_skinningVertexSize, dstSkinning);
+				dstSkinning += m_skinningVertexSize;
+			}
+		}
+	}
+}
+
 void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
 
 	CreateMeshlets(indices);
+	CreateMeshletReorderedVertices();
     CreateVertexBuffer();
 	ComputeBoundingSphere(indices);
 
@@ -188,6 +227,9 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferVie
 	m_meshletBufferView = std::move(meshletBufferView);
 	m_meshletVerticesBufferView = std::move(meshletVerticesBufferView);
 	m_meshletTrianglesBufferView = std::move(meshletTrianglesBufferView);
+	if (m_meshletBufferView == nullptr || m_meshletVerticesBufferView == nullptr || m_meshletTrianglesBufferView == nullptr) {
+		return; // We're probably deleting the mesh
+	}
 	if (m_preSkinningVertexBufferView != nullptr) { // If the mesh is skinned
 		m_perMeshBufferData.vertexBufferOffset = m_preSkinningVertexBufferView->GetOffset();
 	}
@@ -198,7 +240,7 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferVie
 	m_perMeshBufferData.meshletVerticesBufferOffset = m_meshletVerticesBufferView->GetOffset() / 4;
 	m_perMeshBufferData.meshletTrianglesBufferOffset = m_meshletTrianglesBufferView->GetOffset();
 
-	if (m_pCurrentMeshManager != nullptr) {
+	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
 }

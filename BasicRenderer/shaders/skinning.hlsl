@@ -3,13 +3,13 @@
 #include "cbuffers.hlsli"
 
 [numthreads(64, 1, 1)]
-void CSMain(uint dispatchID : SV_DispatchThreadID) {
+void CSMain(uint3 dtid : SV_DispatchThreadID) {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
-    
-    if (dispatchID >= meshBuffer.numVertices) {
+    uint vertexOffsetInMesh = dtid.x;
+    if (vertexOffsetInMesh >= meshBuffer.numVertices) {
         return;
     }
     
@@ -21,8 +21,8 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
     
-    uint preSkinnedByteOffset = meshBuffer.vertexBufferOffset + dispatchID * meshBuffer.skinningVertexByteSize;
-    uint postSkinnedByteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset + dispatchID * meshBuffer.vertexByteSize;
+    uint preSkinnedByteOffset = meshBuffer.vertexBufferOffset + vertexOffsetInMesh * meshBuffer.skinningVertexByteSize;
+    uint postSkinnedByteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset + vertexOffsetInMesh * meshBuffer.vertexByteSize;
     
     Vertex input = LoadSkinningVertex(preSkinnedByteOffset, preSkinningVertexBuffer, meshBuffer.vertexFlags);
     
