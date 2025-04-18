@@ -122,6 +122,7 @@ private:
     void CreateRenderGraph();
     void SetSettings();
     void SetEnvironmentInternal(std::wstring name);
+	void ToggleMeshShaders(bool useMeshShaders);
 
     void WaitForFrame(uint8_t frameIndex);
     void SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t currentFrameIndex);

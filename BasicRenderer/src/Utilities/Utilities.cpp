@@ -75,7 +75,12 @@ std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) 
         }
     }
 
-    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningData), skinningVertexSize, meshData.indices, meshData.material, meshData.flags);
+    std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices;
+	if (hasJoints) {
+		skinningVertices = std::move(skinningData);
+	}
+
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, meshData.material, meshData.flags);
 }
 
 XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix) {

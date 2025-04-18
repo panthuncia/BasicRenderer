@@ -217,3 +217,8 @@ enum LightClusterRootConstants {
     LightPagesPoolSize,
 	NumLightClusterRootConstants
 };
+
+enum MiscRootConstants { // Used for pass-specific one-off constants
+	UintRootConstant0,
+	NumMiscRootConstants
+};

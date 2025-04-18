@@ -27,6 +27,7 @@ Scene::Scene(){
     getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
     getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
     setDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingSetter<std::vector<float>>("directionalLightCascadeSplits");
+	getMeshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader");
 
     //Initialize ECS scene
     auto& world = ECSManager::GetInstance().GetWorld();
@@ -148,14 +149,16 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 	auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
 	auto drawStats = world.get_mut<Components::DrawStats>();
 
+	bool useMeshletReorderedVertices = getMeshShadersEnabled();
+
 	if (opaqueMeshInstances) {
 		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
 		for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
 			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Opaque);
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Opaque, useMeshletReorderedVertices);
 			}
-			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
 		drawStats->numOpaqueDraws += opaqueMeshInstances->meshInstances.size();
 		drawStats->numDrawsInScene += opaqueMeshInstances->meshInstances.size();
@@ -165,9 +168,9 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 		for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
 			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::AlphaTest);
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::AlphaTest, useMeshletReorderedVertices);
 			}
-			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
 		drawStats->numAlphaTestDraws += alphaTestMeshInstances->meshInstances.size();
 		drawStats->numDrawsInScene += alphaTestMeshInstances->meshInstances.size();
@@ -177,9 +180,9 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 		for (auto& meshInstance : blendMeshInstances->meshInstances) {
 			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
-				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Blend);
+				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Blend, useMeshletReorderedVertices);
 			}
-			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get());
+			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
 		drawStats->numBlendDraws += blendMeshInstances->meshInstances.size();
 		drawStats->numDrawsInScene += blendMeshInstances->meshInstances.size();

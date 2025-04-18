@@ -56,4 +56,8 @@ cbuffer LightClusterInfo : register(b8) {
     uint lightPagesPoolSize;
 }
 
+cbuffer MiscRootConstants : register(b9) { // Used for pass-specific one-off constants
+    uint UintRootConstant0;
+}
+
 #endif // __CBUFFERS_HLSL__
