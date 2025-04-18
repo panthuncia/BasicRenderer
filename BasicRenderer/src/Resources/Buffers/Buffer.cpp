@@ -25,7 +25,7 @@ D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType) {
 Buffer::Buffer(
 	ID3D12Device* device, 
 	ResourceCPUAccessType accessType, 
-	uint32_t bufferSize, 
+	size_t bufferSize, 
 	bool upload, bool unorderedAccess) : 
 	GloballyIndexedResource(){
 	m_accessType = accessType;
@@ -62,6 +62,8 @@ Buffer::Buffer(
 
 	m_barrierGroups.numBufferBarrierGroups = 1;
 	m_barrierGroups.bufferBarriers = &m_barrierGroup;
+
+	m_size = bufferSize;
 }
 
 std::vector<D3D12_RESOURCE_BARRIER>& Buffer::GetTransitions(ResourceState fromState, ResourceState toState) {

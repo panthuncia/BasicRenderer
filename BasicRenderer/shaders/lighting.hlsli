@@ -161,11 +161,6 @@ float3 calculateLightContributionPBR(LightFragmentData light, LightingParameters
     
     lighting *= light.spotAttenuation;
     
-#if defined(PSO_PARALLAX)
-    float parallaxShadow = getParallaxShadow(parallaxTexture, parallaxSampler, TBN, uv, lightDir, viewDir, height, heightmapScale);
-    lighting *= parallaxShadow;
-#endif
-    
     return lighting * lightingParameters.albedo;
 }
 

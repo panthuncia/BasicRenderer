@@ -321,18 +321,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //    }
     //}
 
+	auto sanMiguel = LoadModel("models/san-miguel.obj");
 
     renderer.SetCurrentScene(baseScene);
+
+    renderer.GetCurrentScene()->AppendScene(sanMiguel->Clone());
+
     //mountainScene->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-	renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+	//renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+	//renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 1; i++) {
+	for (int i = 0; i < 0; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
@@ -343,7 +347,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
-    auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    //auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(bistro);

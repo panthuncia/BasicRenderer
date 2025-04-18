@@ -32,6 +32,12 @@ struct ReleaseRequest {
 	uint64_t offset;
 };
 
+struct UploadPage {
+	std::shared_ptr<Buffer> buffer;
+	size_t                  tailOffset = 0;
+};
+
+
 class UploadManager {
 public:
 	static UploadManager& GetInstance();
@@ -45,16 +51,18 @@ public:
 
 private:
 	UploadManager() = default;
-	void ReleaseData(size_t size, size_t offset);
-	void GrowBuffer(size_t newCapacity);
 
 	size_t                 m_currentCapacity = 0;
 	size_t                 m_headOffset      = 0;   // oldest in flight allocation
 	size_t                 m_tailOffset      = 0;   // where next allocation comes from
-	std::vector<size_t>    m_frameStart;            // for each frame, the tailOffset at frame start
+	std::vector<UploadPage>    m_pages;
+	size_t                     m_activePage = 0;
+	static constexpr size_t    kPageSize    = 256 * 1024 * 1024; // 256 MB
+	static constexpr size_t    kMaxPageSize = 4294967296; // 4 GB
+	static constexpr size_t	   maxSingleUploadSize = 4294967296; // 4 GB
+	std::vector<size_t>           m_frameStart;      // size = numFramesInFlight
 
-	std::shared_ptr<Buffer>         m_uploadBuffer;
-	uint8_t                         m_numFramesInFlight = 0;
+	uint8_t m_numFramesInFlight = 0;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;

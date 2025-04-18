@@ -15,13 +15,8 @@ void UploadManager::Initialize() {
 		.getSettingGetter<uint8_t>("numFramesInFlight")();
 
 	m_currentCapacity = 1024 * 1024 * 4; // 4MB
-	m_uploadBuffer = Buffer::CreateShared(
-		device.Get(),
-		ResourceCPUAccessType::WRITE,
-		m_currentCapacity,
-		/*isUpload*/true,
-		/*isReadBack*/false
-	);
+
+	m_pages.push_back({ Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, kPageSize, true, false), 0});
 
 	// ring buffer pointers
 	m_headOffset = 0;
@@ -45,64 +40,98 @@ void UploadManager::Initialize() {
 
 	getNumFramesInFlight =
 		SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
+
+	m_activePage = 0;
+	m_frameStart.resize(m_numFramesInFlight, 0);
 }
 
 void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset) {
-	// check space before wrap
-	auto freeAtEnd = (m_headOffset > m_tailOffset)
-		? m_headOffset - m_tailOffset
-		: m_currentCapacity - m_tailOffset;
 
-	size_t uploadOffset = 0;
-	if (freeAtEnd >= size) {
-		// allocate straight
-		uploadOffset = m_tailOffset;
-		m_tailOffset += size;
-	} else {
-		// try wrapping to front
-		if (m_headOffset < size) {
-			// not enough free space anywhere, grow
-			GrowBuffer(m_currentCapacity + (std::max)(m_currentCapacity, size));
-			return UploadData(data, size, resourceToUpdate, dataBufferOffset);
+	if (size > kPageSize) {
+		// break it into multiple sub uploads
+		size_t done     = 0;
+		size_t dstOffset = dataBufferOffset;
+		while (done < size) {
+			size_t chunk = (std::min)(size - done, kPageSize);
+			UploadData(
+				reinterpret_cast<const uint8_t*>(data) + done,
+				chunk,
+				resourceToUpdate,
+				dstOffset
+			);
+			done     += chunk;
+			dstOffset += chunk;
 		}
-		// wrap
-		uploadOffset = 0;
-		m_tailOffset = size;
+		return;
 	}
+
+	UploadPage* page = &m_pages[m_activePage];
+
+	// if it won’t fit in the rest of this page, open a new page
+	if (page->tailOffset + size > page->buffer->GetSize()) {
+		++m_activePage;
+		if (m_activePage >= m_pages.size()) {
+			// allocate another fresh page
+			size_t allocSize = std::max(kPageSize, size);
+			auto& device = DeviceManager::GetInstance().GetDevice();
+			m_pages.push_back({ Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, allocSize, true, false), 0});
+		}
+		page = &m_pages[m_activePage];
+		page->tailOffset = 0;
+	}
+
+	// now we're guaranteed space
+	size_t uploadOffset = page->tailOffset;
+	page->tailOffset += size;
 
 	uint8_t* mapped = nullptr;
 	CD3DX12_RANGE readRange(0,0);
-	m_uploadBuffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&mapped));
+	page->buffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&mapped));
 	memcpy(mapped + uploadOffset, data, size);
-	m_uploadBuffer->m_buffer->Unmap(0, nullptr);
+	page->buffer->m_buffer->Unmap(0, nullptr);
 
 	// queue up the GPU copy
 	ResourceUpdate update;
 	update.size = size;
 	update.resourceToUpdate = resourceToUpdate;
-	update.uploadBuffer = m_uploadBuffer;
+	update.uploadBuffer = page->buffer;
 	update.uploadBufferOffset = uploadOffset;
 	update.dataBufferOffset = dataBufferOffset;
 	m_resourceUpdates.push_back(update);
 }
 
-void UploadManager::ProcessDeferredReleases(uint8_t frameIndex) {
-	// reclaim the region that frameIndex last allocated
-	m_headOffset = m_frameStart[frameIndex];
+void UploadManager::ProcessDeferredReleases(uint8_t frameIndex)
+{
+	// The page where this frame started uploading
+	size_t retiringStart = m_frameStart[frameIndex];
 
-	// record the start of this frame’s allocations
-	m_frameStart[frameIndex] = m_tailOffset;
+	// Compute the minimum page start across all in flight frames
+	size_t minStart = retiringStart;
+	for (uint8_t f = 0; f < m_numFramesInFlight; ++f) {
+		if (f == frameIndex) continue;
+		minStart = std::min(minStart, m_frameStart[f]);
+	}
+
+	// Any page with index < minStart is no longer needed by anybody.
+	// But leave at least one page alive
+	if (minStart > 0) {
+		// clamp so we don't delete our last page
+		size_t eraseCount = std::min(minStart, m_pages.size() - 1);
+		if (eraseCount > 0) {
+			m_pages.erase(m_pages.begin(), m_pages.begin() + eraseCount);
+
+			// 4) Shift all of our indices down by eraseCount
+			m_activePage -= eraseCount;
+			for (auto &start : m_frameStart) {
+				start = (start >= eraseCount ? start - eraseCount : 0);
+			}
+		}
+	}
+
+	// Now record "this frame's" new begin page for the next round:
+	m_frameStart[frameIndex] = m_activePage;
 
 	m_commandAllocators[frameIndex]->Reset();
-}
-
-void UploadManager::GrowBuffer(size_t newCapacity) {
-    auto& device = DeviceManager::GetInstance().GetDevice();
-
-    DeletionManager::GetInstance().MarkForDelete(m_uploadBuffer);
-    m_uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, newCapacity, true, false);
-
-	m_currentCapacity = newCapacity;
 }
 
 void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue) {

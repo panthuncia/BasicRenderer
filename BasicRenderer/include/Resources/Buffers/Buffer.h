@@ -24,7 +24,7 @@ public:
 	static std::shared_ptr<Buffer> CreateShared(
 		ID3D12Device* device,
 		ResourceCPUAccessType accessType, 
-		uint32_t bufferSize, 
+		size_t bufferSize, 
 		bool upload,
 		bool unorderedAccess) {
 		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
@@ -32,7 +32,7 @@ public:
 	static std::unique_ptr<Buffer> CreateUnique(
 		ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
-		uint32_t bufferSize,
+		size_t bufferSize,
 		bool upload,
 		bool unorderedAccess) {
 		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
@@ -45,7 +45,7 @@ public:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
 	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState);
 	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
-
+	size_t GetSize() const { return m_size; }
 
 	ID3D12Resource* GetAPIResource() const override { return m_buffer.Get(); }
 protected:
@@ -59,9 +59,10 @@ private:
 	D3D12_BUFFER_BARRIER m_bufferBarrier;
 	D3D12_BARRIER_GROUP m_barrierGroup = {};
 	BarrierGroups m_barrierGroups;
+	size_t m_size = 0;
 
 	Buffer(ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
-		uint32_t bufferSize, 
+		size_t bufferSize, 
 		bool upload = false, bool unorderedAccess = false);
 };
