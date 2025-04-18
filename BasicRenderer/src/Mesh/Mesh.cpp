@@ -254,3 +254,10 @@ void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 	}
 	//skeleton->userIDs.push_back(localID);
 }
+
+void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {
+	m_perMeshBufferData.numVertices = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+}

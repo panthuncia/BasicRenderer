@@ -331,8 +331,9 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
     // We need to:
     // 1. Remove all meshes in the global mesh library from the mesh manager
 	// 2. Re-add them to the mesh manager
-    // 3. Get all mesh instances by querying the ECS
-	// 4. Remove and re-add them to the mesh manager
+    // 3. Get all objects with mesh instances by querying the ECS
+	// 4. Remove and re-add all instances to the mesh manager
+	// 5. Remove and re-add all objects from the object manager to rebuild indirect draw info
 
 	auto& world = ECSManager::GetInstance().GetWorld();
 	auto& meshLibrary = world.get_mut<Components::GlobalMeshLibrary>()->meshes;
@@ -360,11 +361,12 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
         m_pMeshManager->AddMesh(mesh, bucket, useMeshShaders);
 	}
 
-	// Get all active mesh instances by querying the ECS
-    auto query = world.query_builder<>().with<Components::RenderableObject>().with<Components::Active>()
+	// Get all active objects with mesh instances by querying the ECS
+    auto query = world.query_builder<Components::RenderableObject, Components::ObjectDrawInfo>().with<Components::Active>()
         .build();
 
-    query.each([&](flecs::entity entity) {
+    world.defer_begin();
+    query.each([&](flecs::entity entity, const Components::RenderableObject& object, const Components::ObjectDrawInfo& drawInfo) {
         auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
         auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
         auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
@@ -387,7 +389,13 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
                 m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
             }
         }
+
+		// Remove and re-add all objects from the object manager to rebuild indirect draw info
+		m_pObjectManager->RemoveObject(&drawInfo);
+		auto newDrawInfo = m_pObjectManager->AddObject(object.perObjectCB, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
+		entity.set<Components::ObjectDrawInfo>(newDrawInfo);
             });
+    world.defer_end();
 }
 
 void EnableShaderBasedValidation() {

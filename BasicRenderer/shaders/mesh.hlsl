@@ -164,7 +164,7 @@ void MSMain(
 
     uint3 meshletIndices = uint3(b0, b1, b2);
     
-    uint vertOffset = meshlet.VertOffset + meshBuffer.meshletVerticesBufferOffset;
+    uint vertOffset = meshlet.VertOffset;
     
     if (uGroupThreadID < meshlet.VertCount) {
         //uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
