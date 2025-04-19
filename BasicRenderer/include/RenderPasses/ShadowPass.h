@@ -94,7 +94,7 @@ public:
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
-					auto pso = psoManager.GetPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+					auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 
 					unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -117,7 +117,7 @@ public:
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
-					auto pso = psoManager.GetPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
+					auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 
 					unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -140,7 +140,7 @@ public:
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
-					auto pso = psoManager.GetPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+					auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 
 					auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);

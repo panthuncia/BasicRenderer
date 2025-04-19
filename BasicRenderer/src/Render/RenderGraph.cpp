@@ -263,6 +263,11 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 		}
 
 		if (initialState != finalState) {
+
+			if (initialSyncState == ResourceSyncState::DRAW || initialSyncState == ResourceSyncState::PIXEL_SHADING || initialSyncState == ResourceSyncState::VERTEX_SHADING) {
+				initialSyncState = ResourceSyncState::ALL_SHADING; // Graphics-queue sync states are not compatible with compute queue, so sync with ALL_SHADING
+			}
+
 			transitions.push_back(ResourceTransition(resource, initialState, finalState, initialSyncState, finalSyncState));
 			transitionHistory[resource->GetName()] = batchIndex;
 		}

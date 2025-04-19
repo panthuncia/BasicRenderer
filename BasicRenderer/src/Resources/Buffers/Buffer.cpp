@@ -91,9 +91,9 @@ BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, Resource
 	if (prevState != currentState) {
 		throw(std::runtime_error("Buffer state mismatch"));
 	}
-	if (prevSyncState != currentSyncState) {
-		throw(std::runtime_error("Buffer sync state mismatch"));
-	}
+	//if (prevSyncState != currentSyncState) {
+	//	throw(std::runtime_error("Buffer sync state mismatch"));
+	//}
 	if (prevState == newState) {
 		throw(std::runtime_error("Useless transition"));
 	}

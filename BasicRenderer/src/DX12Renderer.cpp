@@ -38,6 +38,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "RenderPasses/ClusterGenerationPass.h"
 #include "RenderPasses/LightCullingPass.h"
+#include "RenderPasses/ZPrepass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1014,12 +1015,75 @@ void DX12Renderer::CreateRenderGraph() {
     auto& cameraBuffer = cameraManager->GetCameraBuffer();
     newGraph->AddResource(cameraBuffer);
 
+
+    // Frustrum culling goes before Z prepass
+    bool indirect = getIndirectDrawsEnabled();
+    if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
+        indirect = false;
+    }
+    std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
+    if (indirect) {
+        // Clear UAVs
+        indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
+        newGraph->AddResource(indirectCommandBufferResourceGroup);
+        auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
+        RenderPassParameters clearUAVsPassParameters;
+        clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
+        newGraph->AddRenderPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
+
+        // Compute pass
+        auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
+        ComputePassParameters frustrumCullingPassParameters;
+        frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
+        frustrumCullingPassParameters.shaderResources.push_back(perMeshBuffer);
+        frustrumCullingPassParameters.shaderResources.push_back(cameraBuffer);
+        frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
+        newGraph->AddComputePass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
+    }
+
+    // Skinning comes before Z prepass
+    auto skinningPass = std::make_shared<SkinningPass>();
+    ComputePassParameters skinningPassParameters;
+    skinningPassParameters.shaderResources.push_back(perObjectBuffer);
+    skinningPassParameters.shaderResources.push_back(perMeshBuffer);
+    skinningPassParameters.shaderResources.push_back(preSkinningVertices);
+    skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
+    skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
+    newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
+
+
+    // Z prepass goes before light clustering for when active cluster determination is implemented
+    auto zPrepassParameters = RenderPassParameters();
+    zPrepassParameters.shaderResources.push_back(perObjectBuffer);
+    zPrepassParameters.shaderResources.push_back(perMeshBuffer);
+    zPrepassParameters.shaderResources.push_back(postSkinningVertices);
+    zPrepassParameters.shaderResources.push_back(cameraBuffer);
+
+    std::shared_ptr<ZPrepass> zPrepass = nullptr;
+
+    if (useMeshShaders) {
+        zPrepassParameters.shaderResources.push_back(meshResourceGroup);
+        if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
+            zPrepass = std::make_shared<ZPrepass>(getWireframeEnabled(), true, true);
+            zPrepassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
+        }
+        else {
+            zPrepass = std::make_shared<ZPrepass>(getWireframeEnabled(), true, false);
+        }
+    }
+    else {
+        zPrepass = std::make_shared<ZPrepass>(getWireframeEnabled(), false, false);
+    }
+
+	newGraph->AddRenderPass(zPrepass, zPrepassParameters, "ZPrepass");
+
+
     auto& lightBufferResourceGroup = m_pLightManager->GetLightBufferResourceGroup();
     newGraph->AddResource(lightBufferResourceGroup);
 
     std::shared_ptr<Buffer> clusterBuffer;
-	std::shared_ptr<Buffer> lightPagesBuffer;
-    if (m_clusteredLighting) {
+    std::shared_ptr<Buffer> lightPagesBuffer;
+	if (m_clusteredLighting) { // TODO: active cluster determination using Z prepass
         // Frustrum cluster creation
         clusterBuffer = m_pLightManager->GetClusterBuffer();
         lightPagesBuffer = m_pLightManager->GetLightPagesBuffer();
@@ -1037,7 +1101,7 @@ void DX12Renderer::CreateRenderGraph() {
         clusterPassParameters.unorderedAccessViews.push_back(clusterBuffer);
         //clusterPassParameters.constantBuffers.push_back(perFrameBuffer);
         newGraph->AddComputePass(clusterPass, clusterPassParameters, "ClusterGenerationPass");
-
+ 
         // Light cluster culling
         auto lightCullingPass = std::make_shared<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
         ComputePassParameters lightCullingPassParameters;
@@ -1049,41 +1113,6 @@ void DX12Renderer::CreateRenderGraph() {
         //lightCullingPassParameters.constantBuffers.push_back(perFrameBuffer);
 
         newGraph->AddComputePass(lightCullingPass, lightCullingPassParameters, "LightCullingPass");
-    }
-
-    // Skinning
-	auto skinningPass = std::make_shared<SkinningPass>();
-	ComputePassParameters skinningPassParameters;
-	skinningPassParameters.shaderResources.push_back(perObjectBuffer);
-	skinningPassParameters.shaderResources.push_back(perMeshBuffer);
-	skinningPassParameters.shaderResources.push_back(preSkinningVertices);
-    skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
-	skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
-	newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
-
-    // Frustrum culling
-	bool indirect = getIndirectDrawsEnabled();
-	if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
-		indirect = false;
-	}
-	std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
-    if (indirect) {
-        // Clear UAVs
-        indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
-        newGraph->AddResource(indirectCommandBufferResourceGroup);
-        auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
-        RenderPassParameters clearUAVsPassParameters;
-        clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
-        newGraph->AddRenderPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
-
-        // Compute pass
-        auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
-        ComputePassParameters frustrumCullingPassParameters;
-        frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
-        frustrumCullingPassParameters.shaderResources.push_back(perMeshBuffer);
-		frustrumCullingPassParameters.shaderResources.push_back(cameraBuffer);
-        frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
-        newGraph->AddComputePass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
     }
 
     auto forwardPassParameters = RenderPassParameters();
@@ -1098,7 +1127,7 @@ void DX12Renderer::CreateRenderGraph() {
         forwardPassParameters.shaderResources.push_back(lightPagesBuffer);
     }
 
-    std::shared_ptr<RenderPass> forwardPass = nullptr;
+    std::shared_ptr<ForwardRenderPass> forwardPass = nullptr;
 
     if (useMeshShaders) {
         forwardPassParameters.shaderResources.push_back(meshResourceGroup);

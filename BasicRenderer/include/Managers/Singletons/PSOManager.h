@@ -56,6 +56,9 @@ public:
     ComPtr<ID3D12PipelineState> GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
     ComPtr<ID3D12PipelineState> GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
+	ComPtr<ID3D12PipelineState> GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+	ComPtr<ID3D12PipelineState> GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+
     ComPtr<ID3D12RootSignature> GetRootSignature();
 	ComPtr<ID3D12RootSignature> GetComputeRootSignature();
     void ReloadShaders();
@@ -77,6 +80,9 @@ private:
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_depthPSOCache;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshDepthPSOCache;
 
+    std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_shadowPSOCache;
+	std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_shadowMeshPSOCache;
+
     ComPtr<IDxcUtils> pUtils;
     ComPtr<IDxcCompiler3> pCompiler;
 	ComPtr<ID3D12PipelineState> debugPSO;
@@ -89,6 +95,9 @@ private:
 
     ComPtr<ID3D12PipelineState> CreateDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
     ComPtr<ID3D12PipelineState> CreateMeshDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+
+    ComPtr<ID3D12PipelineState> CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+	ComPtr<ID3D12PipelineState> CreateShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
     void createRootSignature();
     D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
