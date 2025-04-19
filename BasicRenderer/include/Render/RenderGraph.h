@@ -13,6 +13,8 @@
 #include "Resources/ResourceStates.h"
 
 class Resource;
+class RenderPassBuilder;
+class ComputePassBuilder;
 
 class RenderGraph {
 public:
@@ -24,10 +26,13 @@ public:
 	void Setup();
 	//void AllocateResources(RenderContext& context);
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false, ResourceState initialState = ResourceState::UNKNOWN);
-	void CreateResource(std::wstring name);
+	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
 	std::shared_ptr<RenderPass> GetRenderPassByName(const std::string& name);
 	std::shared_ptr<ComputePass> GetComputePassByName(const std::string& name);
+	RenderPassBuilder BuildRenderPass(std::string name);
+	ComputePassBuilder BuildComputePass(std::string name);
+
 private:
 	struct RenderPassAndResources {
 		std::shared_ptr<RenderPass> pass;

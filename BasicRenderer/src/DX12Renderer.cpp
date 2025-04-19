@@ -17,6 +17,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Render/RenderContext.h"
 #include "Render/RenderGraph.h"
+#include "Render/PassBuilders.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
@@ -984,24 +985,17 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 
 void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
+
     auto newGraph = std::make_unique<RenderGraph>();
 
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
-	newGraph->AddResource(meshResourceGroup);
-
     auto& perObjectBuffer = objectManager->GetPerObjectBuffers();
-	newGraph->AddResource(perObjectBuffer);
     auto& perMeshBuffer = meshManager->GetPerMeshBuffers();
-	newGraph->AddResource(perMeshBuffer);
-
 	auto& preSkinningVertices = meshManager->GetPreSkinningVertices();
 	auto& postSkinningVertices = meshManager->GetPostSkinningVertices();
 	auto& normalMatrixBuffer = objectManager->GetNormalMatrixBuffer();
-	newGraph->AddResource(preSkinningVertices);
-	newGraph->AddResource(postSkinningVertices);
-	newGraph->AddResource(normalMatrixBuffer);
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1013,106 +1007,80 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto& cameraManager = m_pCameraManager;
     auto& cameraBuffer = cameraManager->GetCameraBuffer();
-    newGraph->AddResource(cameraBuffer);
+    auto& lightBufferResourceGroup = m_pLightManager->GetLightBufferResourceGroup();
 
+    std::shared_ptr<Buffer> clusterBuffer;
+    std::shared_ptr<Buffer> lightPagesBuffer;
+    if (m_clusteredLighting) {
+        clusterBuffer = m_pLightManager->GetClusterBuffer();
+        lightPagesBuffer = m_pLightManager->GetLightPagesBuffer();
+        newGraph->AddResource(clusterBuffer, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(lightPagesBuffer, false, ResourceState::UNORDERED_ACCESS);
+    }
+    newGraph->AddResource(cameraBuffer);
+    newGraph->AddResource(lightBufferResourceGroup);
+    newGraph->AddResource(preSkinningVertices);
+    newGraph->AddResource(postSkinningVertices);
+    newGraph->AddResource(normalMatrixBuffer);
+    newGraph->AddResource(perMeshBuffer);
+    newGraph->AddResource(perObjectBuffer);
+    newGraph->AddResource(meshResourceGroup);
 
     // Frustrum culling goes before Z prepass
     bool indirect = getIndirectDrawsEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
         indirect = false;
     }
+
     std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
     if (indirect) {
         // Clear UAVs
         indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
-        auto clearUAVsPass = std::make_shared<ClearUAVsPass>();
-        RenderPassParameters clearUAVsPassParameters;
-        clearUAVsPassParameters.copyTargets.push_back(indirectCommandBufferResourceGroup);
-        newGraph->AddRenderPass(clearUAVsPass, clearUAVsPassParameters, "ClearUAVsPass");
 
-        // Compute pass
-        auto frustrumCullingPass = std::make_shared<FrustrumCullingPass>();
-        ComputePassParameters frustrumCullingPassParameters;
-        frustrumCullingPassParameters.shaderResources.push_back(perObjectBuffer);
-        frustrumCullingPassParameters.shaderResources.push_back(perMeshBuffer);
-        frustrumCullingPassParameters.shaderResources.push_back(cameraBuffer);
-        frustrumCullingPassParameters.unorderedAccessViews.push_back(indirectCommandBufferResourceGroup);
-        newGraph->AddComputePass(frustrumCullingPass, frustrumCullingPassParameters, "FrustrumCullingPass");
+        newGraph->BuildRenderPass("ClearUAVsPass")
+            .WithCopyDest(indirectCommandBufferResourceGroup)
+            .Build<ClearUAVsPass>();
+
+		newGraph->BuildComputePass("FrustrumCullingPass")
+			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+			.WithUnorderedAccess(indirectCommandBufferResourceGroup)
+			.Build<FrustrumCullingPass>();
     }
 
     // Skinning comes before Z prepass
-    auto skinningPass = std::make_shared<SkinningPass>();
-    ComputePassParameters skinningPassParameters;
-    skinningPassParameters.shaderResources.push_back(perObjectBuffer);
-    skinningPassParameters.shaderResources.push_back(perMeshBuffer);
-    skinningPassParameters.shaderResources.push_back(preSkinningVertices);
-    skinningPassParameters.shaderResources.push_back(normalMatrixBuffer);
-    skinningPassParameters.unorderedAccessViews.push_back(postSkinningVertices);
-    newGraph->AddComputePass(skinningPass, skinningPassParameters, "SkinningPass");
-
+	newGraph->BuildComputePass("SkinningPass")
+		.WithShaderResource(perObjectBuffer, perMeshBuffer, preSkinningVertices, normalMatrixBuffer)
+		.WithUnorderedAccess(postSkinningVertices)
+		.Build<SkinningPass>();
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
-    auto zPrepassParameters = RenderPassParameters();
-    zPrepassParameters.shaderResources.push_back(perObjectBuffer);
-    zPrepassParameters.shaderResources.push_back(perMeshBuffer);
-    zPrepassParameters.shaderResources.push_back(postSkinningVertices);
-    zPrepassParameters.shaderResources.push_back(cameraBuffer);
-
-    std::shared_ptr<ZPrepass> zPrepass = nullptr;
-
-    if (useMeshShaders) {
-        zPrepassParameters.shaderResources.push_back(meshResourceGroup);
-        if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-            zPrepass = std::make_shared<ZPrepass>(getWireframeEnabled(), true, true);
-            zPrepassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
-        }
-        else {
-            zPrepass = std::make_shared<ZPrepass>(getWireframeEnabled(), true, false);
-        }
-    }
-    else {
-        zPrepass = std::make_shared<ZPrepass>(getWireframeEnabled(), false, false);
-    }
-
-	newGraph->AddRenderPass(zPrepass, zPrepassParameters, "ZPrepass");
+    auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer);
+	if (useMeshShaders) {
+		zBuilder.WithShaderResource(meshResourceGroup);
+		if (indirect) {
+			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+		}
+	}
+	zBuilder.Build<ZPrepass>(getWireframeEnabled(), useMeshShaders, indirect);
 
 
-    auto& lightBufferResourceGroup = m_pLightManager->GetLightBufferResourceGroup();
-    newGraph->AddResource(lightBufferResourceGroup);
-
-    std::shared_ptr<Buffer> clusterBuffer;
-    std::shared_ptr<Buffer> lightPagesBuffer;
-	if (m_clusteredLighting) { // TODO: active cluster determination using Z prepass
-        // Frustrum cluster creation
-        clusterBuffer = m_pLightManager->GetClusterBuffer();
-        lightPagesBuffer = m_pLightManager->GetLightPagesBuffer();
-        newGraph->AddResource(clusterBuffer, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(lightPagesBuffer, false, ResourceState::UNORDERED_ACCESS);
-
+	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
         // light pages counter
         auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
         lightPagesCounter->SetName(L"Light Pages Counter");
         newGraph->AddResource(lightPagesCounter, false, ResourceState::UNORDERED_ACCESS);
 
-        auto clusterPass = std::make_shared<ClusterGenerationPass>(clusterBuffer);
-        ComputePassParameters clusterPassParameters;
-        clusterPassParameters.shaderResources.push_back(cameraBuffer);
-        clusterPassParameters.unorderedAccessViews.push_back(clusterBuffer);
-        //clusterPassParameters.constantBuffers.push_back(perFrameBuffer);
-        newGraph->AddComputePass(clusterPass, clusterPassParameters, "ClusterGenerationPass");
- 
-        // Light cluster culling
-        auto lightCullingPass = std::make_shared<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
-        ComputePassParameters lightCullingPassParameters;
-        lightCullingPassParameters.shaderResources.push_back(cameraBuffer);
-        lightCullingPassParameters.shaderResources.push_back(lightBufferResourceGroup);
-        lightCullingPassParameters.unorderedAccessViews.push_back(clusterBuffer);
-        lightCullingPassParameters.unorderedAccessViews.push_back(lightPagesBuffer);
-        lightCullingPassParameters.unorderedAccessViews.push_back(lightPagesCounter);
-        //lightCullingPassParameters.constantBuffers.push_back(perFrameBuffer);
+		newGraph->BuildComputePass("ClusterGenerationPass")
+			.WithShaderResource(cameraBuffer)
+			.WithUnorderedAccess(clusterBuffer)
+			.Build<ClusterGenerationPass>(clusterBuffer);
 
-        newGraph->AddComputePass(lightCullingPass, lightCullingPassParameters, "LightCullingPass");
+		newGraph->BuildComputePass("LightCullingPass")
+			.WithShaderResource(cameraBuffer, lightBufferResourceGroup)
+			.WithUnorderedAccess(clusterBuffer, lightPagesBuffer, lightPagesCounter)
+			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
     }
 
     auto forwardPassParameters = RenderPassParameters();

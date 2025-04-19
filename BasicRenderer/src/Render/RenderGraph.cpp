@@ -5,6 +5,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ReadbackManager.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "Render/PassBuilders.h"
 
 static bool mapHasResourceNotInState(std::unordered_map<std::wstring, ResourceState>& map, std::wstring resourceName, ResourceState state) {
     return mapHasKeyNotAsValue<std::wstring, ResourceState>(map, resourceName, state);
@@ -786,4 +787,11 @@ void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::wstring, Re
         }
     }
 	batches.push_back(std::move(loopBatch));
+}
+
+RenderPassBuilder RenderGraph::BuildRenderPass(std::string name) {
+	return RenderPassBuilder(*this, name);
+}
+ComputePassBuilder RenderGraph::BuildComputePass(std::string name) {
+	return ComputePassBuilder(*this, name);
 }
