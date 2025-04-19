@@ -5,61 +5,127 @@
 class RenderPassBuilder {
 public:
     // Variadic entry points
+
+    //First set, callable on Lvalues
     template<typename... Args>
-    RenderPassBuilder& WithShaderResource(Args&&... args) {
+    RenderPassBuilder& WithShaderResource(Args&&... args) & {
         (addShaderResource(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithRenderTarget(Args&&... args) {
+    RenderPassBuilder& WithRenderTarget(Args&&... args) & {
         (addRenderTarget(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithDepthTarget(Args&&... args) {
+    RenderPassBuilder& WithDepthTarget(Args&&... args) & {
         (addDepthTarget(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithConstantBuffer(Args&&... args) {
+    RenderPassBuilder& WithConstantBuffer(Args&&... args) & {
         (addConstantBuffer(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithUnorderedAccess(Args&&... args) {
+    RenderPassBuilder& WithUnorderedAccess(Args&&... args) & {
         (addUnorderedAccess(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithCopyDest(Args&&... args) {
+    RenderPassBuilder& WithCopyDest(Args&&... args) & {
         (addCopyDest(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithCopySource(Args&&... args) {
+    RenderPassBuilder& WithCopySource(Args&&... args) & {
         (addCopySource(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithIndirectArguments(Args&&... args) {
+    RenderPassBuilder& WithIndirectArguments(Args&&... args) & {
         (addIndirectArguments(std::forward<Args>(args)), ...);
         return *this;
     }
 
+    // Second set, callable on temporaries
+    template<typename... Args>
+    RenderPassBuilder WithShaderResource(Args&&... args) && {
+        (addShaderResource(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithRenderTarget(Args&&... args) && {
+        (addRenderTarget(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithDepthTarget(Args&&... args) && {
+        (addDepthTarget(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithConstantBuffer(Args&&... args) && {
+        (addConstantBuffer(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithUnorderedAccess(Args&&... args) && {
+        (addUnorderedAccess(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithCopyDest(Args&&... args) && {
+        (addCopyDest(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithCopySource(Args&&... args) && {
+        (addCopySource(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithIndirectArguments(Args&&... args) && {
+        (addIndirectArguments(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    // First build, callable on Lvalues
     template<typename PassT, typename... CtorArgs>
-    std::shared_ptr<PassT> Build(CtorArgs&&... args) {
-        // construct the pass
+    RenderPassBuilder& Build(CtorArgs&&... args) & {
+        ensureNotBuilt();
+        built_ = true;
+
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        // record into the graph
         graph.AddRenderPass(pass, params, passName);
-        return pass;
+
+        return *this;
+    }
+
+	// Second build, callable on temporaries
+    template<typename PassT, typename... CtorArgs>
+    RenderPassBuilder Build(CtorArgs&&... args) && {
+        ensureNotBuilt();
+        built_ = true;
+
+        auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
+        graph.AddRenderPass(pass, params, passName);
+
+        return std::move(*this);
     }
 
 private:
@@ -147,10 +213,15 @@ private:
 			params.indirectArgumentBuffers.push_back(r);
 	}
 
+    void ensureNotBuilt() const {
+        if (built_) throw std::runtime_error("RenderPassBuilder::Build() may only be called once");
+    }
+
     // storage
     RenderGraph&             graph;
     std::string              passName;
     RenderPassParameters     params;
+    bool built_ = false;
 
     friend class RenderGraph;
 };
@@ -158,31 +229,67 @@ private:
 class ComputePassBuilder {
 public:
     // Variadic entry points
+    
+    //First set, callable on Lvalues
     template<typename... Args>
-    ComputePassBuilder& WithShaderResource(Args&&... args) {
+    ComputePassBuilder& WithShaderResource(Args&&... args) & {
         (addShaderResource(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    ComputePassBuilder& WithConstantBuffer(Args&&... args) {
+    ComputePassBuilder& WithConstantBuffer(Args&&... args) & {
         (addConstantBuffer(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
-    ComputePassBuilder& WithUnorderedAccess(Args&&... args) {
+    ComputePassBuilder& WithUnorderedAccess(Args&&... args) & {
         (addUnorderedAccess(std::forward<Args>(args)), ...);
         return *this;
     }
 
+	// Second set, callable on temporaries
+    template<typename... Args>
+    ComputePassBuilder WithShaderResource(Args&&... args) && {
+        (addShaderResource(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    ComputePassBuilder WithConstantBuffer(Args&&... args) && {
+        (addConstantBuffer(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    ComputePassBuilder WithUnorderedAccess(Args&&... args) && {
+        (addUnorderedAccess(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    // First build, callable on Lvalues
     template<typename PassT, typename... CtorArgs>
-    std::shared_ptr<PassT> Build(CtorArgs&&... args) {
-        // construct the pass
+    ComputePassBuilder& Build(CtorArgs&&... args) & {
+        ensureNotBuilt();
+        built_ = true;
+
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        // record into the graph
         graph.AddComputePass(pass, params, passName);
-        return pass;
+
+        return *this;
+    }
+
+    // Second build, callable on temporaries
+    template<typename PassT, typename... CtorArgs>
+    ComputePassBuilder Build(CtorArgs&&... args) && {
+        ensureNotBuilt();
+        built_ = true;
+
+        auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
+        graph.AddComputePass(pass, params, passName);
+
+        return std::move(*this);
     }
 
 private:
@@ -220,10 +327,15 @@ private:
             params.unorderedAccessViews.push_back(r);
     }
 
+    void ensureNotBuilt() const {
+        if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");
+    }
+
     // storage
     RenderGraph&             graph;
     std::string              passName;
     ComputePassParameters     params;
+    bool built_ = false;
 
     friend class RenderGraph;
 };

@@ -22,8 +22,6 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
 #include "RenderPasses/ShadowPass.h"
-#include "RenderPasses/ShadowPassMS.h"
-#include "RenderPasses/ShadowPassMSIndirect.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
@@ -1083,33 +1081,19 @@ void DX12Renderer::CreateRenderGraph() {
 			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
     }
 
-    auto forwardPassParameters = RenderPassParameters();
-	forwardPassParameters.shaderResources.push_back(perObjectBuffer);
-	forwardPassParameters.shaderResources.push_back(perMeshBuffer);
-    forwardPassParameters.shaderResources.push_back(lightBufferResourceGroup);
-    //forwardPassParameters.shaderResources.push_back(normalMatrixBuffer);
-	forwardPassParameters.shaderResources.push_back(postSkinningVertices);
-	forwardPassParameters.shaderResources.push_back(cameraBuffer);
-    if (m_clusteredLighting) {
-        forwardPassParameters.shaderResources.push_back(clusterBuffer);
-        forwardPassParameters.shaderResources.push_back(lightPagesBuffer);
-    }
+    auto forwardBuilder = newGraph->BuildRenderPass("ForwardPass")
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer);
 
-    std::shared_ptr<ForwardRenderPass> forwardPass = nullptr;
+    if (m_clusteredLighting) {
+		forwardBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
+    }
 
     if (useMeshShaders) {
-        forwardPassParameters.shaderResources.push_back(meshResourceGroup);
+		forwardBuilder.WithShaderResource(meshResourceGroup);
 		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-            forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled(), true, true);
-            forwardPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
-        }
-        else {
-            forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled(), true, false);
+			forwardBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
         }
 	}
-    else {
-        forwardPass = std::make_shared<ForwardRenderPass>(getWireframeEnabled(), false, false);
-    }
 
     auto debugPassParameters = RenderPassParameters();
 
@@ -1133,14 +1117,13 @@ void DX12Renderer::CreateRenderGraph() {
         ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo().index);
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
-		auto brdfIntegrationPass = std::make_shared<BRDFIntegrationPass>(m_lutTexture);
-		auto brdfIntegrationPassParameters = RenderPassParameters();
-		brdfIntegrationPassParameters.renderTargets.push_back(m_lutTexture);
-        newGraph->AddRenderPass(brdfIntegrationPass, brdfIntegrationPassParameters, "BRDFIntegrationPass");
+		newGraph->BuildRenderPass("BRDFIntegrationPass")
+			.WithRenderTarget(m_lutTexture)
+			.Build<BRDFIntegrationPass>(m_lutTexture);
     }
 
     newGraph->AddResource(m_lutTexture);
-	forwardPassParameters.shaderResources.push_back(m_lutTexture);
+	forwardBuilder.WithShaderResource(m_lutTexture);
 
     // Check if we've already computed this environment
     bool skipEnvironmentPass = false;
@@ -1160,28 +1143,25 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddResource(m_currentEnvironmentTexture);
         //newGraph->AddResource(m_currentSkybox);
         //newGraph->AddResource(m_environmentIrradiance);
-        auto environmentConversionPass = std::make_shared<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
-        auto environmentConversionPassParameters = RenderPassParameters();
-        environmentConversionPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
-        environmentConversionPassParameters.renderTargets.push_back(m_currentSkybox);
-        environmentConversionPassParameters.renderTargets.push_back(m_environmentIrradiance);
-        newGraph->AddRenderPass(environmentConversionPass, environmentConversionPassParameters, "EnvironmentConversionPass");
 
-        //newGraph->AddResource(m_prefilteredEnvironment);
-		auto environmentFilterPass = std::make_shared<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
-		auto environmentFilterPassParameters = RenderPassParameters();
-		environmentFilterPassParameters.shaderResources.push_back(m_currentEnvironmentTexture);
-		environmentFilterPassParameters.renderTargets.push_back(m_prefilteredEnvironment);
-        newGraph->AddRenderPass(environmentFilterPass, environmentFilterPassParameters, "EnvironmentFilterPass");
-    }
+		newGraph->BuildRenderPass("EnvironmentConversionPass")
+			.WithShaderResource(m_currentEnvironmentTexture)
+			.WithRenderTarget(m_currentSkybox, m_environmentIrradiance)
+			.Build<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
+        
+		newGraph->BuildRenderPass("EnvironmentFilterPass")
+			.WithShaderResource(m_currentEnvironmentTexture)
+			.WithRenderTarget(m_prefilteredEnvironment)
+			.Build<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
+	}
 
     if (m_prefilteredEnvironment != nullptr) {
         newGraph->AddResource(m_prefilteredEnvironment);
-		forwardPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
+		forwardBuilder.WithShaderResource(m_prefilteredEnvironment);
     }
     if (m_environmentIrradiance != nullptr) {
         newGraph->AddResource(m_environmentIrradiance);
-        forwardPassParameters.shaderResources.push_back(m_environmentIrradiance);
+		forwardBuilder.WithShaderResource(m_environmentIrradiance);
     }
 
 	auto& lightViewResourceGroup = m_pLightManager->GetLightViewInfoResourceGroup();
@@ -1191,43 +1171,30 @@ void DX12Renderer::CreateRenderGraph() {
     if (drawShadows) {
         newGraph->AddResource(m_shadowMaps);
 
-        std::shared_ptr<RenderPass> shadowPass = nullptr;
-        auto shadowPassParameters = RenderPassParameters();
-		shadowPassParameters.shaderResources.push_back(lightViewResourceGroup);
-        //shadowPassParameters.shaderResources.push_back(normalMatrixBuffer);
-		shadowPassParameters.shaderResources.push_back(postSkinningVertices);
+		auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
+			.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
+			.WithDepthTarget(m_shadowMaps);
 
-        if (useMeshShaders) { 
-            shadowPassParameters.shaderResources.push_back(meshResourceGroup);
-            if (indirect) {
-                shadowPass = std::make_shared<ShadowPassMSIndirect>(m_shadowMaps);
-                shadowPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
-            }
-            else {
-				shadowPass = std::make_shared<ShadowPassMS>(m_shadowMaps);
-            }
+		if (useMeshShaders) {
+			shadowBuilder.WithShaderResource(meshResourceGroup);
+			if (indirect) {
+				shadowBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+			}
 		}
-		else {
-			shadowPass = std::make_shared<ShadowPass>(m_shadowMaps);
-		}
-		shadowPassParameters.shaderResources.push_back(perObjectBuffer);
-		shadowPassParameters.shaderResources.push_back(perMeshBuffer);
-		shadowPassParameters.shaderResources.push_back(cameraBuffer);
-        shadowPassParameters.depthTextures.push_back(m_shadowMaps);
-        forwardPassParameters.shaderResources.push_back(m_shadowMaps);
+		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect);
+
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
-        newGraph->AddRenderPass(shadowPass, shadowPassParameters);
     }
 
     if (m_currentSkybox != nullptr) {
         newGraph->AddResource(m_currentSkybox);
-        auto skyboxPass = std::make_shared<SkyboxRenderPass>(m_currentSkybox);
-        auto skyboxPassParameters = RenderPassParameters();
-        skyboxPassParameters.shaderResources.push_back(m_currentSkybox);
-        newGraph->AddRenderPass(skyboxPass, skyboxPassParameters);
+
+		newGraph->BuildRenderPass("SkyboxPass")
+			.WithShaderResource(m_currentSkybox)
+			.Build<SkyboxRenderPass>(m_currentSkybox);
     }
 
-    newGraph->AddRenderPass(forwardPass, forwardPassParameters);
+	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
@@ -1255,47 +1222,27 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(PPLLBuffer);
 	newGraph->AddResource(PPLLCounter);
 
-    std::shared_ptr<RenderPass> pPPLLFillPass;
-    auto PPLLFillPassParameters = RenderPassParameters();
-    //PPLLFillPassParameters.shaderResources.push_back(normalMatrixBuffer);
-	PPLLFillPassParameters.shaderResources.push_back(lightBufferResourceGroup);
-	PPLLFillPassParameters.shaderResources.push_back(postSkinningVertices);
-
-    if (useMeshShaders) {
-        if (indirect) {
-            pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, true, true);
-            PPLLFillPassParameters.indirectArgumentBuffers.push_back(indirectCommandBufferResourceGroup);
-        }
-        pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, true, false);
-    }
-    else {
-        pPPLLFillPass = std::make_shared<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, false, false);
-    }
-
-	PPLLFillPassParameters.shaderResources.push_back(perObjectBuffer);
-	PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
-	PPLLFillPassParameters.shaderResources.push_back(perMeshBuffer);
+    auto PPLLFillBuilder = newGraph->BuildRenderPass("PPFillPass")
+        .WithUnorderedAccess(PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter)
+        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_prefilteredEnvironment, m_environmentIrradiance, cameraBuffer);
     if (drawShadows) {
-        PPLLFillPassParameters.shaderResources.push_back(m_shadowMaps);
+		PPLLFillBuilder.WithShaderResource(m_shadowMaps);
     }
-    PPLLFillPassParameters.shaderResources.push_back(m_prefilteredEnvironment);
-	PPLLFillPassParameters.shaderResources.push_back(m_environmentIrradiance);
-    PPLLFillPassParameters.shaderResources.push_back(meshResourceGroup);
-	PPLLFillPassParameters.shaderResources.push_back(cameraBuffer);
-    if (m_clusteredLighting) {
-        PPLLFillPassParameters.shaderResources.push_back(clusterBuffer);
-        PPLLFillPassParameters.shaderResources.push_back(lightPagesBuffer);
-    }
-	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLHeadPointerTexture);
-	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLBuffer);
-	PPLLFillPassParameters.unorderedAccessViews.push_back(PPLLCounter);
-	newGraph->AddRenderPass(pPPLLFillPass, PPLLFillPassParameters);
+	if (m_clusteredLighting) {
+		PPLLFillBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
+	}
+	if (useMeshShaders) {
+		PPLLFillBuilder.WithShaderResource(meshResourceGroup);
+		if (indirect) {
+			PPLLFillBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+		}
+	}
+	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect);
 
-	auto ResolvePass = std::make_shared<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
-	auto ResolvePassParameters = RenderPassParameters();
-	ResolvePassParameters.shaderResources.push_back(PPLLHeadPointerTexture);
-	ResolvePassParameters.shaderResources.push_back(PPLLBuffer);
-	newGraph->AddRenderPass(ResolvePass, ResolvePassParameters);
+
+    newGraph->BuildRenderPass("PPLLResolvePass")
+        .WithShaderResource(PPLLHeadPointerTexture, PPLLBuffer)
+        .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
 
 	auto debugPass = std::make_shared<DebugRenderPass>();
 	if (m_currentDebugTexture != nullptr) {
