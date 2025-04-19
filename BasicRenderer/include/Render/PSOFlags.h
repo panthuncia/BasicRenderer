@@ -8,4 +8,5 @@ enum PSOFlags {
 	PSO_ALPHA_TEST = 1 << 3,
 	PSO_BLEND = 1 << 4,
 	PSO_CLUSTERED_LIGHTING = 1 << 5,
+	PSO_DEPTH_ONLY = 1 << 6,
 };
