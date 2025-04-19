@@ -74,7 +74,7 @@ Material::Material(const std::string& name,
     }
     if (heightMap != nullptr) {
         m_materialData.heightMapIndex = heightMap->GetBuffer()->GetSRVInfo().index;
-        m_materialData.heightMapIndex = heightMap->GetSamplerDescriptorIndex();
+        m_materialData.heightSamplerIndex = heightMap->GetSamplerDescriptorIndex();
         heightMap->GetBuffer()->SetName(L"HeightMap");
     }
     if (metallicTexture != nullptr) {

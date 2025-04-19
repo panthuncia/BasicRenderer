@@ -22,6 +22,7 @@ public:
 	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 	virtual void SetName(const std::wstring& name);
 	ID3D12Resource* GetAPIResource() const override;
+	void SetFileType(ImageFiletype fileType) { m_fileType = fileType; }
 	ImageFiletype GetFileType() const { return m_fileType; }
 	std::string GetFilePath() const { return m_filePath; }
 	ImageLoader GetImageLoader() const { return m_imageLoader; }
@@ -31,7 +32,7 @@ private:
 	std::shared_ptr<PixelBuffer> m_image;
 	std::shared_ptr<Sampler> m_sampler;
 	std::string m_filePath;
-	ImageFiletype m_fileType;
+	ImageFiletype m_fileType = ImageFiletype::UNKNOWN;
 	ImageLoader m_imageLoader;
 	bool m_alphaIsAllOpaque = true;
 };

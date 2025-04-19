@@ -160,13 +160,21 @@ std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shar
     return std::make_shared<Texture>(buffer, sampler);
 }
 
-std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::shared_ptr<Sampler> sampler) {
+std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler) {
 	DirectX::ScratchImage image;
 	DirectX::TexMetadata metadata;
-	HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+    HRESULT hr;
+    switch (format) {
+	case ImageFiletype::DDS:
+        hr = DirectX::LoadFromDDSFile(filePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
+		break;
+	case ImageFiletype::PNG:
+		hr = DirectX::LoadFromWICFile(filePath.c_str(), DirectX::WIC_FLAGS_NONE, &metadata, image);
+        break;
+    }
 
 	if (FAILED(hr)) {
-		throw std::runtime_error("Failed to load DDS texture: " + ws2s(ddsFilePath));
+		throw std::runtime_error("Failed to load texture: " + ws2s(filePath));
 	}
 	// Extract the first mip level
 	const DirectX::Image* img = image.GetImage(0, 0, 0); // mip 0, face 0, slice 0
@@ -186,7 +194,8 @@ std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::s
 		sampler = Sampler::GetDefaultSampler();
 	}
     auto texture = std::make_shared<Texture>(buffer, sampler);
-	texture->SetFilepath(ws2s(ddsFilePath));
+	texture->SetFilepath(ws2s(filePath));
+    texture->SetFileType(format);
 	texture->SetAlphaIsAllOpaque(image.IsAlphaAllOpaque());
 	return texture;
 }
@@ -403,7 +412,7 @@ std::vector<Cascade> setupCascades(
         cascade.orthoMatrix = lightOrtho;
 
         // Combine view and projection matrices for plane extraction
-        XMMATRIX comboMatrix = XMMatrixMultiply(lightView, lightOrtho);
+        XMMATRIX comboMatrix = lightOrtho;
 
         // Helper lambda to extract one clipping plane from the combined matrix
         auto ExtractPlane = [&comboMatrix](int planeIndex) -> ClippingPlane {
@@ -952,10 +961,10 @@ std::array<ClippingPlane, 6> GetFrustumPlanesPerspective(const float aspectRatio
     return planes;
 }
 
-std::array<ClippingPlane, 6> GetFrustumPlanesOrthographic(const float left, const float right, const float top, const float bottom, const float nearClip, const float farClip) {
+std::array<ClippingPlane, 6> GetFrustumPlanesOrthographic(const float left, const float right, const float top, const float bottom, const float nearClip, const float farClip, DirectX::XMFLOAT3 cameraPosWorld) {
     std::array<ClippingPlane, 6> planes = {};
 
-    // Near and Far Planes (aligned with Z-axis)
+	// Near and Far Planes (aligned with Z-axis, repositioned to camera space)
     planes[0] = { DirectX::XMFLOAT4(0, 0, -1, -nearClip) }; // Near plane
     planes[1] = { DirectX::XMFLOAT4(0, 0, 1, farClip) };    // Far plane
 

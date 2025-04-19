@@ -115,7 +115,7 @@ public:
 
 				for (auto& pMesh : meshes) {
 					auto& mesh = *pMesh->GetMesh();
-					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+					auto pso = psoManager.GetMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
 					commandList->SetPipelineState(pso.Get());
 
 					unsigned int perMeshIndices[NumPerMeshRootConstants] = {};

@@ -239,7 +239,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     if (materialFlags & MATERIAL_PBR) {
         baseColor = materialInfo.baseColorFactor * baseColor;
     }
-    float3 normalWS = input.normalWorldSpace.xyz;
+    float3 normalWS = normalize(input.normalWorldSpace.xyz);
     
     if (materialFlags & MATERIAL_NORMAL_MAP) {
         Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
@@ -406,17 +406,15 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     // Metallic fresnel
     Texture2D<float2> brdfLUT = ResourceDescriptorHeap[perFrameBuffer.environmentBRDFLUTIndex];
     SamplerState brdfSampler = SamplerDescriptorHeap[perFrameBuffer.environmentBRDFLUTSamplerIndex];
-    float3 f_metal_fresnel_ibl = getIBLGGXFresnel(normalWS, viewDir, roughness, baseColor.rgb, 1.0, brdfLUT, brdfSampler);
+    float3 f_metal_fresnel_ibl = getIBLGGXFresnel(normalWS, viewDir, roughness, F0, 1.0, brdfLUT, brdfSampler);
     float3 f_metal_brdf_ibl = f_metal_fresnel_ibl * f_specular_metal;
     
     // Dielectric fresnel
     float specularWeight = 1.0;
-    float3 f_dielectric_fresnel_ibl = getIBLGGXFresnel(normalWS, viewDir, roughness, baseColor.rgb, specularWeight, brdfLUT, brdfSampler);
+    float3 f_dielectric_fresnel_ibl = getIBLGGXFresnel(normalWS, viewDir, roughness, F0, specularWeight, brdfLUT, brdfSampler);
     float3 f_dielectric_brdf_ibl = lerp(f_diffuse, f_specular_dielectric, f_dielectric_fresnel_ibl);
     
     float3 ambient = lerp(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
-    
-    //return float4(lighting, 1.0);
     
 #else 
     float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz * ao;

@@ -54,13 +54,13 @@ float clampedDot(float3 x, float3 y) {
 
 float4 getSpecularSample(float3 reflection, float lod, TextureCube<float4> prefilteredEnvironment, SamplerState environmentSampler) {
     float4 textureSample = prefilteredEnvironment.SampleLevel(environmentSampler, reflection, lod); //textureLod(u_GGXEnvSampler, u_EnvRotation * reflection, lod);
-    textureSample.rgb *= 2.0; // u_EnvIntensity;
+    //textureSample.rgb *= 2.0; // u_EnvIntensity;
     return textureSample;
 }
 
 float3 getDiffuseLight(float3 n, TextureCube<float4> environmentRadiance, SamplerState radianceSampler) {
     float3 textureSample = environmentRadiance.Sample(radianceSampler, n).rgb; //texture(u_LambertianEnvSampler, u_EnvRotation * n);
-    textureSample.rgb *= 1.0; //0.3; //u_EnvIntensity;
+    //textureSample.rgb *= 1.0; //0.3; //u_EnvIntensity;
     return textureSample.rgb;
 }
 

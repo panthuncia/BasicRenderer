@@ -138,7 +138,7 @@ static std::shared_ptr<Texture> loadAiTexture(
 		case ImageLoader::STBImage:
 			return loadTextureFromFileSTBI(fullPath, sampler);
 		case ImageLoader::DirectXTex:
-			return loadTextureFromFileDXT(s2ws(fullPath), sampler);
+			return loadTextureFromFileDXT(s2ws(fullPath), format, sampler);
 		default:
 			throw std::runtime_error("Unsupported texture format: " + fullPath);
         }
@@ -292,11 +292,16 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
             }
 			baseColorTexture = materialTextures[aiTextureType_BASE_COLOR];
 			materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+            if (!baseColorTexture->AlphaIsAllOpaque()) {
+				materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
+				psoFlags |= PSOFlags::PSO_ALPHA_TEST;
+				blendMode = BlendState::BLEND_STATE_MASK;
+            }
 		}
 		if (materialTextures.find(aiTextureType_NORMALS) != materialTextures.end()) {
 			normalTexture = materialTextures[aiTextureType_NORMALS];
 			materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
-            if (normalTexture->GetImageLoader() == ImageLoader::DirectXTex) {
+            if (normalTexture->GetFileType() == ImageFiletype::DDS) {
 				materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMALS;
             }
 		}
@@ -380,7 +385,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
             baseColorTexture,
             normalTexture,
             aoMap,
-			nullptr, // TODO: heightMap
+            heightMap,
             metallicTex,
             roughnessTex,
             emissiveTexture,

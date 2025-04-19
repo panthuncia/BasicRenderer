@@ -15,6 +15,7 @@
 #include "Render/DescriptorHeap.h"
 #include "Resources/HeapIndexInfo.h"
 #include "ShaderBuffers.h"
+#include "Import/Filetypes.h"
 
 class DescriptorHeap;
 class Mesh;
@@ -31,7 +32,7 @@ void print(Args... args) {
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
 DirectX::XMMATRIX RemoveScalingFromMatrix(DirectX::XMMATRIX& initialMatrix);
-std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring ddsFilePath, std::shared_ptr<Sampler> sampler = nullptr);
+std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler = nullptr);
 std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
 std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
 std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath);
@@ -174,7 +175,7 @@ std::wstring getFileNameFromPath(const std::wstring& path);
 
 std::array<ClippingPlane, 6> GetFrustumPlanesPerspective(const float aspectRatio, const float fovRad, const float nearClip, const float farClip);
 
-std::array<ClippingPlane, 6> GetFrustumPlanesOrthographic(const float left, const float right, const float top, const float bottom, const float nearClip, const float farClip);
+std::array<ClippingPlane, 6> GetFrustumPlanesOrthographic(const float left, const float right, const float top, const float bottom, const float nearClip, const float farClip, DirectX::XMFLOAT3 cameraPosWorld);
 
 DirectX::XMFLOAT3 Subtract(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b);
 

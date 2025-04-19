@@ -17,7 +17,7 @@ enum class ImageLoader {
 };
 
 static std::unordered_map<ImageFiletype, ImageLoader> imageFiletypeToLoader = {
-	{ImageFiletype::PNG, ImageLoader::STBImage},
+	{ImageFiletype::PNG, ImageLoader::DirectXTex},
 	{ImageFiletype::JPEG, ImageLoader::STBImage},
 	{ImageFiletype::BMP, ImageLoader::STBImage},
 	{ImageFiletype::DDS, ImageLoader::DirectXTex}

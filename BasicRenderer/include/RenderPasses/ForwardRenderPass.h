@@ -179,7 +179,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -229,7 +229,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
