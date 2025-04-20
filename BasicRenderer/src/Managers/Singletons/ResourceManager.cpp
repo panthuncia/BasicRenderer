@@ -332,7 +332,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
 
-	pDynamicBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+	pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { srvInfo });
 
 	if (UAV) {
 		D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
@@ -351,7 +351,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		ShaderVisibleIndexInfo uavInfo;
 		uavInfo.index = uavShaderVisibleIndex;
 		uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-		pDynamicBuffer->SetUAVGPUDescriptor(m_cbvSrvUavHeap, uavInfo, 0);
+		pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { uavInfo }, 0);
 	}
 
 	return pDynamicBuffer;
@@ -394,50 +394,267 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
 
-	pBuffer->SetSRVDescriptor(m_cbvSrvUavHeap, srvInfo);
+	pBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { srvInfo });
 
 	return pBuffer;
 }
 
-//void ResourceManager::ExecuteResourceCopies() {
-//	auto& device = DeviceManager::GetInstance().GetDevice();
-//	auto& commandList = copyCommandList;
-//	auto& commandAllocator = copyCommandAllocator;
-//	if (queuedResourceCopies.size() == 0) {
-//		return;
-//	}
-//
-//	auto hr = commandList->Reset(commandAllocator.Get(), nullptr);
-//	if (FAILED(hr)) {
-//		spdlog::error("Failed to reset command list");
-//	}
-//	for (auto& copy : queuedResourceCopies) {
-//		if (copy.source && copy.destination) {
-//			// Transition for copy
-//			auto startState = ResourceStateToD3D12(copy.destination->GetState());
-//			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-//				copy.destination->GetAPIResource(),
-//				startState,
-//				D3D12_RESOURCE_STATE_COPY_DEST
-//			);
-//			commandList->ResourceBarrier(1, &barrier);
-//
-//			commandList->CopyResource(copy.destination->GetAPIResource(), copy.source->GetAPIResource());
-//
-//			barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-//				copy.destination->GetAPIResource(),
-//				D3D12_RESOURCE_STATE_COPY_DEST,
-//				startState
-//			);
-//			commandList->ResourceBarrier(1, &barrier);
-//		}
-//	}
-//	hr = commandList->Close();
-//	if (FAILED(hr)) {
-//		spdlog::error("Failed to close command list");
-//	}
-//
-//	ID3D12CommandList* ppCommandLists[] = { copyCommandList.Get() };
-//	copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-//	queuedResourceCopies.clear();
-//}
+TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
+	const TextureDescription& desc,
+	const std::vector<const stbi_uc*>& initialData) {
+
+	auto& device = DeviceManager::GetInstance().GetDevice();
+
+	// Determine the number of mip levels
+	unsigned int mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
+
+	// Determine the array size
+	uint32_t arraySize = desc.arraySize;
+	if (!desc.isArray && !desc.isCubemap) {
+		arraySize = 1;
+	}
+
+	// Create the texture resource description
+	auto textureDesc = CreateTextureResourceDesc(
+		desc.format,
+		desc.imageDimensions[0].width,
+		desc.imageDimensions[0].height,
+		arraySize,
+		mipLevels,
+		desc.isCubemap,
+		desc.hasRTV,
+		desc.hasDSV,
+		desc.hasUAV
+	);
+
+	// Handle clear values for RTV and DSV
+	D3D12_CLEAR_VALUE* clearValue = nullptr;
+	D3D12_CLEAR_VALUE depthClearValue = {};
+	D3D12_CLEAR_VALUE colorClearValue = {};
+	if (desc.hasDSV) {
+		depthClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+		depthClearValue.DepthStencil.Depth = 1.0f;
+		depthClearValue.DepthStencil.Stencil = 0;
+		clearValue = &depthClearValue;
+	}
+	else if (desc.hasRTV) {
+		colorClearValue.Format = desc.format;
+		if (desc.channels == 1) {
+			colorClearValue.Color[0] = 1.0f;
+		}
+		else {
+			colorClearValue.Color[0] = 0.0f;
+			colorClearValue.Color[1] = 0.0f;
+			colorClearValue.Color[2] = 0.0f;
+			colorClearValue.Color[3] = 1.0f;
+		}
+		clearValue = &colorClearValue;
+	}
+
+	// Create the texture resource
+	auto textureResource = CreateCommittedTextureResource(
+		device.Get(),
+		textureDesc,
+		clearValue
+	);
+
+	// Create SRV
+	auto srvInfo = CreateShaderResourceViewsPerMip(
+		device.Get(),
+		textureResource.Get(),
+		desc.format == DXGI_FORMAT_R32_TYPELESS ? DXGI_FORMAT_R32_FLOAT : desc.format,
+		m_cbvSrvUavHeap.get(),
+		mipLevels,
+		desc.isCubemap,
+		desc.isArray,
+		arraySize
+	);
+
+	// UAV
+	std::vector<ShaderVisibleIndexInfo> uavInfo;
+	if (desc.hasUAV) {
+		uavInfo = CreateUnorderedAccessViewsPerMip(
+			device.Get(),
+			textureResource.Get(),
+			desc.format,
+			m_cbvSrvUavHeap.get(),
+			desc.isArray,
+			arraySize,
+			mipLevels,
+			0,
+			0
+		);
+	}
+
+	// Non-shader visible UAV
+	std::vector<NonShaderVisibleIndexInfo> nonShaderUavInfo;
+	if (desc.hasNonShaderVisibleUAV) {
+		nonShaderUavInfo = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
+			device.Get(),
+			textureResource.Get(),
+			desc.format,
+			m_nonShaderVisibleHeap.get(),
+			desc.isArray,
+			arraySize,
+			mipLevels,
+			0,
+			0
+		);
+	}
+
+	// Create RTVs if needed
+	std::vector<NonShaderVisibleIndexInfo> rtvInfos;
+	if (desc.hasRTV) {
+		rtvInfos = CreateRenderTargetViews(
+			device.Get(),
+			textureResource.Get(),
+			desc.format,
+			m_rtvHeap.get(),
+			desc.isCubemap,
+			desc.isArray,
+			arraySize,
+			mipLevels
+		);
+	}
+
+	// Create DSVs if needed
+	std::vector<NonShaderVisibleIndexInfo> dsvInfos;
+	if (desc.hasDSV) {
+		dsvInfos = CreateDepthStencilViews(
+			device.Get(),
+			textureResource.Get(),
+			m_dsvHeap.get(),
+			desc.isCubemap,
+			desc.isArray,
+			arraySize
+		);
+	}
+
+	// Handle initial data upload if provided
+	if (!initialData.empty()) {
+		// Ensure initialData has the correct size
+		size_t numTextures = arraySize * desc.isCubemap ? 6 : 1;
+		size_t numSubresources = numTextures * mipLevels;
+
+		// Create an upload heap
+		UINT64 uploadBufferSize = GetRequiredIntermediateSize(textureResource.Get(), 0, numSubresources);
+		CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+		D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+		ComPtr<ID3D12Resource> textureUploadHeap;
+		ThrowIfFailed(device->CreateCommittedResource(
+			&uploadHeapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&uploadBufferDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&textureUploadHeap)));
+
+		// Prepare the subresource data
+		std::vector<D3D12_SUBRESOURCE_DATA> subresourceData(numSubresources);
+		std::vector<std::vector<stbi_uc>> expandedImages;
+
+		std::vector<const stbi_uc*> fullInitialData(numSubresources, nullptr);
+		std::copy(initialData.begin(), initialData.end(), fullInitialData.begin());
+
+		int i = -1;
+		for (uint32_t arraySlice = 0; arraySlice < numTextures; ++arraySlice) {
+			for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+				i++;
+				UINT subresourceIndex = mip + arraySlice * mipLevels;
+				D3D12_SUBRESOURCE_DATA& subData = subresourceData[subresourceIndex];
+
+				const stbi_uc* imageData = fullInitialData[subresourceIndex];
+
+				UINT width = desc.imageDimensions[i].width >> mip;
+				UINT height = desc.imageDimensions[i].height >> mip;
+				UINT channels = desc.channels;
+				if ((width * channels != desc.imageDimensions[i].rowPitch) || (width * channels * height != desc.imageDimensions[i].slicePitch)) // Probably compressed texture
+				{
+					subData.pData = imageData;
+					subData.RowPitch = desc.imageDimensions[i].rowPitch;
+					subData.SlicePitch = desc.imageDimensions[i].slicePitch;
+				}
+				else {
+					if (imageData != nullptr) {
+						// Expand image data if channels == 3
+						const stbi_uc* imagePtr = imageData;
+						if (channels == 3) {
+							// Expand image data and store it in the container
+							expandedImages.emplace_back(ExpandImageData(imageData, width, height));
+							imagePtr = expandedImages.back().data();
+							channels = 4; // Update channels after expansion
+						}
+
+						subData.pData = imagePtr;
+						subData.RowPitch = width * channels;
+						subData.SlicePitch = subData.RowPitch * height;
+					}
+					else {
+						// For missing data, set pData to nullptr
+						subData.pData = nullptr;
+						subData.RowPitch = 0;
+						subData.SlicePitch = 0;
+					}
+				}
+			}
+		}
+
+		// Record commands to upload data
+		GetCopyCommandList(commandList, commandAllocator);
+
+		// Update only subresources with valid data
+		std::vector<D3D12_SUBRESOURCE_DATA> validSubresourceData;
+		UINT firstValidSubresource = UINT_MAX;
+		for (UINT i = 0; i < subresourceData.size(); ++i) {
+			if (subresourceData[i].pData != nullptr) {
+				if (firstValidSubresource == UINT_MAX) {
+					firstValidSubresource = i;
+				}
+				validSubresourceData.push_back(subresourceData[i]);
+			}
+		}
+
+		if (!validSubresourceData.empty()) {
+			UpdateSubresources(
+				commandList.Get(),
+				textureResource.Get(),
+				textureUploadHeap.Get(),
+				0,
+				firstValidSubresource,
+				static_cast<UINT>(validSubresourceData.size()),
+				validSubresourceData.data()
+			);
+		}
+
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			textureResource.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_COMMON
+		);
+		commandList->ResourceBarrier(1, &barrier);
+
+		ExecuteAndWaitForCommandList(commandList, commandAllocator); // TODO - This is a blocking call. We could upload all textures and only wait once before they are used
+	}
+
+	// Build and return the texture handle
+	TextureHandle<PixelBuffer> handle;
+	handle.texture = textureResource;
+	handle.SRVInfo = srvInfo;
+	handle.srvUavHeap = m_cbvSrvUavHeap;
+
+	if (desc.hasUAV) {
+		handle.UAVInfo = uavInfo;
+		handle.NSVUAVInfo = nonShaderUavInfo;
+		handle.uavCPUHeap = m_nonShaderVisibleHeap;
+	}
+	if (desc.hasRTV) {
+		handle.rtvHeap = m_rtvHeap;
+		handle.RTVInfo = rtvInfos;
+	}
+	if (desc.hasDSV) {
+		handle.dsvHeap = m_dsvHeap;
+		handle.DSVInfo = dsvInfos;
+	}
+
+	return handle;
+}

@@ -106,7 +106,7 @@ private:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		uint32_t clearValues[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
-		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo().cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
+		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo()[0].gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo()[0].cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
 
 		D3D12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLHeadPointerTexture->GetAPIResource());
 		commandList->ResourceBarrier(1, &uavBarrier);
@@ -150,19 +150,19 @@ private:
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
-		lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo().index;
-		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo().index;
+		lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo()[0].index;
+		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo()[0].index;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo().index;
-		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo().index;
-		transparencyInfo[PPLLCounterBufferDescriptorIndex] = m_PPLLCounter->GetSRVInfo().index;
+		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo()[0].index;
+		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo()[0].index;
+		transparencyInfo[PPLLCounterBufferDescriptorIndex] = m_PPLLCounter->GetSRVInfo()[0].index;
 		transparencyInfo[PPLLNodePoolSize] = m_numPPLLNodes;
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
 
 		// PPLL heads & buffer
-		uint32_t indices[NumTransparencyInfoRootConstants] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes};
+		uint32_t indices[NumTransparencyInfoRootConstants] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo()[0].index, m_PPLLBuffer->GetUAVShaderVisibleInfo()[0].index, m_PPLLCounter->GetUAVShaderVisibleInfo()[0].index, m_numPPLLNodes};
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 4, &indices, 0);
 	}
 

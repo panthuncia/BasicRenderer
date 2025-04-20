@@ -629,6 +629,69 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
     return srvInfo;
 }
 
+std::vector<ShaderVisibleIndexInfo> CreateShaderResourceViewsPerMip(
+    ID3D12Device*                device,
+    ID3D12Resource*              resource,
+    DXGI_FORMAT                  format,
+    DescriptorHeap*              srvHeap,
+    int                          mipLevels,
+    bool                         isCubemap,
+    bool                         isArray,
+    int                          arraySize)
+{
+    std::vector<ShaderVisibleIndexInfo> result;
+    result.reserve(mipLevels);
+
+    for(int mip = 0; mip < mipLevels; ++mip) {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format                 = format;
+
+        if (isCubemap) {
+            if (isArray) {
+                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+                srvDesc.TextureCubeArray.MostDetailedMip = mip;
+                srvDesc.TextureCubeArray.MipLevels       = 1;
+                srvDesc.TextureCubeArray.First2DArrayFace = 0;
+                srvDesc.TextureCubeArray.NumCubes         = arraySize;
+            } else {
+                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+                srvDesc.TextureCube.MostDetailedMip = mip;
+                srvDesc.TextureCube.MipLevels       = 1;
+            }
+        } else {
+            if (isArray) {
+                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                srvDesc.Texture2DArray.MostDetailedMip = mip;
+                srvDesc.Texture2DArray.MipLevels       = 1;
+                srvDesc.Texture2DArray.FirstArraySlice = 0;
+                srvDesc.Texture2DArray.ArraySize       = arraySize;
+                srvDesc.Texture2DArray.PlaneSlice      = 0;
+            } else {
+                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                srvDesc.Texture2D.MostDetailedMip = mip;
+                srvDesc.Texture2D.MipLevels       = 1;
+                srvDesc.Texture2D.PlaneSlice      = 0;
+            }
+        }
+
+        // allocate one descriptor for this mip
+        unsigned int descriptorIndex = srvHeap->AllocateDescriptor();
+        auto cpu = srvHeap->GetCPUHandle(descriptorIndex);
+        auto gpu = srvHeap->GetGPUHandle(descriptorIndex);
+
+        device->CreateShaderResourceView(resource, &srvDesc, cpu);
+
+        ShaderVisibleIndexInfo srvInfo;
+        srvInfo.index = descriptorIndex;
+        srvInfo.gpuHandle = gpu;
+
+        result.push_back(srvInfo);
+    }
+
+    return result;
+}
+
 ShaderVisibleIndexInfo CreateUnorderedAccessView(
     ID3D12Device* device,
     ID3D12Resource* resource,
@@ -708,6 +771,98 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear op
 	uavInfo.cpuHandle = cpuHandle;
 
     return uavInfo;
+}
+
+std::vector<ShaderVisibleIndexInfo> CreateUnorderedAccessViewsPerMip(
+    ID3D12Device*      device,
+    ID3D12Resource*    resource,
+    DXGI_FORMAT        format,
+    DescriptorHeap*    uavHeap,
+    bool               isArray,
+    int                arraySize,
+    int                mipLevels,        // total number of mips
+    int                firstArraySlice,  // for array textures
+    int                planeSlice)       // for planar formats
+{
+    std::vector<ShaderVisibleIndexInfo> result;
+    result.reserve(mipLevels);
+
+    for (int mip = 0; mip < mipLevels; ++mip) {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format = format;
+
+        if (isArray) {
+            uavDesc.ViewDimension               = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+            uavDesc.Texture2DArray.MipSlice     = mip;
+            uavDesc.Texture2DArray.FirstArraySlice = firstArraySlice;
+            uavDesc.Texture2DArray.ArraySize    = arraySize;
+            uavDesc.Texture2DArray.PlaneSlice   = planeSlice;
+        } else {
+            uavDesc.ViewDimension           = D3D12_UAV_DIMENSION_TEXTURE2D;
+            uavDesc.Texture2D.MipSlice      = mip;
+            uavDesc.Texture2D.PlaneSlice    = planeSlice;
+        }
+
+        UINT idx = uavHeap->AllocateDescriptor();
+        auto cpu = uavHeap->GetCPUHandle(idx);
+        auto gpu = uavHeap->GetGPUHandle(idx);
+
+        // create the UAV into that slot
+        device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpu);
+
+		ShaderVisibleIndexInfo uav;
+		uav.index = idx;
+		uav.gpuHandle = gpu;
+
+        result.push_back(uav);
+    }
+
+    return result;
+}
+
+std::vector<NonShaderVisibleIndexInfo> CreateNonShaderVisibleUnorderedAccessViewsPerMip(
+    ID3D12Device*      device,
+    ID3D12Resource*    resource,
+    DXGI_FORMAT        format,
+    DescriptorHeap*    uavHeap,
+    bool               isArray,
+    int                arraySize,
+    int                mipLevels,
+    int                firstArraySlice,
+    int                planeSlice)
+{
+    std::vector<NonShaderVisibleIndexInfo> result;
+    result.reserve(mipLevels);
+
+    for (int mip = 0; mip < mipLevels; ++mip) {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format = format;
+
+        if (isArray) {
+            uavDesc.ViewDimension               = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+            uavDesc.Texture2DArray.MipSlice     = mip;
+            uavDesc.Texture2DArray.FirstArraySlice = firstArraySlice;
+            uavDesc.Texture2DArray.ArraySize    = arraySize;
+            uavDesc.Texture2DArray.PlaneSlice   = planeSlice;
+        } else {
+            uavDesc.ViewDimension           = D3D12_UAV_DIMENSION_TEXTURE2D;
+            uavDesc.Texture2D.MipSlice      = mip;
+            uavDesc.Texture2D.PlaneSlice    = planeSlice;
+        }
+
+        UINT idx = uavHeap->AllocateDescriptor();
+        auto cpu = uavHeap->GetCPUHandle(idx);
+
+        device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpu);
+
+		NonShaderVisibleIndexInfo uav;
+		uav.index = idx;
+		uav.cpuHandle = cpu;
+
+        result.push_back(uav);
+    }
+
+    return result;
 }
 
 std::vector<NonShaderVisibleIndexInfo> CreateRenderTargetViews(

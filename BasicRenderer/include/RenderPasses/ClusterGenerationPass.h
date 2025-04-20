@@ -68,7 +68,7 @@ public:
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
 		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
-		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo().index;
+		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo()[0].index;
 		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
 
 		auto clusterSize = getClusterSize();

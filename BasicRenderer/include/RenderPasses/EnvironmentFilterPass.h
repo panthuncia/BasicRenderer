@@ -59,7 +59,7 @@ public:
 
         commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
         commandList->SetPipelineState(PSO.Get());

@@ -88,7 +88,7 @@ public:
 
             commandList->SetGraphicsRootSignature(environmentConversionRootSignature.Get());
 
-            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
 
             commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
             commandList->RSSetViewports(1, &viewport);

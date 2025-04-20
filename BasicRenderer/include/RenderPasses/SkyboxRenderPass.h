@@ -64,7 +64,7 @@ public:
 		viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
 		auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.projection);
         commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
-		commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo().index, 0);
+		commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo()[0].index, 0);
         commandList->SetGraphicsRoot32BitConstant(2, m_texture->GetSamplerDescriptorIndex(), 0);
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube

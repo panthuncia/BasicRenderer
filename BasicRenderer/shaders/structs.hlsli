@@ -153,4 +153,26 @@ struct Cluster {
     uint pad[2];
 };
 
+struct GTAOInfo {
+    uint g_srcRawDepthDescriptorIndex; // source depth buffer data (in NDC space in DirectX)
+    uint g_outWorkingDepthMIP0DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP1DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP2DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP3DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP4DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+
+// input output textures for the second pass (XeGTAO_MainPass)
+    uint g_srcWorkingDepthDescriptorIndex; // viewspace depth with MIPs, output by XeGTAO_PrefilterDepths16x16 and consumed by XeGTAO_MainPass
+    uint g_srcNormalmapDescriptorIndex; // source normal map (if used)
+    uint g_srcHilbertLUTDescriptorIndex; // hilbert lookup table  (if any)
+    uint g_outWorkingAOTermDescriptorIndex; // output AO term (includes bent normals if enabled - packed as R11G11B10 scaled by AO)
+    uint g_outWorkingEdgesDescriptorIndex; // output depth-based edges used by the denoiser
+    uint g_outNormalmapDescriptorIndex; // output viewspace normals if generating from depth
+
+// input output textures for the third pass (XeGTAO_Denoise)
+    uint g_srcWorkingAOTermDescriptorIndex; // coming from previous pass
+    uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
+    uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
+};
+
 #endif // __STRUCTS_HLSL__

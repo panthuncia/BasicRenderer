@@ -365,10 +365,13 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
                 }
             
                 LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, input.positionWorldSpace.xyz);
+                if (shadow > 0.95) {
+                    continue; // skip light if shadowed
+                }
                 if (lightFragmentInfo.distance > light.maxRange && light.type != 2) {
                     continue;
                 }
-                if (materialInfo.materialFlags & MATERIAL_PBR) {
+                if (materialInfo.materialFlags & MATERIAL_PBR && shadow) {
                     lighting += (1.0 - shadow) * calculateLightContributionPBR(lightFragmentInfo, lightingParameters);
                 }
                 else {
