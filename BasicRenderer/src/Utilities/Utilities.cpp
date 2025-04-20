@@ -651,26 +651,26 @@ std::vector<ShaderVisibleIndexInfo> CreateShaderResourceViewsPerMip(
             if (isArray) {
                 srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
                 srvDesc.TextureCubeArray.MostDetailedMip = mip;
-                srvDesc.TextureCubeArray.MipLevels       = 1;
+                srvDesc.TextureCubeArray.MipLevels       = mipLevels - mip;
                 srvDesc.TextureCubeArray.First2DArrayFace = 0;
                 srvDesc.TextureCubeArray.NumCubes         = arraySize;
             } else {
                 srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
                 srvDesc.TextureCube.MostDetailedMip = mip;
-                srvDesc.TextureCube.MipLevels       = 1;
+                srvDesc.TextureCube.MipLevels       = mipLevels - mip;
             }
         } else {
             if (isArray) {
                 srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
                 srvDesc.Texture2DArray.MostDetailedMip = mip;
-                srvDesc.Texture2DArray.MipLevels       = 1;
+                srvDesc.Texture2DArray.MipLevels       = mipLevels - mip;
                 srvDesc.Texture2DArray.FirstArraySlice = 0;
                 srvDesc.Texture2DArray.ArraySize       = arraySize;
                 srvDesc.Texture2DArray.PlaneSlice      = 0;
             } else {
                 srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                 srvDesc.Texture2D.MostDetailedMip = mip;
-                srvDesc.Texture2D.MipLevels       = 1;
+                srvDesc.Texture2D.MipLevels       = mipLevels - mip;
                 srvDesc.Texture2D.PlaneSlice      = 0;
             }
         }
