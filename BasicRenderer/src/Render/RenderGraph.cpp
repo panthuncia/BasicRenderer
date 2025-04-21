@@ -266,7 +266,8 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 		if (initialState != finalState) {
 
 			if (initialSyncState == ResourceSyncState::DRAW || initialSyncState == ResourceSyncState::PIXEL_SHADING || initialSyncState == ResourceSyncState::VERTEX_SHADING) {
-				initialSyncState = ResourceSyncState::ALL_SHADING; // Graphics-queue sync states are not compatible with compute queue, so sync with ALL_SHADING
+				initialSyncState = ResourceSyncState::NONE; // Graphics-queue sync and access states are not compatible with compute queue
+				//initialState = ResourceState::UNKNOWN;		// We will be waiting on the graphics queue to finish before executing the compute pass
 			}
 
 			transitions.push_back(ResourceTransition(resource, initialState, finalState, initialSyncState, finalSyncState));

@@ -137,7 +137,7 @@ struct PerMeshInstanceBuffer {
     uint pad[2];
 };
 
-#define LIGHTS_PER_PAGE 10
+#define LIGHTS_PER_PAGE 12
 #define LIGHT_PAGE_ADDRESS_NULL 0xFFFFFFFF
 struct LightPage {
     uint ptrNextPage;
@@ -153,7 +153,34 @@ struct Cluster {
     uint pad[2];
 };
 
+struct GTAOConstants {
+    uint2 ViewportSize;
+    float2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
+
+    float2 DepthUnpackConsts;
+    float2 CameraTanHalfFOV;
+
+    float2 NDCToViewMul;
+    float2 NDCToViewAdd;
+
+    float2 NDCToViewMul_x_PixelSize;
+    float EffectRadius; // world (viewspace) maximum size of the shadow
+    float EffectFalloffRange;
+
+    float RadiusMultiplier;
+    float Padding0;
+    float FinalValuePower;
+    float DenoiseBlurBeta;
+
+    float SampleDistributionPower;
+    float ThinOccluderCompensation;
+    float DepthMIPSamplingOffset;
+    int NoiseIndex; // frameIndex % 64 if using TAA or 0 otherwise
+};
+
 struct GTAOInfo {
+    GTAOConstants g_GTAOConstants;
+    uint g_samplerPointClampDescriptorIndex;
     uint g_srcRawDepthDescriptorIndex; // source depth buffer data (in NDC space in DirectX)
     uint g_outWorkingDepthMIP0DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
     uint g_outWorkingDepthMIP1DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)

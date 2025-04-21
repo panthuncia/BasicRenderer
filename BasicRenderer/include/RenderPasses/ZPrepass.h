@@ -20,8 +20,8 @@
 
 class ZPrepass : public RenderPass {
 public:
-    ZPrepass(bool wireframe, bool meshShaders, bool indirect)
-        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+    ZPrepass(std::shared_ptr<GloballyIndexedResource> pNormals, bool wireframe, bool meshShaders, bool indirect)
+        : m_pNormals(pNormals), m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
@@ -104,7 +104,8 @@ private:
 
         // Render targets
         CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
-        commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
+        auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
+        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -132,6 +133,7 @@ private:
         staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
         staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
         staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+		staticBufferIndices[NormalsTextureDescriptorIndex] = m_pNormals->GetRTVInfos()[0].index;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
     }
 
@@ -149,7 +151,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetDepthPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -171,7 +173,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetDepthPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -200,7 +202,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshDepthPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -221,7 +223,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshDepthPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
                 commandList->SetPipelineState(pso.Get());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -246,7 +248,7 @@ private:
         if (numOpaque > 0) {
 
             auto opaqueIndirectBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
-            auto pso = psoManager.GetMeshDepthPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
+            auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
             commandList->SetPipelineState(pso.Get());
 
             auto apiResource = opaqueIndirectBuffer->GetAPIResource();
@@ -264,7 +266,7 @@ private:
         if (numAlphaTest > 0) {
 
             auto alphaTestIndirectBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();
-            auto pso = psoManager.GetMeshDepthPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
+            auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
                 BlendState::BLEND_STATE_MASK, m_wireframe);
             commandList->SetPipelineState(pso.Get());
 
@@ -280,6 +282,7 @@ private:
     }
 
 private:
+    std::shared_ptr<GloballyIndexedResource> m_pNormals;
     flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
     flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;

@@ -56,31 +56,31 @@ namespace XeGTAO
 #define XE_GTAO_NUMTHREADS_X                        8                   // these can be changed
 #define XE_GTAO_NUMTHREADS_Y                        8                   // these can be changed
 
-struct GTAOConstants
-{
-    Vector2i                ViewportSize;
-    Vector2                 ViewportPixelSize;                  // .zw == 1.0 / ViewportSize.xy
-
-    Vector2                 DepthUnpackConsts;
-    Vector2                 CameraTanHalfFOV;
-
-    Vector2                 NDCToViewMul;
-    Vector2                 NDCToViewAdd;
-
-    Vector2                 NDCToViewMul_x_PixelSize;
-    float                   EffectRadius;                       // world (viewspace) maximum size of the shadow
-    float                   EffectFalloffRange;
-
-    float                   RadiusMultiplier;
-    float                   Padding0;
-    float                   FinalValuePower;
-    float                   DenoiseBlurBeta;
-
-    float                   SampleDistributionPower;
-    float                   ThinOccluderCompensation;
-    float                   DepthMIPSamplingOffset;
-    int                     NoiseIndex;                         // frameIndex % 64 if using TAA or 0 otherwise
-};
+//struct GTAOConstants
+//{
+//    Vector2i                ViewportSize;
+//    Vector2                 ViewportPixelSize;                  // .zw == 1.0 / ViewportSize.xy
+//
+//    Vector2                 DepthUnpackConsts;
+//    Vector2                 CameraTanHalfFOV;
+//
+//    Vector2                 NDCToViewMul;
+//    Vector2                 NDCToViewAdd;
+//
+//    Vector2                 NDCToViewMul_x_PixelSize;
+//    float                   EffectRadius;                       // world (viewspace) maximum size of the shadow
+//    float                   EffectFalloffRange;
+//
+//    float                   RadiusMultiplier;
+//    float                   Padding0;
+//    float                   FinalValuePower;
+//    float                   DenoiseBlurBeta;
+//
+//    float                   SampleDistributionPower;
+//    float                   ThinOccluderCompensation;
+//    float                   DepthMIPSamplingOffset;
+//    int                     NoiseIndex;                         // frameIndex % 64 if using TAA or 0 otherwise
+//};
 
 // This is used only for the development (ray traced ground truth).
 struct ReferenceRTAOConstants

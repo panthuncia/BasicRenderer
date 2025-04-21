@@ -57,20 +57,20 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetShadowMeshPSO(UINT ps
     return m_shadowMeshPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
-    if (m_depthPSOCache.find(key) == m_depthPSOCache.end()) {
-        m_depthPSOCache[key] = CreateDepthPSO(psoFlags, blendState, wireframe);
+    if (m_prePassPSOCache.find(key) == m_prePassPSOCache.end()) {
+        m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, blendState, wireframe);
     }
-    return m_depthPSOCache[key];
+    return m_prePassPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
-    if (m_meshDepthPSOCache.find(key) == m_meshDepthPSOCache.end()) {
-        m_meshDepthPSOCache[key] = CreateMeshDepthPSO(psoFlags, blendState, wireframe);
+    if (m_meshPrePassPSOCache.find(key) == m_meshPrePassPSOCache.end()) {
+        m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, blendState, wireframe);
     }
-    return m_meshDepthPSOCache[key];
+    return m_meshPrePassPSOCache[key];
 }
 
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
@@ -190,7 +190,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT pso
 }
 
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags | PSO_DEPTH_ONLY);
 
@@ -218,7 +218,8 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDepthPSO(UINT psoF
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 0;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32_FLOAT; // Normals
 
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
@@ -445,7 +446,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     return pso;
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshDepthPSO(
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags | PSO_DEPTH_ONLY);

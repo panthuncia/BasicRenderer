@@ -38,7 +38,9 @@
 #include "RenderPasses/ClusterGenerationPass.h"
 #include "RenderPasses/LightCullingPass.h"
 #include "RenderPasses/ZPrepass.h"
-#include "RenderPasses/XeGTAOPass.h"
+#include "RenderPasses/GTAO/XeGTAOFilterPass.h"
+#include "RenderPasses/GTAO/XeGTAOMainPass.h"
+#include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1054,19 +1056,83 @@ void DX12Renderer::CreateRenderGraph() {
 		.Build<SkinningPass>();
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
+
+    TextureDescription normalsWorldSpaceDesc;
+	normalsWorldSpaceDesc.arraySize = 1;
+	normalsWorldSpaceDesc.channels = 4;
+	normalsWorldSpaceDesc.isCubemap = false;
+	normalsWorldSpaceDesc.hasRTV = true;
+	normalsWorldSpaceDesc.format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	normalsWorldSpaceDesc.generateMipMaps = false;
+	ImageDimensions dims = { m_xRes, m_yRes, 0, 0 };
+	normalsWorldSpaceDesc.imageDimensions.push_back(dims);
+	auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
+	normalsWorldSpace->SetName(L"Normals World Space");
+	newGraph->AddResource(normalsWorldSpace, false, ResourceState::UNORDERED_ACCESS);
+
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer);
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
+        .WithRenderTarget(normalsWorldSpace);
+
 	if (useMeshShaders) {
 		zBuilder.WithShaderResource(meshResourceGroup);
 		if (indirect) {
 			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-	zBuilder.Build<ZPrepass>(getWireframeEnabled(), useMeshShaders, indirect);
+    zBuilder.Build<ZPrepass>(normalsWorldSpace, getWireframeEnabled(), useMeshShaders, indirect);
 
     // GTAO pass
-	newGraph->BuildComputePass("GTAOPass")
-		.Build<GTAOPass>();
+
+	TextureDescription workingDepthsDesc;
+	workingDepthsDesc.arraySize = 1;
+	workingDepthsDesc.channels = 1;
+	workingDepthsDesc.isCubemap = false;
+    workingDepthsDesc.hasRTV = false;
+	workingDepthsDesc.hasUAV = true;
+	workingDepthsDesc.format = DXGI_FORMAT_R32_FLOAT;
+    workingDepthsDesc.generateMipMaps = true;
+    ImageDimensions dims1 = { m_xRes, m_yRes, 0, 0 };
+	workingDepthsDesc.imageDimensions.push_back(dims1);
+	auto workingDepths = PixelBuffer::Create(workingDepthsDesc);
+	workingDepths->SetName(L"GTAO Working Depths");
+
+	TextureDescription workingEdgesDesc;
+	workingEdgesDesc.arraySize = 1;
+	workingEdgesDesc.channels = 1;
+	workingEdgesDesc.isCubemap = false;
+	workingEdgesDesc.hasRTV = false;
+    workingDepthsDesc.hasUAV = true;
+    workingEdgesDesc.format = DXGI_FORMAT_R8_UNORM;
+    workingEdgesDesc.generateMipMaps = false;
+	workingEdgesDesc.imageDimensions.push_back(dims1);
+	auto workingEdges = PixelBuffer::Create(workingEdgesDesc);
+	workingEdges->SetName(L"GTAO Working Edges");
+
+	TextureDescription workingAOTermDesc;
+	workingAOTermDesc.arraySize = 1;
+	workingAOTermDesc.channels = 1;
+	workingAOTermDesc.isCubemap = false;
+	workingAOTermDesc.hasRTV = false;
+    workingDepthsDesc.hasUAV = true;
+	workingAOTermDesc.format = DXGI_FORMAT_R8_UINT;
+	workingAOTermDesc.generateMipMaps = false;
+	workingAOTermDesc.imageDimensions.push_back(dims1);
+	auto workingAOTerm1 = PixelBuffer::Create(workingAOTermDesc);
+	workingAOTerm1->SetName(L"GTAO Working AO Term 1");
+	auto workingAOTerm2 = PixelBuffer::Create(workingAOTermDesc);
+	workingAOTerm2->SetName(L"GTAO Working AO Term 2");
+
+	newGraph->AddResource(workingDepths, false, ResourceState::UNORDERED_ACCESS);
+	newGraph->AddResource(workingEdges, false, ResourceState::UNORDERED_ACCESS);
+
+    auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
+	newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
+
+	newGraph->BuildComputePass("GTAOPass") // Depth filter pass
+        .WithShaderResource(normalsWorldSpace)
+		.WithUnorderedAccess(workingDepths)
+		.Build<GTAOFilterPass>(GTAOConstantBuffer);
 
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
