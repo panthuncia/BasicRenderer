@@ -40,7 +40,7 @@ protected:
 		return m_transitions;
     }
 
-	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 		m_barrierGroups.numBufferBarrierGroups = 0;
 		m_barrierGroups.numTextureBarrierGroups = 0;
 		m_barrierGroups.numGlobalBarrierGroups = 0;
@@ -48,7 +48,7 @@ protected:
 		m_textureBarriers.clear();
 		m_globalBarriers.clear();
 		for (auto& pair : resourcesByID) {
-			auto& barrierGroup = pair.second->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+			auto& barrierGroup = pair.second->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
 			if (barrierGroup.numBufferBarrierGroups > 0) {
 				m_bufferBarriers.insert(m_bufferBarriers.end(), barrierGroup.bufferBarriers, barrierGroup.bufferBarriers + barrierGroup.numBufferBarrierGroups);
 				m_barrierGroups.numBufferBarrierGroups += barrierGroup.numBufferBarrierGroups;

@@ -94,11 +94,13 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     return output;
 }
 
-#if !(defined(PSO_SHADOW) || defined(PSO_DEPTH_ONLY))
+#if !(defined(PSO_SHADOW) || defined(PSO_PREPASS))
 [earlydepthstencil]
 #endif
-#if defined(PSO_SHADOW) || defined(PSO_DEPTH_ONLY)
+#if defined(PSO_SHADOW)
 void
+#elif defined(PSO_PREPASS)
+float3
 #else
 float4 
 #endif
@@ -109,7 +111,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
-#if defined(PSO_SHADOW) || defined(PSO_DEPTH_ONLY) // Alpha tested shadows
+#if defined(PSO_SHADOW) || defined(PSO_PREPASS) // Alpha tested shadows
     #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
         return;
     #endif // DOUBLE_SIDED
@@ -125,8 +127,9 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     if (materialInfo.baseColorFactor.a < 0.5){
         discard;
     }
+    return normalize(input.normalWorldSpace);
 #endif // SHADOW || DEPTH_ONLY
-#if !defined(PSO_SHADOW) && !defined(PSO_DEPTH_ONLY)
+#if !defined(PSO_SHADOW) && !defined(PSO_PREPASS)
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     

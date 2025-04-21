@@ -86,7 +86,7 @@ std::vector<D3D12_RESOURCE_BARRIER>& Buffer::GetTransitions(ResourceState fromSt
 	return m_transitions;
 }
 
-BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
 	//if (prevState != currentState) { // I thought this would never be correct, but it seems that cross-queue transitions can require this?
 	//	throw(std::runtime_error("Buffer state mismatch"));
@@ -99,8 +99,8 @@ BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, Resource
 	}
 #endif
 	
-	m_bufferBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevState);
-	m_bufferBarrier.AccessAfter = ResourceStateToD3D12AccessType(newState);
+	m_bufferBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevAccessType);
+	m_bufferBarrier.AccessAfter = ResourceStateToD3D12AccessType(newAccessType);
 	m_bufferBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
 	m_bufferBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 

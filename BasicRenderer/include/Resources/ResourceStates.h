@@ -25,7 +25,26 @@ enum class ResourceState {
 	COPY_DEST,
 	UNORDERED_ACCESS,
 	INDIRECT_ARGUMENT,
+	RAYTRACING_ACCELERATION_STRUCTURE_READ,
+	RAYTRACING_ACCELERATION_STRUCTURE_WRITE,
 };
+
+inline bool ResourceStateIsGraphicsQueueState(ResourceState state) {
+	switch (state) {
+	case ResourceState::INDEX:
+	case ResourceState::VERTEX:
+	case ResourceState::CONSTANT:
+	case ResourceState::PIXEL_SRV:
+	case ResourceState::NON_PIXEL_SRV:
+	case ResourceState::ALL_SRV:
+	case ResourceState::RENDER_TARGET:
+	case ResourceState::DEPTH_WRITE:
+	case ResourceState::DEPTH_READ:
+		return true;
+	default:
+		return false;
+	}
+}
 
 inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 	switch (state) {
@@ -63,40 +82,93 @@ inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 	throw std::runtime_error("Invalid Resource State");
 }
 
-inline D3D12_BARRIER_ACCESS ResourceStateToD3D12AccessType(ResourceState state) {
-	switch (state) {
+enum class ResourceAccessType {
+	NONE,
+	COMMON,
+	VERTEX_BUFFER,
+	CONSTANT_BUFFER,
+	INDEX_BUFFER,
+	RENDER_TARGET,
+	UNORDERED_ACCESS,
+	DEPTH_WRITE,
+	DEPTH_READ,
+	SHADER_RESOURCE,
+	INDIRECT_ARGUMENT,
+	COPY_DEST,
+	COPY_SOURCE,
+	RAYTRACING_ACCELERATION_STRUCTURE_READ,
+	RAYTRACING_ACCELERATION_STRUCTURE_WRITE,
+};
+
+inline ResourceAccessType ResourceStateToAccessType(ResourceState state) {
+	switch(state){
 	case ResourceState::UNKNOWN:
-		return D3D12_BARRIER_ACCESS_NO_ACCESS;
+		return ResourceAccessType::NONE;
 	case ResourceState::INDEX:
-		return D3D12_BARRIER_ACCESS_INDEX_BUFFER;
+		return ResourceAccessType::INDEX_BUFFER;
 	case ResourceState::VERTEX:
-		return D3D12_BARRIER_ACCESS_VERTEX_BUFFER;
+		return ResourceAccessType::VERTEX_BUFFER;
 	case ResourceState::CONSTANT:
-		return D3D12_BARRIER_ACCESS_CONSTANT_BUFFER;
+		return ResourceAccessType::CONSTANT_BUFFER;
 	case ResourceState::PIXEL_SRV:
-		return D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+		return ResourceAccessType::SHADER_RESOURCE;
 	case ResourceState::NON_PIXEL_SRV:
-		return D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+		return ResourceAccessType::SHADER_RESOURCE;
 	case ResourceState::ALL_SRV:
-		return D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+		return ResourceAccessType::SHADER_RESOURCE;
 	case ResourceState::RENDER_TARGET:
-		return D3D12_BARRIER_ACCESS_RENDER_TARGET;
+		return ResourceAccessType::RENDER_TARGET;
 	case ResourceState::DEPTH_WRITE:
-		return D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
+		return ResourceAccessType::DEPTH_WRITE;
 	case ResourceState::DEPTH_READ:
-		return D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ;
+		return ResourceAccessType::DEPTH_READ;
 	case ResourceState::UPLOAD:
-		return D3D12_BARRIER_ACCESS_COPY_SOURCE;
+		return ResourceAccessType::NONE;
 	case ResourceState::COPY_SOURCE:
-		return D3D12_BARRIER_ACCESS_COPY_SOURCE;
+		return ResourceAccessType::COPY_SOURCE;
 	case ResourceState::COPY_DEST:
-		return D3D12_BARRIER_ACCESS_COPY_DEST;
+		return ResourceAccessType::COPY_DEST;
 	case ResourceState::UNORDERED_ACCESS:
-		return D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+		return ResourceAccessType::UNORDERED_ACCESS;
 	case ResourceState::INDIRECT_ARGUMENT:
+		return ResourceAccessType::INDIRECT_ARGUMENT;
+	case ResourceState::RAYTRACING_ACCELERATION_STRUCTURE_READ:
+		return ResourceAccessType::RAYTRACING_ACCELERATION_STRUCTURE_READ;
+	case ResourceState::RAYTRACING_ACCELERATION_STRUCTURE_WRITE:
+		return ResourceAccessType::RAYTRACING_ACCELERATION_STRUCTURE_WRITE;
+	}
+}
+
+inline D3D12_BARRIER_ACCESS ResourceStateToD3D12AccessType(ResourceAccessType state) {
+	switch (state) {
+	case ResourceAccessType::NONE:
+		return D3D12_BARRIER_ACCESS_NO_ACCESS;
+	case ResourceAccessType::COMMON:
+		return D3D12_BARRIER_ACCESS_COMMON;
+	case ResourceAccessType::INDEX_BUFFER:
+		return D3D12_BARRIER_ACCESS_INDEX_BUFFER;
+	case ResourceAccessType::VERTEX_BUFFER:
+		return D3D12_BARRIER_ACCESS_VERTEX_BUFFER;
+	case ResourceAccessType::CONSTANT_BUFFER:
+		return D3D12_BARRIER_ACCESS_CONSTANT_BUFFER;
+	case ResourceAccessType::SHADER_RESOURCE:
+		return D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+	case ResourceAccessType::RENDER_TARGET:
+		return D3D12_BARRIER_ACCESS_RENDER_TARGET;
+	case ResourceAccessType::DEPTH_WRITE:
+		return D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
+	case ResourceAccessType::DEPTH_READ:
+		return D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ;
+	case ResourceAccessType::COPY_SOURCE:
+		return D3D12_BARRIER_ACCESS_COPY_SOURCE;
+	case ResourceAccessType::COPY_DEST:
+		return D3D12_BARRIER_ACCESS_COPY_DEST;
+	case ResourceAccessType::UNORDERED_ACCESS:
+		return D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+	case ResourceAccessType::INDIRECT_ARGUMENT:
 		return D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT;
 	}
-	throw std::runtime_error("Invalid Resource State");
+	throw std::runtime_error("Invalid Resource Access Type");
 }
 
 // TODO: Use COMPUTE_QUEUE and DIRECT_QUEUE barrier types- requires reworking render graph compiler

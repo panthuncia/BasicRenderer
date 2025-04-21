@@ -192,7 +192,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT pso
 
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
-    auto defines = GetShaderDefines(psoFlags | PSO_DEPTH_ONLY);
+    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
@@ -449,7 +449,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
-    auto defines = GetShaderDefines(psoFlags | PSO_DEPTH_ONLY);
+    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
@@ -487,7 +487,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
         CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
         CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
         CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
-        //CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
+        CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
         CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
     };
 
@@ -503,9 +503,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     pipelineStateStream.BlendState = blendDesc;
     pipelineStateStream.DepthStencilState = depthStencilState;
 
-    //D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    //rtvFormats.NumRenderTargets = 0;
-    //pipelineStateStream.RTVFormats = rtvFormats;
+    D3D12_RT_FORMAT_ARRAY rtvFormats = {};
+    rtvFormats.NumRenderTargets = 1;
+	rtvFormats.RTFormats[0] = DXGI_FORMAT_R32G32B32_FLOAT; // Normals
+    pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;
 
@@ -636,10 +637,10 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
 		macro.Name = L"PSO_CLUSTERED_LIGHTING";
 		defines.insert(defines.begin(), macro);
 	}
-	if (psoFlags & PSOFlags::PSO_DEPTH_ONLY) {
+	if (psoFlags & PSOFlags::PSO_PREPASS) {
 		DxcDefine macro;
 		macro.Value = L"1";
-		macro.Name = L"PSO_DEPTH_ONLY";
+		macro.Name = L"PSO_PREPASS";
 		defines.insert(defines.begin(), macro);
 	}
     return defines;

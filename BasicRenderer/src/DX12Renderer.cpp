@@ -1129,10 +1129,10 @@ void DX12Renderer::CreateRenderGraph() {
     auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
 	newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
 
-	newGraph->BuildComputePass("GTAOPass") // Depth filter pass
-        .WithShaderResource(normalsWorldSpace)
-		.WithUnorderedAccess(workingDepths)
-		.Build<GTAOFilterPass>(GTAOConstantBuffer);
+	//newGraph->BuildComputePass("GTAOPass") // Depth filter pass
+ //       .WithShaderResource(normalsWorldSpace)
+	//	.WithUnorderedAccess(workingDepths)
+	//	.Build<GTAOFilterPass>(GTAOConstantBuffer);
 
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass

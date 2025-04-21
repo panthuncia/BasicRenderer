@@ -19,7 +19,7 @@ public:
 	}
 	void SetFilepath(const std::string& path);
 	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
-	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 	virtual void SetName(const std::wstring& name);
 	ID3D12Resource* GetAPIResource() const override;
 	void SetFileType(ImageFiletype fileType) { m_fileType = fileType; }

@@ -40,10 +40,10 @@ public:
         }
     }
 
-    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
         if (resource) {
             SetState(newState); // Keep the wrapper's state in sync
-            return resource->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+            return resource->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
         }
     }
 
@@ -97,10 +97,10 @@ public:
         }
     }
 
-    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 		if (m_resource) {
 			SetState(newState); // Keep the wrapper's state in sync
-			return m_resource->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+			return m_resource->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
 		}
     }
 
