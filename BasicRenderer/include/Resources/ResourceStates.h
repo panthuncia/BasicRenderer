@@ -29,6 +29,24 @@ enum class ResourceState {
 	RAYTRACING_ACCELERATION_STRUCTURE_WRITE,
 };
 
+enum class ResourceAccessType {
+	NONE,
+	COMMON,
+	VERTEX_BUFFER,
+	CONSTANT_BUFFER,
+	INDEX_BUFFER,
+	RENDER_TARGET,
+	UNORDERED_ACCESS,
+	DEPTH_WRITE,
+	DEPTH_READ,
+	SHADER_RESOURCE,
+	INDIRECT_ARGUMENT,
+	COPY_DEST,
+	COPY_SOURCE,
+	RAYTRACING_ACCELERATION_STRUCTURE_READ,
+	RAYTRACING_ACCELERATION_STRUCTURE_WRITE,
+};
+
 inline bool ResourceStateIsGraphicsQueueState(ResourceState state) {
 	switch (state) {
 	case ResourceState::INDEX:
@@ -45,6 +63,7 @@ inline bool ResourceStateIsGraphicsQueueState(ResourceState state) {
 		return false;
 	}
 }
+
 
 inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 	switch (state) {
@@ -82,28 +101,10 @@ inline D3D12_RESOURCE_STATES ResourceStateToD3D12(ResourceState state) {
 	throw std::runtime_error("Invalid Resource State");
 }
 
-enum class ResourceAccessType {
-	NONE,
-	COMMON,
-	VERTEX_BUFFER,
-	CONSTANT_BUFFER,
-	INDEX_BUFFER,
-	RENDER_TARGET,
-	UNORDERED_ACCESS,
-	DEPTH_WRITE,
-	DEPTH_READ,
-	SHADER_RESOURCE,
-	INDIRECT_ARGUMENT,
-	COPY_DEST,
-	COPY_SOURCE,
-	RAYTRACING_ACCELERATION_STRUCTURE_READ,
-	RAYTRACING_ACCELERATION_STRUCTURE_WRITE,
-};
-
 inline ResourceAccessType ResourceStateToAccessType(ResourceState state) {
 	switch(state){
 	case ResourceState::UNKNOWN:
-		return ResourceAccessType::NONE;
+		return ResourceAccessType::COMMON;
 	case ResourceState::INDEX:
 		return ResourceAccessType::INDEX_BUFFER;
 	case ResourceState::VERTEX:
@@ -123,7 +124,7 @@ inline ResourceAccessType ResourceStateToAccessType(ResourceState state) {
 	case ResourceState::DEPTH_READ:
 		return ResourceAccessType::DEPTH_READ;
 	case ResourceState::UPLOAD:
-		return ResourceAccessType::NONE;
+		return ResourceAccessType::COPY_SOURCE;
 	case ResourceState::COPY_SOURCE:
 		return ResourceAccessType::COPY_SOURCE;
 	case ResourceState::COPY_DEST:

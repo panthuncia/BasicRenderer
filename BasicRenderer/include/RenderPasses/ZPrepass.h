@@ -61,6 +61,11 @@ public:
         ID3D12GraphicsCommandList* commandList = m_commandLists[context.frameIndex].Get();
         commandList->Reset(allocator.Get(), nullptr);
 
+		// Clear the render target
+		auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
+        const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f};
+		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
 

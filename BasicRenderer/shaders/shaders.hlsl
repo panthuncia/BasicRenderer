@@ -100,7 +100,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
 #if defined(PSO_SHADOW)
 void
 #elif defined(PSO_PREPASS)
-float3
+float4
 #else
 float4 
 #endif
@@ -112,7 +112,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
 #if defined(PSO_SHADOW) || defined(PSO_PREPASS) // Alpha tested shadows
-    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
+    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND) && !defined(PSO_PREPASS)
         return;
     #endif // DOUBLE_SIDED
     if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
@@ -127,8 +127,10 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     if (materialInfo.baseColorFactor.a < 0.5){
         discard;
     }
-    return normalize(input.normalWorldSpace);
-#endif // SHADOW || DEPTH_ONLY
+#if defined(PSO_PREPASS)
+    return float4(normalize(input.normalWorldSpace), 1.0);
+#endif // PSO_PREPASS
+#endif // PSO_SHADOW || PSO_PREPASS
 #if !defined(PSO_SHADOW) && !defined(PSO_PREPASS)
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];

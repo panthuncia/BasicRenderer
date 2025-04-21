@@ -442,11 +442,16 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 		if (desc.channels == 1) {
 			colorClearValue.Color[0] = 1.0f;
 		}
-		else {
+		else if (desc.channels == 4) {
 			colorClearValue.Color[0] = 0.0f;
 			colorClearValue.Color[1] = 0.0f;
 			colorClearValue.Color[2] = 0.0f;
 			colorClearValue.Color[3] = 1.0f;
+		}
+		else if (desc.channels == 3){
+			colorClearValue.Color[0] = 0.0f;
+			colorClearValue.Color[1] = 0.0f;
+			colorClearValue.Color[2] = 0.0f;
 		}
 		clearValue = &colorClearValue;
 	}

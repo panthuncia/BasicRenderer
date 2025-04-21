@@ -219,7 +219,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32_FLOAT; // Normals
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
 
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
@@ -505,7 +505,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
     rtvFormats.NumRenderTargets = 1;
-	rtvFormats.RTFormats[0] = DXGI_FORMAT_R32G32B32_FLOAT; // Normals
+	rtvFormats.RTFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
     pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;

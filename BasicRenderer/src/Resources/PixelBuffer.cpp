@@ -87,10 +87,6 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, Res
 	m_textureBarrier.LayoutBefore = ResourceStateToD3D12GraphicsBarrierLayout(prevState);
 	m_textureBarrier.LayoutAfter = ResourceStateToD3D12GraphicsBarrierLayout(newState);
 
-    if (m_textureBarrier.AccessAfter == D3D12_BARRIER_ACCESS_SHADER_RESOURCE && m_textureBarrier.SyncAfter == D3D12_BARRIER_SYNC_NONE) {
-        spdlog::error("What");
-    }
-
     currentState = newState;
     currentSyncState = newSyncState;
 

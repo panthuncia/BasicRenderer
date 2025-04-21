@@ -150,14 +150,19 @@ private:
     void UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<std::wstring>& renderUAVs);
     void UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<std::wstring>& computeUAVs);
 
-	void ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates);
+	void ComputeResourceLoops(
+		const std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
+		std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
+		std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<std::wstring>& computeUAVs);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<std::wstring>& renderUAVs);
 
     std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(
 		std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
 		std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
-		std::unordered_map<std::wstring, unsigned int>& transitionHistory, 
+		std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
+		std::unordered_map<std::wstring, unsigned int>& computeQueueTransitionHistory, 
+		std::unordered_map<std::wstring, unsigned int>& renderQueueTransitionHistory,
 		std::unordered_map<std::wstring, unsigned int>& producerHistory,
 		ComputePassAndResources& pass,
 		unsigned int batchIndex,
@@ -166,7 +171,8 @@ private:
 	std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(
 		std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
 		std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates, 
-		std::unordered_map<std::wstring, unsigned int>& transitionHistory, 
+		std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
+		std::unordered_map<std::wstring, unsigned int>& transitionHistory,
 		std::unordered_map<std::wstring, unsigned int>& producerHistory, 
 		RenderPassAndResources& pass,
 		unsigned int batchIndex);

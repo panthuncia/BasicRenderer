@@ -25,6 +25,7 @@ void RenderGraph::Compile() {
     //std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
     std::unordered_map<std::wstring, ResourceState> finalResourceStates;
 	std::unordered_map<std::wstring, ResourceSyncState> finalResourceSyncStates;
+	std::unordered_map<std::wstring, ResourceSyncState> firstResourceSyncStates;
 
 	std::unordered_set<std::wstring> computeUAVs;
 	std::unordered_set<std::wstring> renderUAVs;
@@ -61,7 +62,14 @@ void RenderGraph::Compile() {
                     // Update final resource states
                 }
 				
-				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, finalResourceSyncStates, batchOfLastRenderQueueTransition, batchOfLastRenderQueueProducer, renderPass, currentBatchIndex);
+				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(
+					finalResourceStates, 
+					finalResourceSyncStates, 
+					firstResourceSyncStates, 
+					batchOfLastRenderQueueTransition, 
+					batchOfLastRenderQueueProducer, 
+					renderPass, 
+					currentBatchIndex);
 				currentBatch.renderTransitions.insert(currentBatch.renderTransitions.end(), transitions.begin(), transitions.end());
                 
 				// Build synchronization points
@@ -117,7 +125,16 @@ void RenderGraph::Compile() {
 				}
 
 				std::vector<std::pair<ResourceTransition, int>> transitionsToPutAtEndOfEarlierBatchOnRenderQueue; // The compute queue cannot transition resources out of graphics queue states
-				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(finalResourceStates, finalResourceSyncStates, batchOfLastComputeQueueTransition, batchOfLastComputeQueueProducer, computePass, currentBatchIndex, transitionsToPutAtEndOfEarlierBatchOnRenderQueue);
+				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(
+					finalResourceStates, 
+					finalResourceSyncStates, 
+					firstResourceSyncStates, 
+					batchOfLastComputeQueueTransition,
+					batchOfLastRenderQueueTransition,
+					batchOfLastComputeQueueProducer, 
+					computePass, 
+					currentBatchIndex, 
+					transitionsToPutAtEndOfEarlierBatchOnRenderQueue);
                 currentBatch.computeTransitions.insert(currentBatch.computeTransitions.end(), transitions.begin(), transitions.end());
 
 				for (auto& transition : transitionsToPutAtEndOfEarlierBatchOnRenderQueue) {
@@ -172,7 +189,7 @@ void RenderGraph::Compile() {
     batches.push_back(std::move(currentBatch));
 
     // Insert transitions to loop resources back to their initial states
-    ComputeResourceLoops(finalResourceStates, finalResourceSyncStates);
+    ComputeResourceLoops(finalResourceStates, finalResourceSyncStates, firstResourceSyncStates);
 
 	// Readback pass in its own batch
 	auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
@@ -254,8 +271,10 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(RenderPassAndResources& pass
 
 std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(
 	std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
-	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates, 
-	std::unordered_map<std::wstring, unsigned int>& transitionHistory, 
+	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
+	std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
+	std::unordered_map<std::wstring, unsigned int>& computeQueueTransitionHistory, 
+	std::unordered_map<std::wstring, unsigned int>& renderQueueTransitionHistory,
 	std::unordered_map<std::wstring, unsigned int>& producerHistory, 
 	ComputePassAndResources& pass, 
 	unsigned int batchIndex,  
@@ -263,8 +282,8 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 	std::vector<ResourceTransition> transitions;
 
     auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState, ResourceSyncState finalSyncState) {
-        ResourceState initialState = ResourceState::UNKNOWN;
-		ResourceSyncState initialSyncState = ResourceSyncState::NONE;
+        ResourceState initialState = resource->GetState();
+		ResourceSyncState initialSyncState = ResourceSyncState::ALL;
         
         if (initialResourceStates.contains(resource->GetName())) {
 			initialState = initialResourceStates[resource->GetName()];
@@ -280,16 +299,17 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 		if (initialState != finalState) {
 			auto prevAccessType = ResourceStateToAccessType(initialState);
 			auto newAccessType = ResourceStateToAccessType(finalState);
-			if (finalSyncState == ResourceSyncState::NONE && newAccessType == ResourceAccessType::SHADER_RESOURCE) {
-				spdlog::error("Resource {} is in an unknown state");
-			}
 			auto transition = ResourceTransition(resource, initialState, finalState, prevAccessType, newAccessType, initialSyncState, finalSyncState);
 			if (ResourceStateIsGraphicsQueueState(initialState)) { // We cannot transition a resource in the compute queue if it is in a graphics queue state
-				transitionsToAddToBatchInRenderQueue.push_back({ transition, transitionHistory[resource->GetName()] }); // Send it back to the last graphics queue batch
+				if (!renderQueueTransitionHistory.contains(resource->GetName())) {
+					spdlog::error("Resource last transitioned on render queue missing from transition history!");
+					__debugbreak();
+				}
+				transitionsToAddToBatchInRenderQueue.push_back({ transition, renderQueueTransitionHistory[resource->GetName()] }); // Send it back to the last graphics queue batch
 			}
 			else {
 				transitions.push_back(transition);
-				transitionHistory[resource->GetName()] = batchIndex;
+				computeQueueTransitionHistory[resource->GetName()] = batchIndex;
 			}
 		}
         };
@@ -298,16 +318,40 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 		addTransition(resource, ResourceState::NON_PIXEL_SRV, ResourceSyncState::COMPUTE_SHADING);
         finalResourceStates[resource->GetName()] = ResourceState::NON_PIXEL_SRV;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COMPUTE_SHADING;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
     }
 	for (auto& resource : pass.resources.constantBuffers) {
 		addTransition(resource, ResourceState::CONSTANT, ResourceSyncState::COMPUTE_SHADING);
 		finalResourceStates[resource->GetName()] = ResourceState::CONSTANT;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COMPUTE_SHADING;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 	}
 	for (auto& resource : pass.resources.unorderedAccessViews) {
 		addTransition(resource, ResourceState::UNORDERED_ACCESS, ResourceSyncState::COMPUTE_SHADING);
 		finalResourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COMPUTE_SHADING;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 		producerHistory[resource->GetName()] = batchIndex;
 	}
 	return transitions;
@@ -315,7 +359,8 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 
 std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(
 	std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
-	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates, 
+	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
+	std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
 	std::unordered_map<std::wstring, unsigned int>& transitionHistory, 
 	std::unordered_map<std::wstring, unsigned int>& producerHistory, 
 	RenderPassAndResources& pass, 
@@ -323,8 +368,8 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
     std::vector<ResourceTransition> transitions;
 
     auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState, ResourceSyncState finalSyncState) {
-        ResourceState initialState = ResourceState::UNKNOWN;
-		ResourceSyncState initialSyncState = ResourceSyncState::NONE;
+        ResourceState initialState = resource->GetState();
+		ResourceSyncState initialSyncState = ResourceSyncState::ALL;
 
         if (initialResourceStates.contains(resource->GetName())) {
             initialState = initialResourceStates[resource->GetName()];
@@ -354,45 +399,104 @@ std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceSta
 		addTransition(resource, ResourceState::ALL_SRV, ResourceSyncState::DRAW); // TODO: Use fine-grained sync states
 		finalResourceStates[resource->GetName()] = ResourceState::ALL_SRV;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 	}
 	for (auto& resource : pass.resources.renderTargets) {
 		addTransition(resource, ResourceState::RENDER_TARGET, ResourceSyncState::DRAW);
 		finalResourceStates[resource->GetName()] = ResourceState::RENDER_TARGET;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 		producerHistory[resource->GetName()] = batchIndex;
 	}
 	for (auto& resource : pass.resources.depthTextures) {
 		addTransition(resource, ResourceState::DEPTH_WRITE, ResourceSyncState::DRAW);
 		finalResourceStates[resource->GetName()] = ResourceState::DEPTH_WRITE;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 		producerHistory[resource->GetName()] = batchIndex;
 	}
 	for (auto& resource : pass.resources.constantBuffers) {
 		addTransition(resource, ResourceState::CONSTANT, ResourceSyncState::DRAW);
 		finalResourceStates[resource->GetName()] = ResourceState::CONSTANT;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 	}
 	for (auto& resource : pass.resources.unorderedAccessViews) {
 		addTransition(resource, ResourceState::UNORDERED_ACCESS, ResourceSyncState::DRAW);
 		finalResourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		}
 		producerHistory[resource->GetName()] = batchIndex;
 	}
 	for (auto& resource : pass.resources.copyTargets) {
 		addTransition(resource, ResourceState::COPY_DEST, ResourceSyncState::COPY);
 		finalResourceStates[resource->GetName()] = ResourceState::COPY_DEST;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COPY;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 		producerHistory[resource->GetName()] = batchIndex;
 	}
 	for (auto& resource : pass.resources.copySources) {
 		addTransition(resource, ResourceState::COPY_SOURCE, ResourceSyncState::COPY);
 		finalResourceStates[resource->GetName()] = ResourceState::COPY_SOURCE;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COPY;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 	}
 	for (auto& resource : pass.resources.indirectArgumentBuffers) {
 		addTransition(resource, ResourceState::INDIRECT_ARGUMENT, ResourceSyncState::DRAW);
 		finalResourceStates[resource->GetName()] = ResourceState::INDIRECT_ARGUMENT;
 		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+		if (!firstResourceSyncStates.contains(resource->GetName())) {
+			if (resource->GetState() == ResourceState::UNKNOWN) {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
+			}
+			else {
+				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
+			}
+		}
 	}
 	return transitions;
 }
@@ -830,7 +934,10 @@ void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndRe
 }
 
 
-void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::wstring, ResourceState>& finalResourceStates, std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates) {
+void RenderGraph::ComputeResourceLoops(
+	const std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
+	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates, 
+	std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates) {
 	PassBatch loopBatch;
     for (const auto& [resourceName, finalState] : finalResourceStates) {
         auto resource = GetResourceByName(resourceName);
@@ -839,11 +946,15 @@ void RenderGraph::ComputeResourceLoops(const std::unordered_map<std::wstring, Re
         }
 
         ResourceState initialState = resource->GetState();
-        if (finalState != initialState) {
+
+		auto finalSyncState = finalResourceSyncStates[resourceName];
+		auto firstResourceSyncState = firstResourceSyncStates[resourceName];
+
+        if (finalState != initialState || firstResourceSyncState != finalSyncState) {
             // Insert a transition to bring the resource back to its initial state
-			ResourceAccessType prevAccessType = ResourceStateToAccessType(initialState);
+			ResourceAccessType firstAccessType = ResourceStateToAccessType(initialState);
 			ResourceAccessType newAccessType = ResourceStateToAccessType(finalState);
-            ResourceTransition transition = { resource, finalState, initialState, prevAccessType, newAccessType, finalResourceSyncStates[resource->GetName()], ResourceSyncState::NONE};
+            ResourceTransition transition = { resource, finalState, initialState, newAccessType, firstAccessType, finalSyncState, firstResourceSyncState};
             loopBatch.renderTransitions.push_back(transition);
         }
     }
