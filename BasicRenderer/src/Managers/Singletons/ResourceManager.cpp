@@ -432,13 +432,13 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	D3D12_CLEAR_VALUE depthClearValue = {};
 	D3D12_CLEAR_VALUE colorClearValue = {};
 	if (desc.hasDSV) {
-		depthClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+		depthClearValue.Format = desc.dsvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.dsvFormat;
 		depthClearValue.DepthStencil.Depth = 1.0f;
 		depthClearValue.DepthStencil.Stencil = 0;
 		clearValue = &depthClearValue;
 	}
 	else if (desc.hasRTV) {
-		colorClearValue.Format = desc.format;
+		colorClearValue.Format = desc.rtvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.rtvFormat;
 		if (desc.channels == 1) {
 			colorClearValue.Color[0] = 1.0f;
 		}
@@ -467,7 +467,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	auto srvInfo = CreateShaderResourceViewsPerMip(
 		device.Get(),
 		textureResource.Get(),
-		desc.format == DXGI_FORMAT_R32_TYPELESS ? DXGI_FORMAT_R32_FLOAT : desc.format,
+		desc.srvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.srvFormat,
 		m_cbvSrvUavHeap.get(),
 		mipLevels,
 		desc.isCubemap,
@@ -481,7 +481,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 		uavInfo = CreateUnorderedAccessViewsPerMip(
 			device.Get(),
 			textureResource.Get(),
-			desc.format,
+			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
 			m_cbvSrvUavHeap.get(),
 			desc.isArray,
 			arraySize,
@@ -497,7 +497,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 		nonShaderUavInfo = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
 			device.Get(),
 			textureResource.Get(),
-			desc.format,
+			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
 			m_nonShaderVisibleHeap.get(),
 			desc.isArray,
 			arraySize,
@@ -513,7 +513,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 		rtvInfos = CreateRenderTargetViews(
 			device.Get(),
 			textureResource.Get(),
-			desc.format,
+			desc.rtvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.rtvFormat,
 			m_rtvHeap.get(),
 			desc.isCubemap,
 			desc.isArray,
@@ -529,6 +529,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 			device.Get(),
 			textureResource.Get(),
 			m_dsvHeap.get(),
+			desc.dsvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.dsvFormat,
 			desc.isCubemap,
 			desc.isArray,
 			arraySize

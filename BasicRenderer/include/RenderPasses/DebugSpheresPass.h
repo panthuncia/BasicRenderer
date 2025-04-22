@@ -60,7 +60,7 @@ public:
 
 		// Set the render target
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
+		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

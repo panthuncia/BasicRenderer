@@ -54,6 +54,7 @@
 #include "Utilities/MathUtils.h"
 #include "Scene/MovementState.h"
 #include "Animation/AnimationController.h"
+#include "ThirdParty/XeGTAO.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -145,6 +146,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
+    CreateTextures();
     CreateGlobalResources();
 
     // Initialize GPU resource managers
@@ -524,13 +526,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap)));
 
     rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	dsvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
-    // Create depth stencil descriptor heap
-    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-    dsvHeapDesc.NumDescriptors = numFramesInFlight;
-    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    ThrowIfFailed(device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvHeap)));
 
     // Create frame resources
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
@@ -553,41 +548,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         m_commandLists.push_back(commandList);
     }
 
-
-    // Create the depth stencil buffer
-    D3D12_RESOURCE_DESC depthStencilDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_D24_UNORM_S8_UINT, x_res, y_res,
-        1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
-    );
-
-    D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
-    depthOptimizedClearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
-    depthOptimizedClearValue.DepthStencil.Stencil = 0;
-
-    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    for (int i = 0; i < numFramesInFlight; i++){
-        auto dsvHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-		ComPtr<ID3D12Resource> depthStencilBuffer;
-        ThrowIfFailed(device->CreateCommittedResource(
-            &dsvHeapProperties,
-            D3D12_HEAP_FLAG_NONE,
-            &depthStencilDesc,
-            D3D12_RESOURCE_STATE_DEPTH_WRITE,
-            &depthOptimizedClearValue,
-            IID_PPV_ARGS(&depthStencilBuffer)
-        ));
-
-		depthStencilBuffers.push_back(depthStencilBuffer);
-        // Create the depth stencil view
-        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
-        device->CreateDepthStencilView(depthStencilBuffers[i].Get(), &dsvDesc, dsvHandle);
-        dsvHandle.Offset(1, dsvDescriptorSize);
-    }
-
     // Create per-frame fence information
 	m_frameFenceValues.resize(numFramesInFlight);
 	for (int i = 0; i < numFramesInFlight; i++) {
@@ -602,9 +562,28 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
 }
 
+void DX12Renderer::CreateTextures() {
+    TextureDescription depthStencilDesc;
+    ImageDimensions dimensions;
+    dimensions.width = m_xRes;
+    dimensions.height = m_yRes;
+    depthStencilDesc.imageDimensions.push_back(dimensions);
+    depthStencilDesc.format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    depthStencilDesc.hasSRV = true;
+    depthStencilDesc.srvFormat = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    depthStencilDesc.arraySize = 1;
+    depthStencilDesc.channels = 1;
+    depthStencilDesc.generateMipMaps = false;
+    depthStencilDesc.hasDSV = true;
+
+    m_depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
+    m_depthStencilBuffer->SetName(L"DepthStencilBuffer");
+}
+
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     if (!device) return;
-
+	m_xRes = newWidth;
+	m_yRes = newHeight;
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
 
@@ -613,7 +592,6 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
     for (int i = 0; i < numFramesInFlight; ++i) {
         renderTargets[i].Reset();
-		depthStencilBuffers[i].Reset();
     }
 
     // Resize the swap chain
@@ -633,34 +611,10 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
         rtvHandle.Offset(1, rtvDescriptorSize);
     }
 
-    // Recreate the depth/stencil buffer
-    D3D12_RESOURCE_DESC depthStencilDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_D24_UNORM_S8_UINT, newWidth, newHeight,
-        1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+    CreateTextures();
 
-    D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
-    depthOptimizedClearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
-    depthOptimizedClearValue.DepthStencil.Stencil = 0;
-
-    auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
-    for (int i = 0; i < numFramesInFlight; i++) {
-        ThrowIfFailed(device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &depthStencilDesc,
-            D3D12_RESOURCE_STATE_DEPTH_WRITE,
-            &depthOptimizedClearValue,
-            IID_PPV_ARGS(&depthStencilBuffers[i])));
-
-        // Create the depth stencil view
-        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
-        device->CreateDepthStencilView(depthStencilBuffers[i].Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    }
+	//Rebuild the render graph
+	rebuildRenderGraph = true;
 }
 
 
@@ -734,7 +688,7 @@ void DX12Renderer::Render() {
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
-    m_context.dsvHeap = dsvHeap.Get();
+	m_context.pPrimaryDepthBuffer = m_depthStencilBuffer.get();
     m_context.renderTargets = renderTargets.data();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
@@ -763,13 +717,8 @@ void DX12Renderer::Render() {
     commandList->ResourceBarrier(1, &barrier);
     
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.rtvDescriptorSize);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.dsvDescriptorSize);
+	auto& dsvHandle = m_depthStencilBuffer->GetDSVInfos()[0].cpuHandle;
     //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-    // Clear the render target
-    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-    commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     commandList->Close();
 
@@ -988,7 +937,8 @@ void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
 
     auto newGraph = std::make_unique<RenderGraph>();
-
+    std::shared_ptr<PixelBuffer> depthTexture = m_depthStencilBuffer;
+	newGraph->AddResource(depthTexture, false, ResourceState::DEPTH_WRITE);
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
@@ -1072,7 +1022,8 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace);
+        .WithRenderTarget(normalsWorldSpace)
+        .WithDepthTarget(depthTexture);
 
 	if (useMeshShaders) {
 		zBuilder.WithShaderResource(meshResourceGroup);
@@ -1102,7 +1053,7 @@ void DX12Renderer::CreateRenderGraph() {
 	workingEdgesDesc.channels = 1;
 	workingEdgesDesc.isCubemap = false;
 	workingEdgesDesc.hasRTV = false;
-    workingDepthsDesc.hasUAV = true;
+    workingEdgesDesc.hasUAV = true;
     workingEdgesDesc.format = DXGI_FORMAT_R8_UNORM;
     workingEdgesDesc.generateMipMaps = false;
 	workingEdgesDesc.imageDimensions.push_back(dims1);
@@ -1114,7 +1065,7 @@ void DX12Renderer::CreateRenderGraph() {
 	workingAOTermDesc.channels = 1;
 	workingAOTermDesc.isCubemap = false;
 	workingAOTermDesc.hasRTV = false;
-    workingDepthsDesc.hasUAV = true;
+    workingAOTermDesc.hasUAV = true;
 	workingAOTermDesc.format = DXGI_FORMAT_R8_UINT;
 	workingAOTermDesc.generateMipMaps = false;
 	workingAOTermDesc.imageDimensions.push_back(dims1);
@@ -1122,15 +1073,60 @@ void DX12Renderer::CreateRenderGraph() {
 	workingAOTerm1->SetName(L"GTAO Working AO Term 1");
 	auto workingAOTerm2 = PixelBuffer::Create(workingAOTermDesc);
 	workingAOTerm2->SetName(L"GTAO Working AO Term 2");
-
+	auto outputAO = PixelBuffer::Create(workingAOTermDesc);
+	outputAO->SetName(L"GTAO Output AO Term");
+	newGraph->AddResource(workingAOTerm1, false, ResourceState::UNORDERED_ACCESS);
+	newGraph->AddResource(workingAOTerm2, false, ResourceState::UNORDERED_ACCESS);
+	newGraph->AddResource(outputAO, false, ResourceState::UNORDERED_ACCESS);
 	newGraph->AddResource(workingDepths, false, ResourceState::UNORDERED_ACCESS);
 	newGraph->AddResource(workingEdges, false, ResourceState::UNORDERED_ACCESS);
 
     auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
 	newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
 
-	newGraph->BuildComputePass("GTAOPass") // Depth filter pass
-        .WithShaderResource(normalsWorldSpace)
+    // Point-clamp sampler
+	D3D12_SAMPLER_DESC samplerDesc = {};
+	samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+	samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	samplerDesc.MipLODBias = 0.0f;
+	samplerDesc.MaxAnisotropy = 1;
+	samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+
+    auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
+
+    auto cameraInfo = currentScene->GetPrimaryCamera().get<Components::Camera>();
+	GTAOInfo gtaoInfo;
+    XeGTAO::GTAOSettings gtaoSettings;
+	XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
+	XeGTAO::GTAOUpdateConstants(gtaoConstants, m_xRes, m_yRes, gtaoSettings, (float*) & cameraInfo->info.projection, false, 0);
+    // Bindless indices
+    gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
+	
+    // Filter pass
+    gtaoInfo.g_srcRawDepthDescriptorIndex = depthTexture->GetSRVInfo()[0].index;
+	gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[0].index;
+	gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[1].index;
+	gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[2].index;
+    gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[3].index;
+    gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[4].index;
+
+    // Main pass
+	gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo()[0].index;
+	gtaoInfo.g_srcNormalmapDescriptorIndex = normalsWorldSpace->GetSRVInfo()[0].index;
+    // TODO: Hilbert lookup table
+	gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo()[0].index; // Moved to root constant
+	gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo()[0].index;
+
+    // Denoise pass
+	gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo()[0].index;
+	gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo()[0].index;
+
+	UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
+
+	newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
+        .WithShaderResource(normalsWorldSpace, m_depthStencilBuffer)
 		.WithUnorderedAccess(workingDepths)
 		.Build<GTAOFilterPass>(GTAOConstantBuffer);
 
@@ -1151,9 +1147,10 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithUnorderedAccess(clusterBuffer, lightPagesBuffer, lightPagesCounter)
 			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
     }
-
+    
     auto forwardBuilder = newGraph->BuildRenderPass("ForwardPass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer);
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
+        .WithDepthTarget(depthTexture);
 
     if (m_clusteredLighting) {
 		forwardBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);

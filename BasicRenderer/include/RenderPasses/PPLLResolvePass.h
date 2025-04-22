@@ -66,7 +66,6 @@ public:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 		commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);

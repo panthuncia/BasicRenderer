@@ -117,7 +117,7 @@ private:
 		commandList->RSSetScissorRects(1, &scissorRect);
 
 		// Set the render target
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
+		auto dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
 		commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

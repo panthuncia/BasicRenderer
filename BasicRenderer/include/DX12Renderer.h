@@ -63,8 +63,9 @@ private:
 	ComPtr<ID3D12CommandQueue> computeQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
-    ComPtr<ID3D12DescriptorHeap> dsvHeap;
-	std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
+    //ComPtr<ID3D12DescriptorHeap> dsvHeap;
+	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
+	std::shared_ptr<PixelBuffer> m_depthStencilBuffer;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
     std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
     UINT rtvDescriptorSize;
@@ -116,6 +117,7 @@ private:
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
+    void CreateTextures();
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
     void CreateGlobalResources();

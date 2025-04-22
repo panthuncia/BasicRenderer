@@ -44,6 +44,14 @@ public:
         };
         commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
+		// Set the compute pipeline state
+		commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
+		commandList->SetPipelineState(PrefilterDepths16x16PSO.Get());
+
+        unsigned int passConstants[NumMiscRootConstants] = {};
+        passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
+
+
         commandList->Close();
 
         return { { commandList.Get() } };

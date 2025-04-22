@@ -172,6 +172,7 @@ std::vector<NonShaderVisibleIndexInfo> CreateDepthStencilViews(
 	ID3D12Device* device,
 	ID3D12Resource* resource,
 	DescriptorHeap* dsvHeap,
+	DXGI_FORMAT format,
 	bool isCubemap = false,
 	bool isArray = false,
 	int arraySize = 1);

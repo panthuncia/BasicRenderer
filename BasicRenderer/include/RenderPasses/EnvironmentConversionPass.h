@@ -108,8 +108,6 @@ public:
                 rtvHandles[0] = m_environmentCubeMap->GetBuffer()->GetRTVInfos()[i].cpuHandle;
                 rtvHandles[1] = m_environmentRadiance->GetBuffer()->GetRTVInfos()[i].cpuHandle;
 
-                CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
-
                 commandList->OMSetRenderTargets(2, rtvHandles, FALSE, nullptr);
 
                 auto viewMatrix = m_viewMatrices[i];

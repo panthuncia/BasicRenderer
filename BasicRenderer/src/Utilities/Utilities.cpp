@@ -910,6 +910,7 @@ std::vector<NonShaderVisibleIndexInfo> CreateDepthStencilViews(
     ID3D12Device* device,
     ID3D12Resource* resource,
     DescriptorHeap* dsvHeap,
+	DXGI_FORMAT format,
     bool isCubemap,
     bool isArray,
     int arraySize) {
@@ -917,7 +918,7 @@ std::vector<NonShaderVisibleIndexInfo> CreateDepthStencilViews(
     std::vector<NonShaderVisibleIndexInfo> dsvInfos;
 
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.Format = format;
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
     dsvDesc.Texture2DArray.MipSlice = 0;
     dsvDesc.Texture2DArray.ArraySize = 1;

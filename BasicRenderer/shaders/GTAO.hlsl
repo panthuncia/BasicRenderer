@@ -160,7 +160,7 @@ void CSGTAOUltra(const uint2 pixCoord : SV_DispatchThreadID) {
 void CSDenoisePass(const uint2 dispatchThreadID : SV_DispatchThreadID) {
     const uint2 pixCoordBase = dispatchThreadID * uint2(2, 1); // we're computing 2 horizontal pixels at a time (performance optimization)
     ConstantBuffer<GTAOInfo> gtaoInfo = ResourceDescriptorHeap[UintRootConstant0];
-    Texture2D<uint> g_srcWorkingAOTerm = ResourceDescriptorHeap[gtaoInfo.g_srcWorkingAOTermDescriptorIndex];
+    Texture2D<uint> g_srcWorkingAOTerm = ResourceDescriptorHeap[UintRootConstant1];
     Texture2D<float> g_srcWorkingEdges = ResourceDescriptorHeap[gtaoInfo.g_outWorkingEdgesDescriptorIndex];
     SamplerState g_samplerPointClamp = SamplerDescriptorHeap[gtaoInfo.g_samplerPointClampDescriptorIndex];
     RWTexture2D<uint> g_outFinalAOTerm = ResourceDescriptorHeap[gtaoInfo.g_outFinalAOTermDescriptorIndex];
@@ -172,7 +172,7 @@ void CSDenoisePass(const uint2 dispatchThreadID : SV_DispatchThreadID) {
 void CSDenoiseLastPass(const uint2 dispatchThreadID : SV_DispatchThreadID) {
     const uint2 pixCoordBase = dispatchThreadID * uint2(2, 1); // we're computing 2 horizontal pixels at a time (performance optimization)
     ConstantBuffer<GTAOInfo> gtaoInfo = ResourceDescriptorHeap[UintRootConstant0];
-    Texture2D<uint> g_srcWorkingAOTerm = ResourceDescriptorHeap[gtaoInfo.g_srcWorkingAOTermDescriptorIndex];
+    Texture2D<uint> g_srcWorkingAOTerm = ResourceDescriptorHeap[UintRootConstant1];
     Texture2D<float> g_srcWorkingEdges = ResourceDescriptorHeap[gtaoInfo.g_outWorkingEdgesDescriptorIndex];
     SamplerState g_samplerPointClamp = SamplerDescriptorHeap[gtaoInfo.g_samplerPointClampDescriptorIndex];
     RWTexture2D<uint> g_outFinalAOTerm = ResourceDescriptorHeap[gtaoInfo.g_outFinalAOTermDescriptorIndex];

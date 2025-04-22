@@ -65,6 +65,8 @@ public:
 		auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
         const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f};
 		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
+        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
@@ -108,7 +110,7 @@ private:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         // Render targets
-        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
+		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
         auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 

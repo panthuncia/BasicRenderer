@@ -79,7 +79,6 @@ public:
             for (int i = 0; i < 6; i++) {
 
 				CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6*mip+i].cpuHandle;
-                CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
                 commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
