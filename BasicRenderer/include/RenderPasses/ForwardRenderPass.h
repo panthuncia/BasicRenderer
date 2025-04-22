@@ -20,12 +20,13 @@
 
 class ForwardRenderPass : public RenderPass {
 public:
-    ForwardRenderPass(bool wireframe, bool meshShaders, bool indirect)
-        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+    ForwardRenderPass(bool wireframe, bool meshShaders, bool indirect, int aoTextureDescriptorIndex)
+        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect), m_aoTextureDescriptorIndex(aoTextureDescriptorIndex) {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
     }
 
 	~ForwardRenderPass() {
@@ -116,7 +117,7 @@ private:
     }
 
     void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
-        unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
+        unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
         auto& meshManager = context.meshManager;
@@ -134,6 +135,7 @@ private:
         staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
         staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+        staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
@@ -295,6 +297,8 @@ private:
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
+	int m_aoTextureDescriptorIndex;
+    bool m_gtaoEnabled = true;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;

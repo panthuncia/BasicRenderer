@@ -420,9 +420,14 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     float3 ambient = lerp(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
     
 #else 
-    float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz * ao;
+    float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz;
 #endif // IMAGE_BASED_LIGHTING
-    
+    if (enableGTAO) {
+        Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
+        uint2 currentScreenSpace = uint2(input.position.xy);
+        ao *= float(aoTexture[currentScreenSpace].x) / 255.0;
+    }
+    ambient *= ao;
     lighting += ambient;
     if (meshBuffer.vertexFlags & VERTEX_COLORS) { // TODO: This only makes sense for forward rendering
         lighting = lighting * input.color.xyz;

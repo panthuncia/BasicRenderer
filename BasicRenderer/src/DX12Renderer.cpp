@@ -278,6 +278,7 @@ void DX12Renderer::SetSettings() {
     bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
+	settingsManager.registerSetting<bool>("enableGTAO", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -328,7 +329,10 @@ void DX12Renderer::SetSettings() {
 	settingsManager.addObserver<bool>("enableImageBasedLighting", [this](const bool& newValue) {
 		m_imageBasedLighting = newValue;
 		});
-
+	settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
+		m_gtaoEnabled = newValue;
+		rebuildRenderGraph = true;
+		});
     m_numFramesInFlight = getNumFramesInFlight();
 }
 
@@ -568,13 +572,14 @@ void DX12Renderer::CreateTextures() {
     dimensions.width = m_xRes;
     dimensions.height = m_yRes;
     depthStencilDesc.imageDimensions.push_back(dimensions);
-    depthStencilDesc.format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    depthStencilDesc.format = DXGI_FORMAT_R32_TYPELESS;
     depthStencilDesc.hasSRV = true;
-    depthStencilDesc.srvFormat = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    depthStencilDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
     depthStencilDesc.arraySize = 1;
     depthStencilDesc.channels = 1;
     depthStencilDesc.generateMipMaps = false;
     depthStencilDesc.hasDSV = true;
+	depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
 
     m_depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
     m_depthStencilBuffer->SetName(L"DepthStencilBuffer");
@@ -1033,103 +1038,120 @@ void DX12Renderer::CreateRenderGraph() {
 	}
     zBuilder.Build<ZPrepass>(normalsWorldSpace, getWireframeEnabled(), useMeshShaders, indirect);
 
+    auto debugPassParameters = RenderPassParameters();
+
     // GTAO pass
+    std::shared_ptr<PixelBuffer> outputAO;
+    if (m_gtaoEnabled) {
+        TextureDescription workingDepthsDesc;
+        workingDepthsDesc.arraySize = 1;
+        workingDepthsDesc.channels = 1;
+        workingDepthsDesc.isCubemap = false;
+        workingDepthsDesc.hasRTV = false;
+        workingDepthsDesc.hasUAV = true;
+        workingDepthsDesc.format = DXGI_FORMAT_R32_FLOAT;
+        workingDepthsDesc.generateMipMaps = true;
+        ImageDimensions dims1 = { m_xRes, m_yRes, 0, 0 };
+        workingDepthsDesc.imageDimensions.push_back(dims1);
+        auto workingDepths = PixelBuffer::Create(workingDepthsDesc);
+        workingDepths->SetName(L"GTAO Working Depths");
 
-	TextureDescription workingDepthsDesc;
-	workingDepthsDesc.arraySize = 1;
-	workingDepthsDesc.channels = 1;
-	workingDepthsDesc.isCubemap = false;
-    workingDepthsDesc.hasRTV = false;
-	workingDepthsDesc.hasUAV = true;
-	workingDepthsDesc.format = DXGI_FORMAT_R32_FLOAT;
-    workingDepthsDesc.generateMipMaps = true;
-    ImageDimensions dims1 = { m_xRes, m_yRes, 0, 0 };
-	workingDepthsDesc.imageDimensions.push_back(dims1);
-	auto workingDepths = PixelBuffer::Create(workingDepthsDesc);
-	workingDepths->SetName(L"GTAO Working Depths");
+        TextureDescription workingEdgesDesc;
+        workingEdgesDesc.arraySize = 1;
+        workingEdgesDesc.channels = 1;
+        workingEdgesDesc.isCubemap = false;
+        workingEdgesDesc.hasRTV = false;
+        workingEdgesDesc.hasUAV = true;
+        workingEdgesDesc.format = DXGI_FORMAT_R8_UNORM;
+        workingEdgesDesc.generateMipMaps = false;
+        workingEdgesDesc.imageDimensions.push_back(dims1);
+        auto workingEdges = PixelBuffer::Create(workingEdgesDesc);
+        workingEdges->SetName(L"GTAO Working Edges");
 
-	TextureDescription workingEdgesDesc;
-	workingEdgesDesc.arraySize = 1;
-	workingEdgesDesc.channels = 1;
-	workingEdgesDesc.isCubemap = false;
-	workingEdgesDesc.hasRTV = false;
-    workingEdgesDesc.hasUAV = true;
-    workingEdgesDesc.format = DXGI_FORMAT_R8_UNORM;
-    workingEdgesDesc.generateMipMaps = false;
-	workingEdgesDesc.imageDimensions.push_back(dims1);
-	auto workingEdges = PixelBuffer::Create(workingEdgesDesc);
-	workingEdges->SetName(L"GTAO Working Edges");
+        TextureDescription workingAOTermDesc;
+        workingAOTermDesc.arraySize = 1;
+        workingAOTermDesc.channels = 1;
+        workingAOTermDesc.isCubemap = false;
+        workingAOTermDesc.hasRTV = false;
+        workingAOTermDesc.hasUAV = true;
+        workingAOTermDesc.format = DXGI_FORMAT_R8_UINT;
+        workingAOTermDesc.generateMipMaps = false;
+        workingAOTermDesc.imageDimensions.push_back(dims1);
+        auto workingAOTerm1 = PixelBuffer::Create(workingAOTermDesc);
+        workingAOTerm1->SetName(L"GTAO Working AO Term 1");
+        auto workingAOTerm2 = PixelBuffer::Create(workingAOTermDesc);
+        workingAOTerm2->SetName(L"GTAO Working AO Term 2");
+        outputAO = PixelBuffer::Create(workingAOTermDesc);
+        outputAO->SetName(L"GTAO Output AO Term");
+        newGraph->AddResource(workingAOTerm1, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingAOTerm2, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(outputAO, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingDepths, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingEdges, false, ResourceState::UNORDERED_ACCESS);
 
-	TextureDescription workingAOTermDesc;
-	workingAOTermDesc.arraySize = 1;
-	workingAOTermDesc.channels = 1;
-	workingAOTermDesc.isCubemap = false;
-	workingAOTermDesc.hasRTV = false;
-    workingAOTermDesc.hasUAV = true;
-	workingAOTermDesc.format = DXGI_FORMAT_R8_UINT;
-	workingAOTermDesc.generateMipMaps = false;
-	workingAOTermDesc.imageDimensions.push_back(dims1);
-	auto workingAOTerm1 = PixelBuffer::Create(workingAOTermDesc);
-	workingAOTerm1->SetName(L"GTAO Working AO Term 1");
-	auto workingAOTerm2 = PixelBuffer::Create(workingAOTermDesc);
-	workingAOTerm2->SetName(L"GTAO Working AO Term 2");
-	auto outputAO = PixelBuffer::Create(workingAOTermDesc);
-	outputAO->SetName(L"GTAO Output AO Term");
-	newGraph->AddResource(workingAOTerm1, false, ResourceState::UNORDERED_ACCESS);
-	newGraph->AddResource(workingAOTerm2, false, ResourceState::UNORDERED_ACCESS);
-	newGraph->AddResource(outputAO, false, ResourceState::UNORDERED_ACCESS);
-	newGraph->AddResource(workingDepths, false, ResourceState::UNORDERED_ACCESS);
-	newGraph->AddResource(workingEdges, false, ResourceState::UNORDERED_ACCESS);
+        auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
+        newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
 
-    auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
-	newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
+        // Point-clamp sampler
+        D3D12_SAMPLER_DESC samplerDesc = {};
+        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.MipLODBias = 0.0f;
+        samplerDesc.MaxAnisotropy = 1;
+        //samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
 
-    // Point-clamp sampler
-	D3D12_SAMPLER_DESC samplerDesc = {};
-	samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-	samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	samplerDesc.MipLODBias = 0.0f;
-	samplerDesc.MaxAnisotropy = 1;
-	samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
 
-    auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
+        auto cameraInfo = currentScene->GetPrimaryCamera().get<Components::Camera>();
+        GTAOInfo gtaoInfo;
+        XeGTAO::GTAOSettings gtaoSettings;
+        XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
+        XeGTAO::GTAOUpdateConstants(gtaoConstants, m_xRes, m_yRes, gtaoSettings, (float*)&cameraInfo->info.projection, true, 0);
+        // Bindless indices
+        gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
 
-    auto cameraInfo = currentScene->GetPrimaryCamera().get<Components::Camera>();
-	GTAOInfo gtaoInfo;
-    XeGTAO::GTAOSettings gtaoSettings;
-	XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
-	XeGTAO::GTAOUpdateConstants(gtaoConstants, m_xRes, m_yRes, gtaoSettings, (float*) & cameraInfo->info.projection, false, 0);
-    // Bindless indices
-    gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
-	
-    // Filter pass
-    gtaoInfo.g_srcRawDepthDescriptorIndex = depthTexture->GetSRVInfo()[0].index;
-	gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[0].index;
-	gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[1].index;
-	gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[2].index;
-    gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[3].index;
-    gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[4].index;
+        // Filter pass
+        gtaoInfo.g_srcRawDepthDescriptorIndex = depthTexture->GetSRVInfo()[0].index;
+        gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[0].index;
+        gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[1].index;
+        gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[2].index;
+        gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[3].index;
+        gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[4].index;
 
-    // Main pass
-	gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo()[0].index;
-	gtaoInfo.g_srcNormalmapDescriptorIndex = normalsWorldSpace->GetSRVInfo()[0].index;
-    // TODO: Hilbert lookup table
-	gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo()[0].index; // Moved to root constant
-	gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo()[0].index;
+        // Main pass
+        gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo()[0].index;
+        gtaoInfo.g_srcNormalmapDescriptorIndex = normalsWorldSpace->GetSRVInfo()[0].index;
+        // TODO: Hilbert lookup table
+        gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo()[0].index;
+        gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo()[0].index;
 
-    // Denoise pass
-	gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo()[0].index;
-	gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo()[0].index;
+        // Denoise pass
+        gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo()[0].index;
+        gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo()[0].index;
 
-	UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
+        debugPassParameters.shaderResources.push_back(outputAO);
+        SetDebugTexture(outputAO);
 
-	newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
-        .WithShaderResource(normalsWorldSpace, m_depthStencilBuffer)
-		.WithUnorderedAccess(workingDepths)
-		.Build<GTAOFilterPass>(GTAOConstantBuffer);
+        UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
 
+        newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
+            .WithShaderResource(normalsWorldSpace, m_depthStencilBuffer)
+            .WithUnorderedAccess(workingDepths)
+            .Build<GTAOFilterPass>(GTAOConstantBuffer);
+
+        newGraph->BuildComputePass("GTAOMainPass") // Main pass
+            .WithShaderResource(normalsWorldSpace, workingDepths)
+            .WithUnorderedAccess(workingEdges, workingAOTerm1)
+            .Build<GTAOMainPass>(GTAOConstantBuffer);
+
+        newGraph->BuildComputePass("GTAODenoisePass") // Denoise pass
+            .WithShaderResource(workingEdges, workingAOTerm1)
+            .WithUnorderedAccess(outputAO)
+            .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo()[0].index, workingAOTerm2->GetSRVInfo()[0].index);
+
+    }
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
         // light pages counter
@@ -1156,14 +1178,16 @@ void DX12Renderer::CreateRenderGraph() {
 		forwardBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
     }
 
+    if (m_gtaoEnabled) {
+        forwardBuilder.WithShaderResource(outputAO);
+    }
+
     if (useMeshShaders) {
 		forwardBuilder.WithShaderResource(meshResourceGroup);
 		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
 			forwardBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
         }
 	}
-
-    auto debugPassParameters = RenderPassParameters();
 
     if (m_lutTexture == nullptr) {
 		TextureDescription lutDesc;
@@ -1262,7 +1286,7 @@ void DX12Renderer::CreateRenderGraph() {
 			.Build<SkyboxRenderPass>(m_currentSkybox);
     }
 
-	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect);
+	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
@@ -1467,7 +1491,7 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	rebuildRenderGraph = true;
 }
 
-void DX12Renderer::SetDebugTexture(std::shared_ptr<Texture> texture) {
+void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
     m_currentDebugTexture = texture;
 	if (currentRenderGraph == nullptr) {
 		return;

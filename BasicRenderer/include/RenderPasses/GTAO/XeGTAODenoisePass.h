@@ -10,7 +10,7 @@
 
 class GTAODenoisePass : public ComputePass {
 public:
-    GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
+    GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex1, int workingBufferIndex2) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex1(workingBufferIndex1), m_workingAOBufferIndex2(workingBufferIndex2) {}
 
     void Setup() override {
         auto& manager = DeviceManager::GetInstance();
@@ -29,9 +29,7 @@ public:
     }
 
     ComputePassReturn Execute(RenderContext& context) override {
-        if (m_texture == nullptr) {
-            return { };
-        }
+
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = m_commandLists[context.frameIndex];
         auto& allocator = m_allocators[context.frameIndex];
@@ -44,6 +42,26 @@ public:
         };
         commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
+		// Set the root signature
+		commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
+		commandList->SetPipelineState(DenoiseLastPassPSO.Get());
+
+        unsigned int gtaoConstants[NumMiscRootConstants] = {};
+        gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
+
+        unsigned int numDenoisePasses = 1;
+		//for (unsigned int i = 0; i < numDenoisePasses; i++) {
+            gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex1;
+            
+            commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, gtaoConstants, 0);
+
+            //gtaoConstants[UintRootConstant2] = workingAOBufferIndex2;
+			commandList->Dispatch((context.xRes + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.yRes + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
+			// Swap buffers
+			//std::swap(workingAOBufferIndex1, workingAOBufferIndex2);
+        //}
+
+
         commandList->Close();
 
         return { { commandList.Get() } };
@@ -53,15 +71,8 @@ public:
         // Cleanup if necessary
     }
 
-    void SetTexture(Texture* texture) {
-        m_texture = texture;
-    }
-
 private:
-    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
-    Texture* m_texture = nullptr;
-	GTAOInfo m_gtaoInfo;
 
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
@@ -69,6 +80,8 @@ private:
     ComPtr<ID3D12PipelineState> DenoisePassPSO;
     ComPtr<ID3D12PipelineState> DenoiseLastPassPSO;
 
+	unsigned int m_workingAOBufferIndex1 = 0;
+	unsigned int m_workingAOBufferIndex2 = 1;
 
     void CreateXeGTAOComputePSO()
     {

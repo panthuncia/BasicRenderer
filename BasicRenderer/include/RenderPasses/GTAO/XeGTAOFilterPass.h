@@ -29,9 +29,6 @@ public:
     }
 
     ComputePassReturn Execute(RenderContext& context) override {
-        if (m_texture == nullptr) {
-            return { };
-        }
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = m_commandLists[context.frameIndex];
         auto& allocator = m_allocators[context.frameIndex];
@@ -51,6 +48,13 @@ public:
         unsigned int passConstants[NumMiscRootConstants] = {};
         passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
 
+		commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, passConstants, 0);
+
+        // Dispatch
+        // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)
+		unsigned int x = (context.xRes + 16 - 1) / 16;
+		unsigned int y = (context.yRes + 16 - 1) / 16;
+		commandList->Dispatch(x, y, 1);
 
         commandList->Close();
 
@@ -61,15 +65,8 @@ public:
         // Cleanup if necessary
     }
 
-    void SetTexture(Texture* texture) {
-        m_texture = texture;
-    }
-
 private:
-    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
-    Texture* m_texture = nullptr;
-	GTAOInfo m_gtaoInfo;
 
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;

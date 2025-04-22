@@ -196,6 +196,7 @@ enum RootSignatureLayout {
 	VariableBufferRootSignatureIndex,
 	TransparencyInfoRootSignatureIndex,
 	LightClusterRootSignatureIndex,
+	MiscRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -219,6 +220,7 @@ enum ViewRootConstants {
 enum SettingsRootConstants {
 	EnableShadows,
 	EnablePunctualLights,
+    EnableGTAO,
 	NumSettingsRootConstants
 };
 
@@ -235,6 +237,7 @@ enum StaticBufferRootConstants {
     PerMeshInstanceBufferDescriptorIndex,
     DrawSetCommandBufferDescriptorIndex,
 	NormalsTextureDescriptorIndex,
+    AOTextureDescriptorIndex,
     NumStaticBufferRootConstants,
 };
 
