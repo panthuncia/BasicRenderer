@@ -1,6 +1,17 @@
 #ifndef __STRUCTS_HLSL__
 #define __STRUCTS_HLSL__
 
+struct PSInput {
+    float4 position : SV_POSITION; // Screen-space position, required for rasterization
+    float4 positionWorldSpace : TEXCOORD0; // For world-space lighting
+    float4 positionViewSpace : TEXCOORD1; // For cascaded shadows
+    float3 normalWorldSpace : TEXCOORD2; // For world-space lighting
+    float2 texcoord : TEXCOORD3;
+    float3 color : TEXCOORD7; // For models with vertex colors
+    float3 normalModelSpace : TEXCOORD8; // For debug view
+    uint meshletIndex : TEXCOORD9; // For meshlet debug view
+};
+
 struct ClippingPlane {
     float4 plane;
 };
@@ -203,6 +214,11 @@ struct GTAOInfo {
     uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
     uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
     uint pad[1];
+};
+
+struct FragmentInfo {
+    float3 normalWS;
+    float ambientOcclusion;
 };
 
 #endif // __STRUCTS_HLSL__

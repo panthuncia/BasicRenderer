@@ -1,42 +1,8 @@
 #ifndef __UTILITY_HLSL__
 #define __UTILITY_HLSL__
-
-// Helper function to load a float3 from a ByteAddressBuffer
-float3 LoadFloat3(uint offset, ByteAddressBuffer buffer) {
-    float3 result;
-    result.x = asfloat(buffer.Load(offset));
-    result.y = asfloat(buffer.Load(offset + 4));
-    result.z = asfloat(buffer.Load(offset + 8));
-    return result;
-}
-
-// Helper function to load a float2 from a ByteAddressBuffer
-float2 LoadFloat2(uint offset, ByteAddressBuffer buffer) {
-    float2 result;
-    result.x = asfloat(buffer.Load(offset));
-    result.y = asfloat(buffer.Load(offset + 4));
-    return result;
-}
-
-// Helper function to load a uint4 from a ByteAddressBuffer
-uint4 LoadUint4(uint offset, ByteAddressBuffer buffer) {
-    uint4 result;
-    result.x = buffer.Load(offset);
-    result.y = buffer.Load(offset + 4);
-    result.z = buffer.Load(offset + 8);
-    result.w = buffer.Load(offset + 12);
-    return result;
-}
-
-// Helper function to load a float4 from a ByteAddressBuffer
-float4 LoadFloat4(uint offset, ByteAddressBuffer buffer) {
-    float4 result;
-    result.x = asfloat(buffer.Load(offset));
-    result.y = asfloat(buffer.Load(offset + 4));
-    result.z = asfloat(buffer.Load(offset + 8));
-    result.w = asfloat(buffer.Load(offset + 12));
-    return result;
-}
+#include "structs.hlsli"
+#include "cbuffers.hlsli"
+#include "vertex.hlsli"
 
 // Basic blinn-phong for uint visualization
 float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {
@@ -87,6 +53,35 @@ float3 SignedOctDecode(float3 n) {
  
     OutN = normalize(OutN);
     return OutN;
+}
+
+FragmentInfo GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in bool enableGTAO) {
+    FragmentInfo info;
+    // Gather textures
+    Texture2D<float4> normalsTexture = ResourceDescriptorHeap[normalsTextureDescriptorIndex];
+    
+    // Load values
+    float4 encodedNormal = normalsTexture[pixelCoordinates];
+    info.normalWS = SignedOctDecode(encodedNormal.yzw);
+    
+    if (enableGTAO) {
+        Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
+        uint2 currentScreenSpace = uint2(pixelCoordinates);
+        info.ambientOcclusion = float(aoTexture[currentScreenSpace].x) / 255.0;
+    }
+    else {
+        info.ambientOcclusion = 1.0;
+    }
+    
+    return info;
+}
+
+FragmentInfo GetFragmentInfoDirectTransparent(in PSInput input) {
+    FragmentInfo info;
+    
+    info.normalWS = input.normalWorldSpace;
+    info.ambientOcclusion = 1.0; // Screen-space AO not applied to transparent objects
+    return info;
 }
 
 #endif // __UTILITY_HLSL__

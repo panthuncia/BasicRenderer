@@ -196,7 +196,7 @@ uint3 ComputeClusterID(float4 svPos, float viewDepth,
     return uint3(tile.x, tile.y, sliceZ);
 }
 
-LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<MaterialInfo> materialInfo, PerMeshBuffer meshBuffer, ConstantBuffer<PerFrameBuffer> perFrameBuffer, bool isFrontFace) {
+LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInput input, ConstantBuffer<MaterialInfo> materialInfo, PerMeshBuffer meshBuffer, ConstantBuffer<PerFrameBuffer> perFrameBuffer, bool isFrontFace) {
     uint materialFlags = materialInfo.materialFlags;
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
     
@@ -239,11 +239,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     if (materialFlags & MATERIAL_PBR) {
         baseColor = materialInfo.baseColorFactor * baseColor;
     }
-    //float3 normalWS = normalize(input.normalWorldSpace.xyz);
-    Texture2D<float4> screenNormalTexture = ResourceDescriptorHeap[normalsTextureDescriptorIndex];
-    uint2 screenSpace = uint2(input.position.xy);
-    float4 screenNormal = screenNormalTexture[screenSpace];
-    float3 normalWS = SignedOctDecode(screenNormal.yzw);
+    float3 normalWS = fragmentInfo.normalWS;
     
     if (materialFlags & MATERIAL_NORMAL_MAP) {
         Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
@@ -427,9 +423,7 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     float3 ambient = perFrameBuffer.ambientLighting.xyz * baseColor.xyz;
 #endif // IMAGE_BASED_LIGHTING
     if (enableGTAO) {
-        Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
-        uint2 currentScreenSpace = uint2(input.position.xy);
-        ao *= float(aoTexture[currentScreenSpace].x) / 255.0;
+        ao *= fragmentInfo.ambientOcclusion;
     }
     ambient *= ao;
     lighting += ambient;

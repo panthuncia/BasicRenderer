@@ -94,14 +94,35 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     return output;
 }
 
-#if !(defined(PSO_SHADOW) || defined(PSO_PREPASS))
-[earlydepthstencil]
-#endif
+float4 PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    uint meshBufferIndex = perMeshBufferIndex;
+    PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+#if defined(PSO_ALPHA_TEST) || defined(PSO_BLEND)
+    if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
+        Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
+        SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
+        float2 uv = input.texcoord;
+        float4 baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
+        if (baseColor.a*materialInfo.baseColorFactor.a < 0.5){
+            discard;
+        }
+    }
+    if (materialInfo.baseColorFactor.a < 0.5){
+        discard;
+    }
+#endif // PSO_ALPHA_TEST || PSO_BLEND
+    float3 outNorm = normalize(input.normalWorldSpace);
+    outNorm = SignedOctEncode(outNorm);
+    return float4(0, outNorm.x, outNorm.y, outNorm.z);
+}
+
 #if defined(PSO_SHADOW)
 void
-#elif defined(PSO_PREPASS)
-float4
 #else
+[earlydepthstencil]
 float4 
 #endif
 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
@@ -139,8 +160,10 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    
+    FragmentInfo fragmentInfo = GetFragmentInfoScreenSpace(input.position.xy, enableGTAO);
 
-    LightingOutput lightingOutput = lightFragment(mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
     
     // Reinhard tonemapping
     float3 lighting = reinhardJodie(lightingOutput.lighting);
