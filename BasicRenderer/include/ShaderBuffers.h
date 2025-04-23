@@ -1,8 +1,6 @@
 #pragma once
 #include <DirectXMath.h>
 
-#include "ThirdParty/XeGTAO.h"
-
 struct ClippingPlane {
 	DirectX::XMFLOAT4 plane;
 };
@@ -159,6 +157,33 @@ struct Cluster {
 };
 
 typedef unsigned int uint;
+
+namespace XeGTAO {
+    struct GTAOConstants {
+        DirectX::XMUINT2 ViewportSize;
+        DirectX::XMFLOAT2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
+
+        DirectX::XMFLOAT2 DepthUnpackConsts;
+        DirectX::XMFLOAT2 CameraTanHalfFOV;
+
+        DirectX::XMFLOAT2 NDCToViewMul;
+        DirectX::XMFLOAT2 NDCToViewAdd;
+
+        DirectX::XMFLOAT2 NDCToViewMul_x_PixelSize;
+        float EffectRadius; // world (viewspace) maximum size of the shadow
+        float EffectFalloffRange;
+
+        float RadiusMultiplier;
+        float Padding0;
+        float FinalValuePower;
+        float DenoiseBlurBeta;
+
+        float SampleDistributionPower;
+        float ThinOccluderCompensation;
+        float DepthMIPSamplingOffset;
+        int NoiseIndex; // frameIndex % 64 if using TAA or 0 otherwise
+    };
+}
 
 struct GTAOInfo {
     XeGTAO::GTAOConstants g_GTAOConstants;

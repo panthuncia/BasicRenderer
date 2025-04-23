@@ -64,7 +64,8 @@ float3 LoadNormal(int2 pos, uint normalsDescriptorIndex) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
-    normal = mul( (float3x3)mainCamera.view, normal );
+    normal = normalize(mul(normal, (float3x3) mainCamera.view));
+    normal.z = -normal.z; // flip Z axis to match convention XeGTAO wants
 #endif
 
     return (float3) normal;

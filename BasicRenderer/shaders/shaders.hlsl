@@ -128,7 +128,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         discard;
     }
 #if defined(PSO_PREPASS)
-    return float4(normalize(input.normalWorldSpace), 1.0);
+    return float4(normalize(input.normalWorldSpace)*0.5+0.5, 1.0);
 #endif // PSO_PREPASS
 #endif // PSO_SHADOW || PSO_PREPASS
 #if !defined(PSO_SHADOW) && !defined(PSO_PREPASS)

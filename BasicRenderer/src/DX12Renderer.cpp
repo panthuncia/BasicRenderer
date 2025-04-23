@@ -1108,7 +1108,7 @@ void DX12Renderer::CreateRenderGraph() {
         GTAOInfo gtaoInfo;
         XeGTAO::GTAOSettings gtaoSettings;
         XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
-        XeGTAO::GTAOUpdateConstants(gtaoConstants, m_xRes, m_yRes, gtaoSettings, (float*)&cameraInfo->info.projection, true, 0);
+        XeGTAO::GTAOUpdateConstants(gtaoConstants, m_xRes, m_yRes, gtaoSettings, false, 0, *cameraInfo);
         // Bindless indices
         gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
 
@@ -1149,7 +1149,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->BuildComputePass("GTAODenoisePass") // Denoise pass
             .WithShaderResource(workingEdges, workingAOTerm1)
             .WithUnorderedAccess(outputAO)
-            .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo()[0].index, workingAOTerm2->GetSRVInfo()[0].index);
+            .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo()[0].index);
 
     }
 

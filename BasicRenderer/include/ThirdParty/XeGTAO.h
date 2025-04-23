@@ -30,6 +30,7 @@
 #ifdef __cplusplus
 
 #include <cmath>
+#include "../Scene/Components.h"
 
 namespace XeGTAO
 {
@@ -160,47 +161,24 @@ struct GTAOSettings
 
 template<class T> inline T clamp( T const & v, T const & min, T const & max ) { assert( max >= min ); if( v < min ) return min; if( v > max ) return max;  return v; }
 
-struct GTAOConstants {
-    DirectX::XMUINT2 ViewportSize;
-    DirectX::XMFLOAT2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
-
-    DirectX::XMFLOAT2 DepthUnpackConsts;
-    DirectX::XMFLOAT2 CameraTanHalfFOV;
-
-    DirectX::XMFLOAT2 NDCToViewMul;
-    DirectX::XMFLOAT2 NDCToViewAdd;
-
-    DirectX::XMFLOAT2 NDCToViewMul_x_PixelSize;
-    float EffectRadius; // world (viewspace) maximum size of the shadow
-    float EffectFalloffRange;
-
-    float RadiusMultiplier;
-    float Padding0;
-    float FinalValuePower;
-    float DenoiseBlurBeta;
-
-    float SampleDistributionPower;
-    float ThinOccluderCompensation;
-    float DepthMIPSamplingOffset;
-    int NoiseIndex; // frameIndex % 64 if using TAA or 0 otherwise
-};
-
 // If using TAA then set noiseIndex to frameIndex % 64 - otherwise use 0
-inline void GTAOUpdateConstants( XeGTAO::GTAOConstants& consts, uint32_t viewportWidth, uint32_t viewportHeight, const XeGTAO::GTAOSettings & settings, const float projMatrix[16], bool rowMajor, unsigned int frameCounter )
+inline void GTAOUpdateConstants( XeGTAO::GTAOConstants& consts, uint32_t viewportWidth, uint32_t viewportHeight, const XeGTAO::GTAOSettings & settings, bool rowMajor, unsigned int frameCounter, Components::Camera cam)
 {
     consts.ViewportSize                 = { viewportWidth, viewportHeight };
     consts.ViewportPixelSize            = { 1.0f / (float)viewportWidth, 1.0f / (float)viewportHeight };
 
-    float depthLinearizeMul = (rowMajor)?(-projMatrix[3 * 4 + 2]):(-projMatrix[3 + 2 * 4]);     // float depthLinearizeMul = ( clipFar * clipNear ) / ( clipFar - clipNear );
-    float depthLinearizeAdd = (rowMajor)?( projMatrix[2 * 4 + 2]):( projMatrix[2 + 2 * 4]);     // float depthLinearizeAdd = clipFar / ( clipFar - clipNear );
+    float clipFar = cam.zFar;
+	float clipNear = cam.zNear;
+    float depthLinearizeMul = ( clipFar * clipNear ) / ( clipFar - clipNear );
+    float depthLinearizeAdd =  clipFar / ( clipFar - clipNear );
 
     // correct the handedness issue. need to make sure this below is correct, but I think it is.
     if( depthLinearizeMul * depthLinearizeAdd < 0 )
         depthLinearizeAdd = -depthLinearizeAdd;
     consts.DepthUnpackConsts            = { depthLinearizeMul, depthLinearizeAdd };
 
-    float tanHalfFOVY = 1.0f / ((rowMajor)?(projMatrix[1 * 4 + 1]):(projMatrix[1 + 1 * 4]));    // = tanf( drawContext.Camera.GetYFOV( ) * 0.5f );
-    float tanHalfFOVX = 1.0F / ((rowMajor)?(projMatrix[0 * 4 + 0]):(projMatrix[0 + 0 * 4]));    // = tanHalfFOVY * drawContext.Camera.GetAspect( );
+    float tanHalfFOVY = tanf( cam.fov * 0.5f );
+    float tanHalfFOVX = tanHalfFOVY * cam.aspect;
     consts.CameraTanHalfFOV             = { tanHalfFOVX, tanHalfFOVY };
 
     consts.NDCToViewMul                 = { consts.CameraTanHalfFOV.x * 2.0f, consts.CameraTanHalfFOV.y * -2.0f };

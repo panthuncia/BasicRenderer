@@ -10,7 +10,7 @@
 
 class GTAODenoisePass : public ComputePass {
 public:
-    GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex1, int workingBufferIndex2) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex1(workingBufferIndex1), m_workingAOBufferIndex2(workingBufferIndex2) {}
+    GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex(workingBufferIndex) {}
 
     void Setup() override {
         auto& manager = DeviceManager::GetInstance();
@@ -48,19 +48,11 @@ public:
 
         unsigned int gtaoConstants[NumMiscRootConstants] = {};
         gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
-
-        unsigned int numDenoisePasses = 1;
-		//for (unsigned int i = 0; i < numDenoisePasses; i++) {
-            gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex1;
+        gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex;
             
-            commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, gtaoConstants, 0);
+        commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, gtaoConstants, 0);
 
-            //gtaoConstants[UintRootConstant2] = workingAOBufferIndex2;
-			commandList->Dispatch((context.xRes + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.yRes + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
-			// Swap buffers
-			//std::swap(workingAOBufferIndex1, workingAOBufferIndex2);
-        //}
-
+        commandList->Dispatch((context.xRes + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.yRes + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
 
         commandList->Close();
 
@@ -80,8 +72,7 @@ private:
     ComPtr<ID3D12PipelineState> DenoisePassPSO;
     ComPtr<ID3D12PipelineState> DenoiseLastPassPSO;
 
-	unsigned int m_workingAOBufferIndex1 = 0;
-	unsigned int m_workingAOBufferIndex2 = 1;
+	unsigned int m_workingAOBufferIndex = 0;
 
     void CreateXeGTAOComputePSO()
     {
