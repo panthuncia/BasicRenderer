@@ -62,4 +62,31 @@ float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {
     return float4(finalColor, 1);
 }
 
+// https://johnwhite3d.blogspot.com/2017/10/signed-octahedron-normal-encoding.html
+#define FLT_MAX 3.402823466e+38f
+float3 SignedOctEncode(float3 n) {
+    float3 OutN;
+
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+
+    OutN.y = n.y * 0.5 + 0.5;
+    OutN.x = n.x * 0.5 + OutN.y;
+    OutN.y = n.x * -0.5 + OutN.y;
+
+    OutN.z = saturate(n.z * FLT_MAX);
+    return OutN;
+}
+
+float3 SignedOctDecode(float3 n) {
+    float3 OutN;
+
+    OutN.x = (n.x - n.y);
+    OutN.y = (n.x + n.y) - 1.0;
+    OutN.z = n.z * 2.0 - 1.0;
+    OutN.z = OutN.z * (1.0 - abs(OutN.x) - abs(OutN.y));
+ 
+    OutN = normalize(OutN);
+    return OutN;
+}
+
 #endif // __UTILITY_HLSL__

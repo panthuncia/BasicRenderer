@@ -21,6 +21,7 @@
 #include "XeGTAO.hlsli"
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
+#include "utilities.hlsli"
 /*
 SamplerState g_samplerPointClamp : register(s0); // Sampler used for depth sampling - used in all passes
 
@@ -49,11 +50,13 @@ RWTexture2D<uint> g_outFinalAOTerm : register(u0); // final AO term - just 'visi
 float3 LoadNormal(int2 pos, uint normalsDescriptorIndex) {
 #if 1
     // special decoding for external normals stored in 11_11_10 unorm - modify appropriately to support your own encoding 
-    Texture2D<float3> g_srcNormalmap = ResourceDescriptorHeap[normalsDescriptorIndex];
+    Texture2D<float4> g_srcNormalmap = ResourceDescriptorHeap[normalsDescriptorIndex];
 //    uint packedInput = g_srcNormalmap.Load(int3(pos, 0)).x;
 //    float3 unpackedOutput = XeGTAO_R11G11B10_UNORM_to_FLOAT3(packedInput);
 //    float3 normal = normalize(unpackedOutput * 2.0.xxx - 1.0.xxx);
-    float3 normal = normalize(g_srcNormalmap.Load(int3(pos, 0)).xyz * 2.0.xxx - 1.0.xxx);
+    float4 inNorm = g_srcNormalmap.Load(int3(pos, 0));
+    float3 decoded = SignedOctDecode(inNorm.yzw); // 10, 10, 2 bits
+    float3 normal = normalize(decoded.xyz);
 #else 
     // example of a different encoding
     float3 encodedNormal = g_srcNormalmap.Load(int3(pos, 0)).xyz;
@@ -117,7 +120,7 @@ void CSGTAOLow(const uint2 pixCoord : SV_DispatchThreadID) {
     RWTexture2D<unorm float> g_outWorkingEdges = ResourceDescriptorHeap[gtaoInfo.g_outWorkingEdgesDescriptorIndex];
     SamplerState g_samplerPointClamp = SamplerDescriptorHeap[gtaoInfo.g_samplerPointClampDescriptorIndex]; // Sampler used for depth sampling - used in all passes]
     // g_samplerPointClamp is a sampler with D3D12_FILTER_MIN_MAG_MIP_POINT filter and D3D12_TEXTURE_ADDRESS_MODE_CLAMP addressing mode
-    XeGTAO_MainPass(pixCoord, 1, 2, SpatioTemporalNoise(pixCoord, gtaoInfo.g_GTAOConstants.NoiseIndex), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
+    XeGTAO_MainPass(pixCoord, 1, 2, SpatioTemporalNoise(pixCoord, UintRootConstant1), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
 }
 
 // Engine-specific entry point for the second pass
@@ -129,7 +132,7 @@ void CSGTAOMedium(const uint2 pixCoord : SV_DispatchThreadID) {
     RWTexture2D<unorm float> g_outWorkingEdges = ResourceDescriptorHeap[gtaoInfo.g_outWorkingEdgesDescriptorIndex];
     SamplerState g_samplerPointClamp = SamplerDescriptorHeap[gtaoInfo.g_samplerPointClampDescriptorIndex]; // Sampler used for depth sampling - used in all passes]
     // g_samplerPointClamp is a sampler with D3D12_FILTER_MIN_MAG_MIP_POINT filter and D3D12_TEXTURE_ADDRESS_MODE_CLAMP addressing mode
-    XeGTAO_MainPass(pixCoord, 2, 2, SpatioTemporalNoise(pixCoord, gtaoInfo.g_GTAOConstants.NoiseIndex), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
+    XeGTAO_MainPass(pixCoord, 2, 2, SpatioTemporalNoise(pixCoord, UintRootConstant1), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
 }
 
 // Engine-specific entry point for the second pass
@@ -141,7 +144,7 @@ void CSGTAOHigh(const uint2 pixCoord : SV_DispatchThreadID) {
     RWTexture2D<unorm float> g_outWorkingEdges = ResourceDescriptorHeap[gtaoInfo.g_outWorkingEdgesDescriptorIndex];
     SamplerState g_samplerPointClamp = SamplerDescriptorHeap[gtaoInfo.g_samplerPointClampDescriptorIndex]; // Sampler used for depth sampling - used in all passes]
     // g_samplerPointClamp is a sampler with D3D12_FILTER_MIN_MAG_MIP_POINT filter and D3D12_TEXTURE_ADDRESS_MODE_CLAMP addressing mode
-    XeGTAO_MainPass(pixCoord, 3, 3, SpatioTemporalNoise(pixCoord, gtaoInfo.g_GTAOConstants.NoiseIndex), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
+    XeGTAO_MainPass(pixCoord, 3, 3, SpatioTemporalNoise(pixCoord, UintRootConstant1), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
 }
 
 // Engine-specific entry point for the second pass
@@ -153,7 +156,7 @@ void CSGTAOUltra(const uint2 pixCoord : SV_DispatchThreadID) {
     RWTexture2D<unorm float> g_outWorkingEdges = ResourceDescriptorHeap[gtaoInfo.g_outWorkingEdgesDescriptorIndex];
     SamplerState g_samplerPointClamp = SamplerDescriptorHeap[gtaoInfo.g_samplerPointClampDescriptorIndex]; // Sampler used for depth sampling - used in all passes]
     // g_samplerPointClamp is a sampler with D3D12_FILTER_MIN_MAG_MIP_POINT filter and D3D12_TEXTURE_ADDRESS_MODE_CLAMP addressing mode
-    XeGTAO_MainPass(pixCoord, 9, 3, SpatioTemporalNoise(pixCoord, gtaoInfo.g_GTAOConstants.NoiseIndex), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
+    XeGTAO_MainPass(pixCoord, 9, 3, SpatioTemporalNoise(pixCoord, UintRootConstant1), LoadNormal(pixCoord, gtaoInfo.g_srcNormalmapDescriptorIndex), gtaoInfo.g_GTAOConstants, g_srcWorkingDepth, g_samplerPointClamp, g_outWorkingAOTerm, g_outWorkingEdges);
 }
 
 // Engine-specific entry point for the third pass

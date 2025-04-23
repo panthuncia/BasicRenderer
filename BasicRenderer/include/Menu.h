@@ -114,6 +114,10 @@ private:
     bool clusteredLighting = true;
 	std::function<bool()> getClusteredLightingEnabled;
 	std::function<void(bool)> setClusteredLightingEnabled;
+
+	bool m_gtaoEnabled = true;
+	std::function<bool()> getGTAOEnabled;
+	std::function<void(bool)> setGTAOEnabled;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -217,6 +221,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getClusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting");
 	clusteredLighting = getClusteredLightingEnabled();
 
+	getGTAOEnabled = settingsManager.getSettingGetter<bool>("enableGTAO");
+	setGTAOEnabled = settingsManager.getSettingSetter<bool>("enableGTAO");
+	m_gtaoEnabled = getGTAOEnabled();
+
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 }
 
@@ -279,6 +287,9 @@ inline void Menu::Render(const RenderContext& context) {
         if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
 			setClusteredLightingEnabled(clusteredLighting);
         }
+		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
+			setGTAOEnabled(m_gtaoEnabled);
+		}
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();

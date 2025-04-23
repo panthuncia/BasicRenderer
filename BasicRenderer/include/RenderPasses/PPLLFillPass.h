@@ -19,11 +19,12 @@
 
 class PPLLFillPass : public RenderPass {
 public:
-	PPLLFillPass(bool wireframe, std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer, std::shared_ptr<Buffer> PPLLCounter, size_t numPPLLNodes, bool meshShaders, bool indirect) : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+	PPLLFillPass(bool wireframe, std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer, std::shared_ptr<Buffer> PPLLCounter, size_t numPPLLNodes, bool meshShaders, bool indirect, unsigned int aoTextureDescriptorIndex, unsigned int normalsTextureDescriptorIndex) : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect), m_aoTextureDescriptorIndex(aoTextureDescriptorIndex), m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex) {
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 
 		m_PPLLHeadPointerTexture = PPLLHeads;
 		m_PPLLBuffer = PPLLBuffer;
@@ -125,13 +126,16 @@ private:
 		auto& psoManager = PSOManager::GetInstance();
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
-
-		unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() }; // HLSL bools are 32 bits
-		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
-		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
 	}
 
 	void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
+
+		unsigned int settings[NumSettingsRootConstants] = {}; // HLSL bools are 32 bits
+		settings[EnableShadows] = getShadowsEnabled();
+		settings[EnablePunctualLights] = getPunctualLightingEnabled();
+		settings[EnableGTAO] = m_gtaoEnabled;
+		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
@@ -147,6 +151,7 @@ private:
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
 		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
@@ -238,6 +243,10 @@ private:
 	bool m_wireframe;
 	bool m_meshShaders;
 	bool m_indirect;
+	bool m_gtaoEnabled = true;
+
+	unsigned int m_normalsTextureDescriptorIndex = 0;
+	unsigned int m_aoTextureDescriptorIndex = 0;
 
 	size_t m_numPPLLNodes;
 

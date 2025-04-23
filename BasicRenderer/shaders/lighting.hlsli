@@ -239,7 +239,11 @@ LightingOutput lightFragment(Camera mainCamera, PSInput input, ConstantBuffer<Ma
     if (materialFlags & MATERIAL_PBR) {
         baseColor = materialInfo.baseColorFactor * baseColor;
     }
-    float3 normalWS = normalize(input.normalWorldSpace.xyz);
+    //float3 normalWS = normalize(input.normalWorldSpace.xyz);
+    Texture2D<float4> screenNormalTexture = ResourceDescriptorHeap[normalsTextureDescriptorIndex];
+    uint2 screenSpace = uint2(input.position.xy);
+    float4 screenNormal = screenNormalTexture[screenSpace];
+    float3 normalWS = SignedOctDecode(screenNormal.yzw);
     
     if (materialFlags & MATERIAL_NORMAL_MAP) {
         Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];

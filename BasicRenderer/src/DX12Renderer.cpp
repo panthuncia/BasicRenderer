@@ -471,7 +471,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
     {
         D3D12_INFO_QUEUE_FILTER filter = {};
-        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists
+        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists, ps output type mismatch
         filter.DenyList.NumIDs = _countof(blockedIDs);
         filter.DenyList.pIDList = blockedIDs;
 
@@ -1017,8 +1017,10 @@ void DX12Renderer::CreateRenderGraph() {
 	normalsWorldSpaceDesc.channels = 4;
 	normalsWorldSpaceDesc.isCubemap = false;
 	normalsWorldSpaceDesc.hasRTV = true;
-	normalsWorldSpaceDesc.format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	normalsWorldSpaceDesc.format = DXGI_FORMAT_R10G10B10A2_UNORM;
 	normalsWorldSpaceDesc.generateMipMaps = false;
+    normalsWorldSpaceDesc.hasSRV = true;
+	normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
 	ImageDimensions dims = { m_xRes, m_yRes, 0, 0 };
 	normalsWorldSpaceDesc.imageDimensions.push_back(dims);
 	auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
@@ -1283,10 +1285,11 @@ void DX12Renderer::CreateRenderGraph() {
 
 		newGraph->BuildRenderPass("SkyboxPass")
 			.WithShaderResource(m_currentSkybox)
+			.WithDepthTarget(depthTexture)
 			.Build<SkyboxRenderPass>(m_currentSkybox);
     }
-
-	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0);
+    forwardBuilder.WithShaderResource(normalsWorldSpace);
+	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
@@ -1316,7 +1319,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto PPLLFillBuilder = newGraph->BuildRenderPass("PPFillPass")
         .WithUnorderedAccess(PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter)
-        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_prefilteredEnvironment, m_environmentIrradiance, cameraBuffer);
+        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_prefilteredEnvironment, m_environmentIrradiance, cameraBuffer, outputAO, normalsWorldSpace);
     if (drawShadows) {
 		PPLLFillBuilder.WithShaderResource(m_shadowMaps);
     }
@@ -1329,7 +1332,7 @@ void DX12Renderer::CreateRenderGraph() {
 			PPLLFillBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect);
+	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
 
 
     newGraph->BuildRenderPass("PPLLResolvePass")

@@ -30,7 +30,7 @@ public:
     }
 
     ComputePassReturn Execute(RenderContext& context) override {
-
+        frameIndex++;
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = m_commandLists[context.frameIndex];
         auto& allocator = m_allocators[context.frameIndex];
@@ -53,6 +53,7 @@ public:
 
         unsigned int passConstants[NumMiscRootConstants] = {};
         passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
+		passConstants[1] = frameIndex % 64; // For spatiotemporal denoising
 
         commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, passConstants, 0);
 
@@ -83,6 +84,8 @@ private:
     ComPtr<ID3D12PipelineState> DenoisePassPSO;
     ComPtr<ID3D12PipelineState> DenoiseLastPassPSO;
     ComPtr<ID3D12PipelineState> GenerateNormalsPSO;
+
+    uint64_t frameIndex = 0;
 
     void CreateXeGTAOComputePSO() {
         auto device = DeviceManager::GetInstance().GetDevice();
