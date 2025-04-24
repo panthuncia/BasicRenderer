@@ -1,5 +1,7 @@
 #include "Render/RenderGraph.h"
 
+#include <span>
+
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
@@ -13,6 +15,62 @@ static bool mapHasResourceNotInState(std::unordered_map<std::wstring, ResourceSt
 
 static bool mapHasResourceInUAVState(std::unordered_map<std::wstring, ResourceState>& map, std::wstring resourceName) {
 	bool a = mapHasKeyAsValue<std::wstring, ResourceState>(map, resourceName, ResourceState::ALL_SRV);
+}
+
+// Factory for the transition lambda
+auto RenderGraph::MakeAddTransition(
+	std::unordered_map<std::wstring, ResourceState>& finalResourceStates,
+	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
+	std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
+	std::unordered_map<std::wstring,unsigned int>& transHistCompute,
+	std::unordered_map<std::wstring,unsigned int>& transHistRender,
+	std::unordered_map<std::wstring,unsigned int>& renderFallback,
+	unsigned int                                   batchIndex,
+	PassBatch&                                     currentBatch)
+{
+	return [&](bool isComputePass, const std::shared_ptr<Resource>& r,
+		ResourceState             newState,
+		ResourceSyncState         newSync)
+		{
+			// Determine old state & sync
+			ResourceState     oldState = r->GetState();
+			ResourceSyncState oldSync  = ResourceSyncState::ALL;
+
+			// override if previously recorded
+			if (initialResourceStates.contains(r->GetName())) { // Start with first state we recieved this resource in
+				oldState = initialResourceStates[r->GetName()];
+			}
+			if (finalResourceStates.contains(r->GetName())) { // If we've modified this resource in a previous pass
+				oldState = finalResourceStates[r->GetName()];
+			}
+			if (finalResourceSyncStates.contains(r->GetName())) {
+				oldSync = finalResourceSyncStates[r->GetName()];
+			}
+
+			auto prevAccess = ResourceStateToAccessType(oldState);
+			auto newAccess  = ResourceStateToAccessType(newState);
+			if (prevAccess == newAccess && oldSync == newSync) return;
+
+			ResourceTransition T{r, oldState, newState,
+				prevAccess, newAccess,
+				oldSync,   newSync};
+
+			bool oldSyncIsNotComputeSyncState = ResourceSyncStateIsNotComputeSyncState(oldSync);
+			if (isComputePass && oldSyncIsNotComputeSyncState && !(oldState == ResourceState::UNKNOWN)) {
+				// bounce back to last graphics-queue batch
+				unsigned int gfxBatch = renderFallback[r->GetName()];
+				batches[gfxBatch].passEndTransitions.push_back(T);
+			}
+			else {
+				if (isComputePass) {
+					currentBatch.computeTransitions.push_back(T);
+					transHistCompute[r->GetName()] = batchIndex;
+				} else {
+					currentBatch.renderTransitions.push_back(T);
+					transHistRender[r->GetName()]  = batchIndex;
+				}
+			}
+		};
 }
 
 void RenderGraph::Compile() {
@@ -37,148 +95,120 @@ void RenderGraph::Compile() {
 	std::unordered_map<std::wstring, unsigned int>  batchOfLastComputeQueueProducer;
 
 	unsigned int currentBatchIndex = 0;
-    for (auto& passAndResources : passes) {
-        bool needsNewBatch = false;
+    for (auto& pr : passes) {
 
-        // Determine if a new batch is needed based on resource state conflicts
-        switch (passAndResources.type) {
-            case PassType::Render: {
-            auto& renderPass = std::get<RenderPassAndResources>(passAndResources.pass);
-                if (IsNewBatchNeeded(currentBatch, renderPass, computeUAVs)) {
-                    // Compute transitions for the current batch
-                    // During execution, finalResourceStates contains the state of
-                    // each resource before the current batch, if it has been used
-                    //ComputeTransitionsForBatch(currentBatch, finalResourceStates);
-                    for (const auto& [resourceName, state] : currentBatch.resourceStates) {
-                        finalResourceStates[resourceName] = state;
-                    }
-                    batches.push_back(std::move(currentBatch));
-                    currentBatch = PassBatch();
-					currentBatch.renderTransitionFenceValue = GetNextGraphicsQueueFenceValue();
-					currentBatch.renderCompletionFenceValue = GetNextGraphicsQueueFenceValue();
-					currentBatch.computeTransitionFenceValue = GetNextComputeQueueFenceValue();
-					currentBatch.computeCompletionFenceValue = GetNextComputeQueueFenceValue();
-                    currentBatchIndex++;
-                    // Update final resource states
-                }
-				
-				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(
-					finalResourceStates, 
-					finalResourceSyncStates, 
-					firstResourceSyncStates, 
-					batchOfLastRenderQueueTransition, 
-					batchOfLastRenderQueueProducer, 
-					renderPass, 
-					currentBatchIndex);
-				currentBatch.renderTransitions.insert(currentBatch.renderTransitions.end(), transitions.begin(), transitions.end());
-                
-				// Build synchronization points
-				auto [lastComputeTransitionBatch, lastComputeProducerBatch] = GetBatchesToWaitOn(renderPass, batchOfLastComputeQueueTransition, batchOfLastComputeQueueProducer);
-                
-                if (lastComputeTransitionBatch != -1) {
-                    // If the compute queue will transition a resource we need, wait on that transition
-                    if (lastComputeTransitionBatch == currentBatchIndex) {
-                        currentBatch.computeTransitionSignal = true;
-                        currentBatch.renderQueueWaitOnComputeQueueBeforeExecution = true; // Wait to execute
-                        currentBatch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue = currentBatch.computeTransitionFenceValue;
-                    } // 
-                    else {
-                        batches[lastComputeTransitionBatch].computeCompletionSignal = true;
-						currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true; // Wait to transition
-						currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue = (std::max)(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue, batches[lastComputeTransitionBatch].computeCompletionFenceValue);
-                    }
-                }
+		bool isCompute = (pr.type == PassType::Compute);
 
-                if (lastComputeProducerBatch != -1) {
-					// A resource cannot be produced and consumed in the same batch
-#if defined(_DEBUG)
-                    if (lastComputeProducerBatch == currentBatchIndex) {
-						spdlog::error("Producer batch is the same as current batch");
-						__debugbreak();
-                    }
-#endif
-					batches[lastComputeProducerBatch].computeCompletionSignal = true;
-					currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true; // Wait to transition
-					currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue = (std::max)(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue, batches[lastComputeProducerBatch].computeCompletionFenceValue);
-                }
+		// Batch-splitting logic (unchanged)
+		if (isCompute) {
+			auto& pass = std::get<ComputePassAndResources>(pr.pass);
+			if (IsNewBatchNeeded(currentBatch, pass, renderUAVs)) {
+				for (auto& [name, st] : currentBatch.resourceStates)
+					finalResourceStates[name] = st;
+				batches.push_back(std::move(currentBatch));
+				currentBatch = PassBatch();
+				currentBatch.renderTransitionFenceValue   = GetNextGraphicsQueueFenceValue();
+				currentBatch.renderCompletionFenceValue   = GetNextGraphicsQueueFenceValue();
+				currentBatch.computeTransitionFenceValue  = GetNextComputeQueueFenceValue();
+				currentBatch.computeCompletionFenceValue  = GetNextComputeQueueFenceValue();
+				++currentBatchIndex;
+			}
+		} else {
+			auto& pass = std::get<RenderPassAndResources>(pr.pass);
+			if (IsNewBatchNeeded(currentBatch, pass, computeUAVs)) {
+				for (auto& [name, st] : currentBatch.resourceStates)
+					finalResourceStates[name] = st;
+				batches.push_back(std::move(currentBatch));
+				currentBatch = PassBatch();
+				currentBatch.renderTransitionFenceValue   = GetNextGraphicsQueueFenceValue();
+				currentBatch.renderCompletionFenceValue   = GetNextGraphicsQueueFenceValue();
+				currentBatch.computeTransitionFenceValue  = GetNextComputeQueueFenceValue();
+				currentBatch.computeCompletionFenceValue  = GetNextComputeQueueFenceValue();
+				++currentBatchIndex;
+			}
+		}
 
-                currentBatch.renderPasses.push_back(renderPass);
-                // Update desired resource states
-                UpdateDesiredResourceStates(currentBatch, renderPass, renderUAVs);
-                break;
-            }
-            case PassType::Compute: {
-                auto& computePass = std::get<ComputePassAndResources>(passAndResources.pass);
-				if (IsNewBatchNeeded(currentBatch, computePass, renderUAVs)) {
-					// Compute transitions for the current batch
-					//ComputeTransitionsForBatch(currentBatch, finalResourceStates);
-					for (const auto& [resourceName, state] : currentBatch.resourceStates) {
-						finalResourceStates[resourceName] = state;
-					}
-					batches.push_back(std::move(currentBatch));
-					currentBatch = PassBatch();
-					currentBatch.renderTransitionFenceValue = GetNextGraphicsQueueFenceValue();
-					currentBatch.renderCompletionFenceValue = GetNextGraphicsQueueFenceValue();
-					currentBatch.computeTransitionFenceValue = GetNextComputeQueueFenceValue();
-					currentBatch.computeCompletionFenceValue = GetNextComputeQueueFenceValue();
-                    currentBatchIndex++;
-				}
+		// build the transition lambda
+		auto addT = MakeAddTransition(
+			finalResourceStates,
+			finalResourceSyncStates,
+			firstResourceSyncStates,
+			batchOfLastComputeQueueTransition,
+			batchOfLastRenderQueueTransition,
+			batchOfLastRenderQueueTransition,
+			currentBatchIndex,
+			currentBatch
+		);
 
-				std::vector<std::pair<ResourceTransition, int>> transitionsToPutAtEndOfEarlierBatchOnRenderQueue; // The compute queue cannot transition resources out of graphics queue states
-				auto transitions = UpdateFinalResourceStatesAndGatherTransitionsForPass(
-					finalResourceStates, 
-					finalResourceSyncStates, 
-					firstResourceSyncStates, 
-					batchOfLastComputeQueueTransition,
-					batchOfLastRenderQueueTransition,
-					batchOfLastComputeQueueProducer, 
-					computePass, 
-					currentBatchIndex, 
-					transitionsToPutAtEndOfEarlierBatchOnRenderQueue);
-                currentBatch.computeTransitions.insert(currentBatch.computeTransitions.end(), transitions.begin(), transitions.end());
+		// choose categories
+		std::vector<ResourceCategory> catsCompute = {};
+		std::vector<ResourceCategory> catsRender = {};
 
-				for (auto& transition : transitionsToPutAtEndOfEarlierBatchOnRenderQueue) {
-					batches[transition.second].passEndTransitions.push_back(transition.first);
-				}
+		if (isCompute) {
+			catsCompute = {
+				{ &std::get<ComputePassAndResources>(pr.pass).resources.shaderResources, ResourceState::NON_PIXEL_SRV, ResourceSyncState::COMPUTE_SHADING, false },
+				{ &std::get<ComputePassAndResources>(pr.pass).resources.constantBuffers, ResourceState::CONSTANT,       ResourceSyncState::COMPUTE_SHADING, false },
+				{ &std::get<ComputePassAndResources>(pr.pass).resources.unorderedAccessViews, ResourceState::UNORDERED_ACCESS, ResourceSyncState::COMPUTE_SHADING, true }
+			};
+		} else {
+			catsRender = {
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.shaderResources,   ResourceState::ALL_SRV,      ResourceSyncState::DRAW, false },
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.renderTargets,     ResourceState::RENDER_TARGET,ResourceSyncState::DRAW, true  },
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.depthTextures,     ResourceState::DEPTH_WRITE,  ResourceSyncState::DRAW, true  },
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.constantBuffers,   ResourceState::CONSTANT,     ResourceSyncState::DRAW, false },
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.unorderedAccessViews, ResourceState::UNORDERED_ACCESS, ResourceSyncState::DRAW, true },
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.copyTargets,      ResourceState::COPY_DEST,   ResourceSyncState::COPY, true  },
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.copySources,      ResourceState::COPY_SOURCE, ResourceSyncState::COPY, false },
+				{ &std::get<RenderPassAndResources>(pr.pass).resources.indirectArgumentBuffers, ResourceState::INDIRECT_ARGUMENT, ResourceSyncState::DRAW, false }
+			};
+		}
 
-				// Build synchronization points
-				auto [lastRenderTransitionBatch, lastRenderProducerBatch] = GetBatchesToWaitOn(computePass, batchOfLastRenderQueueTransition, batchOfLastRenderQueueProducer);
+		// dispatch categories
+		if (isCompute) {
+			ProcessCategories(
+				isCompute,
+				std::span(catsCompute),
+				addT,
+				finalResourceStates,
+				finalResourceSyncStates,
+				firstResourceSyncStates,
+				batchOfLastComputeQueueProducer,
+				currentBatchIndex);
+			currentBatch.computePasses.push_back(std::get<ComputePassAndResources>(pr.pass));
+			UpdateDesiredResourceStates(currentBatch, std::get<ComputePassAndResources>(pr.pass), computeUAVs);
+		} else {
+			ProcessCategories(
+				isCompute,
+				std::span(catsRender),
+				addT,
+				finalResourceStates,
+				finalResourceSyncStates,
+				firstResourceSyncStates,
+				batchOfLastRenderQueueProducer,
+				currentBatchIndex);
+			currentBatch.renderPasses.push_back(std::get<RenderPassAndResources>(pr.pass));
+			UpdateDesiredResourceStates(currentBatch, std::get<RenderPassAndResources>(pr.pass), renderUAVs);
+		}
 
-                if (lastRenderTransitionBatch != -1) {
-                    // If the render queue will transition a resource we need, wait on that transition
-                    if (lastRenderTransitionBatch == currentBatchIndex) {
-                        currentBatch.renderTransitionSignal = true;
-                        currentBatch.computeQueueWaitOnRenderQueueBeforeExecution = true; // Wait to execute
-                        currentBatch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue = currentBatch.renderTransitionFenceValue;
-                    } //
-                    else {
-                        batches[lastRenderTransitionBatch].renderCompletionSignal = true;
-                        currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true; // Wait to transition
-                        currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue = (std::max)(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue, batches[lastRenderTransitionBatch].renderCompletionFenceValue);
-                    }
-                }
-
-				if (lastRenderProducerBatch != -1) {
-					// A resource cannot be produced and consumed in the same batch
-#if defined(_DEBUG)
-					if (lastRenderProducerBatch == currentBatchIndex) {
-						spdlog::error("Producer batch is the same as current batch");
-						__debugbreak();
-					}
-#endif
-					batches[lastRenderProducerBatch].renderCompletionSignal = true;
-					currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true; // Wait to transition
-					currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue = (std::max)(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue, batches[lastRenderProducerBatch].renderCompletionFenceValue);
-				}
-
-                currentBatch.computePasses.push_back(computePass);
-				// Update desired resource states
-				UpdateDesiredResourceStates(currentBatch, computePass, computeUAVs);
-				break;
-            }
-        }
-
-
+		if (isCompute) {
+			applySynchronization(
+				/*isComputePass=*/true,
+				currentBatch,
+				currentBatchIndex,
+				std::get<ComputePassAndResources>(pr.pass),
+				batchOfLastRenderQueueTransition,
+				batchOfLastRenderQueueProducer
+			);
+		} else {
+			applySynchronization(
+				/*isComputePass=*/false,
+				currentBatch,
+				currentBatchIndex,
+				std::get<RenderPassAndResources>(pr.pass),
+				batchOfLastComputeQueueTransition,
+				batchOfLastComputeQueueProducer
+			);
+		}
     }
 
     // Handle the last batch
@@ -202,7 +232,7 @@ void RenderGraph::Compile() {
 	}
 }
 
-std::pair<int, int> RenderGraph::GetBatchesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory) {
+std::pair<int, int> RenderGraph::GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory) {
 	int latestTransition = -1;
 	int latestProducer = -1;
 
@@ -228,7 +258,7 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(ComputePassAndResources& pas
 	return { latestTransition, latestProducer };
 }
 
-std::pair<int, int> RenderGraph::GetBatchesToWaitOn(RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory) {
+std::pair<int, int> RenderGraph::GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory) {
     int latestTransition = -1;
     int latestProducer = -1;
 
@@ -268,240 +298,6 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(RenderPassAndResources& pass
 
     return { latestTransition, latestProducer };
 }
-
-std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(
-	std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
-	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
-	std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
-	std::unordered_map<std::wstring, unsigned int>& computeQueueTransitionHistory, 
-	std::unordered_map<std::wstring, unsigned int>& renderQueueTransitionHistory,
-	std::unordered_map<std::wstring, unsigned int>& producerHistory, 
-	ComputePassAndResources& pass, 
-	unsigned int batchIndex,  
-	std::vector<std::pair<ResourceTransition, int>>& transitionsToAddToBatchInRenderQueue) {
-	std::vector<ResourceTransition> transitions;
-
-    auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState, ResourceSyncState finalSyncState) {
-        ResourceState initialState = resource->GetState();
-		ResourceSyncState initialSyncState = ResourceSyncState::ALL;
-        
-        if (initialResourceStates.contains(resource->GetName())) {
-			initialState = initialResourceStates[resource->GetName()];
-		}
-        if (finalResourceStates.contains(resource->GetName())) {
-            initialState = finalResourceStates[resource->GetName()];
-        }
-
-		if (finalResourceSyncStates.contains(resource->GetName())) {
-			initialSyncState = finalResourceSyncStates[resource->GetName()];
-		}
-
-		if (initialState != finalState) {
-			auto prevAccessType = ResourceStateToAccessType(initialState);
-			auto newAccessType = ResourceStateToAccessType(finalState);
-			auto transition = ResourceTransition(resource, initialState, finalState, prevAccessType, newAccessType, initialSyncState, finalSyncState);
-			if (ResourceStateIsGraphicsQueueState(initialState)) { // We cannot transition a resource in the compute queue if it is in a graphics queue state
-				if (!renderQueueTransitionHistory.contains(resource->GetName())) {
-					spdlog::error("Resource last transitioned on render queue missing from transition history!");
-					__debugbreak();
-				}
-				transitionsToAddToBatchInRenderQueue.push_back({ transition, renderQueueTransitionHistory[resource->GetName()] }); // Send it back to the last graphics queue batch
-			}
-			else {
-				transitions.push_back(transition);
-				computeQueueTransitionHistory[resource->GetName()] = batchIndex;
-			}
-		}
-        };
-    
-    for(auto& resource : pass.resources.shaderResources) {
-		addTransition(resource, ResourceState::NON_PIXEL_SRV, ResourceSyncState::COMPUTE_SHADING);
-        finalResourceStates[resource->GetName()] = ResourceState::NON_PIXEL_SRV;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COMPUTE_SHADING;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-    }
-	for (auto& resource : pass.resources.constantBuffers) {
-		addTransition(resource, ResourceState::CONSTANT, ResourceSyncState::COMPUTE_SHADING);
-		finalResourceStates[resource->GetName()] = ResourceState::CONSTANT;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COMPUTE_SHADING;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-	}
-	for (auto& resource : pass.resources.unorderedAccessViews) {
-		addTransition(resource, ResourceState::UNORDERED_ACCESS, ResourceSyncState::COMPUTE_SHADING);
-		finalResourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COMPUTE_SHADING;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-		producerHistory[resource->GetName()] = batchIndex;
-	}
-	return transitions;
-}
-
-std::vector<RenderGraph::ResourceTransition> RenderGraph::UpdateFinalResourceStatesAndGatherTransitionsForPass(
-	std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
-	std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
-	std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
-	std::unordered_map<std::wstring, unsigned int>& transitionHistory, 
-	std::unordered_map<std::wstring, unsigned int>& producerHistory, 
-	RenderPassAndResources& pass, 
-	unsigned int batchIndex) {
-    std::vector<ResourceTransition> transitions;
-
-    auto addTransition = [&](std::shared_ptr<Resource>& resource, ResourceState finalState, ResourceSyncState finalSyncState) {
-        ResourceState initialState = resource->GetState();
-		ResourceSyncState initialSyncState = ResourceSyncState::ALL;
-
-        if (initialResourceStates.contains(resource->GetName())) {
-            initialState = initialResourceStates[resource->GetName()];
-        }
-        if (finalResourceStates.contains(resource->GetName())) {
-            initialState = finalResourceStates[resource->GetName()];
-        }
-
-		if (finalResourceSyncStates.contains(resource->GetName())) {
-			initialSyncState = finalResourceSyncStates[resource->GetName()];
-		}
-
-        if (initialState != finalState) {
-
-			auto prevAccessType = ResourceStateToAccessType(initialState);
-			auto newAccessType = ResourceStateToAccessType(finalState);
-
-			if (finalSyncState == ResourceSyncState::NONE && newAccessType == ResourceAccessType::SHADER_RESOURCE) {
-				spdlog::error("Resource {} is in an unknown state");
-			}
-            transitions.push_back(ResourceTransition(resource, initialState, finalState, prevAccessType, newAccessType, initialSyncState, finalSyncState));
-			transitionHistory[resource->GetName()] = batchIndex;
-        }
-        };
-
-    for (auto& resource : pass.resources.shaderResources) {
-		addTransition(resource, ResourceState::ALL_SRV, ResourceSyncState::DRAW); // TODO: Use fine-grained sync states
-		finalResourceStates[resource->GetName()] = ResourceState::ALL_SRV;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-	}
-	for (auto& resource : pass.resources.renderTargets) {
-		addTransition(resource, ResourceState::RENDER_TARGET, ResourceSyncState::DRAW);
-		finalResourceStates[resource->GetName()] = ResourceState::RENDER_TARGET;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-		producerHistory[resource->GetName()] = batchIndex;
-	}
-	for (auto& resource : pass.resources.depthTextures) {
-		addTransition(resource, ResourceState::DEPTH_WRITE, ResourceSyncState::DRAW);
-		finalResourceStates[resource->GetName()] = ResourceState::DEPTH_WRITE;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-		producerHistory[resource->GetName()] = batchIndex;
-	}
-	for (auto& resource : pass.resources.constantBuffers) {
-		addTransition(resource, ResourceState::CONSTANT, ResourceSyncState::DRAW);
-		finalResourceStates[resource->GetName()] = ResourceState::CONSTANT;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-	}
-	for (auto& resource : pass.resources.unorderedAccessViews) {
-		addTransition(resource, ResourceState::UNORDERED_ACCESS, ResourceSyncState::DRAW);
-		finalResourceStates[resource->GetName()] = ResourceState::UNORDERED_ACCESS;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-		}
-		producerHistory[resource->GetName()] = batchIndex;
-	}
-	for (auto& resource : pass.resources.copyTargets) {
-		addTransition(resource, ResourceState::COPY_DEST, ResourceSyncState::COPY);
-		finalResourceStates[resource->GetName()] = ResourceState::COPY_DEST;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COPY;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-		producerHistory[resource->GetName()] = batchIndex;
-	}
-	for (auto& resource : pass.resources.copySources) {
-		addTransition(resource, ResourceState::COPY_SOURCE, ResourceSyncState::COPY);
-		finalResourceStates[resource->GetName()] = ResourceState::COPY_SOURCE;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::COPY;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-	}
-	for (auto& resource : pass.resources.indirectArgumentBuffers) {
-		addTransition(resource, ResourceState::INDIRECT_ARGUMENT, ResourceSyncState::DRAW);
-		finalResourceStates[resource->GetName()] = ResourceState::INDIRECT_ARGUMENT;
-		finalResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-		if (!firstResourceSyncStates.contains(resource->GetName())) {
-			if (resource->GetState() == ResourceState::UNKNOWN) {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::ALL;
-			}
-			else {
-				firstResourceSyncStates[resource->GetName()] = ResourceSyncState::DRAW;
-			}
-		}
-	}
-	return transitions;
-}
-
-
 
 void RenderGraph::Setup() {
     for (auto& pass : passes) {
@@ -865,30 +661,6 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAnd
     }
     return false;
 }
-
-//void RenderGraph::ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates) {
-//    for (const auto& [resourceName, requiredState] : batch.resourceStates) {
-//        ResourceState previousState = ResourceState::UNKNOWN;
-//        auto it = previousStates.find(resourceName);
-//        std::shared_ptr<Resource> resource = GetResourceByName(resourceName);
-//        if (it != previousStates.end()) {
-//            previousState = it->second;
-//        }
-//        else {
-//            
-//            // Use the resource's current state
-//            if (resource) {
-//                previousState = resource->GetState();
-//            }
-//            else {
-//                throw std::runtime_error(ws2s(L"Resource not found: " + resourceName));
-//            }
-//        }
-//        if (previousState != requiredState) {
-//            batch.renderTransitions.push_back({ resource, previousState, requiredState });
-//        }
-//    }
-//}
 
 void RenderGraph::UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<std::wstring>& renderUAVs) {
     // Update batch.resourceStates based on the resources used in passAndResources

@@ -31,6 +31,15 @@ public:
         return instance;
     }
 
+    struct ResourceTransition {
+        Resource* resource = nullptr;
+        ResourceState beforeState;
+        ResourceState afterState;
+#if defined(_DEBUG)
+        std::wstring name;
+#endif // DEBUG
+    };
+
     void Initialize(ID3D12CommandQueue* commandQueue);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);
