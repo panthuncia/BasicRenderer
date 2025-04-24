@@ -60,7 +60,7 @@ public:
         commandList->SetPipelineState(debugPSO.Get());
         commandList->SetGraphicsRootSignature(debugRootSignature.Get());
 
-        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetSRVInfo()[0].gpuHandle);
         auto viewMatrix = XMMatrixTranspose(XMMatrixMultiply(XMMatrixScaling(0.2f, 0.2f, 1.0f), XMMatrixTranslation(0.7, -0.7, 0)));
         commandList->SetGraphicsRoot32BitConstants(1, 16, &viewMatrix, 0);
 
@@ -76,14 +76,14 @@ public:
         // Cleanup if necessary
     }
 
-    void SetTexture(Texture* texture) {
+    void SetTexture(PixelBuffer* texture) {
 		m_texture = texture;
     }
 
 private:
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
-    Texture* m_texture = nullptr;
+    PixelBuffer* m_texture = nullptr;
 
 	std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;

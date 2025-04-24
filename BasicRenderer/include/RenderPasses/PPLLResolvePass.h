@@ -66,7 +66,6 @@ public:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 		commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
@@ -100,8 +99,8 @@ public:
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
 
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo().index;
-		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo().index;
+		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo()[0].index;
+		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo()[0].index;
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
 
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
@@ -112,7 +111,7 @@ public:
 		}
 
 		// PPLL heads & buffer
-		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo().index, m_PPLLBuffer->GetSRVInfo().index };
+		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo()[0].index, m_PPLLBuffer->GetSRVInfo()[0].index };
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 2, &indices, 0);
 
 		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad

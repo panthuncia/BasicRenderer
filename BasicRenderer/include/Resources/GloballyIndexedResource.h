@@ -22,54 +22,60 @@ public:
 		}
 	};
 
-	void SetSRVDescriptor(std::shared_ptr<DescriptorHeap> pSRVHeap, ShaderVisibleIndexInfo srvInfo) {
+	void SetSRVDescriptors(std::shared_ptr<DescriptorHeap> pSRVHeap, const std::vector<ShaderVisibleIndexInfo>& srvInfos) {
 		m_pSRVHeap = pSRVHeap;
-		m_SRVInfo = srvInfo;
+		m_SRVInfos = srvInfos;
 	}
 
-	void SetUAVGPUDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, ShaderVisibleIndexInfo uavInfo, unsigned int counterOffset = 0) {
+	void SetUAVGPUDescriptors(std::shared_ptr<DescriptorHeap> pUAVHeap, const std::vector<ShaderVisibleIndexInfo>& uavInfos, unsigned int counterOffset = 0) {
 		m_pUAVShaderVisibleHeap = pUAVHeap;
-		m_UAVShaderVisibleInfo = uavInfo;
+		m_UAVShaderVisibleInfos = uavInfos;
 		m_counterOffset = counterOffset;
 	}
 
-	void SetUAVCPUDescriptor(std::shared_ptr<DescriptorHeap> pUAVHeap, NonShaderVisibleIndexInfo uavInfo) {
+	void SetUAVCPUDescriptors(std::shared_ptr<DescriptorHeap> pUAVHeap, const std::vector<NonShaderVisibleIndexInfo>& uavInfos) {
 		m_pUAVNonShaderVisibleHeap = pUAVHeap;
-		m_UAVNonShaderVisibleInfo = uavInfo;
+		m_UAVNonShaderVisibleInfos = uavInfos;
 	}
 
-	void SetCBVDescriptor(std::shared_ptr<DescriptorHeap> pCBVHeap, ShaderVisibleIndexInfo cbvInfo) {
+	void SetCBVDescriptor(std::shared_ptr<DescriptorHeap> pCBVHeap, const ShaderVisibleIndexInfo& cbvInfo) {
 		m_pCBVHeap = pCBVHeap;
 		m_CBVInfo = cbvInfo;
 	}
 
-	void SetRTVDescriptors(std::shared_ptr<DescriptorHeap> pRTVHeap, std::vector<NonShaderVisibleIndexInfo>& rtvInfos) {
+	void SetRTVDescriptors(std::shared_ptr<DescriptorHeap> pRTVHeap, const std::vector<NonShaderVisibleIndexInfo>& rtvInfos) {
 		m_pRTVHeap = pRTVHeap;
 		m_RTVInfos = rtvInfos;
 	}
 
-	void SetDSVDescriptors(std::shared_ptr<DescriptorHeap> pDSVHeap, std::vector<NonShaderVisibleIndexInfo>& dsvInfos) {
+	void SetDSVDescriptors(std::shared_ptr<DescriptorHeap> pDSVHeap, const std::vector<NonShaderVisibleIndexInfo>& dsvInfos) {
 		m_pDSVHeap = pDSVHeap;
 		m_DSVInfos = dsvInfos;
 	}
 
-	ShaderVisibleIndexInfo& GetSRVInfo() { return m_SRVInfo; }
-	ShaderVisibleIndexInfo& GetUAVShaderVisibleInfo() { return m_UAVShaderVisibleInfo; }
+	std::vector<ShaderVisibleIndexInfo>& GetSRVInfo() { return m_SRVInfos; }
+	std::vector<ShaderVisibleIndexInfo>& GetUAVShaderVisibleInfo() { return m_UAVShaderVisibleInfos; }
 	unsigned int GetUAVCounterOffset() { return m_counterOffset; }
-	NonShaderVisibleIndexInfo& GetUAVNonShaderVisibleInfo() { return m_UAVNonShaderVisibleInfo; }
+	std::vector<NonShaderVisibleIndexInfo>& GetUAVNonShaderVisibleInfo() { return m_UAVNonShaderVisibleInfos; }
 	ShaderVisibleIndexInfo& GetCBVInfo() { return m_CBVInfo; }
 	std::vector<NonShaderVisibleIndexInfo>& GetRTVInfos() { return m_RTVInfos; }
 	std::vector<NonShaderVisibleIndexInfo>& GetDSVInfos() { return m_DSVInfos; }
 	~GloballyIndexedResource() {
 		// Release SRV, UAV, and CBV
 		if (m_pSRVHeap) {
-			m_pSRVHeap->ReleaseDescriptor(m_SRVInfo.index);
+			for (auto& srvInfo : m_SRVInfos) {
+				m_pSRVHeap->ReleaseDescriptor(srvInfo.index);
+			}
 		}
 		if (m_pUAVShaderVisibleHeap) {
-			m_pUAVShaderVisibleHeap->ReleaseDescriptor(m_UAVShaderVisibleInfo.index);
+			for (auto& uavInfo : m_UAVShaderVisibleInfos) {
+				m_pUAVShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
+			}
 		}
 		if (m_pUAVNonShaderVisibleHeap) {
-			m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(m_UAVNonShaderVisibleInfo.index);
+			for (auto& uavInfo : m_UAVNonShaderVisibleInfos) {
+				m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
+			}
 		}
 		if (m_pCBVHeap) {
 			m_pCBVHeap->ReleaseDescriptor(m_CBVInfo.index);
@@ -91,10 +97,10 @@ public:
 protected:
 	virtual void OnSetName() override {}
 private:
-	ShaderVisibleIndexInfo m_SRVInfo;
+	std::vector<ShaderVisibleIndexInfo> m_SRVInfos;
 	std::shared_ptr<DescriptorHeap> m_pSRVHeap = nullptr;
-	ShaderVisibleIndexInfo m_UAVShaderVisibleInfo;
-	NonShaderVisibleIndexInfo m_UAVNonShaderVisibleInfo;
+	std::vector<ShaderVisibleIndexInfo> m_UAVShaderVisibleInfos;
+	std::vector<NonShaderVisibleIndexInfo> m_UAVNonShaderVisibleInfos;
 	std::shared_ptr<DescriptorHeap> m_pUAVShaderVisibleHeap = nullptr;
 	std::shared_ptr<DescriptorHeap> m_pUAVNonShaderVisibleHeap = nullptr;
 	ShaderVisibleIndexInfo m_CBVInfo;

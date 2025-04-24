@@ -19,11 +19,12 @@
 
 class PPLLFillPass : public RenderPass {
 public:
-	PPLLFillPass(bool wireframe, std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer, std::shared_ptr<Buffer> PPLLCounter, size_t numPPLLNodes, bool meshShaders, bool indirect) : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+	PPLLFillPass(bool wireframe, std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer, std::shared_ptr<Buffer> PPLLCounter, size_t numPPLLNodes, bool meshShaders, bool indirect, unsigned int aoTextureDescriptorIndex, unsigned int normalsTextureDescriptorIndex) : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect), m_aoTextureDescriptorIndex(aoTextureDescriptorIndex), m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex) {
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 
 		m_PPLLHeadPointerTexture = PPLLHeads;
 		m_PPLLBuffer = PPLLBuffer;
@@ -106,7 +107,7 @@ private:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		uint32_t clearValues[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
-		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo().cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
+		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo()[0].gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo()[0].cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
 
 		D3D12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLHeadPointerTexture->GetAPIResource());
 		commandList->ResourceBarrier(1, &uavBarrier);
@@ -117,7 +118,7 @@ private:
 		commandList->RSSetScissorRects(1, &scissorRect);
 
 		// Set the render target
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
+		auto dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
 		commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -125,13 +126,16 @@ private:
 		auto& psoManager = PSOManager::GetInstance();
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
-
-		unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() }; // HLSL bools are 32 bits
-		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
-		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
 	}
 
 	void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
+
+		unsigned int settings[NumSettingsRootConstants] = {}; // HLSL bools are 32 bits
+		settings[EnableShadows] = getShadowsEnabled();
+		settings[EnablePunctualLights] = getPunctualLightingEnabled();
+		settings[EnableGTAO] = m_gtaoEnabled;
+		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
@@ -147,22 +151,23 @@ private:
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
 		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
-		lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo().index;
-		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo().index;
+		lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo()[0].index;
+		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo()[0].index;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo().index;
-		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo().index;
-		transparencyInfo[PPLLCounterBufferDescriptorIndex] = m_PPLLCounter->GetSRVInfo().index;
+		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo()[0].index;
+		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo()[0].index;
+		transparencyInfo[PPLLCounterBufferDescriptorIndex] = m_PPLLCounter->GetSRVInfo()[0].index;
 		transparencyInfo[PPLLNodePoolSize] = m_numPPLLNodes;
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
 
 		// PPLL heads & buffer
-		uint32_t indices[NumTransparencyInfoRootConstants] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo().index, m_PPLLBuffer->GetUAVShaderVisibleInfo().index, m_PPLLCounter->GetUAVShaderVisibleInfo().index, m_numPPLLNodes};
+		uint32_t indices[NumTransparencyInfoRootConstants] = { m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo()[0].index, m_PPLLBuffer->GetUAVShaderVisibleInfo()[0].index, m_PPLLCounter->GetUAVShaderVisibleInfo()[0].index, m_numPPLLNodes};
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 4, &indices, 0);
 	}
 
@@ -238,6 +243,10 @@ private:
 	bool m_wireframe;
 	bool m_meshShaders;
 	bool m_indirect;
+	bool m_gtaoEnabled = true;
+
+	unsigned int m_normalsTextureDescriptorIndex = 0;
+	unsigned int m_aoTextureDescriptorIndex = 0;
 
 	size_t m_numPPLLNodes;
 

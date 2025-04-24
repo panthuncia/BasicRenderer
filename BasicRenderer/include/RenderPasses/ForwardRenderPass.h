@@ -20,12 +20,13 @@
 
 class ForwardRenderPass : public RenderPass {
 public:
-    ForwardRenderPass(bool wireframe, bool meshShaders, bool indirect)
-        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+    ForwardRenderPass(bool wireframe, bool meshShaders, bool indirect, int aoTextureDescriptorIndex, int normalsTextureDescriptorIndex)
+        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect), m_aoTextureDescriptorIndex(aoTextureDescriptorIndex), m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex) {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
     }
 
 	~ForwardRenderPass() {
@@ -104,7 +105,7 @@ private:
 
         // Render targets
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
+		auto dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -116,7 +117,7 @@ private:
     }
 
     void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
-        unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
+        unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
         auto& meshManager = context.meshManager;
@@ -134,11 +135,13 @@ private:
         staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
         staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+        staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
+        staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
-        lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo().index;
-        lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo().index;
+        lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo()[0].index;
+        lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo()[0].index;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
     }
@@ -295,6 +298,9 @@ private:
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
+	int m_aoTextureDescriptorIndex;
+	int m_normalsTextureDescriptorIndex;
+    bool m_gtaoEnabled = true;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;

@@ -1,6 +1,17 @@
 #ifndef __STRUCTS_HLSL__
 #define __STRUCTS_HLSL__
 
+struct PSInput {
+    float4 position : SV_POSITION; // Screen-space position, required for rasterization
+    float4 positionWorldSpace : TEXCOORD0; // For world-space lighting
+    float4 positionViewSpace : TEXCOORD1; // For cascaded shadows
+    float3 normalWorldSpace : TEXCOORD2; // For world-space lighting
+    float2 texcoord : TEXCOORD3;
+    float3 color : TEXCOORD7; // For models with vertex colors
+    float3 normalModelSpace : TEXCOORD8; // For debug view
+    uint meshletIndex : TEXCOORD9; // For meshlet debug view
+};
+
 struct ClippingPlane {
     float4 plane;
 };
@@ -137,7 +148,7 @@ struct PerMeshInstanceBuffer {
     uint pad[2];
 };
 
-#define LIGHTS_PER_PAGE 10
+#define LIGHTS_PER_PAGE 12
 #define LIGHT_PAGE_ADDRESS_NULL 0xFFFFFFFF
 struct LightPage {
     uint ptrNextPage;
@@ -151,6 +162,63 @@ struct Cluster {
     uint numLights;
     uint ptrFirstPage;
     uint pad[2];
+};
+
+struct GTAOConstants {
+    uint2 ViewportSize;
+    float2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
+
+    float2 DepthUnpackConsts;
+    float2 CameraTanHalfFOV;
+
+    float2 NDCToViewMul;
+    float2 NDCToViewAdd;
+
+    float2 NDCToViewMul_x_PixelSize;
+    float EffectRadius; // world (viewspace) maximum size of the shadow
+    float EffectFalloffRange;
+
+    float RadiusMultiplier;
+    float Padding0;
+    float FinalValuePower;
+    float DenoiseBlurBeta;
+
+    float SampleDistributionPower;
+    float ThinOccluderCompensation;
+    float DepthMIPSamplingOffset;
+    int NoiseIndex; // frameIndex % 64 if using TAA or 0 otherwise
+};
+
+struct GTAOInfo {
+    GTAOConstants g_GTAOConstants;
+    
+    uint g_samplerPointClampDescriptorIndex;
+    uint g_srcRawDepthDescriptorIndex; // source depth buffer data (in NDC space in DirectX)
+    uint g_outWorkingDepthMIP0DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP1DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    
+    uint g_outWorkingDepthMIP2DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP3DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP4DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    // input output textures for the second pass (XeGTAO_MainPass)
+    uint g_srcWorkingDepthDescriptorIndex; // viewspace depth with MIPs, output by XeGTAO_PrefilterDepths16x16 and consumed by XeGTAO_MainPass
+    
+    uint g_srcNormalmapDescriptorIndex; // source normal map
+    uint g_srcHilbertLUTDescriptorIndex; // hilbert lookup table  (if any) (unused)
+    uint g_outWorkingAOTermDescriptorIndex; // output AO term (includes bent normals if enabled - packed as R11G11B10 scaled by AO)
+    uint g_outWorkingEdgesDescriptorIndex; // output depth-based edges used by the denoiser
+    
+    uint g_outNormalmapDescriptorIndex; // output viewspace normals if generating from depth (unused)
+    // input output textures for the third pass (XeGTAO_Denoise)
+    //uint g_srcWorkingAOTermDescriptorIndex; // coming from previous pass // Moved to root constant
+    uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
+    uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
+    uint pad[1];
+};
+
+struct FragmentInfo {
+    float3 normalWS;
+    float ambientOcclusion;
 };
 
 #endif // __STRUCTS_HLSL__

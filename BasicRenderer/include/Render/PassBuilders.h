@@ -134,83 +134,107 @@ private:
 
     // Single resource overload
     void addShaderResource(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
         params.shaderResources.push_back(r);
     }
 
     // initializer list overload
     void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list)
+        for (auto& r : list) {
+            if (!r) continue;
             params.shaderResources.push_back(r);
+        }
     }
 
 	// Render target
     void addRenderTarget(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
         params.renderTargets.push_back(r);
     }
 
     void addRenderTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list)
-            params.renderTargets.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
     }
 
 	// Depth target
 	void addDepthTarget(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
 		params.depthTextures.push_back(r);
 	}
 
 	void addDepthTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
-		for (auto& r : list)
-			params.depthTextures.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
 	}
 
 	// Constant buffer
 	void addConstantBuffer(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
 		params.constantBuffers.push_back(r);
 	}
 
 	void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
-		for (auto& r : list)
-			params.constantBuffers.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
 	}
 
 	// Unordered access
 	void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
 		params.unorderedAccessViews.push_back(r);
 	}
 
 	void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
-		for (auto& r : list)
-			params.unorderedAccessViews.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
 	}
 
 	// Copy destination
 	void addCopyDest(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
 		params.copyTargets.push_back(r);
 	}
 
 	void addCopyDest(std::initializer_list<std::shared_ptr<Resource>> list) {
-		for (auto& r : list)
-			params.copyTargets.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
 	}
 
 	// Copy source
 	void addCopySource(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
 		params.copySources.push_back(r);
 	}
 
 	void addCopySource(std::initializer_list<std::shared_ptr<Resource>> list) {
-		for (auto& r : list)
-			params.copySources.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
 	}
 
 	// Indirect arguments
 	void addIndirectArguments(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
 		params.indirectArgumentBuffers.push_back(r);
 	}
 
 	void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
-		for (auto& r : list)
-			params.indirectArgumentBuffers.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
 	}
 
     void ensureNotBuilt() const {
@@ -298,33 +322,42 @@ private:
 
     // Single resource overload
     void addShaderResource(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
         params.shaderResources.push_back(r);
     }
 
     // initializer list overload
     void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list)
+        for (auto& r : list) {
+            if (!r) continue;
             params.shaderResources.push_back(r);
+        }
     }
 
     // Constant buffer
     void addConstantBuffer(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
         params.constantBuffers.push_back(r);
     }
 
     void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list)
-            params.constantBuffers.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
     }
 
     // Unordered access
     void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
         params.unorderedAccessViews.push_back(r);
     }
 
     void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list)
-            params.unorderedAccessViews.push_back(r);
+        for (auto& r : list) {
+            if (!r) continue;
+            params.shaderResources.push_back(r);
+        }
     }
 
     void ensureNotBuilt() const {

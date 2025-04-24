@@ -17,8 +17,13 @@ struct TextureDescription {
     bool isArray = false;
     uint32_t arraySize = 1;
     bool hasRTV = false;
+	DXGI_FORMAT rtvFormat = DXGI_FORMAT_UNKNOWN;
     bool hasDSV = false;
+	DXGI_FORMAT dsvFormat = DXGI_FORMAT_UNKNOWN;
     bool hasUAV = false;
+	DXGI_FORMAT uavFormat = DXGI_FORMAT_UNKNOWN;
+	bool hasSRV = false;
+	DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
 	bool hasNonShaderVisibleUAV = false;
     bool generateMipMaps = false;
     ResourceState initialState = ResourceState::UNKNOWN;

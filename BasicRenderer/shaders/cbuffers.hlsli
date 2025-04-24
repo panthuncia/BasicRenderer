@@ -20,6 +20,7 @@ cbuffer ShadowInfo : register(b3) {
 cbuffer Settings : register(b4) {
     bool enableShadows;
     bool enablePunctualLights;
+    bool enableGTAO;
 }
 
 cbuffer StaticBufferInfo : register(b5) {
@@ -34,6 +35,8 @@ cbuffer StaticBufferInfo : register(b5) {
     uint cameraBufferDescriptorIndex;
     uint perMeshInstanceBufferDescriptorIndex; // Used by skinned meshes for skinning
     uint drawSetCommandBufferDescriptorIndex;
+    uint normalsTextureDescriptorIndex;
+    uint aoTextureDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {
@@ -58,6 +61,7 @@ cbuffer LightClusterInfo : register(b8) {
 
 cbuffer MiscRootConstants : register(b9) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
+    uint UintRootConstant1;
 }
 
 #endif // __CBUFFERS_HLSL__

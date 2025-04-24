@@ -53,7 +53,7 @@ public:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.dsvDescriptorSize);
+		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
 
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
@@ -64,7 +64,7 @@ public:
 		viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
 		auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.projection);
         commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
-		commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo().index, 0);
+		commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo()[0].index, 0);
         commandList->SetGraphicsRoot32BitConstant(2, m_texture->GetSamplerDescriptorIndex(), 0);
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
@@ -242,7 +242,7 @@ private:
         psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         psoDesc.NumRenderTargets = 1;
         psoDesc.RTVFormats[0] = renderTargetFormat;
-        psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         psoDesc.SampleDesc.Count = 1;
         psoDesc.SampleDesc.Quality = 0;
         psoDesc.InputLayout = inputLayoutDesc;

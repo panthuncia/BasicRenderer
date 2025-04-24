@@ -32,8 +32,11 @@ public:
 		dims.slicePitch = shadowResolution * shadowResolution * 4;
 		desc.imageDimensions.push_back(dims);
 		desc.hasDSV = true;
+		desc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
 		desc.channels = 1;
 		desc.format = DXGI_FORMAT_R32_TYPELESS;
+		desc.hasSRV = true;
+		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;

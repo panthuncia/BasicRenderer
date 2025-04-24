@@ -88,7 +88,7 @@ public:
 
             commandList->SetGraphicsRootSignature(environmentConversionRootSignature.Get());
 
-            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo().gpuHandle);
+            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
 
             commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
             commandList->RSSetViewports(1, &viewport);
@@ -107,8 +107,6 @@ public:
                 CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
                 rtvHandles[0] = m_environmentCubeMap->GetBuffer()->GetRTVInfos()[i].cpuHandle;
                 rtvHandles[1] = m_environmentRadiance->GetBuffer()->GetRTVInfos()[i].cpuHandle;
-
-                CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(context.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
                 commandList->OMSetRenderTargets(2, rtvHandles, FALSE, nullptr);
 

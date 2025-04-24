@@ -1,7 +1,8 @@
 #ifndef __VERTEX_HLSL__
 #define __VERTEX_HLSL__
 
-#include "utilities.hlsli"
+#include "loadingUtils.hlsli"
+
 // Manually assembled from ByteAddressBuffer
 struct Vertex {
     float3 position : POSITION;
@@ -10,17 +11,6 @@ struct Vertex {
     uint4 joints : TEXCOORD1;
     float4 weights : TEXCOORD2;
     float3 color;
-};
-
-struct PSInput {
-    float4 position : SV_POSITION; // Screen-space position, required for rasterization
-    float4 positionWorldSpace : TEXCOORD0; // For world-space lighting
-    float4 positionViewSpace : TEXCOORD1; // For cascaded shadows
-    float3 normalWorldSpace : TEXCOORD2; // For world-space lighting
-    float2 texcoord : TEXCOORD3;
-    float3 color : TEXCOORD7; // For models with vertex colors
-    float3 normalModelSpace : TEXCOORD8; // For debug view
-    uint meshletIndex : TEXCOORD9; // For meshlet debug view
 };
 
 #define VERTEX_COLORS 1 << 0

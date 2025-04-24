@@ -3,6 +3,8 @@
 #include "lighting.hlsli"
 #include "tonemapping.hlsli"
 #include "outputTypes.hlsli"
+#include "utilities.hlsli"
+
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
 #define FRAGMENT_LIST_NULL 0xffffffff
@@ -53,8 +55,9 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
 
     // Light fragment
+    FragmentInfo fragmentInfo = GetFragmentInfoDirectTransparent(input);
     
-    LightingOutput lightingOutput = lightFragment(mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
 
     
     // Fill the PPLL buffers with the fragment data

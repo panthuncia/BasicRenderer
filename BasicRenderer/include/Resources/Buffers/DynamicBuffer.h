@@ -56,9 +56,9 @@ protected:
         currentState = newState;
         return m_dataBuffer->GetTransitions(prevState, newState);
     }
-    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
         currentState = newState;
-        return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevSyncState, newSyncState);
+        return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
     }
 
 private:

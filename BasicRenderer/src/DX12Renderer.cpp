@@ -38,6 +38,9 @@
 #include "RenderPasses/ClusterGenerationPass.h"
 #include "RenderPasses/LightCullingPass.h"
 #include "RenderPasses/ZPrepass.h"
+#include "RenderPasses/GTAO/XeGTAOFilterPass.h"
+#include "RenderPasses/GTAO/XeGTAOMainPass.h"
+#include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -51,6 +54,7 @@
 #include "Utilities/MathUtils.h"
 #include "Scene/MovementState.h"
 #include "Animation/AnimationController.h"
+#include "ThirdParty/XeGTAO.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -142,6 +146,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
+    CreateTextures();
     CreateGlobalResources();
 
     // Initialize GPU resource managers
@@ -273,6 +278,7 @@ void DX12Renderer::SetSettings() {
     bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
+	settingsManager.registerSetting<bool>("enableGTAO", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -323,7 +329,10 @@ void DX12Renderer::SetSettings() {
 	settingsManager.addObserver<bool>("enableImageBasedLighting", [this](const bool& newValue) {
 		m_imageBasedLighting = newValue;
 		});
-
+	settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
+		m_gtaoEnabled = newValue;
+		rebuildRenderGraph = true;
+		});
     m_numFramesInFlight = getNumFramesInFlight();
 }
 
@@ -462,7 +471,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
     {
         D3D12_INFO_QUEUE_FILTER filter = {};
-        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists
+        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists, ps output type mismatch
         filter.DenyList.NumIDs = _countof(blockedIDs);
         filter.DenyList.pIDList = blockedIDs;
 
@@ -521,13 +530,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap)));
 
     rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	dsvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
-    // Create depth stencil descriptor heap
-    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-    dsvHeapDesc.NumDescriptors = numFramesInFlight;
-    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    ThrowIfFailed(device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvHeap)));
 
     // Create frame resources
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
@@ -550,41 +552,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         m_commandLists.push_back(commandList);
     }
 
-
-    // Create the depth stencil buffer
-    D3D12_RESOURCE_DESC depthStencilDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_D24_UNORM_S8_UINT, x_res, y_res,
-        1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
-    );
-
-    D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
-    depthOptimizedClearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
-    depthOptimizedClearValue.DepthStencil.Stencil = 0;
-
-    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    for (int i = 0; i < numFramesInFlight; i++){
-        auto dsvHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-		ComPtr<ID3D12Resource> depthStencilBuffer;
-        ThrowIfFailed(device->CreateCommittedResource(
-            &dsvHeapProperties,
-            D3D12_HEAP_FLAG_NONE,
-            &depthStencilDesc,
-            D3D12_RESOURCE_STATE_DEPTH_WRITE,
-            &depthOptimizedClearValue,
-            IID_PPV_ARGS(&depthStencilBuffer)
-        ));
-
-		depthStencilBuffers.push_back(depthStencilBuffer);
-        // Create the depth stencil view
-        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
-        device->CreateDepthStencilView(depthStencilBuffers[i].Get(), &dsvDesc, dsvHandle);
-        dsvHandle.Offset(1, dsvDescriptorSize);
-    }
-
     // Create per-frame fence information
 	m_frameFenceValues.resize(numFramesInFlight);
 	for (int i = 0; i < numFramesInFlight; i++) {
@@ -599,9 +566,29 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
 }
 
+void DX12Renderer::CreateTextures() {
+    TextureDescription depthStencilDesc;
+    ImageDimensions dimensions;
+    dimensions.width = m_xRes;
+    dimensions.height = m_yRes;
+    depthStencilDesc.imageDimensions.push_back(dimensions);
+    depthStencilDesc.format = DXGI_FORMAT_R32_TYPELESS;
+    depthStencilDesc.hasSRV = true;
+    depthStencilDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+    depthStencilDesc.arraySize = 1;
+    depthStencilDesc.channels = 1;
+    depthStencilDesc.generateMipMaps = false;
+    depthStencilDesc.hasDSV = true;
+	depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
+
+    m_depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
+    m_depthStencilBuffer->SetName(L"DepthStencilBuffer");
+}
+
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     if (!device) return;
-
+	m_xRes = newWidth;
+	m_yRes = newHeight;
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
 
@@ -610,7 +597,6 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
     for (int i = 0; i < numFramesInFlight; ++i) {
         renderTargets[i].Reset();
-		depthStencilBuffers[i].Reset();
     }
 
     // Resize the swap chain
@@ -630,34 +616,10 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
         rtvHandle.Offset(1, rtvDescriptorSize);
     }
 
-    // Recreate the depth/stencil buffer
-    D3D12_RESOURCE_DESC depthStencilDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_D24_UNORM_S8_UINT, newWidth, newHeight,
-        1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+    CreateTextures();
 
-    D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
-    depthOptimizedClearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
-    depthOptimizedClearValue.DepthStencil.Stencil = 0;
-
-    auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
-    for (int i = 0; i < numFramesInFlight; i++) {
-        ThrowIfFailed(device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &depthStencilDesc,
-            D3D12_RESOURCE_STATE_DEPTH_WRITE,
-            &depthOptimizedClearValue,
-            IID_PPV_ARGS(&depthStencilBuffers[i])));
-
-        // Create the depth stencil view
-        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
-        device->CreateDepthStencilView(depthStencilBuffers[i].Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    }
+	//Rebuild the render graph
+	rebuildRenderGraph = true;
 }
 
 
@@ -731,7 +693,7 @@ void DX12Renderer::Render() {
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
-    m_context.dsvHeap = dsvHeap.Get();
+	m_context.pPrimaryDepthBuffer = m_depthStencilBuffer.get();
     m_context.renderTargets = renderTargets.data();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
@@ -760,13 +722,8 @@ void DX12Renderer::Render() {
     commandList->ResourceBarrier(1, &barrier);
     
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.rtvDescriptorSize);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_context.dsvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.dsvDescriptorSize);
+	auto& dsvHandle = m_depthStencilBuffer->GetDSVInfos()[0].cpuHandle;
     //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-    // Clear the render target
-    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-    commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     commandList->Close();
 
@@ -985,7 +942,8 @@ void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
 
     auto newGraph = std::make_unique<RenderGraph>();
-
+    std::shared_ptr<PixelBuffer> depthTexture = m_depthStencilBuffer;
+	newGraph->AddResource(depthTexture, false, ResourceState::DEPTH_WRITE);
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
@@ -1053,16 +1011,149 @@ void DX12Renderer::CreateRenderGraph() {
 		.Build<SkinningPass>();
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
+
+    TextureDescription normalsWorldSpaceDesc;
+	normalsWorldSpaceDesc.arraySize = 1;
+	normalsWorldSpaceDesc.channels = 4;
+	normalsWorldSpaceDesc.isCubemap = false;
+	normalsWorldSpaceDesc.hasRTV = true;
+	normalsWorldSpaceDesc.format = DXGI_FORMAT_R10G10B10A2_UNORM;
+	normalsWorldSpaceDesc.generateMipMaps = false;
+    normalsWorldSpaceDesc.hasSRV = true;
+	normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+	ImageDimensions dims = { m_xRes, m_yRes, 0, 0 };
+	normalsWorldSpaceDesc.imageDimensions.push_back(dims);
+	auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
+	normalsWorldSpace->SetName(L"Normals World Space");
+	newGraph->AddResource(normalsWorldSpace, false, ResourceState::UNORDERED_ACCESS);
+
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer);
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
+        .WithRenderTarget(normalsWorldSpace)
+        .WithDepthTarget(depthTexture);
+
 	if (useMeshShaders) {
 		zBuilder.WithShaderResource(meshResourceGroup);
 		if (indirect) {
 			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-	zBuilder.Build<ZPrepass>(getWireframeEnabled(), useMeshShaders, indirect);
+    zBuilder.Build<ZPrepass>(normalsWorldSpace, getWireframeEnabled(), useMeshShaders, indirect);
 
+    auto debugPassParameters = RenderPassParameters();
+
+    // GTAO pass
+    std::shared_ptr<PixelBuffer> outputAO;
+    if (m_gtaoEnabled) {
+        TextureDescription workingDepthsDesc;
+        workingDepthsDesc.arraySize = 1;
+        workingDepthsDesc.channels = 1;
+        workingDepthsDesc.isCubemap = false;
+        workingDepthsDesc.hasRTV = false;
+        workingDepthsDesc.hasUAV = true;
+        workingDepthsDesc.format = DXGI_FORMAT_R32_FLOAT;
+        workingDepthsDesc.generateMipMaps = true;
+        ImageDimensions dims1 = { m_xRes, m_yRes, 0, 0 };
+        workingDepthsDesc.imageDimensions.push_back(dims1);
+        auto workingDepths = PixelBuffer::Create(workingDepthsDesc);
+        workingDepths->SetName(L"GTAO Working Depths");
+
+        TextureDescription workingEdgesDesc;
+        workingEdgesDesc.arraySize = 1;
+        workingEdgesDesc.channels = 1;
+        workingEdgesDesc.isCubemap = false;
+        workingEdgesDesc.hasRTV = false;
+        workingEdgesDesc.hasUAV = true;
+        workingEdgesDesc.format = DXGI_FORMAT_R8_UNORM;
+        workingEdgesDesc.generateMipMaps = false;
+        workingEdgesDesc.imageDimensions.push_back(dims1);
+        auto workingEdges = PixelBuffer::Create(workingEdgesDesc);
+        workingEdges->SetName(L"GTAO Working Edges");
+
+        TextureDescription workingAOTermDesc;
+        workingAOTermDesc.arraySize = 1;
+        workingAOTermDesc.channels = 1;
+        workingAOTermDesc.isCubemap = false;
+        workingAOTermDesc.hasRTV = false;
+        workingAOTermDesc.hasUAV = true;
+        workingAOTermDesc.format = DXGI_FORMAT_R8_UINT;
+        workingAOTermDesc.generateMipMaps = false;
+        workingAOTermDesc.imageDimensions.push_back(dims1);
+        auto workingAOTerm1 = PixelBuffer::Create(workingAOTermDesc);
+        workingAOTerm1->SetName(L"GTAO Working AO Term 1");
+        auto workingAOTerm2 = PixelBuffer::Create(workingAOTermDesc);
+        workingAOTerm2->SetName(L"GTAO Working AO Term 2");
+        outputAO = PixelBuffer::Create(workingAOTermDesc);
+        outputAO->SetName(L"GTAO Output AO Term");
+        newGraph->AddResource(workingAOTerm1, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingAOTerm2, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(outputAO, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingDepths, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingEdges, false, ResourceState::UNORDERED_ACCESS);
+
+        auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
+        newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
+
+        // Point-clamp sampler
+        D3D12_SAMPLER_DESC samplerDesc = {};
+        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.MipLODBias = 0.0f;
+        samplerDesc.MaxAnisotropy = 1;
+        //samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+
+        auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
+
+        auto cameraInfo = currentScene->GetPrimaryCamera().get<Components::Camera>();
+        GTAOInfo gtaoInfo;
+        XeGTAO::GTAOSettings gtaoSettings;
+        XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
+        XeGTAO::GTAOUpdateConstants(gtaoConstants, m_xRes, m_yRes, gtaoSettings, false, 0, *cameraInfo);
+        // Bindless indices
+        gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
+
+        // Filter pass
+        gtaoInfo.g_srcRawDepthDescriptorIndex = depthTexture->GetSRVInfo()[0].index;
+        gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[0].index;
+        gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[1].index;
+        gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[2].index;
+        gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[3].index;
+        gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[4].index;
+
+        // Main pass
+        gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo()[0].index;
+        gtaoInfo.g_srcNormalmapDescriptorIndex = normalsWorldSpace->GetSRVInfo()[0].index;
+        // TODO: Hilbert lookup table
+        gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo()[0].index;
+        gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo()[0].index;
+
+        // Denoise pass
+        gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo()[0].index;
+        gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo()[0].index;
+
+        debugPassParameters.shaderResources.push_back(outputAO);
+        SetDebugTexture(outputAO);
+
+        UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
+
+        newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
+            .WithShaderResource(normalsWorldSpace, m_depthStencilBuffer)
+            .WithUnorderedAccess(workingDepths)
+            .Build<GTAOFilterPass>(GTAOConstantBuffer);
+
+        newGraph->BuildComputePass("GTAOMainPass") // Main pass
+            .WithShaderResource(normalsWorldSpace, workingDepths)
+            .WithUnorderedAccess(workingEdges, workingAOTerm1)
+            .Build<GTAOMainPass>(GTAOConstantBuffer);
+
+        newGraph->BuildComputePass("GTAODenoisePass") // Denoise pass
+            .WithShaderResource(workingEdges, workingAOTerm1)
+            .WithUnorderedAccess(outputAO)
+            .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo()[0].index);
+
+    }
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
         // light pages counter
@@ -1080,12 +1171,17 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithUnorderedAccess(clusterBuffer, lightPagesBuffer, lightPagesCounter)
 			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
     }
-
+    
     auto forwardBuilder = newGraph->BuildRenderPass("ForwardPass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer);
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
+        .WithDepthTarget(depthTexture);
 
     if (m_clusteredLighting) {
 		forwardBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
+    }
+
+    if (m_gtaoEnabled) {
+        forwardBuilder.WithShaderResource(outputAO);
     }
 
     if (useMeshShaders) {
@@ -1094,8 +1190,6 @@ void DX12Renderer::CreateRenderGraph() {
 			forwardBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
         }
 	}
-
-    auto debugPassParameters = RenderPassParameters();
 
     if (m_lutTexture == nullptr) {
 		TextureDescription lutDesc;
@@ -1114,7 +1208,7 @@ void DX12Renderer::CreateRenderGraph() {
 		m_lutTexture = std::make_shared<Texture>(lutBuffer, sampler);
 		m_lutTexture->SetName(L"LUTTexture");
 
-        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo().index);
+        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo()[0].index);
 		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
 		newGraph->BuildRenderPass("BRDFIntegrationPass")
@@ -1191,10 +1285,11 @@ void DX12Renderer::CreateRenderGraph() {
 
 		newGraph->BuildRenderPass("SkyboxPass")
 			.WithShaderResource(m_currentSkybox)
+			.WithDepthTarget(depthTexture)
 			.Build<SkyboxRenderPass>(m_currentSkybox);
     }
-
-	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect);
+    forwardBuilder.WithShaderResource(normalsWorldSpace);
+	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
@@ -1224,7 +1319,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto PPLLFillBuilder = newGraph->BuildRenderPass("PPFillPass")
         .WithUnorderedAccess(PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter)
-        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_prefilteredEnvironment, m_environmentIrradiance, cameraBuffer);
+        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_prefilteredEnvironment, m_environmentIrradiance, cameraBuffer, outputAO, normalsWorldSpace);
     if (drawShadows) {
 		PPLLFillBuilder.WithShaderResource(m_shadowMaps);
     }
@@ -1237,7 +1332,7 @@ void DX12Renderer::CreateRenderGraph() {
 			PPLLFillBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect);
+	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
 
 
     newGraph->BuildRenderPass("PPLLResolvePass")
@@ -1382,7 +1477,7 @@ void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
 	m_environmentIrradiance = texture;
     m_environmentIrradiance->SetName(L"EnvironmentRadiance");
     auto& manager = ResourceManager::GetInstance();
-	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetBuffer()->GetSRVInfo().index);
+	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetBuffer()->GetSRVInfo()[0].index);
 	manager.setEnvironmentIrradianceMapSamplerIndex(m_environmentIrradiance->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }
@@ -1394,12 +1489,12 @@ void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
 	m_prefilteredEnvironment = texture;
 	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");
 	auto& manager = ResourceManager::GetInstance();
-	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo().index);
+	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo()[0].index);
 	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
 	rebuildRenderGraph = true;
 }
 
-void DX12Renderer::SetDebugTexture(std::shared_ptr<Texture> texture) {
+void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
     m_currentDebugTexture = texture;
 	if (currentRenderGraph == nullptr) {
 		return;

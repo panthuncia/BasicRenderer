@@ -88,7 +88,7 @@ public:
 			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveOpaqueDrawSetIndicesBufferSRVIndex();
-			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 			bufferIndices[MaxDrawIndex] = numOpaqueDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
@@ -101,7 +101,7 @@ public:
 				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
 				for (auto& buffer : lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers) {
-					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
@@ -120,7 +120,7 @@ public:
 			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveAlphaTestDrawSetIndicesBufferSRVIndex();
-			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 			bufferIndices[MaxDrawIndex] = numAlphaTestDraws-1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
@@ -133,7 +133,7 @@ public:
 				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
 				for (auto& buffer : lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers) {
-					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
@@ -153,7 +153,7 @@ public:
 			auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = objectManager->GetActiveBlendDrawSetIndicesBufferSRVIndex();
-			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo().index;
+			bufferIndices[IndirectCommandBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 			bufferIndices[MaxDrawIndex] = numBlendDraws - 1;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
@@ -166,7 +166,7 @@ public:
 				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
 				for (auto& buffer : lightViewInfo.commandBuffers.blendIndirectCommandBuffers) {
-					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo().index;
+					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
 					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);

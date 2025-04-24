@@ -10,6 +10,7 @@ class MeshManager;
 class IndirectCommandBufferManager;
 class CameraManager;
 class LightManager;
+class PixelBuffer;
 
 class RenderContext {
 public:
@@ -26,7 +27,7 @@ public:
     ID3D12DescriptorHeap* textureDescriptorHeap;
     ID3D12DescriptorHeap* samplerDescriptorHeap;
     ID3D12DescriptorHeap* rtvHeap;
-    ID3D12DescriptorHeap* dsvHeap;
+	PixelBuffer* pPrimaryDepthBuffer;
     Microsoft::WRL::ComPtr<ID3D12Resource> *renderTargets;
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;

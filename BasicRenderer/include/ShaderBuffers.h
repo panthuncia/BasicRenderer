@@ -62,10 +62,12 @@ struct PerMeshCB {
     unsigned int vertexFlags;
 	unsigned int vertexByteSize;
     unsigned int skinningVertexByteSize;
+
     unsigned int inverseBindMatricesBufferIndex;
 	unsigned int vertexBufferOffset;
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
+
     unsigned int meshletTrianglesBufferOffset;
 	BoundingSphere boundingSphere;
 	unsigned int numVertices;
@@ -83,26 +85,32 @@ struct PerMaterialCB {
     unsigned int baseColorTextureIndex;
     unsigned int baseColorSamplerIndex;
     unsigned int normalTextureIndex;
+
     unsigned int normalSamplerIndex;
     unsigned int metallicTextureIndex;
     unsigned int metallicSamplerIndex;
 	unsigned int roughnessTextureIndex;
+
 	unsigned int roughnessSamplerIndex;
     unsigned int emissiveTextureIndex;
     unsigned int emissiveSamplerIndex;
     unsigned int aoMapIndex;
+
     unsigned int aoSamplerIndex;
     unsigned int heightMapIndex;
     unsigned int heightSamplerIndex;
     float metallicFactor;
+
     float roughnessFactor;
     float ambientStrength;
     float specularStrength;
     float textureScale;
+
     float heightMapScale;
     float alphaCutoff;
     unsigned int pad0;
     unsigned int pad1;
+
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
 };
@@ -116,21 +124,24 @@ struct LightInfo {
     float innerConeAngle;
     float outerConeAngle;
     int shadowViewInfoIndex;
+
     DirectX::XMVECTOR posWorldSpace; // Position of the lights
     DirectX::XMVECTOR dirWorldSpace; // Direction of the lights
     DirectX::XMVECTOR attenuation; // x,y,z = constant, linear, quadratic attenuation
     DirectX::XMVECTOR color; // Color of the lights
+
     float nearPlane;
     float farPlane;
 	int shadowMapIndex = -1;
     int shadowSamplerIndex = -1;
+
     bool shadowCaster;
 	BoundingSphere boundingSphere;
     float maxRange;
 	unsigned int pad[1];
 };
 
-#define LIGHTS_PER_PAGE 10
+#define LIGHTS_PER_PAGE 12
 struct LightPage {
     unsigned int ptrNextPage;
     unsigned int numLightsInPage;
@@ -145,6 +156,62 @@ struct Cluster {
     unsigned int pad[2];
 };
 
+typedef unsigned int uint;
+
+namespace XeGTAO {
+    struct GTAOConstants {
+        DirectX::XMUINT2 ViewportSize;
+        DirectX::XMFLOAT2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
+
+        DirectX::XMFLOAT2 DepthUnpackConsts;
+        DirectX::XMFLOAT2 CameraTanHalfFOV;
+
+        DirectX::XMFLOAT2 NDCToViewMul;
+        DirectX::XMFLOAT2 NDCToViewAdd;
+
+        DirectX::XMFLOAT2 NDCToViewMul_x_PixelSize;
+        float EffectRadius; // world (viewspace) maximum size of the shadow
+        float EffectFalloffRange;
+
+        float RadiusMultiplier;
+        float Padding0;
+        float FinalValuePower;
+        float DenoiseBlurBeta;
+
+        float SampleDistributionPower;
+        float ThinOccluderCompensation;
+        float DepthMIPSamplingOffset;
+        int NoiseIndex; // frameIndex % 64 if using TAA or 0 otherwise
+    };
+}
+
+struct GTAOInfo {
+    XeGTAO::GTAOConstants g_GTAOConstants;
+
+    uint g_samplerPointClampDescriptorIndex;
+    uint g_srcRawDepthDescriptorIndex; // source depth buffer data (in NDC space in DirectX)
+    uint g_outWorkingDepthMIP0DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP1DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    
+    uint g_outWorkingDepthMIP2DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP3DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    uint g_outWorkingDepthMIP4DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
+    // input output textures for the second pass (XeGTAO_MainPass)
+    uint g_srcWorkingDepthDescriptorIndex; // viewspace depth with MIPs, output by XeGTAO_PrefilterDepths16x16 and consumed by XeGTAO_MainPass
+    
+    uint g_srcNormalmapDescriptorIndex; // source normal map
+    uint g_srcHilbertLUTDescriptorIndex; // hilbert lookup table  (if any) (unused)
+    uint g_outWorkingAOTermDescriptorIndex; // output AO term (includes bent normals if enabled - packed as R11G11B10 scaled by AO)// // Moved to root constant
+    uint g_outWorkingEdgesDescriptorIndex; // output depth-based edges used by the denoiser
+    
+    uint g_outNormalmapDescriptorIndex; // output viewspace normals if generating from depth (unused)
+    // input output textures for the third pass (XeGTAO_Denoise)
+    //uint g_srcWorkingAOTermDescriptorIndex; // coming from previous pass // Moved to root constant
+    uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
+    uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
+    uint pad[1];
+};
+
 enum RootSignatureLayout {
     PerObjectRootSignatureIndex,
     PerMeshRootSignatureIndex,
@@ -154,6 +221,7 @@ enum RootSignatureLayout {
 	VariableBufferRootSignatureIndex,
 	TransparencyInfoRootSignatureIndex,
 	LightClusterRootSignatureIndex,
+	MiscRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -177,6 +245,7 @@ enum ViewRootConstants {
 enum SettingsRootConstants {
 	EnableShadows,
 	EnablePunctualLights,
+    EnableGTAO,
 	NumSettingsRootConstants
 };
 
@@ -192,6 +261,8 @@ enum StaticBufferRootConstants {
     CameraBufferDescriptorIndex,
     PerMeshInstanceBufferDescriptorIndex,
     DrawSetCommandBufferDescriptorIndex,
+	NormalsTextureDescriptorIndex,
+    AOTextureDescriptorIndex,
     NumStaticBufferRootConstants,
 };
 
@@ -220,5 +291,6 @@ enum LightClusterRootConstants {
 
 enum MiscRootConstants { // Used for pass-specific one-off constants
 	UintRootConstant0,
+	UintRootConstant1,
 	NumMiscRootConstants
 };

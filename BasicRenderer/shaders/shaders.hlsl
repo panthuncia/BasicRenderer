@@ -94,12 +94,35 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     return output;
 }
 
-#if !(defined(PSO_SHADOW) || defined(PSO_DEPTH_ONLY))
-[earlydepthstencil]
-#endif
-#if defined(PSO_SHADOW) || defined(PSO_DEPTH_ONLY)
+float4 PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    uint meshBufferIndex = perMeshBufferIndex;
+    PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+#if defined(PSO_ALPHA_TEST) || defined(PSO_BLEND)
+    if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
+        Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
+        SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
+        float2 uv = input.texcoord;
+        float4 baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
+        if (baseColor.a*materialInfo.baseColorFactor.a < 0.5){
+            discard;
+        }
+    }
+    if (materialInfo.baseColorFactor.a < 0.5){
+        discard;
+    }
+#endif // PSO_ALPHA_TEST || PSO_BLEND
+    float3 outNorm = normalize(input.normalWorldSpace);
+    outNorm = SignedOctEncode(outNorm);
+    return float4(0, outNorm.x, outNorm.y, outNorm.z);
+}
+
+#if defined(PSO_SHADOW)
 void
 #else
+[earlydepthstencil]
 float4 
 #endif
 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
@@ -109,8 +132,8 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
-#if defined(PSO_SHADOW) || defined(PSO_DEPTH_ONLY) // Alpha tested shadows
-    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
+#if defined(PSO_SHADOW) || defined(PSO_PREPASS) // Alpha tested shadows
+    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND) && !defined(PSO_PREPASS)
         return;
     #endif // DOUBLE_SIDED
     if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
@@ -125,15 +148,22 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     if (materialInfo.baseColorFactor.a < 0.5){
         discard;
     }
-#endif // SHADOW || DEPTH_ONLY
-#if !defined(PSO_SHADOW) && !defined(PSO_DEPTH_ONLY)
+#if defined(PSO_PREPASS)
+    float3 outNorm = normalize(input.normalWorldSpace);
+    outNorm = SignedOctEncode(outNorm);
+    return float4(0, outNorm.x, outNorm.y, outNorm.z);
+#endif // PSO_PREPASS
+#endif // PSO_SHADOW || PSO_PREPASS
+#if !defined(PSO_SHADOW) && !defined(PSO_PREPASS)
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    
+    FragmentInfo fragmentInfo = GetFragmentInfoScreenSpace(input.position.xy, enableGTAO);
 
-    LightingOutput lightingOutput = lightFragment(mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
     
     // Reinhard tonemapping
     float3 lighting = reinhardJodie(lightingOutput.lighting);

@@ -12,9 +12,9 @@ class DescriptorHeap;
 template<typename T>
 struct TextureHandle {
     Microsoft::WRL::ComPtr<ID3D12Resource> texture; // Texture resource
-    ShaderVisibleIndexInfo SRVInfo;
-	ShaderVisibleIndexInfo UAVInfo;
-	NonShaderVisibleIndexInfo NSVUAVInfo;
+    std::vector<ShaderVisibleIndexInfo> SRVInfo;
+	std::vector<ShaderVisibleIndexInfo> UAVInfo;
+	std::vector<NonShaderVisibleIndexInfo> NSVUAVInfo;
     std::vector<NonShaderVisibleIndexInfo> RTVInfo;
     std::vector<NonShaderVisibleIndexInfo> DSVInfo;
     std::shared_ptr<DescriptorHeap> srvUavHeap;

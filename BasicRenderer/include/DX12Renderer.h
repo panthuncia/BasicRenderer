@@ -48,7 +48,7 @@ public:
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
-    void SetDebugTexture(std::shared_ptr<Texture> texture);
+    void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
     void SetSkybox(std::shared_ptr<Texture> texture);
 	void SetIrradiance(std::shared_ptr<Texture> texture);
@@ -63,8 +63,9 @@ private:
 	ComPtr<ID3D12CommandQueue> computeQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
-    ComPtr<ID3D12DescriptorHeap> dsvHeap;
-	std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
+    //ComPtr<ID3D12DescriptorHeap> dsvHeap;
+	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
+	std::shared_ptr<PixelBuffer> m_depthStencilBuffer;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
     std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
     UINT rtvDescriptorSize;
@@ -101,7 +102,7 @@ private:
 	std::string m_environmentName;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
-	std::shared_ptr<Texture> m_currentDebugTexture = nullptr;
+	std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 
     // GPU resource managers
     std::unique_ptr<LightManager> m_pLightManager = nullptr;
@@ -116,6 +117,7 @@ private:
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
+    void CreateTextures();
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
     void CreateGlobalResources();
@@ -136,6 +138,7 @@ private:
 	bool m_allowTearing = false;
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
+	bool m_gtaoEnabled = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;

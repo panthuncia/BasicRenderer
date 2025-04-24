@@ -13,11 +13,11 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
     ResourceManager& resourceManager = ResourceManager::GetInstance();
 
     handle = resourceManager.CreateTexture(desc, initialData);
-    SetSRVDescriptor(handle.srvUavHeap, handle.SRVInfo);
+    SetSRVDescriptors(handle.srvUavHeap, handle.SRVInfo);
     if(desc.hasUAV)
-        SetUAVGPUDescriptor(handle.srvUavHeap, handle.UAVInfo);
+        SetUAVGPUDescriptors(handle.srvUavHeap, handle.UAVInfo);
     if(desc.hasNonShaderVisibleUAV)
-        SetUAVCPUDescriptor(handle.uavCPUHeap, handle.NSVUAVInfo);
+        SetUAVCPUDescriptors(handle.uavCPUHeap, handle.NSVUAVInfo);
 	if (desc.hasRTV)
 		SetRTVDescriptors(handle.rtvHeap, handle.RTVInfo);
 	if (desc.hasDSV)
@@ -68,21 +68,20 @@ std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState 
 	return m_transitions;
 }
 
-BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
-    if (prevState != currentState) {
-        throw(std::runtime_error("Texture state mismatch"));
-    }
-    if (prevSyncState != currentSyncState) {
-        throw(std::runtime_error("Texture sync state mismatch"));
-    }
+    //if (prevState != currentState) {
+    //    throw(std::runtime_error("Texture state mismatch"));
+    //}
+    //if (prevSyncState != currentSyncState) {
+    //    throw(std::runtime_error("Texture sync state mismatch"));
+    //}
     if (prevState == newState) {
         throw(std::runtime_error("Useless transition"));
     }
 #endif
-    
-    m_textureBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevState);
-    m_textureBarrier.AccessAfter = ResourceStateToD3D12AccessType(newState);
+    m_textureBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevAccessType);
+    m_textureBarrier.AccessAfter = ResourceStateToD3D12AccessType(newAccessType);
     m_textureBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
     m_textureBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 	m_textureBarrier.LayoutBefore = ResourceStateToD3D12GraphicsBarrierLayout(prevState);

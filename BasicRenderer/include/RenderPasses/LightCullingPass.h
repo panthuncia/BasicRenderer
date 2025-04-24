@@ -68,9 +68,9 @@ public:
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
 		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
-		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo().index;
-		lightClusterConstants[LightPagesBufferDescriptorIndex] = m_pLightPagesBuffer->GetUAVShaderVisibleInfo().index;
-		lightClusterConstants[LightPagesCounterDescriptorIndex] = m_pLightPagesCounter->GetUAVShaderVisibleInfo().index;
+		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo()[0].index;
+		lightClusterConstants[LightPagesBufferDescriptorIndex] = m_pLightPagesBuffer->GetUAVShaderVisibleInfo()[0].index;
+		lightClusterConstants[LightPagesCounterDescriptorIndex] = m_pLightPagesCounter->GetUAVShaderVisibleInfo()[0].index;
 		lightClusterConstants[LightPagesPoolSize] = context.lightManager->GetLightPagePoolSize();
 		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
 

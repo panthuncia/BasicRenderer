@@ -57,20 +57,20 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetShadowMeshPSO(UINT ps
     return m_shadowMeshPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
-    if (m_depthPSOCache.find(key) == m_depthPSOCache.end()) {
-        m_depthPSOCache[key] = CreateDepthPSO(psoFlags, blendState, wireframe);
+    if (m_prePassPSOCache.find(key) == m_prePassPSOCache.end()) {
+        m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, blendState, wireframe);
     }
-    return m_depthPSOCache[key];
+    return m_prePassPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
-    if (m_meshDepthPSOCache.find(key) == m_meshDepthPSOCache.end()) {
-        m_meshDepthPSOCache[key] = CreateMeshDepthPSO(psoFlags, blendState, wireframe);
+    if (m_meshPrePassPSOCache.find(key) == m_meshPrePassPSOCache.end()) {
+        m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, blendState, wireframe);
     }
-    return m_meshDepthPSOCache[key];
+    return m_meshPrePassPSOCache[key];
 }
 
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
@@ -135,7 +135,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     }
 
     psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
     auto& device = DeviceManager::GetInstance().GetDevice();
@@ -180,7 +180,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT pso
     }
 
     psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
     auto& device = DeviceManager::GetInstance().GetDevice();
@@ -190,15 +190,15 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT pso
 }
 
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
-    auto defines = GetShaderDefines(psoFlags | PSO_DEPTH_ONLY);
+    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
     CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
-    CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
+    CompileShader(L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6", defines, pixelShader);
 
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -218,10 +218,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDepthPSO(UINT psoF
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 0;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
 
     psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
     auto& device = DeviceManager::GetInstance().GetDevice();
@@ -270,7 +271,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePPLLPSO(UINT psoFl
     }
 
     psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
     auto& device = DeviceManager::GetInstance().GetDevice();
@@ -313,7 +314,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
 
     // Set the render target format
     DXGI_FORMAT rtvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
@@ -395,7 +396,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
 
     // Set the render target format
     DXGI_FORMAT rtvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
@@ -445,10 +446,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     return pso;
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshDepthPSO(
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
-    auto defines = GetShaderDefines(psoFlags | PSO_DEPTH_ONLY);
+    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
@@ -456,7 +457,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshDepthPSO(
 
     CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
     //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-    CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
+    CompileShader(L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6", defines, pixelShader);
     //}
 
     // Create rasterizer state
@@ -476,7 +477,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshDepthPSO(
     CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 
     // Set the render target format
-    DXGI_FORMAT dsvFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    DXGI_FORMAT dsvFormat = DXGI_FORMAT_D32_FLOAT;
 
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
@@ -486,7 +487,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshDepthPSO(
         CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
         CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
         CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
-        //CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
+        CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
         CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
     };
 
@@ -502,9 +503,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshDepthPSO(
     pipelineStateStream.BlendState = blendDesc;
     pipelineStateStream.DepthStencilState = depthStencilState;
 
-    //D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    //rtvFormats.NumRenderTargets = 0;
-    //pipelineStateStream.RTVFormats = rtvFormats;
+    D3D12_RT_FORMAT_ARRAY rtvFormats = {};
+    rtvFormats.NumRenderTargets = 1;
+	rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+    pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;
 
@@ -555,7 +557,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
 	depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 
     // Set the render target format
-    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
@@ -635,10 +637,10 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
 		macro.Name = L"PSO_CLUSTERED_LIGHTING";
 		defines.insert(defines.begin(), macro);
 	}
-	if (psoFlags & PSOFlags::PSO_DEPTH_ONLY) {
+	if (psoFlags & PSOFlags::PSO_PREPASS) {
 		DxcDefine macro;
 		macro.Value = L"1";
-		macro.Name = L"PSO_DEPTH_ONLY";
+		macro.Name = L"PSO_PREPASS";
 		defines.insert(defines.begin(), macro);
 	}
     return defines;

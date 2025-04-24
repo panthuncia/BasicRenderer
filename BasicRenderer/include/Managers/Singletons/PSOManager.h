@@ -48,10 +48,10 @@ public:
     void initialize();
 
     ComPtr<ID3D12PipelineState> GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-	ComPtr<ID3D12PipelineState> GetDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+	ComPtr<ID3D12PipelineState> GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
     ComPtr<ID3D12PipelineState> GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-	ComPtr<ID3D12PipelineState> GetMeshDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+	ComPtr<ID3D12PipelineState> GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
     ComPtr<ID3D12PipelineState> GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
     ComPtr<ID3D12PipelineState> GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
@@ -77,8 +77,8 @@ private:
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshPSOCache;
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshPPLLPSOCache;
 
-    std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_depthPSOCache;
-    std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshDepthPSOCache;
+    std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_prePassPSOCache;
+    std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_meshPrePassPSOCache;
 
     std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_shadowPSOCache;
 	std::unordered_map<PSOKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_shadowMeshPSOCache;
@@ -93,8 +93,8 @@ private:
     ComPtr<ID3D12PipelineState> CreateMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
     ComPtr<ID3D12PipelineState> CreateMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    ComPtr<ID3D12PipelineState> CreateDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    ComPtr<ID3D12PipelineState> CreateMeshDepthPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    ComPtr<ID3D12PipelineState> CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    ComPtr<ID3D12PipelineState> CreateMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
     ComPtr<ID3D12PipelineState> CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 	ComPtr<ID3D12PipelineState> CreateShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
