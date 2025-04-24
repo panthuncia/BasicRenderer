@@ -16,6 +16,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - Shadow mapping for all light types
 - Skinned meshes
 - Order-independent transparency using a per-pixel linked-list
+- SSAO with XeGTAO
 
 ## Technical features
 
@@ -45,7 +46,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [ImGui](https://github.com/ocornut/imgui)
 - [assimp](https://github.com/assimp/assimp)
 - [flecs](https://www.flecs.dev/flecs/)
-
+- [XeGTAO](https://github.com/GameTechDev/XeGTAO)
+  
 ## Notable sources for development ideas
 
 [LearnOpenGL.com](https://learnopengl.com/)
