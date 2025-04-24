@@ -7,6 +7,8 @@
 #include <memory>
 #include <wrl/client.h>
 #include <variant>
+#include <span>
+#include <spdlog/spdlog.h>
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/Base/ComputePass.h"
@@ -157,26 +159,141 @@ private:
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<std::wstring>& computeUAVs);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<std::wstring>& renderUAVs);
 
-    std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(
-		std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
+	std::pair<int, int> GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
+    std::pair<int, int> GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
+
+	// Refactored compile helpers
+	// 
+	// Category descriptor
+	struct ResourceCategory {
+		ResourceCategory() = default;
+		ResourceCategory(
+			const std::vector<std::shared_ptr<Resource>>* list,
+			ResourceState targetState,
+			ResourceSyncState targetSync,
+			bool recordProducer)
+			: list(list), targetState(targetState), targetSync(targetSync), recordProducer(recordProducer) {
+		}
+		const std::vector<std::shared_ptr<Resource>>* list;
+		ResourceState                                 targetState;
+		ResourceSyncState                             targetSync;
+		bool                                          recordProducer;
+	};
+
+	// Generic processor using std::span
+	template<typename AddTransitionFn>
+	void ProcessCategories(
+		bool isCompute,
+		std::span<const ResourceCategory>                     cats,
+		AddTransitionFn&&                                     addTransition,
+		std::unordered_map<std::wstring, ResourceState>&     finalStates,
+		std::unordered_map<std::wstring, ResourceSyncState>&  finalSyncs,
+		std::unordered_map<std::wstring, ResourceSyncState>&  firstSyncs,
+		std::unordered_map<std::wstring, unsigned int>&       producerHistory,
+		unsigned int                                          batchIndex) {
+		for (auto const& cat : cats) {
+			for (const std::shared_ptr<Resource>& res : *cat.list) {
+				const auto& name = res->GetName();
+
+				// Record transition
+				addTransition(isCompute, res, cat.targetState, cat.targetSync);
+
+				// Update final state maps
+				finalStates[name] = cat.targetState;
+				finalSyncs[name]  = cat.targetSync;
+
+				// First touch sync state
+				if (!firstSyncs.contains(name)) {
+					firstSyncs[name] = (res->GetState() == ResourceState::UNKNOWN)
+						? ResourceSyncState::ALL
+						: cat.targetSync;
+				}
+
+				// Mark as resource producer if needed
+				if (cat.recordProducer) {
+					producerHistory[name] = batchIndex;
+				}
+			}
+		}
+	}
+
+	template<typename PassRes>
+	void applySynchronization(
+		bool                              isComputePass,
+		PassBatch&                        currentBatch,
+		unsigned int                      currentBatchIndex,
+		const PassRes&                    pass, // either ComputePassAndResources or RenderPassAndResources
+		const std::unordered_map<std::wstring, unsigned int>& oppTransHist,
+		const std::unordered_map<std::wstring, unsigned int>& oppProdHist)
+	{
+		// figure out which two numbers we wait on
+		auto [lastTransBatch, lastProdBatch] =
+			GetBatchesToWaitOn(pass, oppTransHist, oppProdHist);
+
+		// handle the "transition" wait
+		if (lastTransBatch != -1) {
+			if (lastTransBatch == currentBatchIndex) {
+				// same batch, signal & immediate wait
+				if (isComputePass) {
+					currentBatch.renderTransitionSignal = true;
+					currentBatch.computeQueueWaitOnRenderQueueBeforeExecution = true;
+					currentBatch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue = 
+						currentBatch.renderTransitionFenceValue;
+				} else {
+					currentBatch.computeTransitionSignal = true;
+					currentBatch.renderQueueWaitOnComputeQueueBeforeExecution = true;
+					currentBatch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue = 
+						currentBatch.computeTransitionFenceValue;
+				}
+			} else {
+				// different batch, signal that batch's completion, then wait before *transition*
+				if (isComputePass) {
+					batches[lastTransBatch].renderCompletionSignal = true;
+					currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true;
+					currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue =
+						std::max(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
+							batches[lastTransBatch].renderCompletionFenceValue);
+				} else {
+					batches[lastTransBatch].computeCompletionSignal = true;
+					currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true;
+					currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue =
+						std::max(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
+							batches[lastTransBatch].computeCompletionFenceValue);
+				}
+			}
+		}
+
+		// handle the "producer" wait
+#if defined(_DEBUG)
+		if (lastProdBatch == currentBatchIndex) {
+			spdlog::error("Producer batch is the same as current batch");
+			__debugbreak();
+		}
+#endif
+		if (lastProdBatch != -1) {
+			if (isComputePass) {
+				batches[lastProdBatch].renderCompletionSignal = true;
+				currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true;
+				currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue =
+					std::max(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
+						batches[lastProdBatch].renderCompletionFenceValue);
+			} else {
+				batches[lastProdBatch].computeCompletionSignal = true;
+				currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true;
+				currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue =
+					std::max(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
+						batches[lastProdBatch].computeCompletionFenceValue);
+			}
+		}
+	}
+
+	auto MakeAddTransition(
+		std::unordered_map<std::wstring, ResourceState>& finalResourceStates,
 		std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
 		std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
-		std::unordered_map<std::wstring, unsigned int>& computeQueueTransitionHistory, 
-		std::unordered_map<std::wstring, unsigned int>& renderQueueTransitionHistory,
-		std::unordered_map<std::wstring, unsigned int>& producerHistory,
-		ComputePassAndResources& pass,
-		unsigned int batchIndex,
-		std::vector<std::pair<ResourceTransition, int>>& transitionsToAddToBatchInRenderQueue);
-
-	std::vector<ResourceTransition> UpdateFinalResourceStatesAndGatherTransitionsForPass(
-		std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
-		std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates, 
-		std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
-		std::unordered_map<std::wstring, unsigned int>& transitionHistory,
-		std::unordered_map<std::wstring, unsigned int>& producerHistory, 
-		RenderPassAndResources& pass,
-		unsigned int batchIndex);
-
-	std::pair<int, int> GetBatchesToWaitOn(ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
-    std::pair<int, int> GetBatchesToWaitOn(RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
+		std::unordered_map<std::wstring, unsigned int>& transHistCompute,
+		std::unordered_map<std::wstring, unsigned int>& transHistRender,
+		std::unordered_map<std::wstring, unsigned int>& renderFallback,
+		unsigned int                                   batchIndex,
+		PassBatch& currentBatch);
 };

@@ -53,7 +53,7 @@ inline bool ResourceStateIsGraphicsQueueState(ResourceState state) {
 	case ResourceState::VERTEX:
 	case ResourceState::CONSTANT:
 	case ResourceState::PIXEL_SRV:
-	case ResourceState::NON_PIXEL_SRV:
+	//case ResourceState::NON_PIXEL_SRV:
 	case ResourceState::ALL_SRV:
 	case ResourceState::RENDER_TARGET:
 	case ResourceState::DEPTH_WRITE:
@@ -272,6 +272,15 @@ enum class ResourceSyncState {
 	SYNC_SPLIT,
 };
 
+inline bool ResourceSyncStateIsNotComputeSyncState(ResourceSyncState state) {
+	switch (state) { // TODO: What states can the compute queue actually work with?
+	case ResourceSyncState::NONE:
+	case ResourceSyncState::COMPUTE_SHADING:
+		return false;
+	}
+	return true;
+}
+
 inline D3D12_BARRIER_SYNC ResourceSyncStateToD3D12(ResourceSyncState state) {
 	switch (state) {
 	case ResourceSyncState::NONE:
@@ -325,12 +334,3 @@ inline D3D12_BARRIER_SYNC ResourceSyncStateToD3D12(ResourceSyncState state) {
 	}
 	throw std::runtime_error("Invalid Sync State");
 }
-
-struct ResourceTransition {
-	Resource* resource = nullptr;
-	ResourceState beforeState;
-	ResourceState afterState;
-#if defined(_DEBUG)
-	std::wstring name;
-#endif // DEBUG
-};

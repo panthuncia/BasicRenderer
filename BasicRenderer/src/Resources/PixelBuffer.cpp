@@ -70,15 +70,15 @@ std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState 
 
 BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
-    //if (prevState != currentState) {
-    //    throw(std::runtime_error("Texture state mismatch"));
-    //}
+    if (prevState != currentState) {
+        throw(std::runtime_error("Texture state mismatch"));
+    }
     //if (prevSyncState != currentSyncState) {
     //    throw(std::runtime_error("Texture sync state mismatch"));
     //}
-    if (prevState == newState) {
-        throw(std::runtime_error("Useless transition"));
-    }
+    //if (prevState == newState) {
+    //    throw(std::runtime_error("Useless transition"));
+    //}
 #endif
     m_textureBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevAccessType);
     m_textureBarrier.AccessAfter = ResourceStateToD3D12AccessType(newAccessType);
