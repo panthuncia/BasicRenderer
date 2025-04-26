@@ -30,6 +30,7 @@ public:
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false, ResourceState initialState = ResourceState::UNKNOWN);
 	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
+	std::shared_ptr<Resource> GetResourceByID(const uint64_t id);
 	std::shared_ptr<RenderPass> GetRenderPassByName(const std::string& name);
 	std::shared_ptr<ComputePass> GetComputePassByName(const std::string& name);
 	RenderPassBuilder BuildRenderPass(std::string name);
@@ -67,8 +68,8 @@ private:
 	struct PassBatch {
 		std::vector<RenderPassAndResources> renderPasses;
 		std::vector<ComputePassAndResources> computePasses;
-		std::unordered_map<std::wstring, ResourceState> resourceStates; // Desired states in this batch
-		std::unordered_map<std::wstring, CommandQueueType> transitionQueue; // Queue to transition resources on
+		std::unordered_map<uint64_t, ResourceState> resourceStates; // Desired states in this batch
+		std::unordered_map<uint64_t, CommandQueueType> transitionQueue; // Queue to transition resources on
 		std::vector<ResourceTransition> renderTransitions; // Transitions needed to reach desired states on the render queue
         std::vector<ResourceTransition> computeTransitions; // Transitions needed to reach desired states on the compute queue
 		std::vector<ResourceTransition> passEndTransitions; // A special case to deal with resources that need to be used by the compute queue, but are in graphics-queue-only states
@@ -120,7 +121,13 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
-	std::unordered_map<std::wstring, ResourceState> initialResourceStates;
+	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
+	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
+	
+	// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately
+	std::unordered_map<uint64_t, std::vector<uint64_t>> resourcesFromGroupToManageIndependantly;
+
+	std::unordered_map<uint64_t, ResourceState> initialResourceStates;
 	std::vector<PassBatch> batches;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
@@ -149,18 +156,18 @@ private:
 	}
 
 	//void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
-    void UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<std::wstring>& renderUAVs);
-    void UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<std::wstring>& computeUAVs);
+    void UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<uint64_t>& renderUAVs);
+    void UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<uint64_t>& computeUAVs);
 
 	void ComputeResourceLoops(
-		const std::unordered_map<std::wstring, ResourceState>& finalResourceStates, 
-		std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
-		std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates);
-	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<std::wstring>& computeUAVs);
-	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<std::wstring>& renderUAVs);
+		const std::unordered_map<uint64_t, ResourceState>& finalResourceStates, 
+		std::unordered_map<uint64_t, ResourceSyncState>& finalResourceSyncStates,
+		std::unordered_map<uint64_t, ResourceSyncState>& firstResourceSyncStates);
+	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<uint64_t>& computeUAVs);
+	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<uint64_t>& renderUAVs);
 
-	std::pair<int, int> GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
-    std::pair<int, int> GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<std::wstring, unsigned int>& transitionHistory, const std::unordered_map<std::wstring, unsigned int>& producerHistory);
+	std::pair<int, int> GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);
+    std::pair<int, int> GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);
 
 	// Refactored compile helpers
 	// 
@@ -186,32 +193,41 @@ private:
 		bool isCompute,
 		std::span<const ResourceCategory>                     cats,
 		AddTransitionFn&&                                     addTransition,
-		std::unordered_map<std::wstring, ResourceState>&     finalStates,
-		std::unordered_map<std::wstring, ResourceSyncState>&  finalSyncs,
-		std::unordered_map<std::wstring, ResourceSyncState>&  firstSyncs,
-		std::unordered_map<std::wstring, unsigned int>&       producerHistory,
+		std::unordered_map<uint64_t, ResourceState>&     finalStates,
+		std::unordered_map<uint64_t, ResourceSyncState>&  finalSyncs,
+		std::unordered_map<uint64_t, ResourceSyncState>&  firstSyncs,
+		std::unordered_map<uint64_t, unsigned int>&       producerHistory,
 		unsigned int                                          batchIndex) {
 		for (auto const& cat : cats) {
 			for (const std::shared_ptr<Resource>& res : *cat.list) {
-				const auto& name = res->GetName();
+				const auto& id = res->GetGlobalResourceID();
 
 				// Record transition
 				addTransition(isCompute, res, cat.targetState, cat.targetSync);
 
 				// Update final state maps
-				finalStates[name] = cat.targetState;
-				finalSyncs[name]  = cat.targetSync;
+				finalStates[id] = cat.targetState;
+				finalSyncs[id]  = cat.targetSync;
+
+				// If this is a group, we need to update the states of independantly managed children
+				auto group = std::dynamic_pointer_cast<ResourceGroup>(res);
+				if (group) {
+					for (auto& childID : resourcesFromGroupToManageIndependantly[group->GetGlobalResourceID()]) {
+						finalStates[childID] = cat.targetState;
+						finalSyncs[childID] = cat.targetSync;
+					}
+				}
 
 				// First touch sync state
-				if (!firstSyncs.contains(name)) {
-					firstSyncs[name] = (res->GetState() == ResourceState::UNKNOWN)
+				if (!firstSyncs.contains(id)) {
+					firstSyncs[id] = (res->GetState() == ResourceState::UNKNOWN)
 						? ResourceSyncState::ALL
 						: cat.targetSync;
 				}
 
 				// Mark as resource producer if needed
 				if (cat.recordProducer) {
-					producerHistory[name] = batchIndex;
+					producerHistory[id] = batchIndex;
 				}
 			}
 		}
@@ -223,8 +239,8 @@ private:
 		PassBatch&                        currentBatch,
 		unsigned int                      currentBatchIndex,
 		const PassRes&                    pass, // either ComputePassAndResources or RenderPassAndResources
-		const std::unordered_map<std::wstring, unsigned int>& oppTransHist,
-		const std::unordered_map<std::wstring, unsigned int>& oppProdHist)
+		const std::unordered_map<uint64_t, unsigned int>& oppTransHist,
+		const std::unordered_map<uint64_t, unsigned int>& oppProdHist)
 	{
 		// figure out which two numbers we wait on
 		auto [lastTransBatch, lastProdBatch] =
@@ -288,12 +304,12 @@ private:
 	}
 
 	auto MakeAddTransition(
-		std::unordered_map<std::wstring, ResourceState>& finalResourceStates,
-		std::unordered_map<std::wstring, ResourceSyncState>& finalResourceSyncStates,
-		std::unordered_map<std::wstring, ResourceSyncState>& firstResourceSyncStates,
-		std::unordered_map<std::wstring, unsigned int>& transHistCompute,
-		std::unordered_map<std::wstring, unsigned int>& transHistRender,
-		std::unordered_map<std::wstring, unsigned int>& renderFallback,
+		std::unordered_map<uint64_t, ResourceState>& finalResourceStates,
+		std::unordered_map<uint64_t, ResourceSyncState>& finalResourceSyncStates,
+		std::unordered_map<uint64_t, ResourceSyncState>& firstResourceSyncStates,
+		std::unordered_map<uint64_t, unsigned int>& transHistCompute,
+		std::unordered_map<uint64_t, unsigned int>& transHistRender,
+		std::unordered_map<uint64_t, unsigned int>& renderFallback,
 		unsigned int                                   batchIndex,
 		PassBatch& currentBatch);
 };

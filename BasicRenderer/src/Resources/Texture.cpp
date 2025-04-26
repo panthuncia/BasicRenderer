@@ -41,3 +41,7 @@ void Texture::SetFilepath(const std::string& filepath) {
 	m_fileType = format;
 	m_imageLoader = loader;
 }
+
+uint64_t Texture::GetGlobalResourceID() const { 
+	return m_image->GetGlobalResourceID(); 
+}

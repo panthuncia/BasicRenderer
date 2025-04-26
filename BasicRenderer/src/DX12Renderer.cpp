@@ -1257,7 +1257,7 @@ void DX12Renderer::CreateRenderGraph() {
 	//	.Build<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 
     if (m_currentEnvironment != nullptr) {
-		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap()); // For skybox, prefiltered cubemap handled with others
+		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap());
 		forwardBuilder.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap());
     }
 

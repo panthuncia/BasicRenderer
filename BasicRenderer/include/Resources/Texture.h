@@ -28,6 +28,7 @@ public:
 	ImageLoader GetImageLoader() const { return m_imageLoader; }
 	bool AlphaIsAllOpaque() const { return m_alphaIsAllOpaque; }
 	void SetAlphaIsAllOpaque(bool value) { m_alphaIsAllOpaque = value; }
+	virtual uint64_t GetGlobalResourceID() const;
 private:
 	std::shared_ptr<PixelBuffer> m_image;
 	std::shared_ptr<Sampler> m_sampler;
