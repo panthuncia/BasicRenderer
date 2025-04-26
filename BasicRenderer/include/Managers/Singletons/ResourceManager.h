@@ -434,12 +434,10 @@ public:
 	void QueueResourceTransition(const ResourceTransition& transition);
     void ExecuteResourceTransitions();
 
-    void setEnvironmentIrradianceMapSamplerIndex(int index) { perFrameCBData.environmentIrradianceSamplerIndex = index; }
-	void setEnvironmentIrradianceMapIndex(int index) { perFrameCBData.environmentIrradianceMapIndex = index; }
-	void setPrefilteredEnvironmentMapIndex(int index) { perFrameCBData.environmentPrefilteredMapIndex = index; }
-	void setPrefilteredEnvironmentMapSamplerIndex(int index) { perFrameCBData.environmentPrefilteredSamplerIndex = index; }
-	void setEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
-	void setEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
+	void SetEnvironmentBufferDescriptorIndex(unsigned int index) { perFrameCBData.environmentBufferDescriptorIndex = index; }
+	void SetActiveEnvironmentIndex(unsigned int index) { perFrameCBData.activeEnvironmentIndex = index; }
+	void SetEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
+	void SetEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
 	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
     

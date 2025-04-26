@@ -11,7 +11,7 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ReadbackManager.h"
-
+#include "Managers/EnvironmentManager.h"
 class EnvironmentFilterPass : public RenderPass {
 public:
     EnvironmentFilterPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> preFilteredEnvironment, std::string environmentName){

@@ -55,6 +55,7 @@
 #include "Scene/MovementState.h"
 #include "Animation/AnimationController.h"
 #include "ThirdParty/XeGTAO.h"
+#include "Managers/EnvironmentManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -155,10 +156,12 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pObjectManager = ObjectManager::CreateUnique();
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pCameraManager = CameraManager::CreateUnique();
+	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
+	ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
 	m_pLightManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Also for indirect command buffers
 
-	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get());
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -260,6 +263,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
+    settingsManager.registerSetting<uint16_t>("reflectionCubemapResolution", 512);
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
@@ -674,7 +678,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
     updateManager.ExecuteResourceCopies(m_frameIndex, graphicsQueue.Get());// copies come before uploads to avoid overwriting data
 	updateManager.ProcessUploads(m_frameIndex, graphicsQueue.Get());
 
-    resourceManager.ExecuteResourceTransitions();
+    //resourceManager.ExecuteResourceTransitions();
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 }
 
@@ -706,6 +710,7 @@ void DX12Renderer::Render() {
 	m_context.meshManager = m_pMeshManager.get();
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
 	m_context.lightManager = m_pLightManager.get();
+	m_context.environmentManager = m_pEnvironmentManager.get();
 	m_context.drawStats = *drawStats;
 
     unsigned int globalPSOFlags = 0;
@@ -952,6 +957,8 @@ void DX12Renderer::CreateRenderGraph() {
 	auto& preSkinningVertices = meshManager->GetPreSkinningVertices();
 	auto& postSkinningVertices = meshManager->GetPostSkinningVertices();
 	auto& normalMatrixBuffer = objectManager->GetNormalMatrixBuffer();
+	auto& environmentsBuffer = m_pEnvironmentManager->GetEnvironmentInfoBuffer();
+    auto& environmentPrefilteredGroup = m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup();
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -981,6 +988,8 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->AddResource(perMeshBuffer);
     newGraph->AddResource(perObjectBuffer);
     newGraph->AddResource(meshResourceGroup);
+	newGraph->AddResource(environmentsBuffer);
+	newGraph->AddResource(environmentPrefilteredGroup);
 
     // Frustrum culling goes before Z prepass
     bool indirect = getIndirectDrawsEnabled();
@@ -1173,7 +1182,7 @@ void DX12Renderer::CreateRenderGraph() {
     }
     
     auto forwardBuilder = newGraph->BuildRenderPass("ForwardPass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup())
         .WithDepthTarget(depthTexture);
 
     if (m_clusteredLighting) {
@@ -1208,8 +1217,8 @@ void DX12Renderer::CreateRenderGraph() {
 		m_lutTexture = std::make_shared<Texture>(lutBuffer, sampler);
 		m_lutTexture->SetName(L"LUTTexture");
 
-        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo()[0].index);
-		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
+        ResourceManager::GetInstance().SetEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo()[0].index);
+		ResourceManager::GetInstance().SetEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
 
 		newGraph->BuildRenderPass("BRDFIntegrationPass")
 			.WithRenderTarget(m_lutTexture)
@@ -1220,42 +1229,36 @@ void DX12Renderer::CreateRenderGraph() {
 	forwardBuilder.WithShaderResource(m_lutTexture);
 
     // Check if we've already computed this environment
-    bool skipEnvironmentPass = false;
-    if (currentRenderGraph != nullptr) {
-        auto currentEnvironmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
-        if (currentEnvironmentPass != nullptr) {
-            if (!currentEnvironmentPass->IsInvalidated()) {
-                skipEnvironmentPass = true;
-                DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
-                m_currentEnvironmentTexture = nullptr;
-            }
-        }
-    }
+    //bool skipEnvironmentPass = false;
+    //if (currentRenderGraph != nullptr) {
+    //    auto currentEnvironmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
+    //    if (currentEnvironmentPass != nullptr) {
+    //        if (!currentEnvironmentPass->IsInvalidated()) {
+    //            skipEnvironmentPass = true;
+    //            DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
+    //            m_currentEnvironmentTexture = nullptr;
+    //        }
+    //    }
+    //}
 
-    if (m_currentEnvironmentTexture != nullptr && !skipEnvironmentPass) {
 
-        newGraph->AddResource(m_currentEnvironmentTexture);
-        //newGraph->AddResource(m_currentSkybox);
-        //newGraph->AddResource(m_environmentIrradiance);
+    newGraph->AddResource(m_pEnvironmentManager->GetWorkingHDRIGroup());
+    newGraph->AddResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup());
+    //newGraph->AddResource(m_environmentIrradiance);
 
-		newGraph->BuildRenderPass("EnvironmentConversionPass")
-			.WithShaderResource(m_currentEnvironmentTexture)
-			.WithRenderTarget(m_currentSkybox, m_environmentIrradiance)
-			.Build<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
+	newGraph->BuildRenderPass("EnvironmentConversionPass")
+		.WithShaderResource(m_pEnvironmentManager->GetWorkingHDRIGroup())
+		.WithRenderTarget(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+		.Build<EnvironmentConversionPass>();
         
-		newGraph->BuildRenderPass("EnvironmentFilterPass")
-			.WithShaderResource(m_currentEnvironmentTexture)
-			.WithRenderTarget(m_prefilteredEnvironment)
-			.Build<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
-	}
+	//newGraph->BuildRenderPass("EnvironmentFilterPass")
+	//	.WithShaderResource(m_currentEnvironmentTexture)
+	//	.WithRenderTarget(m_prefilteredEnvironment)
+	//	.Build<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
 
-    if (m_prefilteredEnvironment != nullptr) {
-        newGraph->AddResource(m_prefilteredEnvironment);
-		forwardBuilder.WithShaderResource(m_prefilteredEnvironment);
-    }
-    if (m_environmentIrradiance != nullptr) {
-        newGraph->AddResource(m_environmentIrradiance);
-		forwardBuilder.WithShaderResource(m_environmentIrradiance);
+    if (m_currentEnvironment != nullptr) {
+		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap()); // For skybox, prefiltered cubemap handled with others
+		forwardBuilder.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap());
     }
 
 	auto& lightViewResourceGroup = m_pLightManager->GetLightViewInfoResourceGroup();
@@ -1280,13 +1283,11 @@ void DX12Renderer::CreateRenderGraph() {
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
     }
 
-    if (m_currentSkybox != nullptr) {
-        newGraph->AddResource(m_currentSkybox);
-
+    if (m_currentEnvironment != nullptr) {
 		newGraph->BuildRenderPass("SkyboxPass")
-			.WithShaderResource(m_currentSkybox)
+			.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap())
 			.WithDepthTarget(depthTexture)
-			.Build<SkyboxRenderPass>(m_currentSkybox);
+			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
     forwardBuilder.WithShaderResource(normalsWorldSpace);
 	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
@@ -1319,7 +1320,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto PPLLFillBuilder = newGraph->BuildRenderPass("PPFillPass")
         .WithUnorderedAccess(PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter)
-        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_prefilteredEnvironment, m_environmentIrradiance, cameraBuffer, outputAO, normalsWorldSpace);
+        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup(), m_pEnvironmentManager->GetEnvironmentInfoBuffer(), cameraBuffer, outputAO, normalsWorldSpace);
     if (drawShadows) {
 		PPLLFillBuilder.WithShaderResource(m_shadowMaps);
     }
@@ -1360,138 +1361,48 @@ void DX12Renderer::CreateRenderGraph() {
 }
 
 void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
-	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
-    auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
-    auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
-	auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
-    if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
-        if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
-            DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
-            m_currentEnvironmentTexture = nullptr;
-        }
-		// Load the cached environment
-        auto skybox = loadCubemapFromFile(skyboxPath);
-		auto radiance = loadCubemapFromFile(radiancePath);
-        auto prefiltered = loadCubemapFromFile(prefilteredPath);
-		SetSkybox(skybox);
-		SetIrradiance(radiance);
-		SetPrefilteredEnvironment(prefiltered);
-        rebuildRenderGraph = true;
+
+    std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
+
+    if (std::filesystem::exists(envpath)) {
+        auto skyHDR = loadTextureFromFileSTBI(envpath.string());
+        m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment();
+        m_currentEnvironment->SetFromHDRI(skyHDR);
+        ResourceManager::GetInstance().SetActiveEnvironmentIndex(m_currentEnvironment->GetEnvironmentIndex());
     }
     else {
-        std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
-        
-        if (std::filesystem::exists(envpath)) {
-            auto skyHDR = loadTextureFromFileSTBI(envpath.string());
-            SetEnvironmentTexture(skyHDR, ws2s(name));
-        }
-        else {
-            spdlog::error("Environment file not found: " + envpath.string());
-        }
+        spdlog::error("Environment file not found: " + envpath.string());
     }
-}
 
-void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName) {
-	m_environmentName = environmentName;
-	if (m_currentEnvironmentTexture != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
-	}
-    m_currentEnvironmentTexture = texture;
-    m_currentEnvironmentTexture->SetName(L"EnvironmentTexture");
-    auto buffer = m_currentEnvironmentTexture->GetBuffer();
-    // Create blank texture for skybox
-	uint16_t skyboxResolution = getSkyboxResolution();
-
-	TextureDescription skyboxDesc;
-    ImageDimensions dims;
-    dims.height = skyboxResolution;
-	dims.width = skyboxResolution;
-	dims.rowPitch = skyboxResolution * 4;
-	dims.slicePitch = skyboxResolution * skyboxResolution * 4;
-    for (int i = 0; i < 6; i++) {
-        skyboxDesc.imageDimensions.push_back(dims);
-    }
-    skyboxDesc.channels = buffer->GetChannels();
-	skyboxDesc.isCubemap = true;
-    skyboxDesc.hasRTV = true;
-	skyboxDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    auto envCubemap = PixelBuffer::Create(skyboxDesc);
-    auto sampler = Sampler::GetDefaultSampler();
-    auto skybox = std::make_shared<Texture>(envCubemap, sampler);
-	SetSkybox(skybox);
-
-	TextureDescription irradianceDesc;
-    for (int i = 0; i < 6; i++) {
-        irradianceDesc.imageDimensions.push_back(dims);
-    }
-	irradianceDesc.channels = buffer->GetChannels();
-	irradianceDesc.isCubemap = true;
-	irradianceDesc.hasRTV = true;
-	irradianceDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    auto envRadianceCubemap = PixelBuffer::Create(irradianceDesc);
-    auto irradiance = std::make_shared<Texture>(envRadianceCubemap, sampler);
-	SetIrradiance(irradiance);
-
-	TextureDescription prefilteredDesc;
-    for (int i = 0; i < 6; i++) {
-        prefilteredDesc.imageDimensions.push_back(dims);
-    }
-	prefilteredDesc.channels = buffer->GetChannels();
-	prefilteredDesc.isCubemap = true;
-	prefilteredDesc.hasRTV = true;
-	prefilteredDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	prefilteredDesc.generateMipMaps = true;
-
-	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
-	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
-	SetPrefilteredEnvironment(prefilteredEnvironment);
-
-    if (currentRenderGraph != nullptr) {
-        auto environmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
-        if (environmentPass != nullptr) {
-            environmentPass->Invalidate();
-        }
-		auto environmentFilterPass = currentRenderGraph->GetRenderPassByName("EnvironmentFilterPass");
-        if (environmentFilterPass != nullptr) {
-            environmentFilterPass->Invalidate();
-        }
-    }
-    rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
-    if (m_currentSkybox != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_currentSkybox);
-    }
-    m_currentSkybox = texture;
-    m_currentSkybox->SetName(L"Skybox");
-    rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
-    if (m_environmentIrradiance != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_environmentIrradiance);
-    }
-	m_environmentIrradiance = texture;
-    m_environmentIrradiance->SetName(L"EnvironmentRadiance");
-    auto& manager = ResourceManager::GetInstance();
-	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetBuffer()->GetSRVInfo()[0].index);
-	manager.setEnvironmentIrradianceMapSamplerIndex(m_environmentIrradiance->GetSamplerDescriptorIndex());
-	rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
-	if (m_prefilteredEnvironment != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_prefilteredEnvironment);
-	}
-	m_prefilteredEnvironment = texture;
-	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");
-	auto& manager = ResourceManager::GetInstance();
-	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo()[0].index);
-	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
-	rebuildRenderGraph = true;
+	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
+ //   auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
+ //   auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
+	//auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
+ //   if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
+ //       if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
+ //           DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
+ //           m_currentEnvironmentTexture = nullptr;
+ //       }
+	//	// Load the cached environment
+ //       auto skybox = loadCubemapFromFile(skyboxPath);
+	//	auto radiance = loadCubemapFromFile(radiancePath);
+ //       auto prefiltered = loadCubemapFromFile(prefilteredPath);
+	//	SetSkybox(skybox);
+	//	SetIrradiance(radiance);
+	//	SetPrefilteredEnvironment(prefiltered);
+ //       rebuildRenderGraph = true;
+ //   }
+ //   else {
+ //       std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
+ //       
+ //       if (std::filesystem::exists(envpath)) {
+ //           auto skyHDR = loadTextureFromFileSTBI(envpath.string());
+ //           SetEnvironmentTexture(skyHDR, ws2s(name));
+ //       }
+ //       else {
+ //           spdlog::error("Environment file not found: " + envpath.string());
+ //       }
+ //   }
 }
 
 void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {

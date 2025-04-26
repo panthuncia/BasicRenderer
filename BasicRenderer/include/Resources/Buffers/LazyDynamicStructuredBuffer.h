@@ -24,6 +24,7 @@ using Microsoft::WRL::ComPtr;
 class LazyDynamicStructuredBufferBase : public ViewedDynamicBufferBase { // Necessary to store these in a templateless vector
 public:
 	virtual size_t GetElementSize() const = 0;
+    virtual void UpdateView(BufferView* view, const void* data) = 0;
 };
 
 template <typename T>

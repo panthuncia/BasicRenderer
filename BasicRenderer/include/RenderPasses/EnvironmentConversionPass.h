@@ -11,14 +11,11 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ReadbackManager.h"
+#include "Managers/EnvironmentManager.h"
 
 class EnvironmentConversionPass : public RenderPass {
 public:
-    EnvironmentConversionPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> environmentCubeMap, std::shared_ptr<Texture> environmentRadiance, std::string environmentName) {
-		m_environmentName = s2ws(environmentName);
-        m_texture = environmentTexture;
-		m_environmentCubeMap = environmentCubeMap;
-		m_environmentRadiance = environmentRadiance;
+    EnvironmentConversionPass() {
         m_viewMatrices = GetCubemapViewMatrices({0.0, 0.0, 0.0});
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
     }
@@ -28,27 +25,15 @@ public:
         auto& device = manager.GetDevice();
         m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
 
-        m_sampleDelta = 0.025;
-        int totalPhiSamples = static_cast<int>(2.0f * M_PI / m_sampleDelta);
-        int totalThetaSamples = static_cast<int>(0.5f * M_PI / m_sampleDelta);
-        m_normalizationFactor = M_PI / (totalPhiSamples * totalThetaSamples);
-
-        int maxPhiBatchSize = 10;
-        m_numPasses = static_cast<int>(std::ceil(static_cast<float>(totalPhiSamples) / maxPhiBatchSize));
-        m_phiBatchSize = totalPhiSamples / m_numPasses;
-
-        for (int i = 0; i < m_numPasses; i++) {
-			ComPtr<ID3D12CommandAllocator> allocator;
+        uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+        for (int i = 0; i < numFramesInFlight; i++) {
+            ComPtr<ID3D12CommandAllocator> allocator;
+            ComPtr<ID3D12GraphicsCommandList> commandList;
             ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-			m_allocators.push_back(allocator);
-        }
-
-        m_commandLists.clear();
-        for (int i = 0; i < m_numPasses; i++) {
-			ComPtr<ID3D12GraphicsCommandList> commandList;
-            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocators[i].Get(), nullptr, IID_PPV_ARGS(&commandList)));
+            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
             commandList->Close();
-			m_commandLists.push_back(commandList);
+            m_allocators.push_back(allocator);
+            m_commandLists.push_back(commandList);
         }
 
 		CreateEnvironmentConversionRootSignature();
@@ -66,49 +51,34 @@ public:
 
 
 		std::vector<ID3D12GraphicsCommandList*> commandLists;
-		unsigned int startPass = m_currentPass;
-		for (int pass = m_currentPass; pass < m_numPasses && pass < startPass + 1; pass++) { // Do at most one pass per frame to avoid device timeout
-            ThrowIfFailed(m_allocators[pass]->Reset());
-            auto commandList = m_commandLists[pass].Get();
-            commandList->Reset(m_allocators[pass].Get(), environmentConversionPSO.Get());
-            m_currentPass += 1;
+		
+        ThrowIfFailed(m_allocators[context.frameIndex]->Reset());
+        auto commandList = m_commandLists[context.frameIndex].Get();
+        commandList->Reset(m_allocators[context.frameIndex].Get(), environmentConversionPSO.Get());
 
-            if (pass == 0) {
-                for (int i = 0; i < 6; i++) {
-                    const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-					commandList->ClearRenderTargetView(m_environmentRadiance->GetBuffer()->GetRTVInfos()[i].cpuHandle, clearColor, 0, nullptr);
-                }
-            }
-            ID3D12DescriptorHeap* descriptorHeaps[] = {
-                ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
-                ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
-            };
+        ID3D12DescriptorHeap* descriptorHeaps[] = {
+            ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
+            ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
+        };
 
-            commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+        commandList->SetGraphicsRootSignature(environmentConversionRootSignature.Get());
+        commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+        commandList->RSSetViewports(1, &viewport);
+        commandList->RSSetScissorRects(1, &scissorRect);
+        commandList->SetPipelineState(environmentConversionPSO.Get());
 
-            commandList->SetGraphicsRootSignature(environmentConversionRootSignature.Get());
-
-            commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
-
-            commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-            commandList->RSSetViewports(1, &viewport);
-            commandList->RSSetScissorRects(1, &scissorRect);
-            commandList->SetPipelineState(environmentConversionPSO.Get());
-
-            commandList->SetGraphicsRoot32BitConstants(4, 1, &m_normalizationFactor, 0);
-            float startPhi = pass * m_phiBatchSize * m_sampleDelta;
-            float endPhi = (pass + 1) * m_phiBatchSize * m_sampleDelta;
-
-			commandList->SetGraphicsRoot32BitConstants(2, 1, &startPhi, 0);
-			commandList->SetGraphicsRoot32BitConstants(3, 1, &endPhi, 0);
+        EnvironmentManager& manager = *context.environmentManager;
+        for (auto& env : manager.GetEnvironmentsToConvert()) {
+            auto texture = env->GetHDRITexture();
+            commandList->SetGraphicsRootDescriptorTable(0, texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
 
             for (int i = 0; i < 6; i++) {
 
-                CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[2];
-                rtvHandles[0] = m_environmentCubeMap->GetBuffer()->GetRTVInfos()[i].cpuHandle;
-                rtvHandles[1] = m_environmentRadiance->GetBuffer()->GetRTVInfos()[i].cpuHandle;
+                CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[1];
+                rtvHandles[0] = env->GetEnvironmentCubemap()->GetBuffer()->GetRTVInfos()[i].cpuHandle;
 
-                commandList->OMSetRenderTargets(2, rtvHandles, FALSE, nullptr);
+                commandList->OMSetRenderTargets(1, rtvHandles, FALSE, nullptr);
 
                 auto viewMatrix = m_viewMatrices[i];
                 auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
@@ -116,12 +86,16 @@ public:
                 commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
                 commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
             }
-			commandList->Close();
-			commandLists.push_back(commandList);
         }
+
+		commandList->Close();
+		commandLists.push_back(commandList);
+
+		manager.ClearEnvironmentsToConvert();
+        invalidated = false;
         // We can reuse the results of this pass
 		RenderPassReturn passReturn;
-        if (m_currentPass == m_numPasses) {
+        /*if (m_currentPass == m_numPasses) {
             
             invalidated = false;
 			m_currentPass = 0;
@@ -131,7 +105,7 @@ public:
 			readbackManager.RequestReadback(m_environmentRadiance, path, nullptr, true);
             path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
 			readbackManager.RequestReadback(m_environmentCubeMap, path, nullptr, true);
-        }
+        }*/
 
 		passReturn.commandLists = std::move(commandLists);
 		return passReturn;
@@ -145,19 +119,9 @@ private:
 
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
-	std::wstring m_environmentName;
-    std::shared_ptr<Texture> m_texture = nullptr;
-	std::shared_ptr<Texture> m_environmentCubeMap = nullptr;
-	std::shared_ptr<Texture> m_environmentRadiance = nullptr;
     std::array<XMMATRIX, 6> m_viewMatrices;
 
     std::function<uint16_t()> getSkyboxResolution;
-
-    float m_sampleDelta = 0.0;
-	float m_normalizationFactor = 0.0;
-	int m_numPasses = 0;
-	int m_phiBatchSize = 0;
-    int m_currentPass = 0;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
     std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_allocators;
@@ -236,12 +200,9 @@ private:
         CD3DX12_DESCRIPTOR_RANGE1 environmentDescriptorRangeSRV;
         environmentDescriptorRangeSRV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 in the shader
 
-        CD3DX12_ROOT_PARAMETER1 environmentRootParameters[5];
+        CD3DX12_ROOT_PARAMETER1 environmentRootParameters[2] = {};
         environmentRootParameters[0].InitAsDescriptorTable(1, &environmentDescriptorRangeSRV, D3D12_SHADER_VISIBILITY_PIXEL); // Pixel shader will use the SRV
         environmentRootParameters[1].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer (b1)
-        environmentRootParameters[2].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Integration range start
-        environmentRootParameters[3].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Integration range end
-        environmentRootParameters[4].InitAsConstants(1, 4, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Normalization factor
 
         D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
         samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -345,9 +306,8 @@ private:
         psoDesc.DepthStencilState = depthStencilDesc;
         psoDesc.SampleMask = UINT_MAX;
         psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 2;
+        psoDesc.NumRenderTargets = 1;
         psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-        psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM;
         psoDesc.SampleDesc.Count = 1;
         psoDesc.SampleDesc.Quality = 0;
         psoDesc.InputLayout = inputLayoutDesc;

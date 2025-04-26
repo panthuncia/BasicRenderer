@@ -32,29 +32,31 @@ struct Camera {
 struct PerFrameBuffer {
     float4 ambientLighting;
     float4 shadowCascadeSplits;
+    
     uint mainCameraIndex;
     uint activeLightIndicesBufferIndex;
     uint lightBufferIndex;
     uint numLights;
+    
     uint pointLightCubemapBufferIndex;
     uint spotLightMatrixBufferIndex;
     uint directionalLightCascadeBufferIndex;
     uint numShadowCascades;
-    uint environmentIrradianceMapIndex;
-    uint environmentIrradianceSamplerIndex;
-    uint environmentPrefilteredMapIndex;
-    uint environmentPrefilteredSamplerIndex;
+    
+    unsigned int activeEnvironmentIndex;
+    unsigned int environmentBufferDescriptorIndex;
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
+    
     uint outputType;
     uint screenResX;
     uint screenResY;
     uint lightClusterGridSizeX;
+    
     uint lightClusterGridSizeY;
     uint lightClusterGridSizeZ;
     uint nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
-    unsigned int pad[2];
 };
 
 struct BoundingSphere {
@@ -219,6 +221,11 @@ struct GTAOInfo {
 struct FragmentInfo {
     float3 normalWS;
     float ambientOcclusion;
+};
+
+struct EnvironmentInfo {
+    uint prefilteredCubemapDescriptorIndex;
+    float sphericalHarmonics[27];
 };
 
 #endif // __STRUCTS_HLSL__

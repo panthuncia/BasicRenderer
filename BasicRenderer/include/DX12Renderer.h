@@ -28,6 +28,7 @@
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
+#include "Managers/EnvironmentManager.h"
 #include "Scene/MovementState.h"
 #include "Scene/Components.h"
 
@@ -50,10 +51,6 @@ public:
     void SetInputMode(InputMode mode);
     void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
-    void SetSkybox(std::shared_ptr<Texture> texture);
-	void SetIrradiance(std::shared_ptr<Texture> texture);
-	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
-    void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
 
 private:
     ComPtr<IDXGIFactory7> factory;
@@ -94,12 +91,9 @@ private:
 
     RenderContext m_context;
 
-	std::shared_ptr<Texture> m_currentSkybox = nullptr;
-	std::shared_ptr<Texture> m_currentEnvironmentTexture = nullptr;
-	std::shared_ptr<Texture> m_environmentIrradiance = nullptr;
-	std::shared_ptr<Texture> m_prefilteredEnvironment = nullptr;
 	std::shared_ptr<Texture> m_lutTexture = nullptr;
 	std::string m_environmentName;
+	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
 	std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
@@ -110,6 +104,7 @@ private:
     std::unique_ptr<ObjectManager> m_pObjectManager = nullptr;
     std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
     std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;

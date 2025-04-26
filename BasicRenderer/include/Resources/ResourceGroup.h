@@ -21,6 +21,10 @@ public:
 		resourcesByID.erase(resource->GetGlobalResourceID());
 	}
 
+	void ClearResources() {
+		resourcesByID.clear();
+	}
+
 	ID3D12Resource* GetAPIResource() const override {
 		spdlog::error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
 		return nullptr;

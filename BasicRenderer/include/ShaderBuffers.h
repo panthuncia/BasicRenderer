@@ -21,29 +21,31 @@ struct CameraInfo {
 struct PerFrameCB {
     DirectX::XMVECTOR ambientLighting;
     DirectX::XMVECTOR shadowCascadeSplits;
+
 	unsigned int mainCameraIndex;
 	unsigned int activeLightIndicesBufferIndex;
     unsigned int lightBufferIndex;
     unsigned int numLights;
+
     unsigned int pointLightCubemapBufferIndex;
     unsigned int spotLightMatrixBufferIndex;
     unsigned int directionalLightCascadeBufferIndex;
 	unsigned int numShadowCascades;
-	unsigned int environmentIrradianceMapIndex;
-	unsigned int environmentIrradianceSamplerIndex;
-	unsigned int environmentPrefilteredMapIndex;
-	unsigned int environmentPrefilteredSamplerIndex;
+
+    unsigned int activeEnvironmentIndex;
+    unsigned int environmentBufferDescriptorIndex;
 	unsigned int environmentBRDFLUTIndex;
 	unsigned int environmentBRDFLUTSamplerIndex;
+
     unsigned int outputType;
     unsigned int screenResX;
     unsigned int screenResY;
     unsigned int lightClusterGridSizeX;
+
     unsigned int lightClusterGridSizeY;
 	unsigned int lightClusterGridSizeZ;
     unsigned int nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
-	unsigned int pad[2];
 };
 
 struct PerObjectCB {
@@ -210,6 +212,11 @@ struct GTAOInfo {
     uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
     uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
     uint pad[1];
+};
+
+struct EnvironmentInfo {
+    unsigned int prefilteredCubemapDescriptorIndex;
+    float sphericalHarmonics[27];
 };
 
 enum RootSignatureLayout {
