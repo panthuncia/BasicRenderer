@@ -26,6 +26,11 @@ public:
 		return m_environmentsToConvert;
 	}
 
+	void UpdateEnvironmentView(const Environment& environment) {
+		std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
+		m_environmentInfoBuffer->UpdateView(environment.GetEnvironmentBufferView(), &environment.m_environmentInfo);
+	}
+
 	void ClearEnvironmentsToConvert() {
 		m_environmentsToConvert.clear();
 		m_workingHDRIGroup->ClearResources(); // HDRIs not needed after conversion to cubemaps
@@ -67,6 +72,7 @@ public:
 private:
 	EnvironmentManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<EnvironmentInfo>> m_environmentInfoBuffer;
+	std::mutex m_environmentInfoBufferMutex; // Mutex for thread safety
 
 	unsigned int m_skyboxResolution = 2048;
 	unsigned int m_reflectionCubemapResolution = 512;

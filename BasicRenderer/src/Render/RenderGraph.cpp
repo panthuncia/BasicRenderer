@@ -1,6 +1,7 @@
 #include "Render/RenderGraph.h"
 
 #include <span>
+#include <ThirdParty/pix/pix3.h>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"

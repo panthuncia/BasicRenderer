@@ -13,7 +13,7 @@ EnvironmentManager::EnvironmentManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_skyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution")();
 	m_reflectionCubemapResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("reflectionCubemapResolution")();
-	m_environmentInfoBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<EnvironmentInfo>(ResourceState::ALL_SRV, 1, L"environmentsBuffer");
+	m_environmentInfoBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<EnvironmentInfo>(ResourceState::ALL_SRV, 1, L"environmentsBuffer", 0, true);
 
 	m_workingEnvironmentCubemapGroup = std::make_shared<ResourceGroup>(L"EnvironmentCubemapGroup");
 	m_workingHDRIGroup = std::make_shared<ResourceGroup>(L"WorkingHDRIGroup");
@@ -21,7 +21,6 @@ EnvironmentManager::EnvironmentManager() {
 }
 
 std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment() {
-	std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
 	auto view = m_environmentInfoBuffer->Add();
 	std::unique_ptr<Environment> env = std::make_unique<Environment>(this);
 	env->SetEnvironmentBufferView(view);
@@ -48,14 +47,14 @@ std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment() {
 	prefilteredEnvironment->SetName(L"Environment prefiltered cubemap");
 
 	env->SetEnvironmentPrefilteredCubemap(prefilteredEnvironment);
+	env->SetReflectionCubemapResolution(m_reflectionCubemapResolution);
+
 	m_environmentPrefilteredCubemapGroup->AddResource(prefilteredEnvironment);
 
 	return std::move(env);
 }
 
-void EnvironmentManager::SetFromHDRI(Environment* e, std::shared_ptr<Texture>& HDRI) {
-	std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
-	
+void EnvironmentManager::SetFromHDRI(Environment* e, std::shared_ptr<Texture>& HDRI) {	
 	TextureDescription skyboxDesc;
 	ImageDimensions dims;
 	dims.height = m_skyboxResolution;
@@ -75,6 +74,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::shared_ptr<Texture>& H
 	auto skybox = std::make_shared<Texture>(envCubemap, sampler);
 	skybox->SetName(L"Environment cubemap");
 	e->SetEnvironmentCubemap(skybox);
+	e->SetReflectionCubemapResolution(m_skyboxResolution); // For HDRI environments, use the same resolution as the skybox
 
 	m_environmentsToConvert.push_back(e);
 	m_environmentsToPrefilter.push_back(e);

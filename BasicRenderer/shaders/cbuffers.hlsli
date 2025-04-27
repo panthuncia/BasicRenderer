@@ -62,6 +62,10 @@ cbuffer LightClusterInfo : register(b8) {
 cbuffer MiscRootConstants : register(b9) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
     uint UintRootConstant1;
+    uint UintRootConstant2;
+    uint UintRootConstant3;
+    uint FloatRootConstant0;
+    uint FloatRootConstant1;
 }
 
 #endif // __CBUFFERS_HLSL__

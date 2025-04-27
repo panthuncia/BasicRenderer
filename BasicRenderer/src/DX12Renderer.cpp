@@ -27,6 +27,7 @@
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
+#include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
@@ -1251,10 +1252,10 @@ void DX12Renderer::CreateRenderGraph() {
 		.WithRenderTarget(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
 		.Build<EnvironmentConversionPass>();
         
-	//newGraph->BuildRenderPass("EnvironmentFilterPass")
-	//	.WithShaderResource(m_currentEnvironmentTexture)
-	//	.WithRenderTarget(m_prefilteredEnvironment)
-	//	.Build<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
+    newGraph->BuildComputePass("EnvironmentFilterPass")
+        .WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+        .WithUnorderedAccess(environmentsBuffer)
+		.Build<EnvironmentSHPass>();
 
     if (m_currentEnvironment != nullptr) {
 		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap());

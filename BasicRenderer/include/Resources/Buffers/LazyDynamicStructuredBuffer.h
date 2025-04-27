@@ -108,6 +108,9 @@ protected:
 private:
     LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
+        if (alignment == 0) {
+			alignment = 1;
+        }
 		m_elementSize = ((sizeof(T) + alignment - 1) / alignment) * alignment;
         CreateBuffer(capacity);
 		SetName(name);

@@ -224,8 +224,10 @@ struct FragmentInfo {
 };
 
 struct EnvironmentInfo {
+    uint cubeMapDescriptorIndex;
     uint prefilteredCubemapDescriptorIndex;
-    float sphericalHarmonics[27];
+    uint sphericalHarmonics[27]; // floats scaled by SH_FLOAT_SCALE
+    uint pad[3];
 };
 
 #endif // __STRUCTS_HLSL__

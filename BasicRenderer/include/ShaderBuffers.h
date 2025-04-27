@@ -215,8 +215,10 @@ struct GTAOInfo {
 };
 
 struct EnvironmentInfo {
+	unsigned int cubeMapDescriptorIndex;
     unsigned int prefilteredCubemapDescriptorIndex;
-    float sphericalHarmonics[27];
+    uint sphericalHarmonics[27]; // Floats scaled by SH_FLOAT_SCALE
+    uint pad[3];
 };
 
 enum RootSignatureLayout {
@@ -297,7 +299,11 @@ enum LightClusterRootConstants {
 };
 
 enum MiscRootConstants { // Used for pass-specific one-off constants
-	UintRootConstant0,
-	UintRootConstant1,
+    UintRootConstant0,
+    UintRootConstant1,
+    UintRootConstant2,
+    UintRootConstant3,
+    FloatRootConstant0,
+    FloatRootConstant1,
 	NumMiscRootConstants
 };

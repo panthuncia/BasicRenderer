@@ -32,23 +32,30 @@ public:
 
 	unsigned int GetEnvironmentIndex() const;
 
+	unsigned int GetReflectionCubemapResolution() const {
+		return reflectionCubemapResolution;
+	}
+
 private:
+	EnvironmentInfo m_environmentInfo = {};
 	EnvironmentManager* m_currentManager;
 	std::shared_ptr<Texture> m_hdriTexture; // Optional
 	std::shared_ptr<Texture> m_environmentCubemap; // Generated from HDRI or rendered
 	std::shared_ptr<Texture> m_environmentPrefilteredCubemap; // Generated from environment cubemap
 	std::shared_ptr<BufferView> m_environmentBufferView; // Includes spherical harmonics
 
-	void SetEnvironmentCubemap(std::shared_ptr<Texture> texture) {
-		m_environmentCubemap = texture;
-	}
+	unsigned int reflectionCubemapResolution = 512;
 
-	void SetEnvironmentPrefilteredCubemap(std::shared_ptr<Texture> texture) {
-		m_environmentPrefilteredCubemap = texture;
-	}
+	void SetEnvironmentCubemap(std::shared_ptr<Texture> texture);
+
+	void SetEnvironmentPrefilteredCubemap(std::shared_ptr<Texture> texture);
 
 	void SetEnvironmentBufferView(std::shared_ptr<BufferView> bufferView) {
 		m_environmentBufferView = bufferView;
+	}
+
+	void SetReflectionCubemapResolution(unsigned int resolution) {
+		reflectionCubemapResolution = resolution;
 	}
 
 	friend class EnvironmentManager;
