@@ -364,18 +364,22 @@ inline int Menu::FindFileIndex(const std::vector<std::string>& hdrFiles, const s
 }
 
 inline void Menu::DrawEnvironmentsDropdown() {
-
     static int selectedItemIndex = FindFileIndex(hdrFiles, environmentName);
-    if (ImGui::BeginCombo("HDR Files", hdrFiles[selectedItemIndex].c_str())) // Current item
+
+    const char* previewValue = (selectedItemIndex >= 0)
+        ? hdrFiles[selectedItemIndex].c_str()
+        : "Select Environment";
+
+    if (ImGui::BeginCombo("HDR Files", previewValue))
     {
-        for (int i = 0; i < hdrFiles.size(); ++i)
+        for (int i = 0; i < (int)hdrFiles.size(); ++i)
         {
             bool isSelected = (selectedItemIndex == i);
             if (ImGui::Selectable(hdrFiles[i].c_str(), isSelected))
             {
-                selectedItemIndex = i;  // Update the selected index
-				environmentName = hdrFiles[i];
-				setEnvironment(hdrFiles[i]);
+                selectedItemIndex = i;
+                environmentName   = hdrFiles[i];
+                setEnvironment(hdrFiles[i]);
             }
             if (isSelected)
                 ImGui::SetItemDefaultFocus();

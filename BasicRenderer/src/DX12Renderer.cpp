@@ -307,6 +307,7 @@ void DX12Renderer::SetSettings() {
         });
 	settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
 		SetEnvironmentInternal(s2ws(newValue));
+		rebuildRenderGraph = true;
 		});
 	settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
@@ -641,6 +642,9 @@ void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 
 void DX12Renderer::Update(double elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+
+	m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
+
     auto& updateManager = UploadManager::GetInstance();
     updateManager.ProcessDeferredReleases(m_frameIndex);
 
@@ -1397,9 +1401,12 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
 
     if (std::filesystem::exists(envpath)) {
         auto skyHDR = loadTextureFromFileSTBI(envpath.string());
-        m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment();
-        m_currentEnvironment->SetFromHDRI(skyHDR);
-        ResourceManager::GetInstance().SetActiveEnvironmentIndex(m_currentEnvironment->GetEnvironmentIndex());
+
+		m_preFrameDeferredFunctions.defer([this, skyHDR]() { // Don't change this during rendering
+            m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment();
+            m_currentEnvironment->SetFromHDRI(skyHDR);
+            ResourceManager::GetInstance().SetActiveEnvironmentIndex(m_currentEnvironment->GetEnvironmentIndex());
+			});
     }
     else {
         spdlog::error("Environment file not found: " + envpath.string());

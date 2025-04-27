@@ -26,11 +26,10 @@ auto RenderGraph::MakeAddTransition(
 	std::unordered_map<uint64_t, ResourceSyncState>& firstResourceSyncStates,
 	std::unordered_map<uint64_t,unsigned int>& transHistCompute,
 	std::unordered_map<uint64_t,unsigned int>& transHistRender,
-	std::unordered_map<uint64_t,unsigned int>& renderFallback,
 	unsigned int                                   batchIndex,
 	PassBatch&                                     currentBatch)
 {
-	return [&](bool isComputePass, const std::shared_ptr<Resource>& r,
+	return [&, batchIndex](bool isComputePass, const std::shared_ptr<Resource>& r,
 		ResourceState             newState,
 		ResourceSyncState         newSync)
 		{
@@ -76,7 +75,7 @@ auto RenderGraph::MakeAddTransition(
 			bool oldSyncIsNotComputeSyncState = ResourceSyncStateIsNotComputeSyncState(oldSync);
 			if (isComputePass && oldSyncIsNotComputeSyncState && !(oldState == ResourceState::UNKNOWN)) {
 				// bounce back to last graphics-queue batch
-				unsigned int gfxBatch = renderFallback[r->GetGlobalResourceID()];
+				unsigned int gfxBatch = transHistRender[r->GetGlobalResourceID()];
 				batches[gfxBatch].passEndTransitions.push_back(T);
 				transHistRender[r->GetGlobalResourceID()] = gfxBatch;
 				for (auto& transition : independantlyManagedTransitions) {
@@ -180,7 +179,6 @@ void RenderGraph::Compile() {
 			finalResourceSyncStates,
 			firstResourceSyncStates,
 			batchOfLastComputeQueueTransition,
-			batchOfLastRenderQueueTransition,
 			batchOfLastRenderQueueTransition,
 			currentBatchIndex,
 			currentBatch

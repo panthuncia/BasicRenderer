@@ -309,7 +309,6 @@ private:
 		std::unordered_map<uint64_t, ResourceSyncState>& firstResourceSyncStates,
 		std::unordered_map<uint64_t, unsigned int>& transHistCompute,
 		std::unordered_map<uint64_t, unsigned int>& transHistRender,
-		std::unordered_map<uint64_t, unsigned int>& renderFallback,
 		unsigned int                                   batchIndex,
 		PassBatch& currentBatch);
 };

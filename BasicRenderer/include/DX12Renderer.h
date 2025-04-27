@@ -34,6 +34,26 @@
 
 using namespace Microsoft::WRL;
 
+class DeferredFunctions {
+public:
+    // enqueue any void() callable
+    void defer(std::function<void()> fn) {
+        _queue.emplace_back(std::move(fn));
+    }
+
+    // invoke all, then clear
+    void flush() {
+        for (auto &fn : _queue)
+            fn();
+        _queue.clear();
+    }
+
+    bool empty() const { return _queue.empty(); }
+
+private:
+    std::vector<std::function<void()>> _queue;
+};
+
 class DX12Renderer {
 public:
     DX12Renderer() : m_gpuCrashTracker(m_markerMap){
@@ -129,6 +149,10 @@ private:
 
     void StallPipeline();
 
+	void RunBeforeNextFrame(std::function<void()> fn) {
+		m_preFrameDeferredFunctions.defer(fn);
+	}
+
 	// Settings
 	bool m_allowTearing = false;
 	bool m_clusteredLighting = true;
@@ -156,6 +180,8 @@ private:
     // Nsight Aftermath instrumentation
     GFSDK_Aftermath_ContextHandle m_hAftermathCommandListContext;
     GpuCrashTracker m_gpuCrashTracker;
+
+	DeferredFunctions m_preFrameDeferredFunctions;
 };
 
 #endif //DX12RENDERER_H
