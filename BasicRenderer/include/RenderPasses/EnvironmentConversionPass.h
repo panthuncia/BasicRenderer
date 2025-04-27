@@ -69,7 +69,8 @@ public:
         commandList->SetPipelineState(environmentConversionPSO.Get());
 
         EnvironmentManager& manager = *context.environmentManager;
-        for (auto& env : manager.GetEnvironmentsToConvert()) {
+		auto environments = manager.GetAndClearEncironmentsToConvert();
+        for (auto& env : environments) {
             auto texture = env->GetHDRITexture();
             commandList->SetGraphicsRootDescriptorTable(0, texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
 
@@ -91,8 +92,6 @@ public:
 		commandList->Close();
 		commandLists.push_back(commandList);
 
-		manager.ClearEnvironmentsToConvert();
-        invalidated = false;
         // We can reuse the results of this pass
 		RenderPassReturn passReturn;
         /*if (m_currentPass == m_numPasses) {

@@ -10,7 +10,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 	uint face = DTid.z;
 
     uint faceSize = UintRootConstant0;
-    uint weight = FloatRootConstant0;
+    float weight = FloatRootConstant0;
     uint samplerIndex = UintRootConstant1;
     uint environmentBufferDescriptorIndex = UintRootConstant2;
     uint environmentIndex = UintRootConstant3;
@@ -20,8 +20,8 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
     TextureCube<float4> g_envMap = ResourceDescriptorHeap[environments[environmentIndex].cubeMapDescriptorIndex];
 	
     // out-of-bounds guard
-	if (x >= faceSize || y >= faceSize)
-		return;
+        if (x >= faceSize || y >= faceSize)
+            return;
 
     // Compute a unit-direction from (face, u, v)
 	float u = (x + 0.5f) / faceSize * 2.0f - 1.0f;
@@ -70,10 +70,10 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 	sh[8] = c4 * (dir.x * dir.x - dir.y * dir.y);
 
 	for (uint i = 0; i < 9; ++i) {
-		float3 contrib = L * sh[i] * weight;
+		float3 contrib = L * sh[i] /** weight*/;
         uint flatIndex = i * 3;
-        InterlockedAdd(environments[environmentIndex].sphericalHarmonics[flatIndex], (uint) (contrib.x * SH_FLOAT_SCALE));
-        InterlockedAdd(environments[environmentIndex].sphericalHarmonics[flatIndex + 1], (uint) (contrib.y * SH_FLOAT_SCALE));
-        InterlockedAdd(environments[environmentIndex].sphericalHarmonics[flatIndex + 2], (uint) (contrib.z * SH_FLOAT_SCALE));
+        InterlockedAdd(environments[environmentIndex].sphericalHarmonics[flatIndex], (int) (contrib.x * SH_FLOAT_SCALE));
+        InterlockedAdd(environments[environmentIndex].sphericalHarmonics[flatIndex + 1], (int) (contrib.y * SH_FLOAT_SCALE));
+        InterlockedAdd(environments[environmentIndex].sphericalHarmonics[flatIndex + 2], (int) (contrib.z * SH_FLOAT_SCALE));
     }
 }

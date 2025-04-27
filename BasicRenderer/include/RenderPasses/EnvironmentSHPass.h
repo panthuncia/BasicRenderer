@@ -74,18 +74,22 @@ public:
 		commandList->SetPipelineState(m_PSO.Get());
 
 		// Root parameters
-		unsigned int miscParams[NumMiscRootConstants] = { };
+		unsigned int miscParams[NumMiscUintRootConstants] = { };
 		miscParams[UintRootConstant1] = m_samplerIndex; // Sampler index
 		miscParams[UintRootConstant2] = context.environmentManager->GetEnvironmentBufferUAVDescriptorIndex();
 
-		auto& environments = context.environmentManager->GetEnvironmentsToPrefilter();
+		float miscFloatParams[NumMiscFloatRootConstants] = { };
+
+		auto environments = context.environmentManager->GetAndClearEnvironmentsToPrefilter();
 		for (auto& env : environments) {
 			auto cubemapRes = env->GetReflectionCubemapResolution();
 			miscParams[UintRootConstant0] = cubemapRes; // Resolution
-			miscParams[FloatRootConstant0] =  std::bit_cast<unsigned int>(4.0f * XM_PI / (cubemapRes * cubemapRes * 6)); // Weight
 			miscParams[UintRootConstant3] = env->GetEnvironmentIndex(); // Environment index
-			
-			commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, miscParams, 0);
+
+			//miscFloatParams[FloatRootConstant0] =  (4.0f * XM_PI / (cubemapRes * cubemapRes * 6)); // Weight
+
+			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscParams, 0);
+			commandList->SetComputeRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, miscFloatParams, 0);
 
 			// dispatch over X×Y tiles, Z=6 faces
 			unsigned int groupsX = (cubemapRes + 15) / 16;
@@ -95,8 +99,6 @@ public:
 		}
 
 		ThrowIfFailed(commandList->Close());
-
-		context.environmentManager->ClearEnvironmentsToPrefilter();
 
 		return { { commandList.Get()} };
 	}

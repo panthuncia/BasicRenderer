@@ -221,14 +221,19 @@ struct GTAOInfo {
 struct FragmentInfo {
     float3 normalWS;
     float3 diffuseColor;
+    float alpha;
     float ambientOcclusion;
+    float metallic;
+    float roughness;
+    float3 emissive;
 };
 
 struct EnvironmentInfo {
     uint cubeMapDescriptorIndex;
     uint prefilteredCubemapDescriptorIndex;
-    uint sphericalHarmonics[27]; // floats scaled by SH_FLOAT_SCALE
-    uint pad[3];
+    float sphericalHarmonicsScale;
+    int sphericalHarmonics[27]; // floats scaled by SH_FLOAT_SCALE
+    uint pad[2];
 };
 
 #endif // __STRUCTS_HLSL__

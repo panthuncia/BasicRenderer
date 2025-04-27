@@ -38,6 +38,7 @@ cbuffer StaticBufferInfo : register(b5) {
     uint normalsTextureDescriptorIndex;
     uint aoTextureDescriptorIndex;
     uint albedoTextureDescriptorIndex;
+    uint metallicRoughnessTextureDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {
@@ -60,13 +61,16 @@ cbuffer LightClusterInfo : register(b8) {
     uint lightPagesPoolSize;
 }
 
-cbuffer MiscRootConstants : register(b9) { // Used for pass-specific one-off constants
+cbuffer MiscUintRootConstants : register(b9) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
     uint UintRootConstant1;
     uint UintRootConstant2;
     uint UintRootConstant3;
-    uint FloatRootConstant0;
-    uint FloatRootConstant1;
+}
+
+cbuffer MiscFloatRootConstants : register(b10) { // Used for pass-specific one-off constants
+    float FloatRootConstant0;
+    float FloatRootConstant1;
 }
 
 #endif // __CBUFFERS_HLSL__

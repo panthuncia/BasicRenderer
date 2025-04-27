@@ -46,11 +46,11 @@ public:
 		commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
 		commandList->SetPipelineState(DenoiseLastPassPSO.Get());
 
-        unsigned int gtaoConstants[NumMiscRootConstants] = {};
+        unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
         gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
         gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex;
             
-        commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, gtaoConstants, 0);
+        commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, gtaoConstants, 0);
 
         commandList->Dispatch((context.xRes + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.yRes + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
 

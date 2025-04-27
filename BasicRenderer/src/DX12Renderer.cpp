@@ -1052,9 +1052,24 @@ void DX12Renderer::CreateRenderGraph() {
 	albedo->SetName(L"Albedo");
 	newGraph->AddResource(albedo, false, ResourceState::RENDER_TARGET);
 
+	TextureDescription metallicRoughnessDesc;
+	metallicRoughnessDesc.arraySize = 1;
+	metallicRoughnessDesc.channels = 2;
+	metallicRoughnessDesc.isCubemap = false;
+	metallicRoughnessDesc.hasRTV = true;
+	metallicRoughnessDesc.format = DXGI_FORMAT_R8G8_UNORM;
+	metallicRoughnessDesc.generateMipMaps = false;
+	metallicRoughnessDesc.hasSRV = true;
+	metallicRoughnessDesc.srvFormat = DXGI_FORMAT_R8G8_UNORM;
+	ImageDimensions metallicRoughnessDims = { m_xRes, m_yRes, 0, 0 };
+	metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
+	auto metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
+	metallicRoughness->SetName(L"Metallic Roughness");
+	newGraph->AddResource(metallicRoughness, false, ResourceState::RENDER_TARGET);
+
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace, albedo)
+        .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness)
         .WithDepthTarget(depthTexture);
 
 	if (useMeshShaders) {
@@ -1305,8 +1320,8 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithDepthTarget(depthTexture)
 			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
-    forwardBuilder.WithShaderResource(normalsWorldSpace, albedo);
-	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index);
+    forwardBuilder.WithShaderResource(normalsWorldSpace, albedo, metallicRoughness);
+	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index, metallicRoughness->GetSRVInfo()[0].index);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;

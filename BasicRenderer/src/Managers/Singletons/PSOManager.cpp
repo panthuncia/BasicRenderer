@@ -218,9 +218,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 2;
+    psoDesc.NumRenderTargets = 3;
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
 	psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+    psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
 
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
@@ -505,9 +506,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     pipelineStateStream.DepthStencilState = depthStencilState;
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    rtvFormats.NumRenderTargets = 2;
+    rtvFormats.NumRenderTargets = 3;
 	rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
 	rtvFormats.RTFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+	rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
     pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;
@@ -758,7 +760,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[9] = {};
+    D3D12_ROOT_PARAMETER1 parameters[10] = {};
 
     // PerObject buffer index
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -819,9 +821,14 @@ void PSOManager::createRootSignature() {
 	parameters[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[8].Constants.ShaderRegister = 9;
 	parameters[8].Constants.RegisterSpace = 0;
-	parameters[8].Constants.Num32BitValues = NumMiscRootConstants;
+	parameters[8].Constants.Num32BitValues = NumMiscUintRootConstants;
 	parameters[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+	parameters[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	parameters[9].Constants.ShaderRegister = 10;
+	parameters[9].Constants.RegisterSpace = 0;
+	parameters[9].Constants.Num32BitValues = NumMiscFloatRootConstants;
+	parameters[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};

@@ -54,9 +54,7 @@ private:
 		m_environmentBufferView = bufferView;
 	}
 
-	void SetReflectionCubemapResolution(unsigned int resolution) {
-		reflectionCubemapResolution = resolution;
-	}
+	void SetReflectionCubemapResolution(unsigned int resolution);
 
 	friend class EnvironmentManager;
 };

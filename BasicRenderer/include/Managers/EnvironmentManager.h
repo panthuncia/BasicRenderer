@@ -22,8 +22,13 @@ public:
 	std::unique_ptr<Environment> CreateEnvironment();
 	void RemoveEnvironment(Environment* environment);
 	
-	const std::vector<Environment*>& GetEnvironmentsToConvert() {
-		return m_environmentsToConvert;
+
+	std::vector<Environment*> GetAndClearEncironmentsToConvert() & {
+		std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
+		auto environments = m_environmentsToConvert; // Copy the vector
+		m_environmentsToConvert.clear();
+		m_workingHDRIGroup->ClearResources(); // HDRIs not needed after conversion to cubemaps
+		return environments;
 	}
 
 	void UpdateEnvironmentView(const Environment& environment) {
@@ -31,18 +36,16 @@ public:
 		m_environmentInfoBuffer->UpdateView(environment.GetEnvironmentBufferView(), &environment.m_environmentInfo);
 	}
 
-	void ClearEnvironmentsToConvert() {
-		m_environmentsToConvert.clear();
-		m_workingHDRIGroup->ClearResources(); // HDRIs not needed after conversion to cubemaps
-	}
-
-	const std::vector<Environment*>& GetEnvironmentsToPrefilter() {
+	std::vector<Environment*>& GetEnvironmentsToPrefilter() {
 		return m_environmentsToPrefilter;
 	}
 
-	void ClearEnvironmentsToPrefilter() {
+	std::vector<Environment*> GetAndClearEnvironmentsToPrefilter() & {
+		std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
+		auto environments = m_environmentsToPrefilter; // Copy the vector
 		m_environmentsToPrefilter.clear();
 		m_workingEnvironmentCubemapGroup->ClearResources(); // Full-res cubemaps not needed after prefiltering
+		return environments;
 	}
 
 	unsigned int GetEnvironmentBufferSRVDescriptorIndex() const {

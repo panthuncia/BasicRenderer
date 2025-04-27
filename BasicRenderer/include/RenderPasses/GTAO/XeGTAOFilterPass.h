@@ -45,10 +45,10 @@ public:
 		commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
 		commandList->SetPipelineState(PrefilterDepths16x16PSO.Get());
 
-        unsigned int passConstants[NumMiscRootConstants] = {};
+        unsigned int passConstants[NumMiscUintRootConstants] = {};
         passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
 
-		commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, passConstants, 0);
+		commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, passConstants, 0);
 
         // Dispatch
         // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)

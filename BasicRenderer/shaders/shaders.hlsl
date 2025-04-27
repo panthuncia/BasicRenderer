@@ -99,78 +99,21 @@ struct PrePassPSOutput
 {
     float4 signedOctEncodedNormal;
     float4 albedo;
+    float2 metallicRoughness;
 };
 
 PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 {
     
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
-    uint meshBufferIndex = perMeshBufferIndex;
-    PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
-    uint materialFlags = materialInfo.materialFlags;
+    MaterialLightingValues fragmentInfo;
+    GetMaterialInfoForFragment(input, fragmentInfo);
     
-    float2 uv = input.texcoord;
-    
-    // Parallax UV offset
-    float3x3 TBN;
-    if (materialFlags & MATERIAL_NORMAL_MAP || materialFlags & MATERIAL_PARALLAX)
-    {
-        //TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
-        TBN = cotangent_frame(input.normalWorldSpace.xyz, input.positionWorldSpace.xyz, uv);
-    }
-
-    float height = 0.0;
-    
-    if (materialFlags & MATERIAL_PARALLAX)
-    {
-        ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
-        Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
-        float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
-        Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
-        SamplerState parallaxSamplerState = SamplerDescriptorHeap[materialInfo.heightSamplerIndex];
-        float3 uvh = getContactRefinementParallaxCoordsAndHeight(parallaxTexture, parallaxSamplerState, TBN, uv, viewDir, materialInfo.heightMapScale);
-        uv = uvh.xy;
-    }
-    
-    // Albedo
-    
-    float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
-    
-    if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE)
-    {
-        Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
-        SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
-        baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
-#if defined(PSO_ALPHA_TEST) || defined (PSO_BLEND)
-        if (baseColor.a < materialInfo.alphaCutoff){
-            discard;
-        }
-#endif // PSO_ALPHA_TEST || PSO_BLEND
-        baseColor.rgb = SRGBToLinear(baseColor.rgb);
-    }
-    
-    // Normal
-    float3 normalWS = input.normalWorldSpace;
-    if (materialFlags & MATERIAL_NORMAL_MAP)
-    {
-        Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
-        SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
-        float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
-        float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
-        if (materialFlags & MATERIAL_INVERT_NORMALS)
-        {
-            tangentSpaceNormal = -tangentSpaceNormal;
-        }
-        normalWS = normalize(mul(tangentSpaceNormal, TBN));
-    }
-    
-    float3 outNorm = SignedOctEncode(normalWS);
+    float3 outNorm = SignedOctEncode(fragmentInfo.normalWS);
     
     PrePassPSOutput output;
     output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
-    output.albedo = baseColor;
+    output.albedo = float4(fragmentInfo.albedo.xyz, 1.0);
+    output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);
     return output;
 }
 
@@ -215,68 +158,60 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
     
-    FragmentInfo fragmentInfo = GetFragmentInfoScreenSpace(input.position.xy, enableGTAO);
+    FragmentInfo fragmentInfo;
+    GetFragmentInfoScreenSpace(input.position.xy, enableGTAO, fragmentInfo);
 
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
     
     // Reinhard tonemapping
     float3 lighting = reinhardJodie(lightingOutput.lighting);
     //lighting = toneMap_KhronosPbrNeutral(lighting);
     //lighting = toneMapACES_Hill(lighting);
     lighting = LinearToSRGB(lighting);
-        
-    float opacity = lightingOutput.baseColor.a;
     
     switch (perFrameBuffer.outputType) {
         case OUTPUT_COLOR:
-            return float4(lighting, opacity);
+            return float4(lighting, 1.0);
         case OUTPUT_NORMAL: // Normal
-            return float4(lightingOutput.normalWS * 0.5 + 0.5, opacity);
+            return float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
         case OUTPUT_ALBEDO:
-            return float4(lightingOutput.baseColor.rgb, opacity);
+            return float4(fragmentInfo.diffuseColor.rgb, 1.0);
         case OUTPUT_METALLIC:
-            return float4(lightingOutput.metallic, lightingOutput.metallic, lightingOutput.metallic, opacity);
+            return float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, 1.0);
         case OUTPUT_ROUGHNESS:
-            return float4(lightingOutput.roughness, lightingOutput.roughness, lightingOutput.roughness, opacity);
+            return float4(fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.roughness, 1.0);
         case OUTPUT_EMISSIVE:{
                 if (materialInfo.materialFlags & MATERIAL_EMISSIVE_TEXTURE) {
-                    float3 srgbEmissive = LinearToSRGB(lightingOutput.emissive);
-                    return float4(srgbEmissive, opacity);
+                    float3 srgbEmissive = LinearToSRGB(fragmentInfo.emissive);
+                    return float4(srgbEmissive, 1.0);
                 } else {
-                    return float4(materialInfo.emissiveFactor.rgb, opacity);
+                    return float4(materialInfo.emissiveFactor.rgb, 1.0);
                 }
             }
         case OUTPUT_AO:
-            return float4(lightingOutput.ao, lightingOutput.ao, lightingOutput.ao, opacity);
+            return float4(fragmentInfo.ambientOcclusion, fragmentInfo.ambientOcclusion, fragmentInfo.ambientOcclusion, 1.0);
         case OUTPUT_DEPTH:{
                 float depth = abs(input.positionViewSpace.z)*0.1;
-                return float4(depth, depth, depth, opacity);
+                return float4(depth, depth, depth, 1.0);
             }
 #if defined(PSO_IMAGE_BASED_LIGHTING)
-        case OUTPUT_METAL_BRDF_IBL:
-            return float4(lightingOutput.f_metal_brdf_ibl, opacity);
-        case OUTPUT_DIELECTRIC_BRDF_IBL:
-            return float4(lightingOutput.f_dielectric_brdf_ibl, opacity);
-        case OUTPUT_SPECULAR_IBL:
-            return float4(lightingOutput.f_specular_metal, opacity);
-        case OUTPUT_METAL_FRESNEL_IBL:
-            return float4(lightingOutput.f_metal_fresnel_ibl, opacity);
-        case OUTPUT_DIELECTRIC_FRESNEL_IBL:
-            return float4(lightingOutput.f_dielectric_fresnel_ibl, opacity);
+        case OUTPUT_DIFFUSE_IBL:
+            return float4(lightingOutput.diffuseIBL.rgb, 1.0);
 #endif // IMAGE_BASED_LIGHTING
         case OUTPUT_MESHLETS:{
-                return lightUints(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
+                return lightUints(input.meshletIndex, fragmentInfo.normalWS, viewDir);
             }
         case OUTPUT_MODEL_NORMALS:{
-                return float4(input.normalModelSpace * 0.5 + 0.5, opacity);
+                return float4(input.normalModelSpace * 0.5 + 0.5, 1.0);
             }
-        case OUTPUT_LIGHT_CLUSTER_ID:{
-                return lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
-            }
-        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
-                return lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
-            }
+//        case OUTPUT_LIGHT_CLUSTER_ID:{
+//                return lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
+//            }
+//        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
+//                return lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
+//            }
         default:
             return float4(1.0, 0.0, 0.0, 1.0);
     }

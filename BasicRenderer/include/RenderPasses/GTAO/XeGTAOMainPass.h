@@ -51,11 +51,11 @@ public:
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
-        unsigned int passConstants[NumMiscRootConstants] = {};
+        unsigned int passConstants[NumMiscUintRootConstants] = {};
         passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
 		passConstants[1] = frameIndex % 64; // For spatiotemporal denoising
 
-        commandList->SetComputeRoot32BitConstants(MiscRootSignatureIndex, NumMiscRootConstants, passConstants, 0);
+        commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, passConstants, 0);
 
         commandList->Dispatch((context.xRes + (XE_GTAO_NUMTHREADS_X * 2) - 1) / (XE_GTAO_NUMTHREADS_X), (context.yRes + XE_GTAO_NUMTHREADS_Y - 1) / XE_GTAO_NUMTHREADS_Y, 1);
 
