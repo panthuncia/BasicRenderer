@@ -8,8 +8,8 @@
 std::unique_ptr<ReadbackManager> ReadbackManager::instance = nullptr;
 bool ReadbackManager::initialized = false;
 
-void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, Texture* cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
-    D3D12_RESOURCE_DESC resourceDesc = cubemap->GetBuffer()->GetTexture()->GetDesc();
+void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
+    D3D12_RESOURCE_DESC resourceDesc = cubemap->GetTexture()->GetDesc();
 
     // Get the number of mip levels and subresources
     UINT numMipLevels = resourceDesc.MipLevels;
@@ -67,7 +67,7 @@ void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsComma
     readbackBuffer->SetName(L"Readback");
 
     auto initialState = ResourceStateToD3D12(cubemap->GetState());
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetBuffer()->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
     commandList->ResourceBarrier(1, &barrier);
 
     // Issue copy commands for each mip level of each face
@@ -76,7 +76,7 @@ void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsComma
             UINT subresourceIndex = D3D12CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, 6);
 
             D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
-            srcLocation.pResource = cubemap->GetBuffer()->GetTexture().Get();
+            srcLocation.pResource = cubemap->GetTexture().Get();
             srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
             srcLocation.SubresourceIndex = subresourceIndex;
 
@@ -89,7 +89,7 @@ void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsComma
         }
     }
 
-    barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetBuffer()->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
     commandList->ResourceBarrier(1, &barrier);
 
     ReadbackRequest readbackRequest;
@@ -162,8 +162,8 @@ void ReadbackManager::SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsComma
     m_readbackRequests.push_back(std::move(readbackRequest));
 }
 
-void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile, UINT64 fenceValue) {
-    D3D12_RESOURCE_DESC resourceDesc = texture->GetBuffer()->GetTexture()->GetDesc();
+void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, PixelBuffer* texture, const std::wstring& outputFile, UINT64 fenceValue) {
+    D3D12_RESOURCE_DESC resourceDesc = texture->GetTexture()->GetDesc();
 
     // Get the number of mip levels and subresources
     UINT numMipLevels = resourceDesc.MipLevels;
@@ -221,7 +221,7 @@ void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsComma
     readbackBuffer->SetName(L"Readback");
 
     auto initialState = ResourceStateToD3D12(texture->GetState());
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetBuffer()->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
     commandList->ResourceBarrier(1, &barrier);
 
     // Issue copy commands for each mip level of each face
@@ -229,7 +229,7 @@ void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsComma
         UINT subresourceIndex = D3D12CalcSubresource(mipLevel, 0, 0, numMipLevels, 1);
 
         D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
-        srcLocation.pResource = texture->GetBuffer()->GetTexture().Get();
+        srcLocation.pResource = texture->GetTexture().Get();
         srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         srcLocation.SubresourceIndex = subresourceIndex;
 
@@ -242,7 +242,7 @@ void ReadbackManager::SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsComma
 
     }
 
-    barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetBuffer()->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(texture->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
     commandList->ResourceBarrier(1, &barrier);
 
     ReadbackRequest readbackRequest;

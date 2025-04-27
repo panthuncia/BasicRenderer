@@ -6,9 +6,8 @@
 #include "Resources/Texture.h"
 #include "Resources/PixelBuffer.h"
 
-void Environment::SetFromHDRI(std::shared_ptr<Texture> hdriTexture) {
+void Environment::SetHDRI(std::shared_ptr<Texture> hdriTexture) {
 	m_hdriTexture = hdriTexture;
-	m_currentManager->SetFromHDRI(this, hdriTexture);
 }
 
 unsigned int Environment::GetEnvironmentIndex() const {

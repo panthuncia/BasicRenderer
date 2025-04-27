@@ -122,6 +122,7 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
+	std::unordered_set<uint64_t> resourcesInGroups;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
 	
 	// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately

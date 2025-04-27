@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "ShaderBuffers.h"
 
@@ -9,7 +10,7 @@ class BufferView;
 class EnvironmentManager;
 class Environment {
 public:
-	Environment(EnvironmentManager* manager) : m_currentManager(manager) {
+	Environment(EnvironmentManager* manager, std::wstring name = L"") : m_currentManager(manager), m_name(name) {
 	}
 
 	std::shared_ptr<Texture>& GetEnvironmentCubemap() {
@@ -28,7 +29,7 @@ public:
 		return m_hdriTexture;
 	}
 
-	void SetFromHDRI(std::shared_ptr<Texture> hdriTexture);
+	void SetHDRI(std::shared_ptr<Texture> hdriTexture);
 
 	unsigned int GetEnvironmentIndex() const;
 
@@ -36,9 +37,14 @@ public:
 		return reflectionCubemapResolution;
 	}
 
+	const std::wstring& GetName() {
+		return m_name;
+	}
+
 private:
 	EnvironmentInfo m_environmentInfo = {};
 	EnvironmentManager* m_currentManager;
+	std::wstring m_name;
 	std::shared_ptr<Texture> m_hdriTexture; // Optional
 	std::shared_ptr<Texture> m_environmentCubemap; // Generated from HDRI or rendered
 	std::shared_ptr<Texture> m_environmentPrefilteredCubemap; // Generated from environment cubemap

@@ -57,7 +57,7 @@ public:
         invalidated = false;
 
         auto path = GetCacheFilePath(L"lut.dds", L"luts");
-        ReadbackManager::GetInstance().RequestReadback(m_lutTexture, path, nullptr, false);
+        ReadbackManager::GetInstance().RequestReadback(m_lutTexture->GetBuffer(), path, nullptr, false);
 
         return { { commandList.Get() }, nullptr, 0 };
     }

@@ -444,12 +444,12 @@ void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassP
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transition, ResourceState initialState) {
 	auto& name = resource->GetName();
 #ifdef _DEBUG
-	if (name == L"") {
-		throw std::runtime_error("Resource name cannot be empty");
-	}
-	else if (resourcesByName.find(name) != resourcesByName.end()) {
-		throw std::runtime_error("Resource with name " + ws2s(name) + " already exists");
-	}
+	//if (name == L"") {
+	//	throw std::runtime_error("Resource name cannot be empty");
+	//}
+	//else if (resourcesByName.find(name) != resourcesByName.end()) {
+	//	throw std::runtime_error("Resource with name " + ws2s(name) + " already exists");
+	//}
 #endif
 
 	auto resourceGroup = std::dynamic_pointer_cast<ResourceGroup>(resource);

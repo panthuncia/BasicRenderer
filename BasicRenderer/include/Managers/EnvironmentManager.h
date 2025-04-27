@@ -19,7 +19,7 @@ public:
 		return std::unique_ptr<EnvironmentManager>(new EnvironmentManager());
 	}
 
-	std::unique_ptr<Environment> CreateEnvironment();
+	std::unique_ptr<Environment> CreateEnvironment(std::wstring name = L"");
 	void RemoveEnvironment(Environment* environment);
 	
 
@@ -72,6 +72,8 @@ public:
 		return m_environmentInfoBuffer;
 	}
 
+	void SetFromHDRI(Environment* e, std::string hdriPath);
+
 private:
 	EnvironmentManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<EnvironmentInfo>> m_environmentInfoBuffer;
@@ -88,8 +90,6 @@ private:
 	std::shared_ptr<ResourceGroup> m_workingHDRIGroup; // Temporary group for prefiltered cubemap generation
 
 	std::shared_ptr<ResourceGroup> m_environmentPrefilteredCubemapGroup;
-
-	void SetFromHDRI(Environment* e, std::shared_ptr<Texture>& HDRI);
 
 	friend class Environment;
 };

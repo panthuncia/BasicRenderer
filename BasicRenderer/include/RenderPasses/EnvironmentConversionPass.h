@@ -92,19 +92,7 @@ public:
 		commandList->Close();
 		commandLists.push_back(commandList);
 
-        // We can reuse the results of this pass
 		RenderPassReturn passReturn;
-        /*if (m_currentPass == m_numPasses) {
-            
-            invalidated = false;
-			m_currentPass = 0;
-
-			auto& readbackManager = ReadbackManager::GetInstance();
-            auto path = GetCacheFilePath(m_environmentName + L"_radiance.dds", L"environments");
-			readbackManager.RequestReadback(m_environmentRadiance, path, nullptr, true);
-            path = GetCacheFilePath(m_environmentName + L"_environment.dds", L"environments");
-			readbackManager.RequestReadback(m_environmentCubeMap, path, nullptr, true);
-        }*/
 
 		passReturn.commandLists = std::move(commandLists);
 		return passReturn;

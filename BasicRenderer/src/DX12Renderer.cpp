@@ -1400,11 +1400,9 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
     std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
 
     if (std::filesystem::exists(envpath)) {
-        auto skyHDR = loadTextureFromFileSTBI(envpath.string());
-
-		m_preFrameDeferredFunctions.defer([this, skyHDR]() { // Don't change this during rendering
-            m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment();
-            m_currentEnvironment->SetFromHDRI(skyHDR);
+		m_preFrameDeferredFunctions.defer([envpath, name, this]() { // Don't change this during rendering
+            m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment(name);
+            m_pEnvironmentManager->SetFromHDRI(m_currentEnvironment.get(), envpath.string());
             ResourceManager::GetInstance().SetActiveEnvironmentIndex(m_currentEnvironment->GetEnvironmentIndex());
 			});
     }

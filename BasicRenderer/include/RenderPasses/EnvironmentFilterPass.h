@@ -95,7 +95,7 @@ public:
         invalidated = false;
 
         auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds", L"environments");
-        ReadbackManager::GetInstance().RequestReadback(m_prefilteredEnvironment, path, nullptr, true);
+        ReadbackManager::GetInstance().RequestReadback(m_prefilteredEnvironment->GetBuffer(), path, nullptr, true);
 
         m_commandList->Close();
         commandLists.push_back(m_commandList.Get());
