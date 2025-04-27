@@ -10,6 +10,7 @@
 #include "gammaCorrection.hlsli"
 #include "shadows.hlsli"
 #include "constants.hlsli"
+#include "IBL.hlsli"
 
 struct LightFragmentData {
     uint lightType;
@@ -147,8 +148,12 @@ uint3 ComputeClusterID(float4 svPos, float viewDepth,
 
 LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInput input, ConstantBuffer<MaterialInfo> materialInfo, PerMeshBuffer meshBuffer, ConstantBuffer<PerFrameBuffer> perFrameBuffer, bool isFrontFace) {
     
+    //float3 indirect = evaluateIBL(fragmentInfo.normalWS, fragmentInfo.albedo, meshBuffer.environmentIndex, meshBuffer.environmentBufferIndex);)
+    
+    float3 albedo = fragmentInfo.diffuseColor;
+    
     LightingOutput output;
-    output.lighting = float3(1, 0, 0);
+    output.lighting = albedo;
     output.baseColor = float4(1, 0, 0, 1);
     output.normalWS = float3(0, 0, 0);
     output.metallic = 0;

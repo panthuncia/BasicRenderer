@@ -7,6 +7,7 @@
 #include "tonemapping.hlsli"
 #include "gammaCorrection.hlsli"
 #include "outputTypes.hlsli"
+#include "MaterialFlags.hlsli"
 
 PSInput VSMain(uint vertexID : SV_VertexID) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
@@ -94,29 +95,83 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     return output;
 }
 
-float4 PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
+struct PrePassPSOutput
+{
+    float4 signedOctEncodedNormal;
+    float4 albedo;
+};
+
+PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
+{
+    
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
-#if defined(PSO_ALPHA_TEST) || defined(PSO_BLEND)
-    if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
+    
+    float2 uv = input.texcoord;
+    
+    // Parallax UV offset
+    float3x3 TBN;
+    if (materialFlags & MATERIAL_NORMAL_MAP || materialFlags & MATERIAL_PARALLAX)
+    {
+        //TBN = float3x3(input.TBN_T, input.TBN_B, input.TBN_N);
+        TBN = cotangent_frame(input.normalWorldSpace.xyz, input.positionWorldSpace.xyz, uv);
+    }
+
+    float height = 0.0;
+    
+    if (materialFlags & MATERIAL_PARALLAX)
+    {
+        ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+        Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+        float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
+        Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
+        SamplerState parallaxSamplerState = SamplerDescriptorHeap[materialInfo.heightSamplerIndex];
+        float3 uvh = getContactRefinementParallaxCoordsAndHeight(parallaxTexture, parallaxSamplerState, TBN, uv, viewDir, materialInfo.heightMapScale);
+        uv = uvh.xy;
+    }
+    
+    // Albedo
+    
+    float4 baseColor = float4(1.0, 1.0, 1.0, 1.0);
+    
+    if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE)
+    {
         Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
         SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
-        float2 uv = input.texcoord;
-        float4 baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
-        if (baseColor.a*materialInfo.baseColorFactor.a < 0.5){
+        baseColor = baseColorTexture.Sample(baseColorSamplerState, uv);
+#if defined(PSO_ALPHA_TEST) || defined (PSO_BLEND)
+        if (baseColor.a < materialInfo.alphaCutoff){
             discard;
         }
-    }
-    if (materialInfo.baseColorFactor.a < 0.5){
-        discard;
-    }
 #endif // PSO_ALPHA_TEST || PSO_BLEND
-    float3 outNorm = normalize(input.normalWorldSpace);
-    outNorm = SignedOctEncode(outNorm);
-    return float4(0, outNorm.x, outNorm.y, outNorm.z);
+        baseColor.rgb = SRGBToLinear(baseColor.rgb);
+    }
+    
+    // Normal
+    float3 normalWS = input.normalWorldSpace;
+    if (materialFlags & MATERIAL_NORMAL_MAP)
+    {
+        Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
+        SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
+        float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
+        float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
+        if (materialFlags & MATERIAL_INVERT_NORMALS)
+        {
+            tangentSpaceNormal = -tangentSpaceNormal;
+        }
+        normalWS = normalize(mul(tangentSpaceNormal, TBN));
+    }
+    
+    float3 outNorm = SignedOctEncode(normalWS);
+    
+    PrePassPSOutput output;
+    output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
+    output.albedo = baseColor;
+    return output;
 }
 
 #if defined(PSO_SHADOW)

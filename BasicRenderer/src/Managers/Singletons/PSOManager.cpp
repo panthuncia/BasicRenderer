@@ -218,8 +218,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
+    psoDesc.NumRenderTargets = 2;
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+	psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
 
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
@@ -504,8 +505,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     pipelineStateStream.DepthStencilState = depthStencilState;
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    rtvFormats.NumRenderTargets = 1;
+    rtvFormats.NumRenderTargets = 2;
 	rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+	rtvFormats.RTFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
     pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;

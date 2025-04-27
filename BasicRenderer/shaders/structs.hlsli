@@ -220,6 +220,7 @@ struct GTAOInfo {
 
 struct FragmentInfo {
     float3 normalWS;
+    float3 diffuseColor;
     float ambientOcclusion;
 };
 

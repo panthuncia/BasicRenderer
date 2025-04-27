@@ -1035,11 +1035,26 @@ void DX12Renderer::CreateRenderGraph() {
 	normalsWorldSpaceDesc.imageDimensions.push_back(dims);
 	auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
 	normalsWorldSpace->SetName(L"Normals World Space");
-	newGraph->AddResource(normalsWorldSpace, false, ResourceState::UNORDERED_ACCESS);
+	newGraph->AddResource(normalsWorldSpace, false, ResourceState::RENDER_TARGET);
+
+	TextureDescription albedoDesc;
+	albedoDesc.arraySize = 1;
+	albedoDesc.channels = 4;
+	albedoDesc.isCubemap = false;
+	albedoDesc.hasRTV = true;
+	albedoDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	albedoDesc.generateMipMaps = false;
+	albedoDesc.hasSRV = true;
+	albedoDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	ImageDimensions albedoDims = { m_xRes, m_yRes, 0, 0 };
+	albedoDesc.imageDimensions.push_back(albedoDims);
+	auto albedo = PixelBuffer::Create(albedoDesc);
+	albedo->SetName(L"Albedo");
+	newGraph->AddResource(albedo, false, ResourceState::RENDER_TARGET);
 
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace)
+        .WithRenderTarget(normalsWorldSpace, albedo)
         .WithDepthTarget(depthTexture);
 
 	if (useMeshShaders) {
@@ -1048,7 +1063,7 @@ void DX12Renderer::CreateRenderGraph() {
 			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-    zBuilder.Build<ZPrepass>(normalsWorldSpace, getWireframeEnabled(), useMeshShaders, indirect);
+    zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, getWireframeEnabled(), useMeshShaders, indirect);
 
     auto debugPassParameters = RenderPassParameters();
 
@@ -1290,8 +1305,8 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithDepthTarget(depthTexture)
 			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
-    forwardBuilder.WithShaderResource(normalsWorldSpace);
-	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
+    forwardBuilder.WithShaderResource(normalsWorldSpace, albedo);
+	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index);
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;

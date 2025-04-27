@@ -37,6 +37,7 @@ cbuffer StaticBufferInfo : register(b5) {
     uint drawSetCommandBufferDescriptorIndex;
     uint normalsTextureDescriptorIndex;
     uint aoTextureDescriptorIndex;
+    uint albedoTextureDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {

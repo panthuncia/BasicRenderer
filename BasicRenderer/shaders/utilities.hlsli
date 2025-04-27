@@ -66,12 +66,14 @@ FragmentInfo GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in bool enabl
     
     if (enableGTAO) {
         Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
-        uint2 currentScreenSpace = uint2(pixelCoordinates);
-        info.ambientOcclusion = float(aoTexture[currentScreenSpace].x) / 255.0;
+        info.ambientOcclusion = float(aoTexture[pixelCoordinates].x) / 255.0;
     }
     else {
         info.ambientOcclusion = 1.0;
     }
+    
+    Texture2D<float4> albedoTexture = ResourceDescriptorHeap[albedoTextureDescriptorIndex];
+    info.diffuseColor = albedoTexture[pixelCoordinates].xyz;
     
     return info;
 }

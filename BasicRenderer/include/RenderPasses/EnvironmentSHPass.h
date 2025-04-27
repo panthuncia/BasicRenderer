@@ -94,8 +94,9 @@ public:
 			commandList->Dispatch(groupsX, groupsY, groupsZ);
 		}
 
-
 		ThrowIfFailed(commandList->Close());
+
+		context.environmentManager->ClearEnvironmentsToPrefilter();
 
 		return { { commandList.Get()} };
 	}

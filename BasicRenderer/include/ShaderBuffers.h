@@ -272,6 +272,7 @@ enum StaticBufferRootConstants {
     DrawSetCommandBufferDescriptorIndex,
 	NormalsTextureDescriptorIndex,
     AOTextureDescriptorIndex,
+	AlbedoTextureDescriptorIndex,
     NumStaticBufferRootConstants,
 };
 
