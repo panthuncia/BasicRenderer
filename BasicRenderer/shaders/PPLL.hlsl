@@ -58,7 +58,7 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
 
     // Light fragment
     FragmentInfo fragmentInfo;
-    GetFragmentInfoDirectTransparent(input, fragmentInfo);
+    GetFragmentInfoDirectTransparent(input, viewDir, fragmentInfo);
     
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
 
@@ -75,8 +75,8 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     int nNewFragmentAddress = AllocateFragment(vScreenAddress, LinkedListCounter);
     int nOldFragmentAddress = MakeFragmentLink(vScreenAddress, nNewFragmentAddress, RWFragmentListHead);
     
-    float4 finalOutput;
-    switch (perFrameBuffer.outputType) {
+    float4 finalOutput = float4(lightingOutput.lighting.xyz, fragmentInfo.alpha);
+    /*switch (perFrameBuffer.outputType) {
         case OUTPUT_COLOR:
             finalOutput = float4(lightingOutput.lighting.xyz, fragmentInfo.alpha);
             break;
@@ -134,7 +134,7 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
         default:
             finalOutput = float4(1.0, 0.0, 0.0, 1.0);
             break;
-    }
+    }*/
     
     WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(finalOutput.rgb, finalOutput.a), input.position.z, LinkedListUAV);
 }

@@ -275,20 +275,44 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.dielectricF0 = computeDielectricF0(ret.reflectance);
     ret.F0 = computeF0(float4(baseColorSample.xyz, 1.0), ret.metallic, ret.dielectricF0); // base albedo, not the diffuse color
     ret.dielectricF0 *= (1.0 - ret.metallic);
+    
+    ret.emissive = float3(0.0, 0.0, 0.0); // TODO
 }
 
-void GetFragmentInfoDirectTransparent(in PSInput input, out FragmentInfo ret)
+void GetFragmentInfoDirectTransparent(in PSInput input, in float3 viewWS, out FragmentInfo ret)
 {
     
     MaterialInputs materialInfo;
     GetMaterialInfoForFragment(input, materialInfo);
     
     ret.metallic = materialInfo.metallic;
-    ret.roughness = materialInfo.roughness;
+    float perceptualRoughness = materialInfo.roughness;
+    ret.perceptualRoughnessUnclamped = perceptualRoughness;
+        // Clamp the roughness to a minimum value to avoid divisions by 0 during lighting
+    ret.perceptualRoughness = clamp(perceptualRoughness, MIN_PERCEPTUAL_ROUGHNESS, 1.0);
+        // Remaps the roughness to a perceptually linear roughness (roughness^2)
+    ret.roughness = PerceptualRoughnessToRoughness(ret.perceptualRoughness);
+    ret.roughnessUnclamped = PerceptualRoughnessToRoughness(ret.perceptualRoughnessUnclamped);
+
+    ret.viewWS = viewWS;
+    ret.NdotV = dot(ret.normalWS, viewWS);
+    ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
+    
+    ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
+    
     ret.diffuseColor = computeDiffuseColor(materialInfo.albedo, ret.metallic);
+    ret.albedo = materialInfo.albedo;
     ret.alpha = materialInfo.opacity;
     ret.normalWS = materialInfo.normalWS;
     ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion; // Screen-space AO not applied to transparent objects
+    
+    ret.reflectance = 0.35; // This is a default value for the reflectance of dielectrics, similar to setting an F0 directly. Ideally, each material should have its own reflectance value.
+    // Assumes an interface from air to an IOR of 1.5 for dielectrics
+    ret.dielectricF0 = computeDielectricF0(ret.reflectance);
+    ret.F0 = computeF0(float4(materialInfo.albedo.xyz, 1.0), ret.metallic, ret.dielectricF0); // base albedo, not the diffuse color
+    ret.dielectricF0 *= (1.0 - ret.metallic);
+    
+    ret.emissive = float3(0.0, 0.0, 0.0); // TODO
 }
 
 #endif // __UTILITY_HLSL__
