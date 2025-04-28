@@ -1281,15 +1281,20 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->AddResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup());
     //newGraph->AddResource(m_environmentIrradiance);
 
-	newGraph->BuildRenderPass("EnvironmentConversionPass")
+	newGraph->BuildRenderPass("Environment Conversion Pass")
 		.WithShaderResource(m_pEnvironmentManager->GetWorkingHDRIGroup())
 		.WithRenderTarget(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
 		.Build<EnvironmentConversionPass>();
         
-    newGraph->BuildComputePass("EnvironmentFilterPass")
+    newGraph->BuildComputePass("Environment Spherical Harmonics Pass")
         .WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
         .WithUnorderedAccess(environmentsBuffer)
 		.Build<EnvironmentSHPass>();
+
+	newGraph->BuildRenderPass("Environment Prefilter Pass")
+		.WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+		.WithRenderTarget(environmentPrefilteredGroup)
+		.Build<EnvironmentFilterPass>();
 
     if (m_currentEnvironment != nullptr) {
 		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap());

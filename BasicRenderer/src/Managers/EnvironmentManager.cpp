@@ -62,10 +62,13 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
 	auto& name = e->GetName();
 	auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
+
 	std::shared_ptr<Texture> skybox;
+	unsigned int res = m_reflectionCubemapResolution;
 	if (std::filesystem::exists(skyboxPath)) {
 		skybox = loadCubemapFromFile(skyboxPath, true);
-		e->SetReflectionCubemapResolution(skybox->GetBuffer()->GetWidth());
+		res = skybox->GetBuffer()->GetWidth();
+		e->SetReflectionCubemapResolution(res);
 		e->SetEnvironmentCubemap(skybox);
 	}
 	else {
@@ -73,6 +76,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 
 		TextureDescription skyboxDesc;
 		ImageDimensions dims;
+		res = m_skyboxResolution;
 		dims.height = m_skyboxResolution;
 		dims.width = m_skyboxResolution;
 		dims.rowPitch = m_skyboxResolution * 4;
@@ -97,8 +101,38 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		m_environmentsToConvert.push_back(e);
 		auto path = GetCacheFilePath(name+L"_environment.dds", L"environments");
 		ReadbackManager::GetInstance().RequestReadback(envCubemap, path, nullptr, true);
+
+		path = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
+		ReadbackManager::GetInstance().RequestReadback(e->GetEnvironmentPrefilteredCubemap()->GetBuffer(), path, nullptr, true);
 	}
 
+	//Re-create environment cubemap at full res
+	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentCubemap().get());
+	ImageDimensions dims;
+	dims.height = res;
+	dims.width = res;
+	dims.rowPitch = res * 4;
+	dims.slicePitch = res * res * 4;
+
+	TextureDescription prefilteredDesc;
+	for (int i = 0; i < 6; i++) {
+		prefilteredDesc.imageDimensions.push_back(dims);
+	}
+	prefilteredDesc.channels = 3;
+	prefilteredDesc.isCubemap = true;
+	prefilteredDesc.hasRTV = true;
+	prefilteredDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	prefilteredDesc.generateMipMaps = true;
+
+	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
+	auto sampler = Sampler::GetDefaultSampler();
+	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
+	prefilteredEnvironment->SetName(L"Environment prefiltered cubemap");
+	e->SetEnvironmentPrefilteredCubemap(prefilteredEnvironment);
+	m_environmentPrefilteredCubemapGroup->AddResource(prefilteredEnvironment);
+
+
+	m_environmentsToComputeSH.push_back(e);
 	m_environmentsToPrefilter.push_back(e);
 	m_workingEnvironmentCubemapGroup->AddResource(skybox);
 }

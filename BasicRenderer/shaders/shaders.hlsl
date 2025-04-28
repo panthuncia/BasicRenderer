@@ -178,7 +178,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
         case OUTPUT_NORMAL: // Normal
             return float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
         case OUTPUT_ALBEDO:
-            return float4(fragmentInfo.diffuseColor.rgb, 1.0);
+            return float4(fragmentInfo.albedo.rgb, 1.0);
         case OUTPUT_METALLIC:
             return float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, 1.0);
         case OUTPUT_ROUGHNESS:
@@ -200,6 +200,8 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 #if defined(PSO_IMAGE_BASED_LIGHTING)
         case OUTPUT_DIFFUSE_IBL:
             return float4(lightingOutput.diffuseIBL.rgb, 1.0);
+        case OUTPUT_SPECULAR_IBL:
+            return float4(lightingOutput.specularIBL.rgb, 1.0);
 #endif // IMAGE_BASED_LIGHTING
         case OUTPUT_MESHLETS:{
                 return lightUints(input.meshletIndex, fragmentInfo.normalWS, viewDir);

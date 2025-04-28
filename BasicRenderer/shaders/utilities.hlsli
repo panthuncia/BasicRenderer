@@ -237,6 +237,7 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     
     Texture2D<float4> albedoTexture = ResourceDescriptorHeap[albedoTextureDescriptorIndex];
     float4 baseColorSample = albedoTexture[pixelCoordinates];
+    ret.albedo = baseColorSample.xyz;
     
     if (enableGTAO)
     {

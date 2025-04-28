@@ -37,6 +37,7 @@ struct LightingOutput { // Lighting + debug info
     float3 lighting;
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     float3 diffuseIBL;
+    float3 specularIBL;
 #endif // IMAGE_BASED_LIGHTING
 };
 
@@ -118,23 +119,30 @@ uint3 ComputeClusterID(float4 svPos, float viewDepth,
 
 LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInput input, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex, bool isFrontFace) {
     
-    float3 indirect = evaluateIBL(
-                                fragmentInfo.normalWS, 
-                                fragmentInfo.normalWS, 
-                                fragmentInfo.diffuseColor, 
-                                fragmentInfo.diffuseAmbientOcclusion, 
-                                fragmentInfo.DFG, 
-                                fragmentInfo.F0, 
-                                fragmentInfo.reflectedWS, 
-                                fragmentInfo.roughness, 
-                                activeEnvironmentIndex, 
-                                environmentBufferDescriptorIndex);
+    float3 lighting = float3(0.0, 0.0, 0.0);
+    float3 debugDiffuse = float3(0, 0, 0);
+    float3 debugSpecular = float3(0, 0, 0);
+    evaluateIBL(lighting,
+                debugDiffuse,
+                debugSpecular,
+                fragmentInfo.normalWS, 
+                fragmentInfo.normalWS, 
+                fragmentInfo.diffuseColor, 
+                fragmentInfo.diffuseAmbientOcclusion, 
+                fragmentInfo.DFG, 
+                fragmentInfo.F0, 
+                fragmentInfo.reflectedWS, 
+                fragmentInfo.roughness, 
+                fragmentInfo.NdotV,
+                activeEnvironmentIndex, 
+                environmentBufferDescriptorIndex);
     
     LightingOutput output;
-    output.lighting = indirect;
+    output.lighting = lighting;
     
 #if defined(PSO_IMAGE_BASED_LIGHTING)
-    output.diffuseIBL = indirect;
+    output.diffuseIBL = debugDiffuse;
+    output.specularIBL = debugSpecular;
 #endif // IMAGE_BASED_LIGHTING
     return output;
 }

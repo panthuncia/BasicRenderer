@@ -80,7 +80,8 @@ public:
 
 		float miscFloatParams[NumMiscFloatRootConstants] = { };
 
-		auto environments = context.environmentManager->GetAndClearEnvironmentsToPrefilter();
+		auto environments = context.environmentManager->GetAndClearEnvironmentsToComputeSH();
+		
 		for (auto& env : environments) {
 			auto cubemapRes = env->GetReflectionCubemapResolution();
 			miscParams[UintRootConstant0] = cubemapRes; // Resolution

@@ -10,10 +10,11 @@ enum OutputType {
 	AO = 6,
 	DEPTH = 7,
 	OUTPUT_DIFFUSE_IBL = 8,
-	MESHLETS = 9,
-	MODEL_NORMAL = 10,
-	LIGHT_CLUSTER_ID = 11,
-	CLUSTERED_LIGHT_COUNT = 12,
+	OUTPUT_SPECULAR_IBL = 9,
+	MESHLETS = 10,
+	MODEL_NORMAL = 11,
+	LIGHT_CLUSTER_ID = 12,
+	CLUSTERED_LIGHT_COUNT = 13,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -26,6 +27,7 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Ambient Occlusion",
 	"Depth",
 	"Diffuse IBL",
+	"Specular IBL",
 	"Meshlets",
 	"Model Normal",
 	"Light Cluster ID",

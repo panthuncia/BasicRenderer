@@ -36,7 +36,7 @@ public:
 		m_environmentInfoBuffer->UpdateView(environment.GetEnvironmentBufferView(), &environment.m_environmentInfo);
 	}
 
-	std::vector<Environment*>& GetEnvironmentsToPrefilter() {
+	const std::vector<Environment*>& GetEnvironmentsToPrefilter() {
 		return m_environmentsToPrefilter;
 	}
 
@@ -45,6 +45,17 @@ public:
 		auto environments = m_environmentsToPrefilter; // Copy the vector
 		m_environmentsToPrefilter.clear();
 		m_workingEnvironmentCubemapGroup->ClearResources(); // Full-res cubemaps not needed after prefiltering
+		return environments;
+	}
+
+	const std::vector<Environment*>& GetEnvironmentsToComputeSH() {
+		return m_environmentsToComputeSH;
+	}
+
+	std::vector<Environment*> GetAndClearEnvironmentsToComputeSH()& {
+		std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
+		auto environments = m_environmentsToComputeSH; // Copy the vector
+		m_environmentsToComputeSH.clear();
 		return environments;
 	}
 
@@ -84,6 +95,7 @@ private:
 
 	std::vector<Environment*> m_environmentsToConvert;
 	std::vector<Environment*> m_environmentsToPrefilter;
+	std::vector<Environment*> m_environmentsToComputeSH;
 	std::mutex m_environmentUpdateMutex; // Mutex for thread safety
 
 	std::shared_ptr<ResourceGroup> m_workingEnvironmentCubemapGroup; // Temporary group for prefiltered cubemap generation

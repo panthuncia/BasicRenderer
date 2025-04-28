@@ -830,12 +830,36 @@ void PSOManager::createRootSignature() {
 	parameters[9].Constants.Num32BitValues = NumMiscFloatRootConstants;
 	parameters[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+    D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
+
+    // point-clamp at s0
+    auto& pointClamp = staticSamplers[0];
+    pointClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    pointClamp.AddressU       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClamp.AddressV       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClamp.AddressW       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClamp.MipLODBias     = 0;
+    pointClamp.MaxAnisotropy  = 0;
+    pointClamp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    pointClamp.BorderColor    = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
+    pointClamp.MinLOD         = 0;
+    pointClamp.MaxLOD         = D3D12_FLOAT32_MAX;
+    pointClamp.ShaderRegister = 0;
+    pointClamp.RegisterSpace  = 0;
+    pointClamp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // linear-clamp at s1
+    auto& linearClamp = staticSamplers[1];
+    linearClamp = pointClamp;
+    linearClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    linearClamp.ShaderRegister = 1;
+
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
     rootSignatureDesc.NumParameters = _countof(parameters);
     rootSignatureDesc.pParameters = parameters;
-    rootSignatureDesc.NumStaticSamplers = 0;
-    rootSignatureDesc.pStaticSamplers = nullptr;
+    rootSignatureDesc.NumStaticSamplers = _countof(staticSamplers);
+    rootSignatureDesc.pStaticSamplers   = staticSamplers;
     rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
 
     // Serialize and create the root signature

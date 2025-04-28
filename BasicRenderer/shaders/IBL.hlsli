@@ -44,6 +44,33 @@ void multiBounceAO(float visibility, const float3 albedo, inout float3 color)
 //#endif
 }
 
+void multiBounceSpecularAO(float visibility, const float3 albedo, inout float3 color)
+{
+//#if MULTI_BOUNCE_AMBIENT_OCCLUSION == 1 && SPECULAR_AMBIENT_OCCLUSION != SPECULAR_AO_OFF
+    color *= gtaoMultiBounce(visibility, albedo);
+//#endif
+}
+
+float SpecularAO_Lagarde(float NoV, float visibility, float roughness)
+{
+    // Lagarde and de Rousiers 2014, "Moving Frostbite to PBR"
+    return saturate(pow(NoV + visibility, exp2(-16.0 * roughness - 1.0)) - 1.0 + visibility);
+}
+
+/*
+Computes a specular occlusion term from the ambient occlusion term.
+ */
+float computeSpecularAO(float NdotV, float visibility, float roughness)
+{
+#if SPECULAR_AMBIENT_OCCLUSION == SPECULAR_AO_SIMPLE
+    return SpecularAO_Lagarde(NdotV, visibility, roughness);
+#elif SPECULAR_AMBIENT_OCCLUSION == SPECULAR_AO_BENT_NORMALS
+    return SpecularAO_Cones(materialSurface, visibility, roughness);
+#else
+    return 1.0;
+#endif
+}
+
 float3 specularDFG(float2 DFG, float3 F0)
 {
 #if defined(SHADING_MODEL_CLOTH) // TODO: Other filament shading models
@@ -66,22 +93,48 @@ float3 getReflectedVector(float3 r, const float3 n, float roughness)
     return getSpecularDominantDirection(n, r, roughness);
 }
 
-float3 evaluateIBL(float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float2 DFG, float3 F0, float3 reflection, in float roughness, in const uint environmentIndex, in const uint environmentBufferIndex)
+float3 prefilteredRadiance(float3 reflection, float roughness, unsigned int prefilteredEnvironmentDescriptorIndex)
 {
+    
+    TextureCube<float4> prefilteredEnvironment = ResourceDescriptorHeap[prefilteredEnvironmentDescriptorIndex];
+    float lod = roughness * float(12 - 1);
+    float4 specularSample = prefilteredEnvironment.SampleLevel(g_linearClamp, reflection, lod);
+    return specularSample.rgb;
+}
+
+void combineDiffuseAndSpecular(const float3 n, const float3 E, const float3 Fd, const float3 Fr, inout float3 color)
+{
+#if defined(HAS_REFRACTION) // TODO: Refraction
+    applyRefraction(materialSurface, n, E, Fd, Fr, color);
+#else
+    color += Fd + Fr;
+#endif
+}
+
+void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 debugSpecular, float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float2 DFG, float3 F0, float3 reflection, float roughness, float NdotV, in const uint environmentIndex, in const uint environmentBufferDescriptorIndex)
+{
+    
     // Specular
     float3 E = specularDFG(DFG, F0); // Pre-calculated DFG term
     float3 r = getReflectedVector(reflection, normal, roughness);
-    //Fr = E * prefilteredRadiance(materialSurface, r, materialSurface.PerceptualRoughness, useLocalIBL, useDistantIBL);
+    
+    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    
+    float3 Fr = E * prefilteredRadiance(reflection, roughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
 
-    float3 diffuseIrradiance = max(irradianceSH(normal, environmentIndex, environmentBufferIndex), 0.0) * Fd_Lambert();
+    float3 diffuseIrradiance = max(irradianceSH(normalize(normal + bentNormal), environmentIndex, environmentBufferDescriptorIndex), 0.0) * Fd_Lambert();
     float3 Fd = diffuseColor * diffuseIrradiance * (1.0 - E) * diffuseAO;
     
-
-    
+    // TODO: Subsurface and clearcoat
     
     multiBounceAO(diffuseAO, diffuseColor, Fd);
-
-    return diffuseColor * diffuseIrradiance;
+    
+    float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);
+    multiBounceSpecularAO(specularAO, F0, Fr);
+    
+    combineDiffuseAndSpecular(normal, E, Fd, Fr, color);
+    debugDiffuse = Fd;
+    debugSpecular = Fr;
 }
 
 #endif // __IBL_HLSLI__
