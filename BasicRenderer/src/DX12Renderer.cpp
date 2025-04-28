@@ -57,6 +57,7 @@
 #include "Animation/AnimationController.h"
 #include "ThirdParty/XeGTAO.h"
 #include "Managers/EnvironmentManager.h"
+#include "Render/TonemapTypes.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -268,7 +269,8 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
-	settingsManager.registerSetting<unsigned int>("outputType", 0);
+	settingsManager.registerSetting<unsigned int>("outputType", OutputType::COLOR);
+	settingsManager.registerSetting<unsigned int>("tonemapType", TonemapType::REINHARD_JODIE);
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", true);
@@ -311,6 +313,9 @@ void DX12Renderer::SetSettings() {
 		});
 	settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
+		});
+	settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
+		ResourceManager::GetInstance().SetTonemapType(newValue);
 		});
 	settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
 		ToggleMeshShaders(newValue);

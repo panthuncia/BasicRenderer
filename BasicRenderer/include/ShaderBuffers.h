@@ -46,6 +46,9 @@ struct PerFrameCB {
 	unsigned int lightClusterGridSizeZ;
     unsigned int nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
+
+    unsigned int tonemapType;
+    unsigned int pad[3];
 };
 
 struct PerObjectCB {

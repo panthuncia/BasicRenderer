@@ -199,7 +199,7 @@ float2 PrefilteredDFG_LUT(float lod, float NoV)
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     Texture2D<float2> DFGLUT = ResourceDescriptorHeap[perFrameBuffer.environmentBRDFLUTIndex];
     SamplerState g_samplerLinearClamp = SamplerDescriptorHeap[perFrameBuffer.environmentBRDFLUTSamplerIndex];
-    return DFGLUT.SampleLevel(g_samplerLinearClamp, float2(NoV, 1.0 - lod), 0.0);
+    return DFGLUT.Sample(g_samplerLinearClamp, float2(NoV, 1.0 - lod));
 }
 
 //------------------------------------------------------------------------------

@@ -439,6 +439,8 @@ public:
 	void SetEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
 	void SetEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
+    void SetTonemapType(unsigned int type) { perFrameCBData.tonemapType = type; }
+
 	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
     
 private:

@@ -18,6 +18,7 @@
 #include "Render/OutputTypes.h"
 #include "Import/ModelLoader.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Render/TonemapTypes.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -58,6 +59,7 @@ private:
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
+    void DrawTonemapTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
     void DisplaySceneNode(flecs::entity node, bool isOnlyChild);
@@ -87,6 +89,7 @@ private:
 	std::function<void(bool)> setShadowsEnabled;
 
 	std::function<void(unsigned int)> setOutputType;
+    std::function<void(unsigned int)> setTonemapType;
 
     bool meshShaderEnabled = false;
     bool indirectDrawsWereEnabled = false;
@@ -194,6 +197,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         });
 
 	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
+	setTonemapType = settingsManager.getSettingSetter<unsigned int>("tonemapType");
 
     getSceneRoot = settingsManager.getSettingGetter<std::function<flecs::entity()>>("getSceneRoot")();
 
@@ -290,6 +294,8 @@ inline void Menu::Render(const RenderContext& context) {
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
 		}
+        DrawTonemapTypeDropdown();
+
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();
@@ -401,6 +407,23 @@ inline void Menu::DrawOutputTypeDropdown() {
 				ImGui::SetItemDefaultFocus();
 		}
 		ImGui::EndCombo();
+
+    }
+}
+
+inline void Menu::DrawTonemapTypeDropdown() {
+    static int selectedItemIndex = 0;
+    if (ImGui::BeginCombo("Tonemap Type", TonemapTypeNames[selectedItemIndex].c_str())) {
+        for (int i = 0; i < TonemapTypeNames.size(); ++i) {
+            bool isSelected = (selectedItemIndex == i);
+            if (ImGui::Selectable(TonemapTypeNames[i].c_str(), isSelected)) {
+                selectedItemIndex = i;
+                setTonemapType(i);
+            }
+            if (isSelected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
 
     }
 }

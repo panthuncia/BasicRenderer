@@ -276,7 +276,23 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
         outColor = outColor + srcColor * (1.0f - outColor.a);
     }
 
-    outColor.xyz = reinhardJodie(outColor.xyz);
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    
+    switch (perFrameBuffer.tonemapType)
+    {
+        case TONEMAP_REINHARD_JODIE:
+            outColor.xyz = reinhardJodie(outColor.xyz);
+            break;
+        case TONEMAP_KRONOS_PBR_NEUTRAL:
+            outColor.xyz = toneMap_KhronosPbrNeutral(outColor.xyz);
+            break;
+        case TONEMAP_ACES_HILL:
+            outColor.xyz = toneMapACES_Hill(outColor.xyz);
+            break;
+        default:
+            break;
+    }
+    
     outColor.xyz = LinearToSRGB(outColor.xyz);
 
     return outColor;

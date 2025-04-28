@@ -129,7 +129,8 @@ void
 [earlydepthstencil]
 float4 
 #endif
-PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
+PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
+{
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     uint meshBufferIndex = perMeshBufferIndex;
@@ -137,9 +138,9 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
 #if defined(PSO_SHADOW)
-    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
+#if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
         return;
-    #endif // DOUBLE_SIDED
+#endif // DOUBLE_SIDED
     if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
         Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
         SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
@@ -166,10 +167,21 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
 
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
     
-    // Reinhard tonemapping
-    float3 lighting = reinhardJodie(lightingOutput.lighting);
-    //lighting = toneMap_KhronosPbrNeutral(lighting);
-    //lighting = toneMapACES_Hill(lighting);
+    float3 lighting;
+    switch (perFrameBuffer.tonemapType)
+    {
+        case TONEMAP_REINHARD_JODIE:
+            lighting = reinhardJodie(lightingOutput.lighting);
+            break;
+        case TONEMAP_KRONOS_PBR_NEUTRAL:
+            lighting = toneMap_KhronosPbrNeutral(lightingOutput.lighting);
+            break;
+        case TONEMAP_ACES_HILL:
+            lighting = toneMapACES_Hill(lightingOutput.lighting);
+            break;
+        default:
+            lighting = lightingOutput.lighting;
+    }
     lighting = LinearToSRGB(lighting);
     
     switch (perFrameBuffer.outputType) {

@@ -135,6 +135,7 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     combineDiffuseAndSpecular(normal, E, Fd, Fr, color);
     debugDiffuse = Fd;
     debugSpecular = Fr;
+    //color = F0;
 }
 
 #endif // __IBL_HLSLI__

@@ -57,6 +57,9 @@ struct PerFrameBuffer {
     uint lightClusterGridSizeZ;
     uint nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
+    
+    uint tonemapType;
+    uint pad[3];
 };
 
 struct BoundingSphere {
