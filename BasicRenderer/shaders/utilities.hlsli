@@ -261,7 +261,10 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.roughnessUnclamped = PerceptualRoughnessToRoughness(ret.perceptualRoughnessUnclamped);
     
     ret.viewWS = viewWS;
-    ret.NdotV = dot(ret.normalWS, viewWS);
+    //ret.NdotV = dot(ret.normalWS, viewWS);
+    ret.NdotV = dot(ret.normalWS, ret.viewWS);
+    ret.normalWS = normalize(ret.normalWS + max(0, -ret.NdotV + MIN_N_DOT_V) * ret.viewWS);
+    ret.NdotV = max(MIN_N_DOT_V, ret.NdotV);
     ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
     
     ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
@@ -294,8 +297,13 @@ void GetFragmentInfoDirectTransparent(in PSInput input, in float3 viewWS, out Fr
     ret.roughness = PerceptualRoughnessToRoughness(ret.perceptualRoughness);
     ret.roughnessUnclamped = PerceptualRoughnessToRoughness(ret.perceptualRoughnessUnclamped);
 
+    ret.normalWS = materialInfo.normalWS;
     ret.viewWS = viewWS;
-    ret.NdotV = dot(ret.normalWS, viewWS);
+    //ret.NdotV = dot(ret.normalWS, viewWS);
+    ret.NdotV = dot(ret.normalWS, ret.viewWS);
+    ret.normalWS = normalize(ret.normalWS + max(0, -ret.NdotV + MIN_N_DOT_V) * ret.viewWS);
+    ret.NdotV = max(MIN_N_DOT_V, ret.NdotV);
+    
     ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
     
     ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
@@ -303,7 +311,6 @@ void GetFragmentInfoDirectTransparent(in PSInput input, in float3 viewWS, out Fr
     ret.diffuseColor = computeDiffuseColor(materialInfo.albedo, ret.metallic);
     ret.albedo = materialInfo.albedo;
     ret.alpha = materialInfo.opacity;
-    ret.normalWS = materialInfo.normalWS;
     ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion; // Screen-space AO not applied to transparent objects
     
     ret.reflectance = 0.35; // This is a default value for the reflectance of dielectrics, similar to setting an F0 directly. Ideally, each material should have its own reflectance value.

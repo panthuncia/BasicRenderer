@@ -841,7 +841,6 @@ void PSOManager::createRootSignature() {
     pointClamp.MipLODBias     = 0;
     pointClamp.MaxAnisotropy  = 0;
     pointClamp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-    pointClamp.BorderColor    = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
     pointClamp.MinLOD         = 0;
     pointClamp.MaxLOD         = D3D12_FLOAT32_MAX;
     pointClamp.ShaderRegister = 0;

@@ -132,7 +132,8 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInp
                 fragmentInfo.DFG, 
                 fragmentInfo.F0, 
                 fragmentInfo.reflectedWS, 
-                fragmentInfo.roughness, 
+                fragmentInfo.roughness,
+                fragmentInfo.perceptualRoughness,
                 fragmentInfo.NdotV,
                 activeEnvironmentIndex, 
                 environmentBufferDescriptorIndex);

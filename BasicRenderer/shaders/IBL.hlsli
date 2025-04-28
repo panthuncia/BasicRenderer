@@ -111,7 +111,7 @@ void combineDiffuseAndSpecular(const float3 n, const float3 E, const float3 Fd, 
 #endif
 }
 
-void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 debugSpecular, float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float2 DFG, float3 F0, float3 reflection, float roughness, float NdotV, in const uint environmentIndex, in const uint environmentBufferDescriptorIndex)
+void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 debugSpecular, float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float2 DFG, float3 F0, float3 reflection, float roughness, float perceptualRoughness, float NdotV, in const uint environmentIndex, in const uint environmentBufferDescriptorIndex)
 {
     
     // Specular
@@ -120,7 +120,7 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     
     StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
     
-    float3 Fr = E * prefilteredRadiance(reflection, roughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
+    float3 Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
 
     float3 diffuseIrradiance = max(irradianceSH(normalize(normal + bentNormal), environmentIndex, environmentBufferDescriptorIndex), 0.0) * Fd_Lambert();
     float3 Fd = diffuseColor * diffuseIrradiance * (1.0 - E) * diffuseAO;
