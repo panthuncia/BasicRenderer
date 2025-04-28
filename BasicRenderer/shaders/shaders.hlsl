@@ -105,14 +105,20 @@ struct PrePassPSOutput
 PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 {
     
-    MaterialLightingValues fragmentInfo;
+    MaterialInputs fragmentInfo;
     GetMaterialInfoForFragment(input, fragmentInfo);
     
+#if defined(PSO_DOUBLE_SIDED)
+    if (!isFrontFace) {
+        fragmentInfo.normalWS = -fragmentInfo.normalWS;
+    }
+#endif    
+
     float3 outNorm = SignedOctEncode(fragmentInfo.normalWS);
     
     PrePassPSOutput output;
     output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
-    output.albedo = float4(fragmentInfo.albedo.xyz, 1.0);
+    output.albedo = float4(fragmentInfo.albedo.xyz, fragmentInfo.ambientOcclusion);
     output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);
     return output;
 }
@@ -130,8 +136,8 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
-#if defined(PSO_SHADOW) || defined(PSO_PREPASS) // Alpha tested shadows
-    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND) && !defined(PSO_PREPASS)
+#if defined(PSO_SHADOW)
+    #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
         return;
     #endif // DOUBLE_SIDED
     if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
@@ -146,13 +152,8 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     if (materialInfo.baseColorFactor.a < 0.5){
         discard;
     }
-#if defined(PSO_PREPASS)
-    float3 outNorm = normalize(input.normalWorldSpace);
-    outNorm = SignedOctEncode(outNorm);
-    return float4(0, outNorm.x, outNorm.y, outNorm.z);
-#endif // PSO_PREPASS
-#endif // PSO_SHADOW || PSO_PREPASS
-#if !defined(PSO_SHADOW) && !defined(PSO_PREPASS)
+#endif // PSO_SHADOW
+#if !defined(PSO_SHADOW)
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     
@@ -161,7 +162,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
     
     FragmentInfo fragmentInfo;
-    GetFragmentInfoScreenSpace(input.position.xy, enableGTAO, fragmentInfo);
+    GetFragmentInfoScreenSpace(input.position.xy, viewDir, enableGTAO, fragmentInfo);
 
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
     
@@ -191,7 +192,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET {
                 }
             }
         case OUTPUT_AO:
-            return float4(fragmentInfo.ambientOcclusion, fragmentInfo.ambientOcclusion, fragmentInfo.ambientOcclusion, 1.0);
+            return float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, 1.0);
         case OUTPUT_DEPTH:{
                 float depth = abs(input.positionViewSpace.z)*0.1;
                 return float4(depth, depth, depth, 1.0);

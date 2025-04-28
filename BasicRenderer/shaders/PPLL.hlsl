@@ -103,7 +103,7 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
                 break;
             }
         case OUTPUT_AO:
-            finalOutput = float4(fragmentInfo.ambientOcclusion, fragmentInfo.ambientOcclusion, fragmentInfo.ambientOcclusion, fragmentInfo.alpha);
+            finalOutput = float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.alpha);
             break;
         case OUTPUT_DEPTH:{
                 float depth = abs(input.positionViewSpace.z) * 0.1;

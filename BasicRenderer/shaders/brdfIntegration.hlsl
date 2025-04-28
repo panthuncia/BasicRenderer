@@ -92,8 +92,8 @@ float2 IntegrateBRDF(float NdotV, float roughness) {
             float G_Vis = (G * VdotH) / (NdotH * NdotV);
             float Fc = pow(1.0 - VdotH, 5.0);
 
-            A += (1.0 - Fc) * G_Vis;
-            B += Fc * G_Vis;
+            A += Fc * G_Vis;
+            B += G_Vis;
         }
     }
     A /= float(SAMPLE_COUNT);

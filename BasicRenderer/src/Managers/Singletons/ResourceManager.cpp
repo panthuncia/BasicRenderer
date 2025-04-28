@@ -452,6 +452,16 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 			colorClearValue.Color[0] = 0.0f;
 			colorClearValue.Color[1] = 0.0f;
 			colorClearValue.Color[2] = 0.0f;
+			colorClearValue.Color[3] = 1.0f;
+		}
+		else if (desc.channels == 2) {
+			colorClearValue.Color[0] = 0.0f;
+			colorClearValue.Color[1] = 0.0f;
+			colorClearValue.Color[2] = 0.0f;
+			colorClearValue.Color[3] = 1.0f;
+		}
+		else {
+			assert(false && "Unsupported number of channels for color clear value");
 		}
 		clearValue = &colorClearValue;
 	}

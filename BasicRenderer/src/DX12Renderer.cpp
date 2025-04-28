@@ -1082,7 +1082,7 @@ void DX12Renderer::CreateRenderGraph() {
 			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-    zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, getWireframeEnabled(), useMeshShaders, indirect);
+    zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, getWireframeEnabled(), useMeshShaders, indirect);
 
     auto debugPassParameters = RenderPassParameters();
 

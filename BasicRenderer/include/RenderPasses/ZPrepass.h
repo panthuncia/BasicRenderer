@@ -20,8 +20,18 @@
 
 class ZPrepass : public RenderPass {
 public:
-    ZPrepass(std::shared_ptr<GloballyIndexedResource> pNormals, std::shared_ptr<GloballyIndexedResource> pAlbedo, bool wireframe, bool meshShaders, bool indirect)
-        : m_pNormals(pNormals), m_pAlbedo(pAlbedo), m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+    ZPrepass(std::shared_ptr<GloballyIndexedResource> pNormals,
+        std::shared_ptr<GloballyIndexedResource> pAlbedo,
+        std::shared_ptr<GloballyIndexedResource> pMetallicRoughness, 
+        bool wireframe,
+        bool meshShaders,
+        bool indirect)
+        : m_pNormals(pNormals),
+        m_pAlbedo(pAlbedo), 
+		m_pMetallicRoughness(pMetallicRoughness),
+        m_wireframe(wireframe),
+        m_meshShaders(meshShaders),
+        m_indirect(indirect) {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
@@ -65,6 +75,10 @@ public:
 		auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
         const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f};
 		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		auto& rtvHandle2 = m_pAlbedo->GetRTVInfos()[0].cpuHandle;
+		commandList->ClearRenderTargetView(rtvHandle2, clearColor, 0, nullptr);
+		auto& rtvHandle3 = m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle;
+		commandList->ClearRenderTargetView(rtvHandle3, clearColor, 0, nullptr);
         auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
         commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
@@ -111,8 +125,8 @@ private:
 
         // Render targets
 		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
-        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[2] = {m_pNormals->GetRTVInfos()[0].cpuHandle, m_pAlbedo->GetRTVInfos()[0].cpuHandle};
-        commandList->OMSetRenderTargets(2, rtvHandles, FALSE, &dsvHandle);
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[3] = {m_pNormals->GetRTVInfos()[0].cpuHandle, m_pAlbedo->GetRTVInfos()[0].cpuHandle, m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle};
+        commandList->OMSetRenderTargets(3, rtvHandles, FALSE, &dsvHandle);
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -291,6 +305,7 @@ private:
 private:
     std::shared_ptr<GloballyIndexedResource> m_pNormals;
 	std::shared_ptr<GloballyIndexedResource> m_pAlbedo;
+	std::shared_ptr<GloballyIndexedResource> m_pMetallicRoughness;
     flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
     flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;

@@ -6,6 +6,7 @@
 #include "materialFlags.hlsli"
 #include "parallax.hlsli"
 #include "gammaCorrection.hlsli"
+#include "constants.hlsli"
 
 // Basic blinn-phong for uint visualization
 float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {
@@ -80,16 +81,17 @@ float3x3 cotangent_frame(float3 N, float3 p, float2 uv)
     return float3x3(T * invmax, B * invmax, N);
 }
 
-struct MaterialLightingValues
+struct MaterialInputs
 {
     float3 albedo;
     float3 normalWS;
     float metallic;
     float roughness;
     float opacity;
+    float ambientOcclusion;
 };
 
-void GetMaterialInfoForFragment(in const PSInput input, out MaterialLightingValues ret)
+void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
 {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     uint meshBufferIndex = perMeshBufferIndex;
@@ -176,14 +178,56 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialLightingValu
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }
     
+    float ao = 1.0;
+    if (materialInfo.materialFlags & MATERIAL_AO_TEXTURE)
+    {
+        Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
+        SamplerState aoSamplerState = SamplerDescriptorHeap[materialInfo.aoSamplerIndex];
+        ao = aoTexture.Sample(aoSamplerState, uv).r;
+    }
+    
     ret.albedo = baseColor.rgb;
     ret.normalWS = normalWS;
     ret.metallic = metallic;
     ret.roughness = roughness;
     ret.opacity = baseColor.a;
+    ret.ambientOcclusion = ao;
 }
 
-void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in bool enableGTAO, out FragmentInfo ret) {
+float2 PrefilteredDFG_LUT(float lod, float NoV)
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    Texture2D<float2> DFGLUT = ResourceDescriptorHeap[perFrameBuffer.environmentBRDFLUTIndex];
+    SamplerState g_samplerLinearClamp = SamplerDescriptorHeap[perFrameBuffer.environmentBRDFLUTSamplerIndex];
+    return DFGLUT.SampleLevel(g_samplerLinearClamp, float2(NoV, 1.0 - lod), 0.0);
+}
+
+//------------------------------------------------------------------------------
+// IBL environment BRDF dispatch
+//------------------------------------------------------------------------------
+
+float2 prefilteredDFG(float perceptualRoughness, float NoV)
+{
+    // PrefilteredDFG_LUT() takes a LOD, which is sqrt(roughness) = perceptualRoughness
+    return PrefilteredDFG_LUT(perceptualRoughness, NoV);
+}
+
+float PerceptualRoughnessToRoughness(float perceptualRoughness)
+{
+    return perceptualRoughness * perceptualRoughness;
+}
+
+float3 computeF0(const float4 baseColor, float metallic, float reflectance)
+{
+    return baseColor.rgb * metallic + (reflectance * (1.0 - metallic));
+}
+
+float computeDielectricF0(float reflectance)
+{
+    return 0.16 * reflectance * reflectance;
+}
+
+void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in bool enableGTAO, out FragmentInfo ret) {
     // Gather textures
     Texture2D<float4> normalsTexture = ResourceDescriptorHeap[normalsTextureDescriptorIndex];
     
@@ -191,30 +235,51 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in bool enableGTAO, o
     float4 encodedNormal = normalsTexture[pixelCoordinates];
     ret.normalWS = SignedOctDecode(encodedNormal.yzw);
     
-    if (enableGTAO) {
-        Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
-        ret.ambientOcclusion = float(aoTexture[pixelCoordinates].x) / 255.0;
-    }
-    else {
-        ret.ambientOcclusion = 1.0;
-    }
-    
     Texture2D<float4> albedoTexture = ResourceDescriptorHeap[albedoTextureDescriptorIndex];
-    float3 baseColor = albedoTexture[pixelCoordinates].xyz;
+    float4 baseColorSample = albedoTexture[pixelCoordinates];
+    
+    if (enableGTAO)
+    {
+        Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
+        ret.diffuseAmbientOcclusion = min(baseColorSample.w, float(aoTexture[pixelCoordinates].x) / 255.0);
+    }
+    else
+    {
+        ret.diffuseAmbientOcclusion = baseColorSample.w; // AO stored in alpha channel
+    }
     
     Texture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[metallicRoughnessTextureDescriptorIndex];
     float2 metallicRoughness = metallicRoughnessTexture[pixelCoordinates];
     
+    float perceptualRoughness = metallicRoughness.y;
+    ret.perceptualRoughnessUnclamped = perceptualRoughness;
+        // Clamp the roughness to a minimum value to avoid divisions by 0 during lighting
+    ret.perceptualRoughness = clamp(perceptualRoughness, MIN_PERCEPTUAL_ROUGHNESS, 1.0);
+        // Remaps the roughness to a perceptually linear roughness (roughness^2)
+    ret.roughness = PerceptualRoughnessToRoughness(ret.perceptualRoughness);
+    ret.roughnessUnclamped = PerceptualRoughnessToRoughness(ret.perceptualRoughnessUnclamped);
+    
+    ret.viewWS = viewWS;
+    ret.NdotV = dot(ret.normalWS, viewWS);
+    ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
+    
+    ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
+    
     ret.metallic = metallicRoughness.x;
-    ret.roughness = metallicRoughness.y;
-    ret.diffuseColor = computeDiffuseColor(baseColor, ret.metallic);
+    ret.diffuseColor = computeDiffuseColor(baseColorSample.xyz, ret.metallic);
     ret.alpha = 1.0; // Opaque objects
+    
+    ret.reflectance = 0.35; // This is a default value for the reflectance of dielectrics, similar to setting an F0 directly. Ideally, each material should have its own reflectance value.
+    // Assumes an interface from air to an IOR of 1.5 for dielectrics
+    ret.dielectricF0 = computeDielectricF0(ret.reflectance);
+    ret.F0 = computeF0(float4(baseColorSample.xyz, 1.0), ret.metallic, ret.dielectricF0); // base albedo, not the diffuse color
+    ret.dielectricF0 *= (1.0 - ret.metallic);
 }
 
 void GetFragmentInfoDirectTransparent(in PSInput input, out FragmentInfo ret)
 {
     
-    MaterialLightingValues materialInfo;
+    MaterialInputs materialInfo;
     GetMaterialInfoForFragment(input, materialInfo);
     
     ret.metallic = materialInfo.metallic;
@@ -222,7 +287,7 @@ void GetFragmentInfoDirectTransparent(in PSInput input, out FragmentInfo ret)
     ret.diffuseColor = computeDiffuseColor(materialInfo.albedo, ret.metallic);
     ret.alpha = materialInfo.opacity;
     ret.normalWS = materialInfo.normalWS;
-    ret.ambientOcclusion = 1.0; // Screen-space AO not applied to transparent objects
+    ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion; // Screen-space AO not applied to transparent objects
 }
 
 #endif // __UTILITY_HLSL__

@@ -222,10 +222,20 @@ struct FragmentInfo {
     float3 normalWS;
     float3 diffuseColor;
     float alpha;
-    float ambientOcclusion;
+    float diffuseAmbientOcclusion;
     float metallic;
+    float perceptualRoughnessUnclamped;
+    float perceptualRoughness;
     float roughness;
+    float roughnessUnclamped;
     float3 emissive;
+    float2 DFG;
+    float3 viewWS;
+    float NdotV;
+    float reflectance;
+    float dielectricF0;
+    float3 F0;
+    float3 reflectedWS;
 };
 
 struct EnvironmentInfo {

@@ -118,7 +118,17 @@ uint3 ComputeClusterID(float4 svPos, float viewDepth,
 
 LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInput input, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex, bool isFrontFace) {
     
-    float3 indirect = evaluateIBL(fragmentInfo.normalWS, fragmentInfo.diffuseColor, activeEnvironmentIndex, environmentBufferDescriptorIndex);
+    float3 indirect = evaluateIBL(
+                                fragmentInfo.normalWS, 
+                                fragmentInfo.normalWS, 
+                                fragmentInfo.diffuseColor, 
+                                fragmentInfo.diffuseAmbientOcclusion, 
+                                fragmentInfo.DFG, 
+                                fragmentInfo.F0, 
+                                fragmentInfo.reflectedWS, 
+                                fragmentInfo.roughness, 
+                                activeEnvironmentIndex, 
+                                environmentBufferDescriptorIndex);
     
     LightingOutput output;
     output.lighting = indirect;

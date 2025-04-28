@@ -22,11 +22,66 @@ float3 irradianceSH(float3 n, in const uint environmentIndex, in const uint envi
         
 }
 
-float3 evaluateIBL(float3 n, float3 diffuseColor, in const uint environmentIndex, in const uint environmentBufferIndex)
+/**
+ * Returns a color ambient occlusion based on a pre-computed visibility term.
+ * The albedo term is meant to be the diffuse color or f0 for the diffuse and
+ * specular terms respectively.
+ */
+float3 gtaoMultiBounce(float visibility, const float3 albedo)
 {
-    float3 indirectDiffuse = max(irradianceSH(n, environmentIndex, environmentBufferIndex), 0.0) * Fd_Lambert();
+    // Jimenez et al. 2016, "Practical Realtime Strategies for Accurate Indirect Occlusion"
+    float3 a = 2.0404 * albedo - 0.3324;
+    float3 b = -4.7951 * albedo + 0.6417;
+    float3 c = 2.7552 * albedo + 0.6903;
 
-    return diffuseColor * indirectDiffuse;
+    return max(float3(visibility.xxx), ((visibility * a + b) * visibility + c) * visibility);
+}
+
+void multiBounceAO(float visibility, const float3 albedo, inout float3 color)
+{
+//#if MULTI_BOUNCE_AMBIENT_OCCLUSION == 1 // Why would we not want this?
+    color *= gtaoMultiBounce(visibility, albedo);
+//#endif
+}
+
+float3 specularDFG(float2 DFG, float3 F0)
+{
+#if defined(SHADING_MODEL_CLOTH) // TODO: Other filament shading models
+    return materialSurface.F0 * materialSurface.DFG.z;
+#elif defined( SHADING_MODEL_SPECULAR_GLOSSINESS )
+    return materialSurface.F0; // this seems to match better what the spec-gloss looks like in general
+#else
+    return lerp(DFG.xxx, DFG.yyy, F0);
+#endif
+}
+
+float3 getSpecularDominantDirection(const float3 n, const float3 r, float roughness)
+{
+    return lerp(r, n, roughness * roughness);
+}
+
+float3 getReflectedVector(float3 r, const float3 n, float roughness)
+{
+    // Anisotropy will change R
+    return getSpecularDominantDirection(n, r, roughness);
+}
+
+float3 evaluateIBL(float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float2 DFG, float3 F0, float3 reflection, in float roughness, in const uint environmentIndex, in const uint environmentBufferIndex)
+{
+    // Specular
+    float3 E = specularDFG(DFG, F0); // Pre-calculated DFG term
+    float3 r = getReflectedVector(reflection, normal, roughness);
+    //Fr = E * prefilteredRadiance(materialSurface, r, materialSurface.PerceptualRoughness, useLocalIBL, useDistantIBL);
+
+    float3 diffuseIrradiance = max(irradianceSH(normal, environmentIndex, environmentBufferIndex), 0.0) * Fd_Lambert();
+    float3 Fd = diffuseColor * diffuseIrradiance * (1.0 - E) * diffuseAO;
+    
+
+    
+    
+    multiBounceAO(diffuseAO, diffuseColor, Fd);
+
+    return diffuseColor * diffuseIrradiance;
 }
 
 #endif // __IBL_HLSLI__
