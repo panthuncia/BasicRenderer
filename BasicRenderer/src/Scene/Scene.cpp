@@ -64,8 +64,10 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 	LightInfo lightInfo;
 	lightInfo.type = type;
 	lightInfo.posWorldSpace = XMLoadFloat3(&position);
-	lightInfo.color = XMVector3Normalize(XMLoadFloat3(&color));
-	lightInfo.color *= intensity;
+	DirectX::XMVECTOR lightColor = XMVector3Normalize(XMLoadFloat3(&color));
+	// Set W to intensity
+	lightColor = XMVectorSetW(lightColor, intensity);
+	lightInfo.color = lightColor;
 	float nearPlane = 0.01;
 	float farPlane = maxRange;
 	lightInfo.attenuation = normalizedAttenuationVec;

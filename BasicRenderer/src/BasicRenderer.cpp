@@ -291,9 +291,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
-    //auto bistro = LoadModel("models/BistroExterior.fbx");
+    auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto bistro = LoadModel("models/bistro.glb");
-    //bistro->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
+    bistro->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
 
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
@@ -322,15 +322,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //}
 
 	//auto sanMiguel = LoadModel("models/SanMiguel.fbx");
+	//sanMiguel->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     renderer.SetCurrentScene(baseScene);
 
     //renderer.GetCurrentScene()->AppendScene(sanMiguel->Clone());
 
     //mountainScene->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-	renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+	//renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+	//renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
@@ -341,16 +342,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-		renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+		//renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 		auto point = randomPointInSphere(50.0);
         tigerScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
-    auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    //auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
-	//renderer.GetCurrentScene()->AppendScene(bistro);
+	renderer.GetCurrentScene()->AppendScene(bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);
 
     //renderer.GetCurrentScene()->AppendScene(*street);
@@ -409,7 +410,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
-	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 1.0, XMFLOAT3(0, -1, 0));
+	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 10.0, XMFLOAT3(0, -1, -1));
  //   auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 10.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
     //auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 1.0, 0.0, 0.0, 1.0);
     

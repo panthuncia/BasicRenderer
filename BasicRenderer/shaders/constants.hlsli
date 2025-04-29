@@ -11,4 +11,8 @@
 
 #define MIN_N_DOT_V 1e-4
 
+#define MEDIUMP_FLT_MAX    65504.0
+#define saturateMediump(x) min(x, MEDIUMP_FLT_MAX)
+
+
 #endif //__CONSTANTS_HLSLI__

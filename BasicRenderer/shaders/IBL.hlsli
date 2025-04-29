@@ -100,27 +100,6 @@ void combineDiffuseAndSpecular(const float3 n, const float3 E, const float3 Fd, 
 #endif
 }
 
-// https://github.com/AcademySoftwareFoundation/MaterialX/blob/a578d8a9758f0a6eefc5a1a5c7ab10727ee11b2d/libraries/pbrlib/genglsl/lib/mx_microfacet_specular.glsl#L85
-// Rational quadratic fit to Monte Carlo data for GGX directional albedo.
-float3 mx_ggx_dir_albedo_analytic(float NdotV, float alpha, float3 F0, float3 F90)
-{
-    float x = NdotV;
-    float y = alpha;
-    float x2 = x * x;
-    float y2 = y * y;
-    float4 r = float4(0.1003, 0.9345, 1.0, 1.0) +
-             float4(-0.6303, -2.323, -1.765, 0.2281) * x +
-             float4(9.748, 2.229, 8.263, 15.94) * y +
-             float4(-2.038, -3.748, 11.53, -55.83) * x * y +
-             float4(29.34, 1.424, 28.96, 13.08) * x2 +
-             float4(-8.245, -0.7684, -7.507, 41.26) * y2 +
-             float4(-26.44, 1.436, -36.11, 54.9) * x2 * y +
-             float4(19.99, 0.2913, 15.86, 300.2) * x * y2 +
-             float4(-5.448, 0.6286, 33.37, -285.1) * x2 * y2;
-    float2 AB = clamp(r.xy / r.zw, 0.0, 1.0);
-    return F0 * AB.x + F90 * AB.y;
-}
-
 void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 debugSpecular, float3 normal, float3 bentNormal, float3 diffuseColor, float diffuseAO, float3 F0, float3 reflection, float roughness, float perceptualRoughness, float NdotV, in const uint environmentIndex, in const uint environmentBufferDescriptorIndex)
 {
     

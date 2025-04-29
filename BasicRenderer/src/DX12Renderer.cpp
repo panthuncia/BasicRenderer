@@ -1076,6 +1076,13 @@ void DX12Renderer::CreateRenderGraph() {
 	metallicRoughness->SetName(L"Metallic Roughness");
 	newGraph->AddResource(metallicRoughness, false, ResourceState::RENDER_TARGET);
 
+	TextureDescription UVTextureDesc;
+    UVTextureDesc.arraySize = 1;
+    UVTextureDesc.channels = 2;
+    UVTextureDesc.isCubemap = false;
+    UVTextureDesc.hasRTV = true;
+    UVTextureDesc.format = DXGI_FORMAT_R16G16_FLOAT;
+
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
         .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness)
@@ -1348,7 +1355,7 @@ void DX12Renderer::CreateRenderGraph() {
 		debugPass->SetTexture(m_currentDebugTexture.get());
 		//debugPassParameters.shaderResources.push_back(m_shadowMaps);
 	}
-    newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
+    //newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
 
     if (getDrawBoundingSpheres()) {
         auto debugSpherePass = std::make_shared<DebugSpherePass>();

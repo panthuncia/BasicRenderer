@@ -240,6 +240,9 @@ struct FragmentInfo {
     float dielectricF0;
     float3 F0;
     float3 reflectedWS;
+    uint heightMapIndex;
+    uint heightMapSamplerIndex;
+    uint materialFlags;
 };
 
 struct EnvironmentInfo {
