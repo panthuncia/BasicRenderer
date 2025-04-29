@@ -14,19 +14,28 @@
 #include "Resources/TextureDescription.h"
 #include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Managers/ObjectManager.h"
 
-class PPLLResolvePass : public RenderPass {
+class DeferredRenderPass : public RenderPass {
 public:
-	PPLLResolvePass(std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer) {
+	DeferredRenderPass(
+		int aoTextureDescriptorIndex,
+		int normalsTextureDescriptorIndex,
+		unsigned int albedoTextureDescriptorIndex,
+		unsigned int metallicRoughnessTextureDescriptorIndex,
+		unsigned int depthBufferDescriptorIndex) : 
+		m_aoTextureDescriptorIndex(aoTextureDescriptorIndex),
+		m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex), 
+		m_albedoTextureDescriptorIndex(albedoTextureDescriptorIndex),
+		m_metallicRoughnessTextureDescriptorIndex(metallicRoughnessTextureDescriptorIndex),
+		m_depthBufferDescriptorIndex(depthBufferDescriptorIndex) {
 
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-
-		m_PPLLHeadPointerTexture = PPLLHeads;
-		m_PPLLBuffer = PPLLBuffer;
 	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
@@ -89,6 +98,8 @@ public:
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
 		auto& cameraManager = context.cameraManager;
+		auto& lightManager = context.lightManager;
+
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
 		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
@@ -97,22 +108,26 @@ public:
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
-
-		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo()[0].index;
-		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo()[0].index;
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
-
+		staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
+		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
+		staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureDescriptorIndex;
+		staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureDescriptorIndex;
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
+
+		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
+		lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo()[0].index;
+		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo()[0].index;
+		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
+
+		unsigned int misc[NumMiscUintRootConstants] = {};
+		misc[0] = m_depthBufferDescriptorIndex;
+
+		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
-
-		// PPLL heads & buffer
-		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo()[0].index, m_PPLLBuffer->GetSRVInfo()[0].index };
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 2, &indices, 0);
 
 		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
 
@@ -129,23 +144,26 @@ private:
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> pso;
 
-	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
-	std::shared_ptr<Buffer> m_PPLLBuffer;
-
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
+
+	unsigned int m_aoTextureDescriptorIndex;
+	unsigned int m_normalsTextureDescriptorIndex;
+	unsigned int m_albedoTextureDescriptorIndex;
+	unsigned int m_metallicRoughnessTextureDescriptorIndex;
+	unsigned int m_depthBufferDescriptorIndex;
 
 	void CreatePSO() {
 		// Compile shaders
 		Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
 		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"VSMain", L"vs_6_6", {}, vertexShader);
-		PSOManager::GetInstance().CompileShader(L"shaders/PPLL.hlsl", L"PPLLResolvePS", L"ps_6_6", {}, pixelShader);
+		PSOManager::GetInstance().CompileShader(L"shaders/PPLL.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
+		PSOManager::GetInstance().CompileShader(L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6", {}, pixelShader);
 
 		static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 		};
 
 		D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};

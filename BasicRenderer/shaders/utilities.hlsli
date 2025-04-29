@@ -209,7 +209,11 @@ float computeDielectricF0(float reflectance)
     return 0.16 * reflectance * reflectance;
 }
 
-void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in bool enableGTAO, out FragmentInfo ret) {
+void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in float3 fragPosViewSpace, in float3 fragPosWorldSpace, in bool enableGTAO, out FragmentInfo ret) {
+    ret.pixelCoords = pixelCoordinates;
+    ret.fragPosViewSpace = fragPosViewSpace;
+    ret.fragPosWorldSpace = fragPosWorldSpace;
+    
     // Gather textures
     Texture2D<float4> normalsTexture = ResourceDescriptorHeap[normalsTextureDescriptorIndex];
     
@@ -236,9 +240,9 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     
     float perceptualRoughness = metallicRoughness.y;
     ret.perceptualRoughnessUnclamped = perceptualRoughness;
-        // Clamp the roughness to a minimum value to avoid divisions by 0 during lighting
+    // Clamp the roughness to a minimum value to avoid divisions by 0 during lighting
     ret.perceptualRoughness = clamp(perceptualRoughness, MIN_PERCEPTUAL_ROUGHNESS, 1.0);
-        // Remaps the roughness to a perceptually linear roughness (roughness^2)
+    // Remaps the roughness to a perceptually linear roughness (roughness^2)
     ret.roughness = PerceptualRoughnessToRoughness(ret.perceptualRoughness);
     ret.roughnessUnclamped = PerceptualRoughnessToRoughness(ret.perceptualRoughnessUnclamped);
     
@@ -264,8 +268,11 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.emissive = float3(0.0, 0.0, 0.0); // TODO
 }
 
-void GetFragmentInfoDirectTransparent(in PSInput input, in float3 viewWS, out FragmentInfo ret)
+void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, bool transparent, bool isFrontFace, out FragmentInfo ret)
 {
+    ret.pixelCoords = input.position.xy;
+    ret.fragPosViewSpace = input.positionViewSpace.xyz;
+    ret.fragPosWorldSpace = input.positionWorldSpace.xyz;
     
     MaterialInputs materialInfo;
     GetMaterialInfoForFragment(input, materialInfo);
@@ -280,6 +287,12 @@ void GetFragmentInfoDirectTransparent(in PSInput input, in float3 viewWS, out Fr
     ret.roughnessUnclamped = PerceptualRoughnessToRoughness(ret.perceptualRoughnessUnclamped);
 
     ret.normalWS = materialInfo.normalWS;
+#if defined (PSO_DOUBLE_SIDED)
+        if (!isFrontFace) {
+            ret.normalWS = -ret.normalWS;
+        }
+#endif
+    
     ret.viewWS = viewWS;
     //ret.NdotV = dot(ret.normalWS, viewWS);
     ret.NdotV = dot(ret.normalWS, ret.viewWS);
@@ -292,8 +305,19 @@ void GetFragmentInfoDirectTransparent(in PSInput input, in float3 viewWS, out Fr
     
     ret.diffuseColor = computeDiffuseColor(materialInfo.albedo, ret.metallic);
     ret.albedo = materialInfo.albedo;
-    ret.alpha = materialInfo.opacity;
-    ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion; // Screen-space AO not applied to transparent objects
+    if (transparent) {
+        ret.alpha = materialInfo.opacity;
+        ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion; // Screen-space AO not applied to transparent objects
+    } else {
+        ret.alpha = 1.0; // Opaque objects
+        if (enableGTAO) {
+            float2 pixelCoordinates = input.position.xy;
+            Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
+            ret.diffuseAmbientOcclusion = min(materialInfo.ambientOcclusion, float(aoTexture[pixelCoordinates].x) / 255.0);
+        } else {
+            ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion;
+        }
+    }
     
     ret.reflectance = 0.35; // This is a default value for the reflectance of dielectrics, similar to setting an F0 directly. Ideally, each material should have its own reflectance value.
     // Assumes an interface from air to an IOR of 1.5 for dielectrics

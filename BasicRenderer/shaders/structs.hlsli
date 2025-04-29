@@ -222,6 +222,9 @@ struct GTAOInfo {
 };
 
 struct FragmentInfo {
+    float2 pixelCoords;
+    float3 fragPosWorldSpace;
+    float3 fragPosViewSpace;
     float3 normalWS;
     float3 diffuseColor;
     float3 albedo;

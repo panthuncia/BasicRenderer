@@ -8,6 +8,7 @@
 #include "gammaCorrection.hlsli"
 #include "outputTypes.hlsli"
 #include "MaterialFlags.hlsli"
+#include "fullscreenVS.hlsli"
 
 PSInput VSMain(uint vertexID : SV_VertexID) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
@@ -163,9 +164,9 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
     
     FragmentInfo fragmentInfo;
-    GetFragmentInfoScreenSpace(input.position.xy, viewDir, enableGTAO, fragmentInfo);
+    GetFragmentInfoDirect(input, viewDir, enableGTAO, false, isFrontFace, fragmentInfo);
 
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
     
     float3 lighting;
     switch (perFrameBuffer.tonemapType)
@@ -231,4 +232,62 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
             return float4(1.0, 0.0, 0.0, 1.0);
     }
 #endif // PSO_SHADOW
+}
+
+void ReconstructViewPos(in float4 pos,
+                          float rawDepth,
+                          float4x4 invProj,
+                          float2 viewportSize, 
+                          out float3 posViewSpace)
+{
+    float2 uv = pos.xy / viewportSize;
+    float2 ndcXY = uv * 2.0f - 1.0f;
+    ndcXY = pos.xy / pos.w;
+
+    // rebuild clip space Z and W
+    float clipZ = rawDepth * 2.0f - 1.0f;
+    float4 clipPos = float4(ndcXY, clipZ, 1.0f);
+
+    // unproject into view space
+    float4 viewPosH = mul(invProj, clipPos);
+
+    // do the perspective divide
+    viewPosH.xyz /= viewPosH.w;
+    posViewSpace = viewPosH.xyz;
+}
+
+void ReconstructWorldPos(in float4 pos,
+                           float rawDepth,
+                           float4x4 invProj,
+                           float4x4 invView,
+                           float2 viewportSize,
+                           out float3 posViewSpace,
+                           out float3 posWorldSpace)
+{
+    ReconstructViewPos(pos, rawDepth, invProj, viewportSize, posViewSpace);
+
+    // bring it into world space
+    posWorldSpace = mul(invView, float4(posViewSpace, 1.0f)).xyz;
+}
+
+float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input)
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    
+    Texture2D<float> depthTexture = ResourceDescriptorHeap[UintRootConstant0];
+    float depth = depthTexture[input.position.xy];
+    
+    float3 fragPosViewSpace;
+    float3 fragPosWorldSpace;
+    ReconstructWorldPos(input.position, depth, mainCamera.projectionInverse, transpose(mainCamera.view), float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY), fragPosViewSpace, fragPosWorldSpace);
+    
+    float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - fragPosWorldSpace.xyz);
+    
+    FragmentInfo fragmentInfo;
+    GetFragmentInfoScreenSpace(input.position.xy, viewDir, fragPosViewSpace, fragPosWorldSpace, enableGTAO, fragmentInfo);
+    
+    return float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
 }

@@ -118,6 +118,10 @@ private:
 	std::function<bool()> getClusteredLightingEnabled;
 	std::function<void(bool)> setClusteredLightingEnabled;
 
+	bool deferredRendering = true;
+	std::function<bool()> getDeferredRenderingEnabled;
+	std::function<void(bool)> setDeferredRenderingEnabled;
+
 	bool m_gtaoEnabled = true;
 	std::function<bool()> getGTAOEnabled;
 	std::function<void(bool)> setGTAOEnabled;
@@ -225,6 +229,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getClusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting");
 	clusteredLighting = getClusteredLightingEnabled();
 
+	setDeferredRenderingEnabled = settingsManager.getSettingSetter<bool>("enableDeferredRendering");
+	getDeferredRenderingEnabled = settingsManager.getSettingGetter<bool>("enableDeferredRendering");
+	deferredRendering = getDeferredRenderingEnabled();
+
 	getGTAOEnabled = settingsManager.getSettingGetter<bool>("enableGTAO");
 	setGTAOEnabled = settingsManager.getSettingSetter<bool>("enableGTAO");
 	m_gtaoEnabled = getGTAOEnabled();
@@ -291,6 +299,9 @@ inline void Menu::Render(const RenderContext& context) {
         if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
 			setClusteredLightingEnabled(clusteredLighting);
         }
+		if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
+			setDeferredRenderingEnabled(deferredRendering);
+		}
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
 		}

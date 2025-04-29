@@ -4,6 +4,7 @@
 #include "tonemapping.hlsli"
 #include "outputTypes.hlsli"
 #include "utilities.hlsli"
+#include "fullscreenVS.hlsli"
 
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
@@ -58,9 +59,9 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
 
     // Light fragment
     FragmentInfo fragmentInfo;
-    GetFragmentInfoDirectTransparent(input, viewDir, fragmentInfo);
+    GetFragmentInfoDirect(input, viewDir, enableGTAO, true, isFrontFace, fragmentInfo);
     
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
 
     
     // Fill the PPLL buffers with the fragment data
@@ -139,18 +140,6 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(finalOutput.rgb, finalOutput.a), input.position.z, LinkedListUAV);
 }
 
-//Resolve vertex Shader
-struct VS_OUTPUT {
-    float4 position : SV_POSITION;
-    float2 uv : TEXCOORD1;
-};
-VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0) {
-    VS_OUTPUT output;
-    output.position = float4(pos, 1.0f);
-    output.uv = uv;
-    return output;
-}
-
 struct KBUFFER_STRUCT {
     float depth;
     float4 color;
@@ -179,7 +168,7 @@ void SortNearest(inout KBUFFER_STRUCT fragments[K_NEAREST]) {
     }
 }
 
-float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
+float4 PPLLResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target {
     
     Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
     StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];

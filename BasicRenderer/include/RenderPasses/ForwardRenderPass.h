@@ -23,17 +23,11 @@ public:
     ForwardRenderPass(bool wireframe,
         bool meshShaders,
         bool indirect,
-        int aoTextureDescriptorIndex,
-        int normalsTextureDescriptorIndex,
-        unsigned int albedoTextureDescriptorIndex,
-        unsigned int metallicRoughnessTextureDescriptorIndex)
+        int aoTextureDescriptorIndex)
         : m_wireframe(wireframe), 
         m_meshShaders(meshShaders), 
         m_indirect(indirect), 
-        m_aoTextureDescriptorIndex(aoTextureDescriptorIndex),
-        m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex), 
-        m_albedoTextureDescriptorIndex(albedoTextureDescriptorIndex),
-		m_metallicRoughnessTextureDescriptorIndex(metallicRoughnessTextureDescriptorIndex)
+        m_aoTextureDescriptorIndex(aoTextureDescriptorIndex)
     {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
@@ -149,9 +143,6 @@ private:
         staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
         staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
-        staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
-		staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureDescriptorIndex;
-		staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureDescriptorIndex;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
@@ -314,9 +305,6 @@ private:
     bool m_meshShaders;
     bool m_indirect;
 	unsigned int m_aoTextureDescriptorIndex;
-	unsigned int m_normalsTextureDescriptorIndex;
-	unsigned int m_albedoTextureDescriptorIndex;
-	unsigned int m_metallicRoughnessTextureDescriptorIndex;
     bool m_gtaoEnabled = true;
 
     std::function<bool()> getImageBasedLightingEnabled;

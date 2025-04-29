@@ -157,6 +157,7 @@ private:
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
 	bool m_gtaoEnabled = true;
+	bool m_deferredRendering = false;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;

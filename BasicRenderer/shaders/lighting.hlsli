@@ -111,11 +111,11 @@ float3 calculateLightContributionPBR(LightFragmentData light, LightingParameters
     return BRDF * light.lightColor.rgb * light.intensity * light.attenuation * light.spotAttenuation * normDotLight;
 }
 
-uint3 ComputeClusterID(float4 svPos, float viewDepth,
+uint3 ComputeClusterID(float2 pixelCoords, float viewDepth,
                          ConstantBuffer<PerFrameBuffer> perFrame, Camera mainCamera) {
 
     float2 tileSize = float2(perFrame.screenResX, perFrame.screenResY) / float2(perFrame.lightClusterGridSizeX, perFrame.lightClusterGridSizeY);
-    uint2 tile = uint2(svPos.xy / tileSize);
+    uint2 tile = uint2(pixelCoords / tileSize);
     
     // Z slice piecewise
     float z = abs(viewDepth);
@@ -143,7 +143,7 @@ uint3 ComputeClusterID(float4 svPos, float viewDepth,
     return uint3(tile.x, tile.y, sliceZ);
 }
 
-LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInput input, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex, bool isFrontFace) {
+LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint activeEnvironmentIndex, uint environmentBufferDescriptorIndex, bool isFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float3 lighting = float3(0.0, 0.0, 0.0);
     float3 debugDiffuse = float3(0, 0, 0);
@@ -171,7 +171,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInp
     if (enablePunctualLights)
     {
         LightingParameters lightingParameters;
-        lightingParameters.fragPos = input.positionWorldSpace.xyz;
+        lightingParameters.fragPos = fragmentInfo.fragPosWorldSpace.xyz;
         lightingParameters.viewDir = fragmentInfo.viewWS;
         lightingParameters.normal = fragmentInfo.normalWS;
         lightingParameters.diffuseColor = fragmentInfo.diffuseColor;
@@ -207,7 +207,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInp
         StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
         StructuredBuffer<LightPage> lightPagesBuffer = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
         
-        float3 clusterID = ComputeClusterID(input.position, input.positionViewSpace.z, perFrameBuffer, cameraBuffer[perFrameBuffer.mainCameraIndex]);
+        float3 clusterID = ComputeClusterID(fragmentInfo.pixelCoords, fragmentInfo.fragPosViewSpace.z, perFrameBuffer, cameraBuffer[perFrameBuffer.mainCameraIndex]);
         clusterIndex = clusterID.x +
                         clusterID.y * perFrameBuffer.lightClusterGridSizeX +
                         clusterID.z * perFrameBuffer.lightClusterGridSizeX * perFrameBuffer.lightClusterGridSizeY;
@@ -236,25 +236,25 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInp
                     switch (light.type)
                     {
                     case 0:{ // Point light
-                            shadow = calculatePointShadow(input.positionWorldSpace, fragmentInfo.normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
+                            shadow = calculatePointShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
                         //return float4(shadow, shadow, shadow, 1.0);
                             break;
                         }
                     case 1:{ // Spot light
                             uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
                             Camera camera = cameraBuffer[spotShadowCameraIndex];
-                            shadow = calculateSpotShadow(input.positionWorldSpace, fragmentInfo.normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
+                            shadow = calculateSpotShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);
                             break;
                         }
                     case 2:{// Directional light
-                            shadow = calculateCascadedShadow(input.positionWorldSpace, input.positionViewSpace, fragmentInfo.normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
+                            shadow = calculateCascadedShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.fragPosViewSpace, fragmentInfo.normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
                                 //break;
                         }
                     }
                 }
             }
             
-            LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, input.positionWorldSpace.xyz);
+            LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, fragmentInfo.fragPosWorldSpace.xyz);
             if (shadow > 0.95)
             {
                 continue; // skip light if shadowed

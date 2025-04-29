@@ -42,6 +42,7 @@
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
+#include "RenderPasses/DeferredRenderPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -273,8 +274,9 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<unsigned int>("tonemapType", TonemapType::REINHARD_JODIE);
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
-    settingsManager.registerSetting<bool>("enableClusteredLighting", true);
+    settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
+	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -342,6 +344,10 @@ void DX12Renderer::SetSettings() {
 		});
 	settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
 		m_gtaoEnabled = newValue;
+		rebuildRenderGraph = true;
+		});
+	settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
+		m_deferredRendering = newValue;
 		rebuildRenderGraph = true;
 		});
     m_numFramesInFlight = getNumFramesInFlight();
@@ -1228,22 +1234,26 @@ void DX12Renderer::CreateRenderGraph() {
 			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
     }
     
-    auto forwardBuilder = newGraph->BuildRenderPass("ForwardPass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup())
+    auto primaryPassBuilder = newGraph->BuildRenderPass("ForwardPass")
+        .WithShaderResource(cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup())
         .WithDepthTarget(depthTexture);
 
+	if (!m_deferredRendering) { // Don't need object and mesh info for deferred rendering
+        primaryPassBuilder.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices);
+    }
+
     if (m_clusteredLighting) {
-		forwardBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
+        primaryPassBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
     }
 
     if (m_gtaoEnabled) {
-        forwardBuilder.WithShaderResource(outputAO);
+        primaryPassBuilder.WithShaderResource(outputAO);
     }
 
-    if (useMeshShaders) {
-		forwardBuilder.WithShaderResource(meshResourceGroup);
+	if (useMeshShaders && !m_deferredRendering) { // Don't need meshlets for deferred rendering
+        primaryPassBuilder.WithShaderResource(meshResourceGroup);
 		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-			forwardBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+            primaryPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
         }
 	}
 
@@ -1268,7 +1278,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     if (m_currentEnvironment != nullptr) {
 		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap());
-		forwardBuilder.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap());
+        primaryPassBuilder.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap());
     }
 
 	auto& lightViewResourceGroup = m_pLightManager->GetLightViewInfoResourceGroup();
@@ -1299,9 +1309,15 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithDepthTarget(depthTexture)
 			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
-    forwardBuilder.WithShaderResource(normalsWorldSpace, albedo, metallicRoughness);
-	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index, metallicRoughness->GetSRVInfo()[0].index);
-
+	if (m_deferredRendering) { // G-Buffer resources + depth
+        primaryPassBuilder.WithShaderResource(normalsWorldSpace, albedo, metallicRoughness, depthTexture);
+    }
+    if (m_deferredRendering) {
+		primaryPassBuilder.Build<DeferredRenderPass>(m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index, metallicRoughness->GetSRVInfo()[0].index, depthTexture->GetSRVInfo()[0].index);
+    }
+    else {
+        primaryPassBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0);
+    }
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
 	static const size_t PPLLNodeSize = 24; // two uints, four floats
