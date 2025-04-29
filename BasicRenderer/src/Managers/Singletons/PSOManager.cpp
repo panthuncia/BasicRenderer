@@ -666,8 +666,8 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
     blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-    depthStencilDesc.DepthEnable = FALSE;
-    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    depthStencilDesc.DepthEnable = true;
+    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
     depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     depthStencilDesc.StencilEnable = FALSE;
     depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;

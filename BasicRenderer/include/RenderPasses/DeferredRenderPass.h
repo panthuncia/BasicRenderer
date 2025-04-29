@@ -34,6 +34,7 @@ public:
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 	}
 
 	void Setup() override {
@@ -89,9 +90,8 @@ public:
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-		unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() }; // HLSL bools are 32 bits
-		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
-		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
+		unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
+		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		auto& meshManager = context.meshManager;
@@ -151,6 +151,8 @@ private:
 	unsigned int m_albedoTextureDescriptorIndex;
 	unsigned int m_metallicRoughnessTextureDescriptorIndex;
 	unsigned int m_depthBufferDescriptorIndex;
+
+	bool m_gtaoEnabled = true;
 
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 	std::shared_ptr<Buffer> m_vertexBufferHandle;

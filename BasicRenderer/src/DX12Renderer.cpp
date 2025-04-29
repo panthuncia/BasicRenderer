@@ -965,9 +965,9 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
-    StallPipeline();
+    //StallPipeline();
 
-    auto newGraph = std::make_unique<RenderGraph>();
+    auto newGraph = std::make_shared<RenderGraph>();
     std::shared_ptr<PixelBuffer> depthTexture = m_depthStencilBuffer;
 	newGraph->AddResource(depthTexture, false, ResourceState::DEPTH_WRITE);
     auto& meshManager = m_pMeshManager;
@@ -1387,6 +1387,7 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->Compile();
     newGraph->Setup();
 
+    DeletionManager::GetInstance().MarkForDelete(currentRenderGraph);
 	currentRenderGraph = std::move(newGraph);
 
 	rebuildRenderGraph = false;

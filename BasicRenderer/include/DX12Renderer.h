@@ -103,7 +103,7 @@ private:
 
     std::shared_ptr<Scene> currentScene;
 
-    std::unique_ptr<RenderGraph> currentRenderGraph = nullptr;
+    std::shared_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool rebuildRenderGraph = true;
 
     UINT m_xRes;
