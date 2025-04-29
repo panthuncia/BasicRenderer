@@ -135,6 +135,7 @@ private:
     // Single resource overload
     void addShaderResource(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+		validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.shaderResources.push_back(r);
     }
 
@@ -142,6 +143,7 @@ private:
     void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
     }
@@ -149,12 +151,14 @@ private:
 	// Render target
     void addRenderTarget(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.renderTargets.push_back(r);
     }
 
     void addRenderTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
     }
@@ -162,12 +166,14 @@ private:
 	// Depth target
 	void addDepthTarget(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
 		params.depthTextures.push_back(r);
 	}
 
 	void addDepthTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
 	}
@@ -175,12 +181,14 @@ private:
 	// Constant buffer
 	void addConstantBuffer(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
 		params.constantBuffers.push_back(r);
 	}
 
 	void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
 	}
@@ -188,12 +196,14 @@ private:
 	// Unordered access
 	void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
 		params.unorderedAccessViews.push_back(r);
 	}
 
 	void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
 	}
@@ -201,12 +211,14 @@ private:
 	// Copy destination
 	void addCopyDest(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
 		params.copyTargets.push_back(r);
 	}
 
 	void addCopyDest(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
 	}
@@ -214,12 +226,14 @@ private:
 	// Copy source
 	void addCopySource(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
 		params.copySources.push_back(r);
 	}
 
 	void addCopySource(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
 	}
@@ -227,12 +241,14 @@ private:
 	// Indirect arguments
 	void addIndirectArguments(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
 		params.indirectArgumentBuffers.push_back(r);
 	}
 
 	void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
 	}
@@ -240,6 +256,33 @@ private:
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("RenderPassBuilder::Build() may only be called once");
     }
+
+	void validateResourceNotAlreadyAdded(uint64_t id) const {
+		if (std::find_if(params.shaderResources.begin(), params.shaderResources.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.shaderResources.end()) {
+			throw std::runtime_error("Resource already added to shader resources");
+		}
+		if (std::find_if(params.renderTargets.begin(), params.renderTargets.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.renderTargets.end()) {
+			throw std::runtime_error("Resource already added to render targets");
+		}
+		if (std::find_if(params.depthTextures.begin(), params.depthTextures.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.depthTextures.end()) {
+			throw std::runtime_error("Resource already added to depth targets");
+		}
+		if (std::find_if(params.constantBuffers.begin(), params.constantBuffers.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.constantBuffers.end()) {
+			throw std::runtime_error("Resource already added to constant buffers");
+		}
+		if (std::find_if(params.unorderedAccessViews.begin(), params.unorderedAccessViews.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.unorderedAccessViews.end()) {
+			throw std::runtime_error("Resource already added to unordered access views");
+		}
+		if (std::find_if(params.copyTargets.begin(), params.copyTargets.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.copyTargets.end()) {
+			throw std::runtime_error("Resource already added to copy targets");
+		}
+		if (std::find_if(params.copySources.begin(), params.copySources.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.copySources.end()) {
+			throw std::runtime_error("Resource already added to copy sources");
+		}
+		if (std::find_if(params.indirectArgumentBuffers.begin(), params.indirectArgumentBuffers.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.indirectArgumentBuffers.end()) {
+			throw std::runtime_error("Resource already added to indirect argument buffers");
+		}
+	}
 
     // storage
     RenderGraph&             graph;
@@ -323,6 +366,7 @@ private:
     // Single resource overload
     void addShaderResource(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.shaderResources.push_back(r);
     }
 
@@ -330,6 +374,7 @@ private:
     void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
     }
@@ -337,12 +382,14 @@ private:
     // Constant buffer
     void addConstantBuffer(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.constantBuffers.push_back(r);
     }
 
     void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
     }
@@ -350,18 +397,32 @@ private:
     // Unordered access
     void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
         if (!r) return;
+        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.unorderedAccessViews.push_back(r);
     }
 
     void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
+            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
     }
 
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");
+    }
+
+    void validateResourceNotAlreadyAdded(uint64_t id) const {
+        if (std::find_if(params.shaderResources.begin(), params.shaderResources.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.shaderResources.end()) {
+            throw std::runtime_error("Resource already added to shader resources");
+        }
+        if (std::find_if(params.constantBuffers.begin(), params.constantBuffers.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.constantBuffers.end()) {
+            throw std::runtime_error("Resource already added to constant buffers");
+        }
+        if (std::find_if(params.unorderedAccessViews.begin(), params.unorderedAccessViews.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.unorderedAccessViews.end()) {
+            throw std::runtime_error("Resource already added to unordered access views");
+        }
     }
 
     // storage

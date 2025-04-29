@@ -270,7 +270,8 @@ void ReconstructWorldPos(in float4 pos,
     posWorldSpace = mul(invView, float4(posViewSpace, 1.0f)).xyz;
 }
 
-float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input)
+
+float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     
@@ -278,16 +279,89 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input)
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     
     Texture2D<float> depthTexture = ResourceDescriptorHeap[UintRootConstant0];
-    float depth = depthTexture[input.position.xy];
+    float depth = depthTexture[input.position.xy]; //unprojectDepth(depthTexture[input.position.xy], mainCamera.zNear, mainCamera.zFar);
     
-    float3 fragPosViewSpace;
-    float3 fragPosWorldSpace;
-    ReconstructWorldPos(input.position, depth, mainCamera.projectionInverse, transpose(mainCamera.view), float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY), fragPosViewSpace, fragPosWorldSpace);
+    float a = mainCamera.zFar / (mainCamera.zFar - mainCamera.zNear);
+    float b = -mainCamera.zFar * mainCamera.zNear / (mainCamera.zFar - mainCamera.zNear);
+    float linearZ = b / (depth - a);
     
-    float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - fragPosWorldSpace.xyz);
+    float3 positionVS = normalize(input.viewRayVS) * linearZ;
+    float3 positionWS = mul(float4(positionVS, 1.0), mainCamera.viewInverse).xyz;
+    
+    float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - positionWS.xyz);
     
     FragmentInfo fragmentInfo;
-    GetFragmentInfoScreenSpace(input.position.xy, viewDir, fragPosViewSpace, fragPosWorldSpace, enableGTAO, fragmentInfo);
+    GetFragmentInfoScreenSpace(input.position.xy, viewDir, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
     
-    return float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, true);
+
+    
+    float3 lighting;
+    switch (perFrameBuffer.tonemapType)
+    {
+        case TONEMAP_REINHARD_JODIE:
+            lighting = reinhardJodie(lightingOutput.lighting);
+            break;
+        case TONEMAP_KRONOS_PBR_NEUTRAL:
+            lighting = toneMap_KhronosPbrNeutral(lightingOutput.lighting);
+            break;
+        case TONEMAP_ACES_HILL:
+            lighting = toneMapACES_Hill(lightingOutput.lighting);
+            break;
+        default:
+            lighting = lightingOutput.lighting;
+    }
+    lighting = LinearToSRGB(lighting);
+    
+    switch (perFrameBuffer.outputType)
+    {
+        case OUTPUT_COLOR:
+            return float4(lighting, 1.0);
+        case OUTPUT_NORMAL: // Normal
+            return float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
+        case OUTPUT_ALBEDO:
+            return float4(fragmentInfo.albedo.rgb, 1.0);
+        case OUTPUT_METALLIC:
+            return float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, 1.0);
+        case OUTPUT_ROUGHNESS:
+            return float4(fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.roughness, 1.0);
+        /*case OUTPUT_EMISSIVE:{
+                if (materialInfo.materialFlags & MATERIAL_EMISSIVE_TEXTURE)
+                {
+                    float3 srgbEmissive = LinearToSRGB(fragmentInfo.emissive);
+                    return float4(srgbEmissive, 1.0);
+                }
+                else
+                {
+                    return float4(materialInfo.emissiveFactor.rgb, 1.0);
+                }
+            }*/
+        case OUTPUT_AO:
+            return float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, 1.0);
+        case OUTPUT_DEPTH:{
+                float scaledDepth = abs(linearZ) * 0.1;
+                //float scaledDepth = depth * 0.1;
+                return float4(normalize(input.viewRayVS)*10, 1.0);
+            }
+#if defined(PSO_IMAGE_BASED_LIGHTING)
+        case OUTPUT_DIFFUSE_IBL:
+            return float4(lightingOutput.diffuseIBL.rgb, 1.0);
+        case OUTPUT_SPECULAR_IBL:
+            return float4(lightingOutput.specularIBL.rgb, 1.0);
+#endif // IMAGE_BASED_LIGHTING
+        /*case OUTPUT_MESHLETS:{
+                return lightUints(input.meshletIndex, fragmentInfo.normalWS, viewDir);
+            }*/
+        /*case OUTPUT_MODEL_NORMALS:{
+                return float4(input.normalModelSpace * 0.5 + 0.5, 1.0);
+            }*/
+//        case OUTPUT_LIGHT_CLUSTER_ID:{
+//                return lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
+//            }
+//        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
+//                return lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
+//            }
+        default:
+            return float4(1.0, 0.0, 0.0, 1.0);
+    }
 }

@@ -19,6 +19,7 @@ struct ClippingPlane {
 struct Camera {
     float4 positionWorldSpace;
     row_major matrix view;
+    row_major matrix viewInverse;
     row_major matrix projection;
     row_major matrix projectionInverse;
     row_major matrix viewProjection;

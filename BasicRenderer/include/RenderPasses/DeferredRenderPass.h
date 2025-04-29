@@ -51,7 +51,6 @@ public:
 		}
 
 		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer(device.Get());
-		CreatePSO();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
@@ -86,7 +85,7 @@ public:
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-		commandList->SetPipelineState(pso.Get());
+		commandList->SetPipelineState(PSOManager::GetInstance().GetDeferredPSO(context.globalPSOFlags).Get());
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
@@ -142,7 +141,6 @@ public:
 private:
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
-	ComPtr<ID3D12PipelineState> pso;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
@@ -153,84 +151,6 @@ private:
 	unsigned int m_albedoTextureDescriptorIndex;
 	unsigned int m_metallicRoughnessTextureDescriptorIndex;
 	unsigned int m_depthBufferDescriptorIndex;
-
-	void CreatePSO() {
-		// Compile shaders
-		Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/PPLL.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
-		PSOManager::GetInstance().CompileShader(L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6", {}, pixelShader);
-
-		static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-		};
-
-		D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-		inputLayoutDesc.pInputElementDescs = inputElementDescs;
-		inputLayoutDesc.NumElements = _countof(inputElementDescs);
-
-		D3D12_RASTERIZER_DESC rasterizerDesc = {};
-		rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-		rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
-		rasterizerDesc.FrontCounterClockwise = FALSE;
-		rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-		rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-		rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-		rasterizerDesc.DepthClipEnable = FALSE;
-		rasterizerDesc.MultisampleEnable = FALSE;
-		rasterizerDesc.AntialiasedLineEnable = FALSE;
-		rasterizerDesc.ForcedSampleCount = 0;
-		rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-
-		D3D12_BLEND_DESC blendDesc = {};
-		blendDesc.AlphaToCoverageEnable = FALSE;
-		blendDesc.IndependentBlendEnable = FALSE;
-		blendDesc.RenderTarget[0].BlendEnable = TRUE;
-		blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-		blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-		blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-		blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-		blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-		D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-		depthStencilDesc.DepthEnable = FALSE;
-		depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-		depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-		depthStencilDesc.StencilEnable = FALSE;
-		depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-		depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-		depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-		depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-		depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
-
-		DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-		psoDesc.InputLayout = inputLayoutDesc;
-		psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-		psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
-		psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
-		psoDesc.RasterizerState = rasterizerDesc;
-		psoDesc.BlendState = blendDesc;
-		psoDesc.DepthStencilState = depthStencilDesc;
-		psoDesc.SampleMask = UINT_MAX;
-		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-		psoDesc.NumRenderTargets = 1;
-		psoDesc.RTVFormats[0] = renderTargetFormat;
-		psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-		psoDesc.SampleDesc.Count = 1;
-		psoDesc.SampleDesc.Quality = 0;
-		psoDesc.InputLayout = inputLayoutDesc;
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso));
-		if (FAILED(hr)) {
-			throw std::runtime_error("Failed to create debug PSO");
-		}
-	}
 
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 	std::shared_ptr<Buffer> m_vertexBufferHandle;

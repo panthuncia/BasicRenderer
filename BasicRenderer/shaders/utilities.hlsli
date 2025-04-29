@@ -328,4 +328,9 @@ void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, 
     ret.emissive = float3(0.0, 0.0, 0.0); // TODO
 }
 
+float unprojectDepth(float depth, float near, float far)
+{
+    return near * far / (far - depth * (far - near));
+}
+
 #endif // __UTILITY_HLSL__

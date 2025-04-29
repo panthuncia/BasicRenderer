@@ -205,11 +205,13 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
 
         if (entity.has<Components::Camera>() && entity.has<Components::CameraBufferView>()) {
-            auto inverseMatrix = XMMatrixInverse(nullptr, mOut.matrix);
+            auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
 
             Components::Camera* camera = entity.get_mut<Components::Camera>();
-            camera->info.view = RemoveScalingFromMatrix(inverseMatrix);
+            camera->info.view = XMMatrixInverse(nullptr, cameraModel);
+			camera->info.viewInverse = cameraModel;
             camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
+			camera->info.projectionInverse = XMMatrixInverse(nullptr, camera->info.projection);
 
             auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
             camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
@@ -1235,8 +1237,11 @@ void DX12Renderer::CreateRenderGraph() {
     }
     
     auto primaryPassBuilder = newGraph->BuildRenderPass("ForwardPass")
-        .WithShaderResource(cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup())
-        .WithDepthTarget(depthTexture);
+        .WithShaderResource(cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup());
+    
+    if (!m_deferredRendering) {
+        primaryPassBuilder.WithDepthTarget(depthTexture);
+    }
 
 	if (!m_deferredRendering) { // Don't need object and mesh info for deferred rendering
         primaryPassBuilder.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices);

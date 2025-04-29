@@ -8,6 +8,7 @@ struct ClippingPlane {
 struct CameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
     DirectX::XMMATRIX view;
+    DirectX::XMMATRIX viewInverse;
     DirectX::XMMATRIX projection;
     DirectX::XMMATRIX projectionInverse;
 	DirectX::XMMATRIX viewProjection;
