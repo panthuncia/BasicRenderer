@@ -225,10 +225,16 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 3;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
-	psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-    psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+    if (psoFlags & PSO_DEFERRED) {
+        psoDesc.NumRenderTargets = 3;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+        psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+        psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+	}
+	else {
+		psoDesc.NumRenderTargets = 1;
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	}
 
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
@@ -513,10 +519,16 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     pipelineStateStream.DepthStencilState = depthStencilState;
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    rtvFormats.NumRenderTargets = 3;
-	rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
-	rtvFormats.RTFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-	rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+    if (psoFlags & PSO_DEFERRED) {
+        rtvFormats.NumRenderTargets = 3;
+        rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+        rtvFormats.RTFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+        rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+	}
+	else {
+        rtvFormats.NumRenderTargets = 1;
+        rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+	}
     pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;
@@ -736,6 +748,13 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
 		macro.Name = L"PSO_PREPASS";
 		defines.insert(defines.begin(), macro);
 	}
+	if (psoFlags & PSOFlags::PSO_DEFERRED) {
+        DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_DEFERRED";
+		defines.insert(defines.begin(), macro);
+	}
+
     return defines;
 }
 

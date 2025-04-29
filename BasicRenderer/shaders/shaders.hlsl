@@ -99,8 +99,10 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
 struct PrePassPSOutput
 {
     float4 signedOctEncodedNormal;
+#if defined(PSO_DEFERRED)
     float4 albedo;
     float2 metallicRoughness;
+#endif
 };
 
 PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
@@ -119,8 +121,10 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     
     PrePassPSOutput output;
     output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
+#if defined(PSO_DEFERRED)
     output.albedo = float4(fragmentInfo.albedo.xyz, fragmentInfo.ambientOcclusion);
     output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);
+#endif
     return output;
 }
 
@@ -234,43 +238,6 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 #endif // PSO_SHADOW
 }
 
-void ReconstructViewPos(in float4 pos,
-                          float rawDepth,
-                          float4x4 invProj,
-                          float2 viewportSize, 
-                          out float3 posViewSpace)
-{
-    float2 uv = pos.xy / viewportSize;
-    float2 ndcXY = uv * 2.0f - 1.0f;
-    ndcXY = pos.xy / pos.w;
-
-    // rebuild clip space Z and W
-    float clipZ = rawDepth * 2.0f - 1.0f;
-    float4 clipPos = float4(ndcXY, clipZ, 1.0f);
-
-    // unproject into view space
-    float4 viewPosH = mul(invProj, clipPos);
-
-    // do the perspective divide
-    viewPosH.xyz /= viewPosH.w;
-    posViewSpace = viewPosH.xyz;
-}
-
-void ReconstructWorldPos(in float4 pos,
-                           float rawDepth,
-                           float4x4 invProj,
-                           float4x4 invView,
-                           float2 viewportSize,
-                           out float3 posViewSpace,
-                           out float3 posWorldSpace)
-{
-    ReconstructViewPos(pos, rawDepth, invProj, viewportSize, posViewSpace);
-
-    // bring it into world space
-    posWorldSpace = mul(invView, float4(posViewSpace, 1.0f)).xyz;
-}
-
-
 float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
@@ -279,19 +246,29 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     
     Texture2D<float> depthTexture = ResourceDescriptorHeap[UintRootConstant0];
-    float depth = depthTexture[input.position.xy]; //unprojectDepth(depthTexture[input.position.xy], mainCamera.zNear, mainCamera.zFar);
+    float depth = depthTexture[input.position.xy];
     
-    float a = mainCamera.zFar / (mainCamera.zFar - mainCamera.zNear);
-    float b = -mainCamera.zFar * mainCamera.zNear / (mainCamera.zFar - mainCamera.zNear);
-    float linearZ = b / (depth - a);
+    float linearZ = unprojectDepth(depth, mainCamera.zNear, mainCamera.zFar);
     
-    float3 positionVS = normalize(input.viewRayVS) * linearZ;
-    float3 positionWS = mul(float4(positionVS, 1.0), mainCamera.viewInverse).xyz;
+    float2 pixel = input.position.xy;
+    float2 uv = (pixel) / float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY); // [0,1] over screen
+    float2 ndc = uv * 2.0f - 1.0f;
     
-    float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - positionWS.xyz);
+    float4 clipPos = float4(ndc, 1.0f, 1.0f);
+
+    // unproject back into view space:
+    float4 viewPosH = mul(clipPos, mainCamera.projectionInverse);
+
+    float3 positionVS = viewPosH.xyz * linearZ;
+    positionVS.y = -positionVS.y;
+    
+    float4 worldPosH = mul(float4(positionVS, 1.0f), mainCamera.viewInverse);
+    float3 positionWS = worldPosH.xyz;
+    
+    float3 viewDirWS = normalize(mainCamera.positionWorldSpace.xyz - positionWS.xyz);
     
     FragmentInfo fragmentInfo;
-    GetFragmentInfoScreenSpace(input.position.xy, viewDir, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
+    GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
     
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, true);
 
@@ -341,7 +318,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_DEPTH:{
                 float scaledDepth = abs(linearZ) * 0.1;
                 //float scaledDepth = depth * 0.1;
-                return float4(normalize(input.viewRayVS)*10, 1.0);
+                return float4(scaledDepth, scaledDepth, scaledDepth, 1.0);
             }
 #if defined(PSO_IMAGE_BASED_LIGHTING)
         case OUTPUT_DIFFUSE_IBL:

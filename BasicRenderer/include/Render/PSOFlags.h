@@ -9,4 +9,5 @@ enum PSOFlags {
 	PSO_BLEND = 1 << 4,
 	PSO_CLUSTERED_LIGHTING = 1 << 5,
 	PSO_PREPASS = 1 << 6,
+	PSO_DEFERRED = 1 << 7,
 };

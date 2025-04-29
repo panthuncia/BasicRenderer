@@ -738,6 +738,9 @@ void DX12Renderer::Render() {
 	if (m_clusteredLighting) {
 		globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
 	}
+	if (m_deferredRendering) {
+		globalPSOFlags |= PSOFlags::PSO_DEFERRED;
+	}
 	m_context.globalPSOFlags = globalPSOFlags;
 
     // Indicate that the back buffer will be used as a render target
@@ -1054,42 +1057,40 @@ void DX12Renderer::CreateRenderGraph() {
 	normalsWorldSpace->SetName(L"Normals World Space");
 	newGraph->AddResource(normalsWorldSpace, false, ResourceState::RENDER_TARGET);
 
-	TextureDescription albedoDesc;
-	albedoDesc.arraySize = 1;
-	albedoDesc.channels = 4;
-	albedoDesc.isCubemap = false;
-	albedoDesc.hasRTV = true;
-	albedoDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	albedoDesc.generateMipMaps = false;
-	albedoDesc.hasSRV = true;
-	albedoDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-	ImageDimensions albedoDims = { m_xRes, m_yRes, 0, 0 };
-	albedoDesc.imageDimensions.push_back(albedoDims);
-	auto albedo = PixelBuffer::Create(albedoDesc);
-	albedo->SetName(L"Albedo");
-	newGraph->AddResource(albedo, false, ResourceState::RENDER_TARGET);
+	std::shared_ptr<PixelBuffer> albedo;
+	std::shared_ptr<PixelBuffer> metallicRoughness;
 
-	TextureDescription metallicRoughnessDesc;
-	metallicRoughnessDesc.arraySize = 1;
-	metallicRoughnessDesc.channels = 2;
-	metallicRoughnessDesc.isCubemap = false;
-	metallicRoughnessDesc.hasRTV = true;
-	metallicRoughnessDesc.format = DXGI_FORMAT_R8G8_UNORM;
-	metallicRoughnessDesc.generateMipMaps = false;
-	metallicRoughnessDesc.hasSRV = true;
-	metallicRoughnessDesc.srvFormat = DXGI_FORMAT_R8G8_UNORM;
-	ImageDimensions metallicRoughnessDims = { m_xRes, m_yRes, 0, 0 };
-	metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
-	auto metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
-	metallicRoughness->SetName(L"Metallic Roughness");
-	newGraph->AddResource(metallicRoughness, false, ResourceState::RENDER_TARGET);
+    if (m_deferredRendering) {
+        TextureDescription albedoDesc;
+        albedoDesc.arraySize = 1;
+        albedoDesc.channels = 4;
+        albedoDesc.isCubemap = false;
+        albedoDesc.hasRTV = true;
+        albedoDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        albedoDesc.generateMipMaps = false;
+        albedoDesc.hasSRV = true;
+        albedoDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        ImageDimensions albedoDims = { m_xRes, m_yRes, 0, 0 };
+        albedoDesc.imageDimensions.push_back(albedoDims);
+        albedo = PixelBuffer::Create(albedoDesc);
+        albedo->SetName(L"Albedo");
+        newGraph->AddResource(albedo, false, ResourceState::RENDER_TARGET);
 
-	TextureDescription UVTextureDesc;
-    UVTextureDesc.arraySize = 1;
-    UVTextureDesc.channels = 2;
-    UVTextureDesc.isCubemap = false;
-    UVTextureDesc.hasRTV = true;
-    UVTextureDesc.format = DXGI_FORMAT_R16G16_FLOAT;
+        TextureDescription metallicRoughnessDesc;
+        metallicRoughnessDesc.arraySize = 1;
+        metallicRoughnessDesc.channels = 2;
+        metallicRoughnessDesc.isCubemap = false;
+        metallicRoughnessDesc.hasRTV = true;
+        metallicRoughnessDesc.format = DXGI_FORMAT_R8G8_UNORM;
+        metallicRoughnessDesc.generateMipMaps = false;
+        metallicRoughnessDesc.hasSRV = true;
+        metallicRoughnessDesc.srvFormat = DXGI_FORMAT_R8G8_UNORM;
+        ImageDimensions metallicRoughnessDims = { m_xRes, m_yRes, 0, 0 };
+        metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
+        metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
+        metallicRoughness->SetName(L"Metallic Roughness");
+        newGraph->AddResource(metallicRoughness, false, ResourceState::RENDER_TARGET);
+    }
 
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
