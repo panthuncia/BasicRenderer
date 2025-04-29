@@ -111,7 +111,6 @@ private:
 
     RenderContext m_context;
 
-	std::shared_ptr<Texture> m_lutTexture = nullptr;
 	std::string m_environmentName;
 	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
 

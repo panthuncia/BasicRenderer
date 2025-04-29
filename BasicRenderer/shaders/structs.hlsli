@@ -233,7 +233,7 @@ struct FragmentInfo {
     float roughness;
     float roughnessUnclamped;
     float3 emissive;
-    float2 DFG;
+    //float2 DFG; // Replaced by MaterialX quadratic fit
     float3 viewWS;
     float NdotV;
     float reflectance;

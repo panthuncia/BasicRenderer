@@ -194,24 +194,6 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
     ret.ambientOcclusion = ao;
 }
 
-float2 PrefilteredDFG_LUT(float lod, float NoV)
-{
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    Texture2D<float2> DFGLUT = ResourceDescriptorHeap[perFrameBuffer.environmentBRDFLUTIndex];
-    SamplerState g_samplerLinearClamp = SamplerDescriptorHeap[perFrameBuffer.environmentBRDFLUTSamplerIndex];
-    return DFGLUT.Sample(g_samplerLinearClamp, float2(NoV, 1.0 - lod));
-}
-
-//------------------------------------------------------------------------------
-// IBL environment BRDF dispatch
-//------------------------------------------------------------------------------
-
-float2 prefilteredDFG(float perceptualRoughness, float NoV)
-{
-    // PrefilteredDFG_LUT() takes a LOD, which is sqrt(roughness) = perceptualRoughness
-    return PrefilteredDFG_LUT(perceptualRoughness, NoV);
-}
-
 float PerceptualRoughnessToRoughness(float perceptualRoughness)
 {
     return perceptualRoughness * perceptualRoughness;
@@ -267,7 +249,7 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.NdotV = max(MIN_N_DOT_V, ret.NdotV);
     ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
     
-    ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
+    //ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
     
     ret.metallic = metallicRoughness.x;
     ret.diffuseColor = computeDiffuseColor(baseColorSample.xyz, ret.metallic);
@@ -306,7 +288,7 @@ void GetFragmentInfoDirectTransparent(in PSInput input, in float3 viewWS, out Fr
     
     ret.reflectedWS = reflect(-ret.viewWS, ret.normalWS);
     
-    ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
+    //ret.DFG = prefilteredDFG(ret.perceptualRoughness, ret.NdotV);
     
     ret.diffuseColor = computeDiffuseColor(materialInfo.albedo, ret.metallic);
     ret.albedo = materialInfo.albedo;

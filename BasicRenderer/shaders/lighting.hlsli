@@ -129,7 +129,6 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, PSInp
                 fragmentInfo.normalWS, 
                 fragmentInfo.diffuseColor, 
                 fragmentInfo.diffuseAmbientOcclusion, 
-                fragmentInfo.DFG, 
                 fragmentInfo.F0, 
                 fragmentInfo.reflectedWS, 
                 fragmentInfo.roughness,

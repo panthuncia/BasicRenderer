@@ -1240,48 +1240,6 @@ void DX12Renderer::CreateRenderGraph() {
         }
 	}
 
-    if (m_lutTexture == nullptr) {
-		TextureDescription lutDesc;
-        ImageDimensions dims;
-		dims.height = 512;
-		dims.width = 512;
-		dims.rowPitch = 512 * 2 * sizeof(float);
-		dims.slicePitch = dims.rowPitch * 512;
-		lutDesc.imageDimensions.push_back(dims);
-		lutDesc.channels = 2;
-		lutDesc.isCubemap = false;
-		lutDesc.hasRTV = true;
-		lutDesc.format = DXGI_FORMAT_R16G16_FLOAT;
-		auto lutBuffer = PixelBuffer::Create(lutDesc);
-		auto sampler = Sampler::GetDefaultSampler();
-		m_lutTexture = std::make_shared<Texture>(lutBuffer, sampler);
-		m_lutTexture->SetName(L"LUTTexture");
-
-        ResourceManager::GetInstance().SetEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo()[0].index);
-		ResourceManager::GetInstance().SetEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
-
-		newGraph->BuildRenderPass("BRDFIntegrationPass")
-			.WithRenderTarget(m_lutTexture)
-			.Build<BRDFIntegrationPass>(m_lutTexture);
-    }
-
-    newGraph->AddResource(m_lutTexture);
-	forwardBuilder.WithShaderResource(m_lutTexture);
-
-    // Check if we've already computed this environment
-    //bool skipEnvironmentPass = false;
-    //if (currentRenderGraph != nullptr) {
-    //    auto currentEnvironmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
-    //    if (currentEnvironmentPass != nullptr) {
-    //        if (!currentEnvironmentPass->IsInvalidated()) {
-    //            skipEnvironmentPass = true;
-    //            DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
-    //            m_currentEnvironmentTexture = nullptr;
-    //        }
-    //    }
-    //}
-
-
     newGraph->AddResource(m_pEnvironmentManager->GetWorkingHDRIGroup());
     newGraph->AddResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup());
     //newGraph->AddResource(m_environmentIrradiance);
