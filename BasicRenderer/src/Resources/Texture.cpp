@@ -18,6 +18,9 @@ UINT Texture::GetSamplerDescriptorIndex() {
 }
 
 BarrierGroups& Texture::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+	m_currentAccessType = newAccessType;
+	m_currentLayout = newLayout;
+	m_prevSyncState = newSyncState;
 	return m_image->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState); // Transition the underlying PixelBuffer
 }
 
@@ -39,3 +42,7 @@ void Texture::SetFilepath(const std::string& filepath) {
 uint64_t Texture::GetGlobalResourceID() const { 
 	return m_image->GetGlobalResourceID(); 
 }
+
+ResourceAccessType Texture::GetCurrentAccessType() const { return m_image->GetCurrentAccessType(); }
+ResourceLayout Texture::GetCurrentLayout() const { return m_image->GetCurrentLayout(); }
+ResourceSyncState Texture::GetPrevSyncState() const { return m_image->GetPrevSyncState(); }

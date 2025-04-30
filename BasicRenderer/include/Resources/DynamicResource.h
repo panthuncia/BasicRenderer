@@ -32,9 +32,15 @@ public:
         return resource;
     }
 
+    ResourceAccessType GetCurrentAccessType() const override { return resource->GetCurrentAccessType(); }
+    ResourceLayout GetCurrentLayout() const override { return resource->GetCurrentLayout(); }
+    ResourceSyncState GetPrevSyncState() const override { return resource->GetPrevSyncState(); }
+
     virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
         if (resource) {
-            //SetState(newState); // Keep the wrapper's state in sync
+            m_currentAccessType = newAccessType;
+            m_currentLayout = newLayout;
+            m_prevSyncState = newSyncState;
             return resource->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
         }
     }

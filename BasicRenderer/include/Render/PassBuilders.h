@@ -27,15 +27,8 @@ public:
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithDepthWrite(Args&&... args) & {
-        (addDepthWrite(std::forward<Args>(args)), ...);
-        return *this;
-    }
-
-    template<typename... Args>
     RenderPassBuilder& WithDepthReadWrite(Args&&... args) & {
-        (addDepthRead(std::forward<Args>(args)), ...);
-		(addDepthWrite(std::forward<Args>(args)), ...);
+        (addDepthReadWrite(std::forward<Args>(args)), ...);
         return *this;
     }
 
@@ -83,21 +76,14 @@ public:
     }
 
     template<typename... Args>
-    RenderPassBuilder WithDepthWrite(Args&&... args) && {
-        (addDepthWrite(std::forward<Args>(args)), ...);
+    RenderPassBuilder WithDepthReadWrite(Args&&... args) && {
+        (addDepthReadWrite(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
     RenderPassBuilder WithDepthRead(Args&&... args) && {
         (addDepthRead(std::forward<Args>(args)), ...);
-        return std::move(*this);
-    }
-
-    template<typename... Args>
-    RenderPassBuilder WithDepthReadWrite(Args&&... args) && {
-        (addDepthWrite(std::forward<Args>(args)), ...);
-		(addDepthRead(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
@@ -137,6 +123,7 @@ public:
         ensureNotBuilt();
         built_ = true;
 
+        params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
         graph.AddRenderPass(pass, params, passName);
 
@@ -188,15 +175,15 @@ private:
     }
 
     // Depth target
-    void addDepthWrite(const std::shared_ptr<Resource>& r) {
+    void addDepthReadWrite(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        params.depthWriteResources.push_back(r);
+        params.depthReadWriteResources.push_back(r);
     }
 
-    void addDepthWrite(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addDepthReadWrite(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            params.depthWriteResources.push_back(r);
+            params.depthReadWriteResources.push_back(r);
         }
     }
 
@@ -299,7 +286,7 @@ private:
         accumulate(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
         accumulate(params.renderTargets,      ResourceAccessType::RENDER_TARGET);
         accumulate(params.depthReadResources, ResourceAccessType::DEPTH_READ);
-        accumulate(params.depthWriteResources,ResourceAccessType::DEPTH_WRITE);
+        accumulate(params.depthReadWriteResources,ResourceAccessType::DEPTH_READ_WRITE);
         accumulate(params.unorderedAccessViews,ResourceAccessType::UNORDERED_ACCESS);
         accumulate(params.copySources,        ResourceAccessType::COPY_SOURCE);
         accumulate(params.copyTargets,        ResourceAccessType::COPY_DEST);
@@ -376,6 +363,7 @@ public:
         ensureNotBuilt();
         built_ = true;
 
+        params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
         graph.AddComputePass(pass, params, passName);
 

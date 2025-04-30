@@ -108,6 +108,7 @@ private:
 	struct AnyPassAndResources {
 		PassType type = PassType::Unknown;
 		std::variant<std::monostate, RenderPassAndResources, ComputePassAndResources> pass;
+		std::string name;
 
 		AnyPassAndResources() = default;
 

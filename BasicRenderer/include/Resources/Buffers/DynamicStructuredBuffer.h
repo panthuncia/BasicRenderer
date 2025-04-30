@@ -83,6 +83,9 @@ public:
 protected:
 
     BarrierGroups&  GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+        m_currentAccessType = newAccessType;
+        m_currentLayout = newLayout;
+        m_prevSyncState = newSyncState;
         return m_dataBuffer->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
     }
 

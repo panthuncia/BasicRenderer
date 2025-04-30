@@ -60,14 +60,16 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceAccessType prevAcces
     //    throw(std::runtime_error("Useless transition"));
     //}
 #endif
-    m_textureBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevAccessType);
-    m_textureBarrier.AccessAfter = ResourceStateToD3D12AccessType(newAccessType);
+    m_textureBarrier.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
+    m_textureBarrier.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
     m_textureBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
     m_textureBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 	m_textureBarrier.LayoutBefore = (D3D12_BARRIER_LAYOUT)prevLayout;
     m_textureBarrier.LayoutAfter = (D3D12_BARRIER_LAYOUT)newLayout;
 
-    currentSyncState = newSyncState;
+    m_currentAccessType = newAccessType;
+    m_currentLayout = newLayout;
+    m_prevSyncState = newSyncState;
 
     return m_barrierGroups;
 }

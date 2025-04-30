@@ -67,6 +67,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	unsigned int res = m_reflectionCubemapResolution;
 	if (std::filesystem::exists(skyboxPath)) {
 		skybox = loadCubemapFromFile(skyboxPath, true);
+		skybox->SetName(L"Skybox cubemap");
 		res = skybox->GetBuffer()->GetWidth();
 		e->SetReflectionCubemapResolution(res);
 		e->SetEnvironmentCubemap(skybox);

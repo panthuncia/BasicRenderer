@@ -13,7 +13,7 @@ struct RenderPassParameters {
     std::vector<std::shared_ptr<Resource>> shaderResources;
     std::vector<std::shared_ptr<Resource>> renderTargets;
     std::vector<std::shared_ptr<Resource>> depthReadResources;
-	std::vector<std::shared_ptr<Resource>> depthWriteResources;
+	std::vector<std::shared_ptr<Resource>> depthReadWriteResources;
 	std::vector<std::shared_ptr<Resource>> constantBuffers;
 	std::vector<std::shared_ptr<Resource>> unorderedAccessViews;
 	std::vector<std::shared_ptr<Resource>> copyTargets;

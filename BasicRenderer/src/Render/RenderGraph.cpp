@@ -28,9 +28,9 @@ auto RenderGraph::MakeAddTransition(
 		ResourceSyncState         newSync)
 		{
 			// Determine old state & sync
-			ResourceAccessType prevAccess = ResourceAccessType::NONE;
-			ResourceLayout prevLayout = ResourceLayout::LAYOUT_COMMON;
-			ResourceSyncState oldSync  = ResourceSyncState::ALL;
+			ResourceAccessType prevAccess = r->GetCurrentAccessType();
+			ResourceLayout prevLayout = r->GetCurrentLayout();
+			ResourceSyncState oldSync  = r->GetPrevSyncState();
 
 			// override if previously recorded
 			if (finalResourceAccessTypes.contains(r->GetGlobalResourceID())) {
@@ -75,6 +75,9 @@ auto RenderGraph::MakeAddTransition(
 				for (auto& transition : independantlyManagedTransitions) {
 					batches[gfxBatch].passEndTransitions.push_back(transition);
 					transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
+					finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
+					finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
+					finalResourceSyncStates[transition.pResource->GetGlobalResourceID()] = transition.newSyncState;
 				}
 			}
 			else {
@@ -84,6 +87,9 @@ auto RenderGraph::MakeAddTransition(
 					for (auto& transition : independantlyManagedTransitions) {
 						currentBatch.computeTransitions.push_back(transition);
 						transHistCompute[transition.pResource->GetGlobalResourceID()] = batchIndex;
+						finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
+						finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
+						finalResourceSyncStates[transition.pResource->GetGlobalResourceID()] = transition.newSyncState;
 					}
 				} else {
 					currentBatch.renderTransitions.push_back(T);
@@ -91,6 +97,9 @@ auto RenderGraph::MakeAddTransition(
 					for (auto& transition : independantlyManagedTransitions) {
 						currentBatch.renderTransitions.push_back(transition);
 						transHistRender[transition.pResource->GetGlobalResourceID()] = batchIndex;
+						finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
+						finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
+						finalResourceSyncStates[transition.pResource->GetGlobalResourceID()] = transition.newSyncState;
 					}
 				}
 			}
@@ -139,9 +148,10 @@ void RenderGraph::Compile() {
 
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
-
+		if (pr.name == "Environment Conversion Pass") {
+			spdlog::info("Environment Conversion Pass");
+		}
 		bool isCompute = (pr.type == PassType::Compute);
-
 		if (isCompute) {
 			auto& pass = std::get<ComputePassAndResources>(pr.pass);
 			if (IsNewBatchNeeded(currentBatch, pass, renderUAVs)) {
@@ -380,9 +390,9 @@ void RenderGraph::Setup() {
 	//DeviceManager::GetInstance().GetGraphicsQueue()->ExecuteCommandLists(1, &pCommandList);
 
     // Sync compute and graphics queue
-	DeviceManager::GetInstance().GetGraphicsQueue()->Signal(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
-	DeviceManager::GetInstance().GetComputeQueue()->Wait(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
-    m_initialTransitionFenceValue++;
+	//DeviceManager::GetInstance().GetGraphicsQueue()->Signal(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
+	//DeviceManager::GetInstance().GetComputeQueue()->Wait(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
+    //m_initialTransitionFenceValue++;
 }
 
 void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name) {
@@ -392,6 +402,7 @@ void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassPara
 	AnyPassAndResources passAndResourcesAny;
 	passAndResourcesAny.type = PassType::Render;
 	passAndResourcesAny.pass = passAndResources;
+	passAndResourcesAny.name = name;
 	passes.push_back(passAndResourcesAny);
     if (name != "") {
         renderPassesByName[name] = pass;
@@ -405,6 +416,7 @@ void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassP
 	AnyPassAndResources passAndResourcesAny;
 	passAndResourcesAny.type = PassType::Compute;
 	passAndResourcesAny.pass = passAndResources;
+	passAndResourcesAny.name = name;
 	passes.push_back(passAndResourcesAny);
 	if (name != "") {
 		computePassesByName[name] = pass;
@@ -615,6 +627,8 @@ void RenderGraph::Execute(RenderContext& context) {
 }
 
 bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<uint64_t>& computeUAVs) {
+	return true;
+	
 	// New batch is needed if (a) current batch has a resource we need for this pass in a different state
 	// Or (b) if this pass would use a resource in a manner that would cause a cross-queue read/write hazard
 	for (auto& requirement : passAndResources.resources.resourceRequirements) {
@@ -625,16 +639,17 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndR
 		if (currentBatch.resourceLayouts.contains(resourceID) && currentBatch.resourceLayouts[resourceID] != requirement.layout) {
 			return true;
 		}
-		if (requirement.access == ResourceAccessType::UNORDERED_ACCESS && computeUAVs.contains(resourceID)) {
+		if (requirement.access & ResourceAccessType::UNORDERED_ACCESS && computeUAVs.contains(resourceID)) {
 			return true;
 		}
 	}
 	return false;
-    return false;
 }
 
 bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<uint64_t>& renderUAVs) {
-    // New batch is needed if (a) current batch has a resource we need for this pass in a different state
+	return true;
+
+	// New batch is needed if (a) current batch has a resource we need for this pass in a different state
     // Or (b) if this pass would use a resource in a manner that would cause a cross-queue read/write hazard
 	for (auto& requirement : passAndResources.resources.resourceRequirements) {
 		auto resourceID = requirement.resource->GetGlobalResourceID();
@@ -644,7 +659,7 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAnd
 		if (currentBatch.resourceLayouts.contains(resourceID) && currentBatch.resourceLayouts[resourceID] != requirement.layout) {
 			return true;
 		}
-		if (requirement.access == ResourceAccessType::UNORDERED_ACCESS && renderUAVs.contains(resourceID)) {
+		if (requirement.access & ResourceAccessType::UNORDERED_ACCESS && renderUAVs.contains(resourceID)) {
 			return true;
 		}
 	}
@@ -689,7 +704,7 @@ void RenderGraph::ComputeResourceLoops(
 
         if (finalLayout != firstLayout || finalAccessType != firstAccessType) {
             // Insert a transition to bring the resource back to its initial state
-            ResourceTransition transition = { resource, finalAccessType, firstAccessType, finalLayout, firstLayout, finalSyncState, finalSyncState};
+            ResourceTransition transition = { resource, finalAccessType, firstAccessType, finalLayout, firstLayout, finalSyncState, firstSyncState};
             loopBatch.renderTransitions.push_back(transition);
         }
     }

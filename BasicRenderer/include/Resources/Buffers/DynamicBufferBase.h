@@ -15,6 +15,10 @@ class DynamicBufferBase : public GloballyIndexedResource {
 public:
     DynamicBufferBase() {}
     std::shared_ptr<Buffer> m_dataBuffer = nullptr;
+
+    ResourceAccessType GetCurrentAccessType() const override { return m_dataBuffer->GetCurrentAccessType(); }
+    ResourceLayout GetCurrentLayout() const override { return m_dataBuffer->GetCurrentLayout(); }
+    ResourceSyncState GetPrevSyncState() const override { return m_dataBuffer->GetPrevSyncState(); }
 protected:
 };
 

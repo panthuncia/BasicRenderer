@@ -2,6 +2,7 @@
 
 #include <directx/d3d12.h>
 #include <stdexcept>
+#include <spdlog/spdlog.h>
 #if defined(_DEBUG)
 #include <string>
 #endif // _DEBUG
@@ -17,7 +18,7 @@ enum ResourceAccessType {
 	INDEX_BUFFER = 1<<3,
 	RENDER_TARGET = 1<<4,
 	UNORDERED_ACCESS = 1<<5,
-	DEPTH_WRITE = 1<<6,
+	DEPTH_READ_WRITE = 1<<6,
 	DEPTH_READ = 1<<7,
 	SHADER_RESOURCE = 1<<8,
 	INDIRECT_ARGUMENT = 1<<9,
@@ -39,7 +40,7 @@ enum class ResourceLayout {
 	LAYOUT_GENERIC_READ = D3D12_BARRIER_LAYOUT_GENERIC_READ,
 	LAYOUT_RENDER_TARGET = D3D12_BARRIER_LAYOUT_RENDER_TARGET,
 	LAYOUT_UNORDERED_ACCESS = D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS,
-	LAYOUT_DEPTH_WRITE = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
+	LAYOUT_DEPTH_READ_WRITE = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE,
 	LAYOUT_DEPTH_READ = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_READ,
 	LAYOUT_SHADER_RESOURCE = D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
 	LAYOUT_COPY_SOURCE = D3D12_BARRIER_LAYOUT_COPY_SOURCE,
@@ -109,8 +110,8 @@ inline ResourceLayout AccessToLayout(ResourceAccessType access) {
 		return ResourceLayout::LAYOUT_UNORDERED_ACCESS;
 	if (access & ResourceAccessType::RENDER_TARGET)      
 		return ResourceLayout::LAYOUT_RENDER_TARGET;
-	if (access & ResourceAccessType::DEPTH_WRITE)        
-		return ResourceLayout::LAYOUT_DEPTH_WRITE;
+	if (access & ResourceAccessType::DEPTH_READ_WRITE)        
+		return ResourceLayout::LAYOUT_DEPTH_READ_WRITE;
 	if (access & ResourceAccessType::COPY_SOURCE)        
 		return ResourceLayout::LAYOUT_COPY_SOURCE;
 	if (access & ResourceAccessType::COPY_DEST)          
@@ -146,26 +147,77 @@ inline ResourceSyncState ComputeSyncFromAccess(ResourceAccessType) {
 	return ResourceSyncState::COMPUTE_SHADING;
 }
 
-inline ResourceSyncState RenderSyncFromAccess(ResourceAccessType access) {
-	if (access & ResourceAccessType::RENDER_TARGET)      return ResourceSyncState::RENDER_TARGET;
-	if (access & ResourceAccessType::DEPTH_WRITE)        return ResourceSyncState::DEPTH_STENCIL;
-	if (access & (ResourceAccessType::COPY_SOURCE |
-		ResourceAccessType::COPY_DEST))       return ResourceSyncState::COPY;
-	if (access & ResourceAccessType::INDIRECT_ARGUMENT) return ResourceSyncState::EXECUTE_INDIRECT;
-	// UAV in pixel/compute or SRV/CBV in shaders
-	return ResourceSyncState::ALL_SHADING;
+inline ResourceSyncState RenderSyncFromAccess(ResourceAccessType access)
+{
+	// pick out each distinct sync category
+	bool needsCommon      = (access & ResourceAccessType::COMMON) != 0;
+	bool needsShading     = (access & (ResourceAccessType::VERTEX_BUFFER
+		| ResourceAccessType::CONSTANT_BUFFER
+		| ResourceAccessType::SHADER_RESOURCE
+		| ResourceAccessType::UNORDERED_ACCESS)) != 0;
+	bool needsIndexInput  = (access & ResourceAccessType::INDEX_BUFFER) != 0;
+	bool needsRenderTarget= (access & ResourceAccessType::RENDER_TARGET) != 0;
+	bool needsDepthStencil= (access & (ResourceAccessType::DEPTH_READ
+		| ResourceAccessType::DEPTH_READ_WRITE)) != 0;
+	bool needsCopy        = (access & (ResourceAccessType::COPY_SOURCE
+		| ResourceAccessType::COPY_DEST)) != 0;
+	bool needsIndirect    = (access & ResourceAccessType::INDIRECT_ARGUMENT) != 0;
+	bool needsRayTracing  = (access & ResourceAccessType::RAYTRACING_ACCELERATION_STRUCTURE_READ) != 0;
+	bool needsBuildAS     = (access & ResourceAccessType::RAYTRACING_ACCELERATION_STRUCTURE_WRITE)!= 0;
+
+	// count how many distinct categories are requested
+	int categoryCount =
+		(int)needsCommon
+		+ (int)needsShading
+		+ (int)needsIndexInput
+		+ (int)needsRenderTarget
+		+ (int)needsDepthStencil
+		+ (int)needsCopy
+		+ (int)needsIndirect
+		+ (int)needsRayTracing
+		+ (int)needsBuildAS;
+
+	// zero categories = no sync
+	if (categoryCount == 0)
+		return ResourceSyncState::NONE;
+	// more than one category = full pipeline sync
+	if (categoryCount > 1)
+		return ResourceSyncState::ALL;
+
+	if (needsRenderTarget && needsShading) {
+		spdlog::warn("RenderSyncFromAccess: RenderTarget and Shading access types are both set. This is not supported.");
+	}
+
+	// exactly one category = pick it
+	if (needsCommon)        return ResourceSyncState::ALL;
+	if (needsShading)       return ResourceSyncState::ALL_SHADING;
+	if (needsIndexInput)    return ResourceSyncState::INDEX_INPUT;
+	if (needsRenderTarget)  return ResourceSyncState::RENDER_TARGET;
+	if (needsDepthStencil)  return ResourceSyncState::DEPTH_STENCIL;
+	if (needsCopy)          return ResourceSyncState::COPY;
+	if (needsIndirect)      return ResourceSyncState::EXECUTE_INDIRECT;
+	if (needsBuildAS)       return ResourceSyncState::BUILD_RAYTRACING_ACCELERATION_STRUCTURE;
+	if (needsRayTracing)    return ResourceSyncState::RAYTRACING;
+
+
+	throw std::runtime_error("ResourceSyncState: Unknown access type");
+	// (should never get here)
+	return ResourceSyncState::ALL;
 }
 
 inline bool AccessTypeIsWriteType(ResourceAccessType access) {
 	if (access & ResourceAccessType::RENDER_TARGET) return true;
-	if (access & ResourceAccessType::DEPTH_WRITE) return true;
+	if (access & ResourceAccessType::DEPTH_READ_WRITE) return true;
 	if (access & ResourceAccessType::COPY_DEST) return true;
 	if (access & ResourceAccessType::UNORDERED_ACCESS) return true;
 	if (access & ResourceAccessType::RAYTRACING_ACCELERATION_STRUCTURE_WRITE) return true;
 	return false;
 }
 
-inline D3D12_BARRIER_ACCESS ResourceStateToD3D12AccessType(ResourceAccessType state) {
+inline D3D12_BARRIER_ACCESS ResourceAccessTypeToD3D12(ResourceAccessType state) {
+	if (state == ResourceAccessType::NONE) {
+		return D3D12_BARRIER_ACCESS_NO_ACCESS;
+	}
 	D3D12_BARRIER_ACCESS access = D3D12_BARRIER_ACCESS_COMMON;
 	if (state & ResourceAccessType::INDEX_BUFFER) {
 		access |= D3D12_BARRIER_ACCESS_INDEX_BUFFER;
@@ -182,7 +234,7 @@ inline D3D12_BARRIER_ACCESS ResourceStateToD3D12AccessType(ResourceAccessType st
 	if (state & ResourceAccessType::RENDER_TARGET) {
 		access |= D3D12_BARRIER_ACCESS_RENDER_TARGET;
 	}
-	if (state & ResourceAccessType::DEPTH_WRITE) {
+	if (state & ResourceAccessType::DEPTH_READ_WRITE) {
 		access |= D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
 	}
 	if (state & ResourceAccessType::DEPTH_READ) {

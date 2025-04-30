@@ -79,12 +79,14 @@ BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType
 	//}
 #endif
 	
-	m_bufferBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevAccessType);
-	m_bufferBarrier.AccessAfter = ResourceStateToD3D12AccessType(newAccessType);
+	m_bufferBarrier.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
+	m_bufferBarrier.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
 	m_bufferBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
 	m_bufferBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 
-	currentSyncState = newSyncState;
+	m_currentAccessType = newAccessType;
+	m_currentLayout = newLayout;
+	m_prevSyncState = newSyncState;
 
 	return m_barrierGroups;
 }
