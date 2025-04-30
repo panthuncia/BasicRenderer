@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderGraph.h"
+#include "ResourceRequirements.h"
 
 class RenderPassBuilder {
 public:
@@ -20,8 +21,21 @@ public:
     }
 
     template<typename... Args>
-    RenderPassBuilder& WithDepthTarget(Args&&... args) & {
-        (addDepthTarget(std::forward<Args>(args)), ...);
+    RenderPassBuilder& WithDepthRead(Args&&... args) & {
+        (addDepthRead(std::forward<Args>(args)), ...);
+        return *this;
+    }
+
+    template<typename... Args>
+    RenderPassBuilder& WithDepthWrite(Args&&... args) & {
+        (addDepthWrite(std::forward<Args>(args)), ...);
+        return *this;
+    }
+
+    template<typename... Args>
+    RenderPassBuilder& WithDepthReadWrite(Args&&... args) & {
+        (addDepthRead(std::forward<Args>(args)), ...);
+		(addDepthWrite(std::forward<Args>(args)), ...);
         return *this;
     }
 
@@ -69,8 +83,21 @@ public:
     }
 
     template<typename... Args>
-    RenderPassBuilder WithDepthTarget(Args&&... args) && {
-        (addDepthTarget(std::forward<Args>(args)), ...);
+    RenderPassBuilder WithDepthWrite(Args&&... args) && {
+        (addDepthWrite(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithDepthRead(Args&&... args) && {
+        (addDepthRead(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithDepthReadWrite(Args&&... args) && {
+        (addDepthWrite(std::forward<Args>(args)), ...);
+		(addDepthRead(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
@@ -116,12 +143,13 @@ public:
         return *this;
     }
 
-	// Second build, callable on temporaries
+    // Second build, callable on temporaries
     template<typename PassT, typename... CtorArgs>
     RenderPassBuilder Build(CtorArgs&&... args) && {
         ensureNotBuilt();
         built_ = true;
 
+		params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
         graph.AddRenderPass(pass, params, passName);
 
@@ -135,7 +163,6 @@ private:
     // Single resource overload
     void addShaderResource(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-		validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.shaderResources.push_back(r);
     }
 
@@ -143,146 +170,154 @@ private:
     void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
     }
 
-	// Render target
+    // Render target
     void addRenderTarget(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.renderTargets.push_back(r);
     }
 
     void addRenderTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.renderTargets.push_back(r);
         }
     }
 
-	// Depth target
-	void addDepthTarget(const std::shared_ptr<Resource>& r) {
+    // Depth target
+    void addDepthWrite(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-		params.depthTextures.push_back(r);
-	}
+        params.depthWriteResources.push_back(r);
+    }
 
-	void addDepthTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addDepthWrite(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.depthWriteResources.push_back(r);
         }
-	}
+    }
 
-	// Constant buffer
-	void addConstantBuffer(const std::shared_ptr<Resource>& r) {
+    void addDepthRead(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-		params.constantBuffers.push_back(r);
-	}
+        params.depthReadResources.push_back(r);
+    }
 
-	void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addDepthRead(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.depthReadResources.push_back(r);
         }
-	}
+    }
 
-	// Unordered access
-	void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
+    // Constant buffer
+    void addConstantBuffer(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-		params.unorderedAccessViews.push_back(r);
-	}
+        params.constantBuffers.push_back(r);
+    }
 
-	void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.constantBuffers.push_back(r);
         }
-	}
+    }
 
-	// Copy destination
-	void addCopyDest(const std::shared_ptr<Resource>& r) {
+    // Unordered access
+    void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-		params.copyTargets.push_back(r);
-	}
+        params.unorderedAccessViews.push_back(r);
+    }
 
-	void addCopyDest(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.unorderedAccessViews.push_back(r);
         }
-	}
+    }
 
-	// Copy source
-	void addCopySource(const std::shared_ptr<Resource>& r) {
+    // Copy destination
+    void addCopyDest(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-		params.copySources.push_back(r);
-	}
+        params.copyTargets.push_back(r);
+    }
 
-	void addCopySource(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addCopyDest(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.copyTargets.push_back(r);
         }
-	}
+    }
 
-	// Indirect arguments
-	void addIndirectArguments(const std::shared_ptr<Resource>& r) {
+    // Copy source
+    void addCopySource(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-		params.indirectArgumentBuffers.push_back(r);
-	}
+        params.copySources.push_back(r);
+    }
 
-	void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addCopySource(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.copySources.push_back(r);
         }
-	}
+    }
+
+    // Indirect arguments
+    void addIndirectArguments(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        params.indirectArgumentBuffers.push_back(r);
+    }
+
+    void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            params.indirectArgumentBuffers.push_back(r);
+        }
+    }
 
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("RenderPassBuilder::Build() may only be called once");
     }
 
-	void validateResourceNotAlreadyAdded(uint64_t id) const {
-		if (std::find_if(params.shaderResources.begin(), params.shaderResources.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.shaderResources.end()) {
-			throw std::runtime_error("Resource already added to shader resources");
-		}
-		if (std::find_if(params.renderTargets.begin(), params.renderTargets.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.renderTargets.end()) {
-			throw std::runtime_error("Resource already added to render targets");
-		}
-		if (std::find_if(params.depthTextures.begin(), params.depthTextures.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.depthTextures.end()) {
-			throw std::runtime_error("Resource already added to depth targets");
-		}
-		if (std::find_if(params.constantBuffers.begin(), params.constantBuffers.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.constantBuffers.end()) {
-			throw std::runtime_error("Resource already added to constant buffers");
-		}
-		if (std::find_if(params.unorderedAccessViews.begin(), params.unorderedAccessViews.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.unorderedAccessViews.end()) {
-			throw std::runtime_error("Resource already added to unordered access views");
-		}
-		if (std::find_if(params.copyTargets.begin(), params.copyTargets.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.copyTargets.end()) {
-			throw std::runtime_error("Resource already added to copy targets");
-		}
-		if (std::find_if(params.copySources.begin(), params.copySources.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.copySources.end()) {
-			throw std::runtime_error("Resource already added to copy sources");
-		}
-		if (std::find_if(params.indirectArgumentBuffers.begin(), params.indirectArgumentBuffers.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.indirectArgumentBuffers.end()) {
-			throw std::runtime_error("Resource already added to indirect argument buffers");
-		}
-	}
+
+    std::vector<ResourceRequirement> GatherResourceRequirements() const {
+        std::unordered_map<uint64_t, ResourceAccessType> accessMap;
+        std::unordered_map<uint64_t, std::shared_ptr<Resource>> ptrMap;
+
+        // helper to fold in one list
+        auto accumulate = [&](const std::vector<std::shared_ptr<Resource>>& list, ResourceAccessType flag){
+            for(const std::shared_ptr<Resource>& r : list){
+                if(!r) continue;
+                accessMap[r->GetGlobalResourceID()] = accessMap[r->GetGlobalResourceID()] | flag;
+                ptrMap[r->GetGlobalResourceID()] = r;
+            }
+            };
+
+        accumulate(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
+        accumulate(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
+        accumulate(params.renderTargets,      ResourceAccessType::RENDER_TARGET);
+        accumulate(params.depthReadResources, ResourceAccessType::DEPTH_READ);
+        accumulate(params.depthWriteResources,ResourceAccessType::DEPTH_WRITE);
+        accumulate(params.unorderedAccessViews,ResourceAccessType::UNORDERED_ACCESS);
+        accumulate(params.copySources,        ResourceAccessType::COPY_SOURCE);
+        accumulate(params.copyTargets,        ResourceAccessType::COPY_DEST);
+        accumulate(params.indirectArgumentBuffers,
+            ResourceAccessType::INDIRECT_ARGUMENT);
+
+        std::vector<ResourceRequirement> reqs;
+        reqs.reserve(accessMap.size());
+        for(auto & [raw, flags] : accessMap){
+            ResourceRequirement rr;
+            rr.resource = ptrMap[raw];
+            rr.access   = flags;
+            rr.layout   = AccessToLayout(flags);
+            rr.sync     = RenderSyncFromAccess(flags);
+            reqs.push_back(rr);
+        }
+        return reqs;
+    }
 
     // storage
     RenderGraph&             graph;
@@ -296,7 +331,7 @@ private:
 class ComputePassBuilder {
 public:
     // Variadic entry points
-    
+
     //First set, callable on Lvalues
     template<typename... Args>
     ComputePassBuilder& WithShaderResource(Args&&... args) & {
@@ -316,7 +351,7 @@ public:
         return *this;
     }
 
-	// Second set, callable on temporaries
+    // Second set, callable on temporaries
     template<typename... Args>
     ComputePassBuilder WithShaderResource(Args&&... args) && {
         (addShaderResource(std::forward<Args>(args)), ...);
@@ -353,6 +388,7 @@ public:
         ensureNotBuilt();
         built_ = true;
 
+        params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
         graph.AddComputePass(pass, params, passName);
 
@@ -366,7 +402,6 @@ private:
     // Single resource overload
     void addShaderResource(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.shaderResources.push_back(r);
     }
 
@@ -374,7 +409,6 @@ private:
     void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
             params.shaderResources.push_back(r);
         }
     }
@@ -382,30 +416,26 @@ private:
     // Constant buffer
     void addConstantBuffer(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.constantBuffers.push_back(r);
     }
 
     void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.constantBuffers.push_back(r);
         }
     }
 
     // Unordered access
     void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
         if (!r) return;
-        validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
         params.unorderedAccessViews.push_back(r);
     }
 
     void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
         for (auto& r : list) {
             if (!r) continue;
-            validateResourceNotAlreadyAdded(r->GetGlobalResourceID());
-            params.shaderResources.push_back(r);
+            params.unorderedAccessViews.push_back(r);
         }
     }
 
@@ -413,16 +443,34 @@ private:
         if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");
     }
 
-    void validateResourceNotAlreadyAdded(uint64_t id) const {
-        if (std::find_if(params.shaderResources.begin(), params.shaderResources.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.shaderResources.end()) {
-            throw std::runtime_error("Resource already added to shader resources");
+    std::vector<ResourceRequirement> GatherResourceRequirements() const {
+        std::unordered_map<uint64_t, ResourceAccessType> accessMap;
+        std::unordered_map<uint64_t, std::shared_ptr<Resource>> ptrMap;
+
+        // helper to fold in one list
+        auto accumulate = [&](const std::vector<std::shared_ptr<Resource>>& list, ResourceAccessType flag){
+            for(const std::shared_ptr<Resource>& r : list){
+                if(!r) continue;
+                accessMap[r->GetGlobalResourceID()] = accessMap[r->GetGlobalResourceID()] | flag;
+                ptrMap[r->GetGlobalResourceID()] = r;
+            }
+            };
+
+        accumulate(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
+        accumulate(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
+        accumulate(params.unorderedAccessViews,ResourceAccessType::UNORDERED_ACCESS);
+
+        std::vector<ResourceRequirement> reqs;
+        reqs.reserve(accessMap.size());
+        for(auto & [raw, flags] : accessMap){
+            ResourceRequirement rr;
+            rr.resource = ptrMap[raw];
+            rr.access   = flags;
+            rr.layout   = AccessToLayout(flags);
+            rr.sync     = ComputeSyncFromAccess(flags);
+            reqs.push_back(rr);
         }
-        if (std::find_if(params.constantBuffers.begin(), params.constantBuffers.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.constantBuffers.end()) {
-            throw std::runtime_error("Resource already added to constant buffers");
-        }
-        if (std::find_if(params.unorderedAccessViews.begin(), params.unorderedAccessViews.end(), [id](const std::shared_ptr<Resource>& r) { return r->GetGlobalResourceID() == id; }) != params.unorderedAccessViews.end()) {
-            throw std::runtime_error("Resource already added to unordered access views");
-        }
+        return reqs;
     }
 
     // storage

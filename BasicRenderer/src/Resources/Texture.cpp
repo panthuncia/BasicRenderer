@@ -17,14 +17,8 @@ UINT Texture::GetSamplerDescriptorIndex() {
 	return m_sampler->GetDescriptorIndex();
 }
 
-std::vector<D3D12_RESOURCE_BARRIER>& Texture::GetTransitions(ResourceState fromState, ResourceState toState) {
-	currentState = toState;
-	return m_image->GetTransitions(fromState, toState); // Transition the underlying PixelBuffer
-}
-
-BarrierGroups& Texture::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-	currentState = newState;
-	return m_image->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState); // Transition the underlying PixelBuffer
+BarrierGroups& Texture::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+	return m_image->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState); // Transition the underlying PixelBuffer
 }
 
 void Texture::SetName(const std::wstring& name) {

@@ -969,7 +969,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto newGraph = std::make_shared<RenderGraph>();
     std::shared_ptr<PixelBuffer> depthTexture = m_depthStencilBuffer;
-	newGraph->AddResource(depthTexture, false, ResourceState::DEPTH_WRITE);
+	newGraph->AddResource(depthTexture, false);
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
@@ -998,8 +998,8 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_clusteredLighting) {
         clusterBuffer = m_pLightManager->GetClusterBuffer();
         lightPagesBuffer = m_pLightManager->GetLightPagesBuffer();
-        newGraph->AddResource(clusterBuffer, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(lightPagesBuffer, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(clusterBuffer, false);
+        newGraph->AddResource(lightPagesBuffer, false);
     }
     newGraph->AddResource(cameraBuffer);
     newGraph->AddResource(lightBufferResourceGroup);
@@ -1055,7 +1055,7 @@ void DX12Renderer::CreateRenderGraph() {
 	normalsWorldSpaceDesc.imageDimensions.push_back(dims);
 	auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
 	normalsWorldSpace->SetName(L"Normals World Space");
-	newGraph->AddResource(normalsWorldSpace, false, ResourceState::RENDER_TARGET);
+	newGraph->AddResource(normalsWorldSpace, false);
 
 	std::shared_ptr<PixelBuffer> albedo;
 	std::shared_ptr<PixelBuffer> metallicRoughness;
@@ -1074,7 +1074,7 @@ void DX12Renderer::CreateRenderGraph() {
         albedoDesc.imageDimensions.push_back(albedoDims);
         albedo = PixelBuffer::Create(albedoDesc);
         albedo->SetName(L"Albedo");
-        newGraph->AddResource(albedo, false, ResourceState::RENDER_TARGET);
+        newGraph->AddResource(albedo, false);
 
         TextureDescription metallicRoughnessDesc;
         metallicRoughnessDesc.arraySize = 1;
@@ -1089,13 +1089,13 @@ void DX12Renderer::CreateRenderGraph() {
         metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
         metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
         metallicRoughness->SetName(L"Metallic Roughness");
-        newGraph->AddResource(metallicRoughness, false, ResourceState::RENDER_TARGET);
+        newGraph->AddResource(metallicRoughness, false);
     }
 
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
         .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness)
-        .WithDepthTarget(depthTexture);
+        .WithDepthReadWrite(depthTexture);
 
 	if (useMeshShaders) {
 		zBuilder.WithShaderResource(meshResourceGroup);
@@ -1150,14 +1150,14 @@ void DX12Renderer::CreateRenderGraph() {
         workingAOTerm2->SetName(L"GTAO Working AO Term 2");
         outputAO = PixelBuffer::Create(workingAOTermDesc);
         outputAO->SetName(L"GTAO Output AO Term");
-        newGraph->AddResource(workingAOTerm1, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(workingAOTerm2, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(outputAO, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(workingDepths, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(workingEdges, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingAOTerm1, false);
+        newGraph->AddResource(workingAOTerm2, false);
+        newGraph->AddResource(outputAO, false);
+        newGraph->AddResource(workingDepths, false);
+        newGraph->AddResource(workingEdges, false);
 
         auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
-        newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
+        newGraph->AddResource(GTAOConstantBuffer, false);
 
         // Point-clamp sampler
         D3D12_SAMPLER_DESC samplerDesc = {};
@@ -1222,9 +1222,9 @@ void DX12Renderer::CreateRenderGraph() {
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
         // light pages counter
-        auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+        auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
         lightPagesCounter->SetName(L"Light Pages Counter");
-        newGraph->AddResource(lightPagesCounter, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(lightPagesCounter, false);
 
 		newGraph->BuildComputePass("ClusterGenerationPass")
 			.WithShaderResource(cameraBuffer)
@@ -1241,8 +1241,11 @@ void DX12Renderer::CreateRenderGraph() {
         .WithShaderResource(cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup());
     
     if (!m_deferredRendering) {
-        primaryPassBuilder.WithDepthTarget(depthTexture);
-    }
+        primaryPassBuilder.WithDepthReadWrite(depthTexture);
+	}
+	else {
+		primaryPassBuilder.WithDepthRead(depthTexture);
+	}
 
 	if (!m_deferredRendering) { // Don't need object and mesh info for deferred rendering
         primaryPassBuilder.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices);
@@ -1296,7 +1299,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 		auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-			.WithDepthTarget(m_shadowMaps);
+			.WithDepthReadWrite(m_shadowMaps);
 
 		if (useMeshShaders) {
 			shadowBuilder.WithShaderResource(meshResourceGroup);
@@ -1312,7 +1315,7 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_currentEnvironment != nullptr) {
 		newGraph->BuildRenderPass("SkyboxPass")
 			.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap())
-			.WithDepthTarget(depthTexture)
+			.WithDepthReadWrite(depthTexture)
 			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
 	if (m_deferredRendering) { // G-Buffer resources + depth
@@ -1339,12 +1342,11 @@ void DX12Renderer::CreateRenderGraph() {
     desc.hasRTV = false;
     desc.hasUAV = true;
 	desc.hasNonShaderVisibleUAV = true;
-    desc.initialState = ResourceState::PIXEL_SRV;
 	auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
 	PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
-    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, ResourceState::UNORDERED_ACCESS, false, true, false);
+    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, false, true, false);
 	PPLLBuffer->SetName(L"PPLLBuffer");
-    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
 	PPLLCounter->SetName(L"PPLLCounter");
 	newGraph->AddResource(PPLLHeadPointerTexture);
 	newGraph->AddResource(PPLLBuffer);

@@ -36,20 +36,8 @@ public:
 	}
 
 protected:
-    // Override the base Resource method to transition all resources in the group
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) {
-		m_transitions.clear();
-        for (auto& pair : resourcesByID) {
-            auto& trans = pair.second->GetTransitions(prevState, newState);
-            for (auto& transition : trans) {
-				m_transitions.push_back(transition);
-            }
-        }
-        currentState = newState; // Set the state for the group as a whole
-		return m_transitions;
-    }
 
-	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+	BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 		m_barrierGroups.numBufferBarrierGroups = 0;
 		m_barrierGroups.numTextureBarrierGroups = 0;
 		m_barrierGroups.numGlobalBarrierGroups = 0;
@@ -57,7 +45,7 @@ protected:
 		m_textureBarriers.clear();
 		m_globalBarriers.clear();
 		for (auto& resource : standardTransitionResources) {
-			auto& barrierGroup = resource->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
+			auto& barrierGroup = resource->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
 			if (barrierGroup.numBufferBarrierGroups > 0) {
 				m_bufferBarriers.insert(m_bufferBarriers.end(), barrierGroup.bufferBarriers, barrierGroup.bufferBarriers + barrierGroup.numBufferBarrierGroups);
 				m_barrierGroups.numBufferBarrierGroups += barrierGroup.numBufferBarrierGroups;
@@ -74,7 +62,6 @@ protected:
 		m_barrierGroups.bufferBarriers = m_bufferBarriers.data();
 		m_barrierGroups.textureBarriers = m_textureBarriers.data();
 		m_barrierGroups.globalBarriers = m_globalBarriers.data();
-		currentState = newState; // Set the state for the group as a whole
 		return m_barrierGroups;
 	}
 

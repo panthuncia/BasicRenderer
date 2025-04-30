@@ -18,11 +18,10 @@ struct BarrierGroups {
 
 class Resource {
 public:
-    Resource() : currentState(ResourceState::UNKNOWN) {
+    Resource() {
         m_globalResourceID = globalResourceCount.fetch_add(1, std::memory_order_relaxed);
     }
 
-    virtual ResourceState GetState() const { return currentState; }
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& name) { this->name = name; OnSetName(); }
@@ -30,12 +29,9 @@ public:
     virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
 
 protected:
-    virtual std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) = 0;
-    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
     virtual void OnSetName() {}
-    virtual void SetState(ResourceState state) { currentState = state; }
 
-    ResourceState currentState;
 	ResourceSyncState currentSyncState = ResourceSyncState::ALL;
     std::wstring name;
 private:

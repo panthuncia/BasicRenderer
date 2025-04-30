@@ -143,7 +143,7 @@ private:
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
 
         UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 

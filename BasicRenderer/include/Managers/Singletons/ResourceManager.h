@@ -31,15 +31,6 @@ public:
         return instance;
     }
 
-    struct ResourceTransition {
-        Resource* resource = nullptr;
-        ResourceState beforeState;
-        ResourceState afterState;
-#if defined(_DEBUG)
-        std::wstring name;
-#endif // DEBUG
-    };
-
     void Initialize(ID3D12CommandQueue* commandQueue);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);
@@ -65,14 +56,14 @@ public:
         //bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
         auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
 		dataBuffer->SetName(name);
-        ResourceTransition transition;
-		transition.resource = dataBuffer.get();
-		transition.beforeState = ResourceState::UNKNOWN;
-		transition.afterState = ResourceState::CONSTANT;
-#if defined(_DEBUG)
-		transition.name = name;
-#endif
-		QueueResourceTransition(transition);
+//        ResourceTransition transition;
+//		transition.resource = dataBuffer.get();
+//		transition.beforeState = ResourceState::UNKNOWN;
+//		transition.afterState = ResourceState::CONSTANT;
+//#if defined(_DEBUG)
+//		transition.name = name;
+//#endif
+//		QueueResourceTransition(transition);
         // Create a descriptor for the buffer
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
         cbvDesc.BufferLocation = dataBuffer->m_buffer->GetGPUVirtualAddress();
@@ -91,7 +82,7 @@ public:
         return dataBuffer;
     }
 
-    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, size_t elementSize, ResourceState usageType, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
+    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, size_t elementSize, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         UINT bufferSize = numElements * elementSize;
         unsigned int counterOffset = 0;
@@ -120,11 +111,11 @@ public:
 
         auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
         
-        ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
-#if defined(_DEBUG)
-        transition.name = L"IndexedStructuredBuffer";
-#endif
-        QueueResourceTransition(transition);
+        //ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
+//#if defined(_DEBUG)
+//        transition.name = L"IndexedStructuredBuffer";
+//#endif
+//        QueueResourceTransition(transition);
 
         unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
 
@@ -190,7 +181,7 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", bool UAV = false) {
+    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "", bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -198,14 +189,14 @@ public:
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
         std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, UAV);
-        ResourceTransition transition;
-        transition.resource = pDynamicBuffer.get();
-		transition.beforeState = ResourceState::UNKNOWN;
-		transition.afterState = usage;
-#if defined(_DEBUG)
-        transition.name = name;
-#endif
-		QueueResourceTransition(transition);
+//        ResourceTransition transition;
+//        transition.resource = pDynamicBuffer.get();
+//		transition.beforeState = ResourceState::UNKNOWN;
+//		transition.afterState = usage;
+//#if defined(_DEBUG)
+//        transition.name = name;
+//#endif
+//		QueueResourceTransition(transition);
         pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, false);
             });
@@ -233,7 +224,7 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(ResourceState usage, UINT capacity = 64, std::wstring name = "", size_t alignment = 1, bool UAV = false) {
+    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "", size_t alignment = 1, bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -241,14 +232,14 @@ public:
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
         std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, alignment, UAV);
-        ResourceTransition transition;
-        transition.resource = pDynamicBuffer.get();
-        transition.beforeState = ResourceState::UNKNOWN;
-        transition.afterState = usage;
-#if defined(_DEBUG)
-        transition.name = L"LazyDynamicStructuredBuffer";
-#endif
-        QueueResourceTransition(transition);
+//        ResourceTransition transition;
+//        transition.resource = pDynamicBuffer.get();
+//        transition.beforeState = ResourceState::UNKNOWN;
+//        transition.afterState = usage;
+//#if defined(_DEBUG)
+//        transition.name = L"LazyDynamicStructuredBuffer";
+//#endif
+//        QueueResourceTransition(transition);
         pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer, bool uav) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, uav);
             });
@@ -295,8 +286,8 @@ public:
         return pDynamicBuffer;
     }
 
-    std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress = false, bool UAV = false);
-	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, std::wstring name = L"");
+    std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress = false, bool UAV = false);
+	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(UINT capacity, std::wstring name = L"");
 
     UINT GetNextResizableBufferID() {
         UINT val = numResizableBuffers;
@@ -335,18 +326,19 @@ public:
 
             device->CreateUnorderedAccessView(buffer->GetAPIResource() , nullptr, &uavDesc, uavShaderVisibleHandle);
         }
-		auto bufferState = buffer->GetState();
-		// After resize, internal buffer state will not match the wrapper state
-		if (bufferState != ResourceState::UNKNOWN) {
-			ResourceTransition transition;
-			transition.resource = buffer->m_dataBuffer.get();
-			transition.beforeState = ResourceState::UNKNOWN;
-			transition.afterState = buffer->GetState();
-#if defined(_DEBUG)
-            transition.name = buffer->GetName()+L": Resize";
-#endif
-			QueueResourceTransition(transition);
-		}
+
+        //		auto bufferState = buffer->GetState();
+//		// After resize, internal buffer state will not match the wrapper state
+//		if (bufferState != ResourceState::UNKNOWN) {
+//			ResourceTransition transition;
+//			transition.resource = buffer->m_dataBuffer.get();
+//			transition.beforeState = ResourceState::UNKNOWN;
+//			transition.afterState = buffer->GetState();
+//#if defined(_DEBUG)
+//            transition.name = buffer->GetName()+L": Resize";
+//#endif
+//			QueueResourceTransition(transition);
+//		}
     }
 
     void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
@@ -381,18 +373,18 @@ public:
             device->CreateUnorderedAccessView(buffer->GetAPIResource(), nullptr, &uavDesc, uavShaderVisibleHandle);
         }
 
-        auto bufferState = buffer->GetState();
-        // After resize, internal buffer state will not match the wrapper state
-        if (bufferState != ResourceState::UNKNOWN) {
-            ResourceTransition transition;
-            transition.resource = buffer->m_dataBuffer.get();
-            transition.beforeState = ResourceState::UNKNOWN;
-            transition.afterState = buffer->GetState();
-#if defined(_DEBUG)
-            transition.name = buffer->GetName()+L": Resize";
-#endif
-            //QueueResourceTransition(transition);
-        }
+//        auto bufferState = buffer->GetState();
+//        // After resize, internal buffer state will not match the wrapper state
+//        if (bufferState != ResourceState::UNKNOWN) {
+//            ResourceTransition transition;
+//            transition.resource = buffer->m_dataBuffer.get();
+//            transition.beforeState = ResourceState::UNKNOWN;
+//            transition.afterState = buffer->GetState();
+//#if defined(_DEBUG)
+//            transition.name = buffer->GetName()+L": Resize";
+//#endif
+//            //QueueResourceTransition(transition);
+//        }
     }
 
     template<typename T>
@@ -406,14 +398,14 @@ public:
 
         auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
 		dataBuffer->SetName(name);
-        ResourceTransition transition;
-        transition.resource = dataBuffer.get();
-        transition.beforeState = ResourceState::UNKNOWN;
-        transition.afterState = ResourceState::CONSTANT;
-#if defined(_DEBUG)
-        transition.name = name;
-#endif
-        QueueResourceTransition(transition);
+//        ResourceTransition transition;
+//        transition.resource = dataBuffer.get();
+//        transition.beforeState = ResourceState::UNKNOWN;
+//        transition.afterState = ResourceState::CONSTANT;
+//#if defined(_DEBUG)
+//        transition.name = name;
+//#endif
+//        QueueResourceTransition(transition);
 
 
         return dataBuffer;
@@ -426,13 +418,13 @@ public:
 		return CreateTextureInternal(desc, initialData);
     }
 
-    std::shared_ptr<Buffer> CreateBuffer(size_t size, ResourceState usageType, void* pInitialData, bool UAV = false);
+    std::shared_ptr<Buffer> CreateBuffer(size_t size, void* pInitialData, bool UAV = false);
 
     UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
     D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
 
-	void QueueResourceTransition(const ResourceTransition& transition);
-    void ExecuteResourceTransitions();
+	//void QueueResourceTransition(const ResourceTransition& transition);
+    //void ExecuteResourceTransitions();
 
 	void SetEnvironmentBufferDescriptorIndex(unsigned int index) { perFrameCBData.environmentBufferDescriptorIndex = index; }
 	void SetActiveEnvironmentIndex(unsigned int index) { perFrameCBData.activeEnvironmentIndex = index; }
@@ -493,7 +485,7 @@ private:
     std::vector<DynamicBufferBase*> dynamicBuffersToUpdate;
 	std::vector<ViewedDynamicBufferBase*> dynamicBuffersToUpdateViews;
 
-	std::vector<ResourceTransition> queuedResourceTransitions;
+	//std::vector<ResourceTransition> queuedResourceTransitions;
 
     ComPtr<ID3D12Resource> m_uavCounterReset;
 

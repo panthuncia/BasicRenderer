@@ -26,5 +26,4 @@ struct TextureDescription {
 	DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
 	bool hasNonShaderVisibleUAV = false;
     bool generateMipMaps = false;
-    ResourceState initialState = ResourceState::UNKNOWN;
 };

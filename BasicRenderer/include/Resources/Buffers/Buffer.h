@@ -43,8 +43,7 @@ public:
 	}
 	ResourceCPUAccessType m_accessType;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
-	std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState);
-	BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+	BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 	size_t GetSize() const { return m_size; }
 
 	ID3D12Resource* GetAPIResource() const override { return m_buffer.Get(); }

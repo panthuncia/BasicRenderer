@@ -10,14 +10,14 @@
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, ResourceState::ALL_SRV, L"perObjectBuffers<PerObjectCB>");
-	m_masterIndirectCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, ResourceState::ALL_SRV, L"masterIndirectCommandsBuffer<IndirectCommand>");
+	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, L"perObjectBuffers<PerObjectCB>");
+	m_masterIndirectCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, L"masterIndirectCommandsBuffer<IndirectCommand>");
 	
-	m_normalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(ResourceState::ALL_SRV, 1, L"preSkinningNormalMatrixBuffer");
+	m_normalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(1, L"preSkinningNormalMatrixBuffer");
 
-	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeOpaqueDrawSetIndices");
-	m_activeAlphaTestDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeAlphaTestDrawSetIndices");
-	m_activeBlendDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeBlendDrawSetIndices");
+	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeOpaqueDrawSetIndices");
+	m_activeAlphaTestDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeAlphaTestDrawSetIndices");
+	m_activeBlendDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeBlendDrawSetIndices");
 }
 Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances) {
 	

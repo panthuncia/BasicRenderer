@@ -234,7 +234,7 @@ private:
 
 		const UINT vertexBufferSize = static_cast<UINT>(4 * sizeof(FullscreenPassVertex));
 
-		m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenTriangleVertices);
+		m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)fullscreenTriangleVertices);
 		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, m_vertexBufferHandle.get(), 0);
 
 		D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
