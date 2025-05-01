@@ -55,12 +55,6 @@ public:
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
-
-		auto numBlend = context.drawStats.numBlendDraws;
-		if (numBlend == 0) {
-			return {};
-		}
-
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = m_commandLists[context.frameIndex];
 		auto& allocator = m_allocators[context.frameIndex];
