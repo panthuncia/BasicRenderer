@@ -30,6 +30,9 @@ Feature development is driven purely by what I'm interested in at the moment.
 - A basic UI for feature toggles, importing new asset files, debug view selection, and scene graph introspection & modification
 
 ## Gallery
+![San-Miguel example](images/SanMiguel.png)
+
+![Bistro example](images/Bistro.png)
 
 ![Color example](images/color.png)
 
