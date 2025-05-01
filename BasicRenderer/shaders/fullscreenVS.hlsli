@@ -25,7 +25,7 @@ FULLSCREEN_VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0, uint v
     
     FULLSCREEN_VS_OUTPUT o;
     float2 ndc = QuadCorners[vid];
-    o.position = float4(ndc, 0, 1);
+    o.position = float4(ndc, 1.0f, 1);
     o.uv = ndc * 0.5 + 0.5;
 
     // build a ray in clip space:

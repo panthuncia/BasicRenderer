@@ -211,21 +211,6 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Reset(commandAllocator.Get(), nullptr);
 	for (auto& copy : queuedResourceCopies) {
-		/*auto startState = ResourceStateToD3D12(copy.source->GetState());
-		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.source->GetAPIResource(),
-			startState,
-			D3D12_RESOURCE_STATE_COPY_SOURCE
-		);
-		commandList->ResourceBarrier(1, &barrier);
-
-		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.destination->GetAPIResource(),
-			ResourceStateToD3D12(copy.destination->GetState()),
-			D3D12_RESOURCE_STATE_COPY_DEST
-		);
-		commandList->ResourceBarrier(1, &barrier);*/
-
 		auto sourceIntialAccessType = copy.source->GetCurrentAccessType();
 		auto sourceInitialLayout = copy.source->GetCurrentLayout();
 		auto sourceInitialSyncState = copy.source->GetPrevSyncState();
@@ -269,20 +254,6 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 		barriers.insert(barriers.end(), destinationTransition.globalBarriers, destinationTransition.globalBarriers + destinationTransition.numGlobalBarrierGroups);
 
 		commandList->Barrier(barriers.size(), barriers.data());
-
-		/*barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.source->GetAPIResource(),
-			D3D12_RESOURCE_STATE_COPY_SOURCE,
-			startState
-		);
-		commandList->ResourceBarrier(1, &barrier);
-
-		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			copy.destination->GetAPIResource(),
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			ResourceStateToD3D12(copy.destination->GetState())
-		);
-		commandList->ResourceBarrier(1, &barrier);*/
 	}
 	commandList->Close();
 

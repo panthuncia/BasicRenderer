@@ -299,8 +299,13 @@ private:
             ResourceRequirement rr;
             rr.resource = ptrMap[raw];
             rr.access   = flags;
-            rr.layout   = AccessToLayout(flags);
+            rr.layout   = AccessToLayout(flags, true);
             rr.sync     = RenderSyncFromAccess(flags);
+
+			if (rr.resource->HasLayout() && !ValidateResourceLayoutAndAccessType(rr.layout, rr.access)) {
+				throw std::runtime_error("Resource layout and state validation failed");
+			}
+
             reqs.push_back(rr);
         }
         return reqs;
@@ -454,8 +459,13 @@ private:
             ResourceRequirement rr;
             rr.resource = ptrMap[raw];
             rr.access   = flags;
-            rr.layout   = AccessToLayout(flags);
+            rr.layout   = AccessToLayout(flags, false);
             rr.sync     = ComputeSyncFromAccess(flags);
+
+            if (!rr.resource->HasLayout() && !ValidateResourceLayoutAndAccessType(rr.layout, rr.access)) {
+                throw std::runtime_error("Resource layout and state validation failed");
+            }
+
             reqs.push_back(rr);
         }
         return reqs;

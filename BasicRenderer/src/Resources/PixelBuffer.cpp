@@ -45,6 +45,8 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 
 	m_barrierGroups.numTextureBarrierGroups = 1;
 	m_barrierGroups.textureBarriers = &m_barrierGroup;
+
+    m_hasLayout = true;
 }
 
 

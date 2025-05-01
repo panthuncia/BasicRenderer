@@ -191,6 +191,9 @@ private:
 		unsigned int batchIndex) {
 	    
 		for (auto& resourceRequirement : resourceRequirements) {
+			if (resourceRequirement.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
+				spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
+			}
 			const auto& id = resourceRequirement.resource->GetGlobalResourceID();
 			addTransition(isCompute, resourceRequirement.resource, resourceRequirement.access, resourceRequirement.layout, resourceRequirement.sync);
 

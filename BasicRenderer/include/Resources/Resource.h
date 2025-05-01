@@ -31,7 +31,7 @@ public:
 	virtual ResourceLayout GetCurrentLayout() const { return m_currentLayout; }
 	virtual ResourceSyncState GetPrevSyncState() const { return m_prevSyncState; }
     virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
-
+	bool HasLayout() const { return m_hasLayout; }
 protected:
     virtual void OnSetName() {}
 
@@ -39,6 +39,7 @@ protected:
     ResourceLayout m_currentLayout = ResourceLayout::LAYOUT_COMMON;
     ResourceSyncState m_prevSyncState = ResourceSyncState::ALL;
     std::wstring name;
+	bool m_hasLayout = false; // Only textures have a layout
 private:
     bool m_uploadInProgress = false;
     inline static std::atomic<uint64_t> globalResourceCount;

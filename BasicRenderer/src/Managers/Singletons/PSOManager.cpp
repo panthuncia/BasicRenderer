@@ -647,7 +647,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
     rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
     rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
     rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-    rasterizerDesc.DepthClipEnable = FALSE;
+    rasterizerDesc.DepthClipEnable = TRUE;
     rasterizerDesc.MultisampleEnable = FALSE;
     rasterizerDesc.AntialiasedLineEnable = FALSE;
     rasterizerDesc.ForcedSampleCount = 0;
@@ -668,7 +668,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
     D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
     depthStencilDesc.DepthEnable = true;
     depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
     depthStencilDesc.StencilEnable = FALSE;
     depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
     depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
@@ -690,7 +690,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
     psoDesc.RTVFormats[0] = renderTargetFormat;
-    psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc.Count = 1;
     psoDesc.SampleDesc.Quality = 0;
     psoDesc.InputLayout = inputLayoutDesc;

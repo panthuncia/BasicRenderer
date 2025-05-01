@@ -11,6 +11,7 @@ Texture::Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sa
 	else {
 		m_sampler = sampler;
 	}
+	m_hasLayout = true;
 }
 
 UINT Texture::GetSamplerDescriptorIndex() {

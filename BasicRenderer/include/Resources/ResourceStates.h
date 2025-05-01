@@ -6,6 +6,7 @@
 #if defined(_DEBUG)
 #include <string>
 #endif // _DEBUG
+#include <set>
 
 
 class Resource;
@@ -62,7 +63,7 @@ enum class ResourceLayout {
 	LAYOUT_COMPUTE_UNORDERED_ACCESS = D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_UNORDERED_ACCESS,
 	LAYOUT_COMPUTE_SHADER_RESOURCE = D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_SHADER_RESOURCE,
 	LAYOUT_COMPUTE_COPY_SOURCE = D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_COPY_SOURCE,
-	LAYOUT_COMPUTE_COPY_DEST = D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_COPY_DEST
+	LAYOUT_COMPUTE_COPY_DEST = D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_COPY_DEST,
 };
 
 enum class ResourceSyncState {
@@ -92,10 +93,14 @@ enum class ResourceSyncState {
 	SYNC_SPLIT,
 };
 
-inline bool ResourceAccessGetNumReadStates(ResourceAccessType access) {
+inline unsigned int ResourceAccessGetNumReadStates(ResourceAccessType access) {
+	if (access & ResourceAccessType::SHADER_RESOURCE && access & ResourceAccessType::DEPTH_READ) {
+		spdlog::warn("ResourceAccessGetNumReadStates: SHADER_RESOURCE and DEPTH_READ are both set. This is not supported.");
+	}
 	int num = 0;
 	if (access & ResourceAccessType::SHADER_RESOURCE) num++;
 	if (access & ResourceAccessType::DEPTH_READ) num++;
+	if (access & ResourceAccessType::RENDER_TARGET) num++;
 	if (access & ResourceAccessType::COPY_SOURCE) num++;
 	if (access & ResourceAccessType::INDEX_BUFFER) num++;
 	if (access & ResourceAccessType::VERTEX_BUFFER) num++;
@@ -104,7 +109,7 @@ inline bool ResourceAccessGetNumReadStates(ResourceAccessType access) {
 	return num;
 }
 
-inline ResourceLayout AccessToLayout(ResourceAccessType access) {
+inline ResourceLayout AccessToLayout(ResourceAccessType access, bool directQueue) {
 	// most-specific first:
 	if (access & ResourceAccessType::UNORDERED_ACCESS) 
 		return ResourceLayout::LAYOUT_UNORDERED_ACCESS;
@@ -119,7 +124,12 @@ inline ResourceLayout AccessToLayout(ResourceAccessType access) {
 
 	auto num = ResourceAccessGetNumReadStates(access);
 	if (num > 1) {
-		return ResourceLayout::LAYOUT_GENERIC_READ;
+		if (directQueue) {
+			return ResourceLayout::LAYOUT_DIRECT_GENERIC_READ;
+		}
+		else {
+			return ResourceLayout::LAYOUT_COMPUTE_GENERIC_READ;
+		}
 	}
 	else {
 		if (access & ResourceAccessType::SHADER_RESOURCE) {
@@ -323,4 +333,72 @@ inline D3D12_BARRIER_SYNC ResourceSyncStateToD3D12(ResourceSyncState state) {
 		return D3D12_BARRIER_SYNC_SPLIT;
 	}
 	throw std::runtime_error("Invalid Sync State");
+}
+
+inline bool ValidateResourceLayoutAndAccessType(ResourceLayout layout, ResourceAccessType access) {
+	if (access & ResourceAccessType::DEPTH_READ && access & ResourceAccessType::DEPTH_READ_WRITE) {
+		return false;
+	}
+	switch (layout) {
+	case ResourceLayout::LAYOUT_COMMON:
+		if ((access & ~(ResourceAccessType::SHADER_RESOURCE | ResourceAccessType::COPY_DEST | ResourceAccessType::COPY_SOURCE)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_DIRECT_COMMON:
+		if ((access & ~(ResourceAccessType::SHADER_RESOURCE | ResourceAccessType::COPY_DEST | ResourceAccessType::COPY_SOURCE | ResourceAccessType::UNORDERED_ACCESS)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_COMPUTE_COMMON:
+		if ((access & ~(ResourceAccessType::SHADER_RESOURCE | ResourceAccessType::COPY_DEST | ResourceAccessType::COPY_SOURCE | ResourceAccessType::UNORDERED_ACCESS)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_GENERIC_READ:
+		if ((access & ~(ResourceAccessType::SHADER_RESOURCE | ResourceAccessType::COPY_SOURCE)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_DIRECT_GENERIC_READ:
+		if ((access & ~(ResourceAccessType::SHADER_RESOURCE | ResourceAccessType::COPY_SOURCE | ResourceAccessType::DEPTH_READ /*| ResourceAccessType::SHADING_RATE_SOURCE | ResourceAccessType::RESOLVE_SOURCE*/)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_COMPUTE_GENERIC_READ:
+		if ((access & ~(ResourceAccessType::SHADER_RESOURCE | ResourceAccessType::COPY_SOURCE)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_RENDER_TARGET:
+		if ((access & ~(ResourceAccessType::RENDER_TARGET)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_UNORDERED_ACCESS:
+	case ResourceLayout::LAYOUT_DIRECT_UNORDERED_ACCESS:
+	case ResourceLayout::LAYOUT_COMPUTE_UNORDERED_ACCESS:
+		if ((access & ~(ResourceAccessType::UNORDERED_ACCESS)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_DEPTH_READ_WRITE:
+		if ((access & ~(ResourceAccessType::DEPTH_READ_WRITE | ResourceAccessType::DEPTH_READ)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_DEPTH_READ:
+		if ((access & ~(ResourceAccessType::DEPTH_READ)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_SHADER_RESOURCE:
+	case ResourceLayout::LAYOUT_DIRECT_SHADER_RESOURCE:
+	case ResourceLayout::LAYOUT_COMPUTE_SHADER_RESOURCE:
+		if ((access & ~(ResourceAccessType::SHADER_RESOURCE)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_COPY_SOURCE:
+	case ResourceLayout::LAYOUT_DIRECT_COPY_SOURCE:
+	case ResourceLayout::LAYOUT_COMPUTE_COPY_SOURCE:
+		if ((access & ~(ResourceAccessType::COPY_SOURCE)) != 0)
+			return false;
+		break;
+	case ResourceLayout::LAYOUT_COPY_DEST:
+		if ((access & ~(ResourceAccessType::COPY_DEST)) != 0)
+			return false;
+		break;
+	}
+	//TODO: other types
+	return true;
 }
