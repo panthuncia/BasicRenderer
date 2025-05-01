@@ -264,6 +264,7 @@ inline D3D12_BARRIER_ACCESS ResourceAccessTypeToD3D12(ResourceAccessType state) 
 inline bool ResourceSyncStateIsNotComputeSyncState(ResourceSyncState state) {
 	switch (state) { // TODO: What states can the compute queue actually work with?
 	case ResourceSyncState::NONE:
+	case ResourceSyncState::ALL:
 	case ResourceSyncState::COMPUTE_SHADING:
 		return false;
 	}

@@ -58,7 +58,12 @@ auto RenderGraph::MakeAddTransition(
 				for (auto& childID : resourcesFromGroupToManageIndependantly[group->GetGlobalResourceID()]) {
 					auto& child = resourcesByID[childID];
 					if (child) {
-						independantlyManagedTransitions.push_back(ResourceTransition{ child, prevAccess, newAccess, prevLayout, newLayout, oldSync, newSync });
+						if (initialTransitions.contains(r->GetGlobalResourceID())) {
+							independantlyManagedTransitions.push_back(ResourceTransition{ child, prevAccess, newAccess, prevLayout, newLayout, oldSync, newSync });
+						}
+						else {
+							initialTransitions[child->GetGlobalResourceID()] = ResourceTransition{ child, prevAccess, newAccess, prevLayout, newLayout, oldSync, newSync };
+						}
 					} else {
 						spdlog::error("Resource group {} has a child resource {} that is marked as independantly managed, but is not managed by this graph. This should not happen.", group->GetGlobalResourceID(), childID);
 						throw(std::runtime_error("Resource group has a child resource that is not managed by this graph"));
@@ -70,10 +75,20 @@ auto RenderGraph::MakeAddTransition(
 			if (isComputePass && oldSyncIsNotComputeSyncState) {
 				// bounce back to last graphics-queue batch
 				unsigned int gfxBatch = transHistRender[r->GetGlobalResourceID()];
-				batches[gfxBatch].passEndTransitions.push_back(T);
+				if (initialTransitions.contains(r->GetGlobalResourceID())) {
+					batches[gfxBatch].passEndTransitions.push_back(T);
+				}
+				else {
+					initialTransitions[r->GetGlobalResourceID()] = T;
+				}
 				transHistRender[r->GetGlobalResourceID()] = gfxBatch;
 				for (auto& transition : independantlyManagedTransitions) {
-					batches[gfxBatch].passEndTransitions.push_back(transition);
+					if (initialTransitions.contains(r->GetGlobalResourceID())) {
+						batches[gfxBatch].passEndTransitions.push_back(transition);
+					}
+					else {
+						initialTransitions[r->GetGlobalResourceID()] = transition;
+					}
 					transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
 					finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
 					finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
@@ -82,20 +97,40 @@ auto RenderGraph::MakeAddTransition(
 			}
 			else {
 				if (isComputePass) {
-					currentBatch.computeTransitions.push_back(T);
+					if (initialTransitions.contains(r->GetGlobalResourceID())) {
+						currentBatch.computeTransitions.push_back(T);
+					}
+					else {
+						initialTransitions[r->GetGlobalResourceID()] = T;
+					}
 					transHistCompute[r->GetGlobalResourceID()] = batchIndex;
 					for (auto& transition : independantlyManagedTransitions) {
-						currentBatch.computeTransitions.push_back(transition);
+						if (initialTransitions.contains(r->GetGlobalResourceID())) {
+							currentBatch.computeTransitions.push_back(transition);
+						}
+						else {
+							initialTransitions[transition.pResource->GetGlobalResourceID()] = transition;
+						}
 						transHistCompute[transition.pResource->GetGlobalResourceID()] = batchIndex;
 						finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
 						finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
 						finalResourceSyncStates[transition.pResource->GetGlobalResourceID()] = transition.newSyncState;
 					}
 				} else {
-					currentBatch.renderTransitions.push_back(T);
+					if (initialTransitions.contains(r->GetGlobalResourceID())) {
+						currentBatch.renderTransitions.push_back(T);
+					}
+					else {
+						initialTransitions[r->GetGlobalResourceID()] = T;
+					}
 					transHistRender[r->GetGlobalResourceID()]  = batchIndex;
 					for (auto& transition : independantlyManagedTransitions) {
-						currentBatch.renderTransitions.push_back(transition);
+						if (initialTransitions.contains(r->GetGlobalResourceID())) {
+							currentBatch.renderTransitions.push_back(transition);
+						}
+						else {
+							initialTransitions[transition.pResource->GetGlobalResourceID()] = transition;
+						}
 						transHistRender[transition.pResource->GetGlobalResourceID()] = batchIndex;
 						finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
 						finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
@@ -148,9 +183,7 @@ void RenderGraph::Compile() {
 
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
-		if (pr.name == "Environment Conversion Pass") {
-			spdlog::info("Environment Conversion Pass");
-		}
+
 		bool isCompute = (pr.type == PassType::Compute);
 		if (isCompute) {
 			auto& pass = std::get<ComputePassAndResources>(pr.pass);
@@ -368,31 +401,34 @@ void RenderGraph::Setup() {
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_computeQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameStartSyncFence));
 
-
 	// Perform initial resource transitions
-	//ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&initialTransitionCommandAllocator)));
-	//ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, initialTransitionCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&initialTransitionCommandList)));
- //   ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_initialTransitionFence)));
- //   for (auto& resourcePair : initialResourceStates) {
-	//	auto& resource = resourcesByID[resourcePair.first];
-	//	auto& state = resourcePair.second;
-	//	auto currentState = resource->GetState();
-	//	if (currentState == state) {
-	//		continue;
-	//	}
-	//	auto transitions = resource->GetTransitions(currentState, state);
-	//	for (auto& transition : transitions) {
-	//		initialTransitionCommandList->ResourceBarrier(1, &transition);
-	//	}
- //   }
-	//initialTransitionCommandList->Close();
-	//ID3D12CommandList* pCommandList = initialTransitionCommandList.Get();
-	//DeviceManager::GetInstance().GetGraphicsQueue()->ExecuteCommandLists(1, &pCommandList);
+	ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&initialTransitionCommandAllocator)));
+	ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, initialTransitionCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&initialTransitionCommandList)));
+	ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_initialTransitionFence)));
+	std::vector<D3D12_BARRIER_GROUP> initialTransitionBarriers;
+	for (auto& transitionPair : initialTransitions) {
+		auto& transition = transitionPair.second;
+		auto& group = transition.pResource->GetEnhancedBarrierGroup(transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+
+		for (int i = 0; i < group.numBufferBarrierGroups; i++) {
+			initialTransitionBarriers.push_back(group.bufferBarriers[i]);
+		}
+		for (int i = 0; i < group.numTextureBarrierGroups; i++) {
+			initialTransitionBarriers.push_back(group.textureBarriers[i]);
+		}
+		for (int i = 0; i < group.numGlobalBarrierGroups; i++) {
+			initialTransitionBarriers.push_back(group.globalBarriers[i]);
+		}
+	}
+	initialTransitionCommandList->Barrier(static_cast<UINT>(initialTransitionBarriers.size()), initialTransitionBarriers.data());
+	initialTransitionCommandList->Close();
+	ID3D12CommandList* pCommandList = initialTransitionCommandList.Get();
+	DeviceManager::GetInstance().GetGraphicsQueue()->ExecuteCommandLists(1, &pCommandList);
 
     // Sync compute and graphics queue
-	//DeviceManager::GetInstance().GetGraphicsQueue()->Signal(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
-	//DeviceManager::GetInstance().GetComputeQueue()->Wait(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
-    //m_initialTransitionFenceValue++;
+	DeviceManager::GetInstance().GetGraphicsQueue()->Signal(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
+	DeviceManager::GetInstance().GetComputeQueue()->Wait(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
+    m_initialTransitionFenceValue++;
 }
 
 void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name) {
@@ -627,7 +663,7 @@ void RenderGraph::Execute(RenderContext& context) {
 }
 
 bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<uint64_t>& computeUAVs) {
-	return true;
+	//return true;
 	
 	// New batch is needed if (a) current batch has a resource we need for this pass in a different state
 	// Or (b) if this pass would use a resource in a manner that would cause a cross-queue read/write hazard
@@ -647,7 +683,7 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndR
 }
 
 bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<uint64_t>& renderUAVs) {
-	return true;
+	//return true;
 
 	// New batch is needed if (a) current batch has a resource we need for this pass in a different state
     // Or (b) if this pass would use a resource in a manner that would cause a cross-queue read/write hazard

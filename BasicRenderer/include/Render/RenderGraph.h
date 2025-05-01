@@ -48,6 +48,7 @@ private:
 	};
 
 	struct ResourceTransition {
+		ResourceTransition() = default;
 		ResourceTransition(std::shared_ptr<Resource> pResource, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState)
 			: pResource(pResource), prevAccessType(prevAccessType), newAccessType(newAccessType), prevLayout(prevLayout), newLayout(newLayout), prevSyncState(prevSyncState), newSyncState(newSyncState) {
 		}
@@ -130,7 +131,7 @@ private:
 	// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately
 	std::unordered_map<uint64_t, std::vector<uint64_t>> resourcesFromGroupToManageIndependantly;
 
-	//std::unordered_map<uint64_t, ResourceState> initialResourceStates;
+	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
@@ -198,11 +199,23 @@ private:
 			finalSyncs[id] = resourceRequirement.sync;
 
 			if (AccessTypeIsWriteType(resourceRequirement.access)) {
+				if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
+					for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
+						producerHistory[childID] = batchIndex;
+					}
+				}
 				producerHistory[id] = batchIndex;
 			}
 
 			// First tough access, layout, and sync state
 			if (!firstAccessTypes.contains(id)) {
+				if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
+					for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
+						firstAccessTypes[childID] = resourceRequirement.access;
+						firstLayouts[childID] = resourceRequirement.layout;
+						firstSyncs[childID] = resourceRequirement.sync;
+					}
+				}
 				firstAccessTypes[id] = resourceRequirement.access;
 				firstLayouts[id] = resourceRequirement.layout;
 				firstSyncs[id] = resourceRequirement.sync;
