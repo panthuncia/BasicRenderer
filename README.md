@@ -6,8 +6,6 @@ A hobby DX12 renderer, written to experiment with real-time rendering for underg
 Feature development is driven purely by what I'm interested in at the moment.
 
 
-
-
 ## Graphical features
 
 - Image-based lighting
@@ -20,8 +18,9 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ## Technical features
 
-- Clustered forward shading
-- A (basic) render graph for automatic resource transitions and queue synchronization
+- Forward+ and Deferred rendering
+- Clustered lighting with a paged linked-list
+- A render graph for automatic resource transitions and queue synchronization
 - Async-compute
 - Compute-based skinning
 - GPU-driven rendering with frustrum culling & ExecuteIndirect
@@ -30,6 +29,9 @@ Feature development is driven purely by what I'm interested in at the moment.
 - A basic UI for feature toggles, importing new asset files, debug view selection, and scene graph introspection & modification
 
 ## Gallery
+![San-Miguel example](images/SanMiguel.png)
+
+![Bistro example](images/Bistro.png)
 
 ![Color example](images/color.png)
 
@@ -49,6 +51,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [XeGTAO](https://github.com/GameTechDev/XeGTAO)
   
 ## Notable sources for development ideas
+
+[Filament](https://github.com/google/filament) for the material model, with additions from [MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX)
 
 [LearnOpenGL.com](https://learnopengl.com/)
 
