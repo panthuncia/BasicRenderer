@@ -45,6 +45,7 @@ cbuffer StaticBufferInfo : register(b5) {
     uint aoTextureDescriptorIndex;
     uint albedoTextureDescriptorIndex;
     uint metallicRoughnessTextureDescriptorIndex;
+    uint emissiveTextureDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {

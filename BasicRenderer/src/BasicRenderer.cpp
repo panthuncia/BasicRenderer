@@ -277,9 +277,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
-    //auto phoenixScene = LoadModel("models/phoenix.glb");
-    //phoenixScene->GetRoot().set<Components::Scale>({ 0.05, 0.05, 0.05 });
-    //phoenixScene->GetRoot().transform.setLocalPosition({ -1.0, 0.0, 0.0 });
+    auto phoenixScene = LoadModel("models/phoenix.glb");
+    phoenixScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+    phoenixScene->GetRoot().set<Components::Position>({ -1.0, 0.0, 0.0 });
 
     auto carScene = LoadModel("models/porche.glb");
     carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
@@ -347,7 +347,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         tigerScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
-    //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
     auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);

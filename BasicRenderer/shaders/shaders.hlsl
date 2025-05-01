@@ -102,6 +102,7 @@ struct PrePassPSOutput
 #if defined(PSO_DEFERRED)
     float4 albedo;
     float2 metallicRoughness;
+    float4 emissive;
 #endif
 };
 
@@ -124,6 +125,7 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
 #if defined(PSO_DEFERRED)
     output.albedo = float4(fragmentInfo.albedo.xyz, fragmentInfo.ambientOcclusion);
     output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);
+    output.emissive = float4(fragmentInfo.emissive.xyz, 0.0);
 #endif
     return output;
 }
@@ -200,14 +202,8 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
             return float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, 1.0);
         case OUTPUT_ROUGHNESS:
             return float4(fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.roughness, 1.0);
-        case OUTPUT_EMISSIVE:{
-                if (materialInfo.materialFlags & MATERIAL_EMISSIVE_TEXTURE) {
-                    float3 srgbEmissive = LinearToSRGB(fragmentInfo.emissive);
-                    return float4(srgbEmissive, 1.0);
-                } else {
-                    return float4(materialInfo.emissiveFactor.rgb, 1.0);
-                }
-            }
+        case OUTPUT_EMISSIVE:
+            return float4(fragmentInfo.emissive.rgb, 1.0);
         case OUTPUT_AO:
             return float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, 1.0);
         case OUTPUT_DEPTH:{
@@ -302,17 +298,8 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
             return float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, 1.0);
         case OUTPUT_ROUGHNESS:
             return float4(fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.roughness, 1.0);
-        /*case OUTPUT_EMISSIVE:{
-                if (materialInfo.materialFlags & MATERIAL_EMISSIVE_TEXTURE)
-                {
-                    float3 srgbEmissive = LinearToSRGB(fragmentInfo.emissive);
-                    return float4(srgbEmissive, 1.0);
-                }
-                else
-                {
-                    return float4(materialInfo.emissiveFactor.rgb, 1.0);
-                }
-            }*/
+        case OUTPUT_EMISSIVE:
+            return float4(fragmentInfo.emissive.rgb, 1.0);
         case OUTPUT_AO:
             return float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, 1.0);
         case OUTPUT_DEPTH:{

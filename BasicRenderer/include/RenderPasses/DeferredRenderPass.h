@@ -23,11 +23,13 @@ public:
 		int normalsTextureDescriptorIndex,
 		unsigned int albedoTextureDescriptorIndex,
 		unsigned int metallicRoughnessTextureDescriptorIndex,
+		unsigned int emissiveTextureDescriptorIndex,
 		unsigned int depthBufferDescriptorIndex) : 
 		m_aoTextureDescriptorIndex(aoTextureDescriptorIndex),
 		m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex), 
 		m_albedoTextureDescriptorIndex(albedoTextureDescriptorIndex),
 		m_metallicRoughnessTextureDescriptorIndex(metallicRoughnessTextureDescriptorIndex),
+		m_emissiveTextureDescriptorIndex(emissiveTextureDescriptorIndex),
 		m_depthBufferDescriptorIndex(depthBufferDescriptorIndex) {
 
 		auto& settingsManager = SettingsManager::GetInstance();
@@ -106,6 +108,8 @@ public:
 		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
 		staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureDescriptorIndex;
 		staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureDescriptorIndex;
+		staticBufferIndices[EmissiveTextureDescriptorIndex] = m_emissiveTextureDescriptorIndex;
+
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
@@ -145,6 +149,8 @@ private:
 	unsigned int m_normalsTextureDescriptorIndex;
 	unsigned int m_albedoTextureDescriptorIndex;
 	unsigned int m_metallicRoughnessTextureDescriptorIndex;
+	unsigned int m_emissiveTextureDescriptorIndex;
+
 	unsigned int m_depthBufferDescriptorIndex;
 
 	bool m_gtaoEnabled = true;

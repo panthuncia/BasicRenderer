@@ -226,10 +226,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     if (psoFlags & PSO_DEFERRED) {
-        psoDesc.NumRenderTargets = 3;
+        psoDesc.NumRenderTargets = 4;
         psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
         psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-        psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+        psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
+		psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
 	}
 	else {
 		psoDesc.NumRenderTargets = 1;
@@ -520,10 +521,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
     if (psoFlags & PSO_DEFERRED) {
-        rtvFormats.NumRenderTargets = 3;
+        rtvFormats.NumRenderTargets = 4;
         rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
         rtvFormats.RTFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-        rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+        rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
+		rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
 	}
 	else {
         rtvFormats.NumRenderTargets = 1;

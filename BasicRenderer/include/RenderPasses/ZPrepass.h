@@ -22,13 +22,15 @@ class ZPrepass : public RenderPass {
 public:
     ZPrepass(std::shared_ptr<GloballyIndexedResource> pNormals,
         std::shared_ptr<GloballyIndexedResource> pAlbedo,
-        std::shared_ptr<GloballyIndexedResource> pMetallicRoughness, 
+        std::shared_ptr<GloballyIndexedResource> pMetallicRoughness,
+		std::shared_ptr<GloballyIndexedResource> pEmissive,
         bool wireframe,
         bool meshShaders,
         bool indirect)
         : m_pNormals(pNormals),
         m_pAlbedo(pAlbedo), 
 		m_pMetallicRoughness(pMetallicRoughness),
+		m_pEmissive(pEmissive),
         m_wireframe(wireframe),
         m_meshShaders(meshShaders),
         m_indirect(indirect) {
@@ -131,8 +133,8 @@ private:
 		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
 
         if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[3] = { m_pNormals->GetRTVInfos()[0].cpuHandle, m_pAlbedo->GetRTVInfos()[0].cpuHandle, m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle };
-            commandList->OMSetRenderTargets(3, rtvHandles, FALSE, &dsvHandle);
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[4] = { m_pNormals->GetRTVInfos()[0].cpuHandle, m_pAlbedo->GetRTVInfos()[0].cpuHandle, m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle, m_pEmissive->GetRTVInfos()[0].cpuHandle};
+            commandList->OMSetRenderTargets(4, rtvHandles, FALSE, &dsvHandle);
         }
         else {
 			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[1] = { m_pNormals->GetRTVInfos()[0].cpuHandle };
@@ -317,6 +319,8 @@ private:
     std::shared_ptr<GloballyIndexedResource> m_pNormals;
 	std::shared_ptr<GloballyIndexedResource> m_pAlbedo;
 	std::shared_ptr<GloballyIndexedResource> m_pMetallicRoughness;
+    std::shared_ptr<GloballyIndexedResource> m_pEmissive;
+
     flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
     flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
     std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;

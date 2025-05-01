@@ -275,6 +275,8 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif
     }
     
+    lighting += fragmentInfo.emissive;
+    
     LightingOutput output;
     output.lighting = lighting;
     

@@ -1059,7 +1059,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 	std::shared_ptr<PixelBuffer> albedo;
 	std::shared_ptr<PixelBuffer> metallicRoughness;
-
+	std::shared_ptr<PixelBuffer> emissive;
     if (m_deferredRendering) {
         TextureDescription albedoDesc;
         albedoDesc.arraySize = 1;
@@ -1090,11 +1090,26 @@ void DX12Renderer::CreateRenderGraph() {
         metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
         metallicRoughness->SetName(L"Metallic Roughness");
         newGraph->AddResource(metallicRoughness, false);
+
+        TextureDescription emissiveDesc;
+		emissiveDesc.arraySize = 1;
+		emissiveDesc.channels = 4;
+		emissiveDesc.isCubemap = false;
+		emissiveDesc.hasRTV = true;
+		emissiveDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		emissiveDesc.generateMipMaps = false;
+		emissiveDesc.hasSRV = true;
+		emissiveDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+		ImageDimensions emissiveDims = { m_xRes, m_yRes, 0, 0 };
+		emissiveDesc.imageDimensions.push_back(emissiveDims);
+		emissive = PixelBuffer::Create(emissiveDesc);
+		emissive->SetName(L"Emissive");
+		newGraph->AddResource(emissive, false);
     }
 
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness)
+        .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness, emissive)
         .WithDepthReadWrite(depthTexture);
 
 	if (useMeshShaders) {
@@ -1103,7 +1118,7 @@ void DX12Renderer::CreateRenderGraph() {
 			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-    zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, getWireframeEnabled(), useMeshShaders, indirect);
+    zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect);
 
     auto debugPassParameters = RenderPassParameters();
 
@@ -1322,7 +1337,7 @@ void DX12Renderer::CreateRenderGraph() {
         primaryPassBuilder.WithShaderResource(normalsWorldSpace, albedo, metallicRoughness, depthTexture);
     }
     if (m_deferredRendering) {
-		primaryPassBuilder.Build<DeferredRenderPass>(m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index, metallicRoughness->GetSRVInfo()[0].index, depthTexture->GetSRVInfo()[0].index);
+		primaryPassBuilder.Build<DeferredRenderPass>(m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index, metallicRoughness->GetSRVInfo()[0].index, emissive->GetSRVInfo()[0].index, depthTexture->GetSRVInfo()[0].index);
     }
     else {
         primaryPassBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0);

@@ -85,6 +85,7 @@ struct MaterialInputs
 {
     float3 albedo;
     float3 normalWS;
+    float3 emissive;
     float metallic;
     float roughness;
     float opacity;
@@ -186,8 +187,21 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
         ao = aoTexture.Sample(aoSamplerState, uv).r;
     }
     
+    float3 emissive = float3(0.0, 0.0, 0.0);
+    if (materialInfo.materialFlags & MATERIAL_EMISSIVE_TEXTURE)
+    {
+        Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];
+        SamplerState emissiveSamplerState = SamplerDescriptorHeap[materialInfo.emissiveSamplerIndex];
+        emissive = SRGBToLinear(emissiveTexture.Sample(emissiveSamplerState, uv).rgb) * materialInfo.emissiveFactor.rgb;
+    }
+    else
+    {
+        emissive = materialInfo.emissiveFactor.rgb;
+    }
+    
     ret.albedo = baseColor.rgb;
     ret.normalWS = normalWS;
+    ret.emissive = emissive;
     ret.metallic = metallic;
     ret.roughness = roughness;
     ret.opacity = baseColor.a;
@@ -224,6 +238,10 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     Texture2D<float4> albedoTexture = ResourceDescriptorHeap[albedoTextureDescriptorIndex];
     float4 baseColorSample = albedoTexture[pixelCoordinates];
     ret.albedo = baseColorSample.xyz;
+    
+    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[emissiveTextureDescriptorIndex];
+    float4 emissive = emissiveTexture[pixelCoordinates];
+    ret.emissive = emissive.xyz;
     
     if (enableGTAO)
     {
@@ -264,8 +282,6 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.dielectricF0 = computeDielectricF0(ret.reflectance);
     ret.F0 = computeF0(float4(baseColorSample.xyz, 1.0), ret.metallic, ret.dielectricF0); // base albedo, not the diffuse color
     ret.dielectricF0 *= (1.0 - ret.metallic);
-    
-    ret.emissive = float3(0.0, 0.0, 0.0); // TODO
 }
 
 void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, bool transparent, bool isFrontFace, out FragmentInfo ret)
@@ -325,7 +341,7 @@ void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, 
     ret.F0 = computeF0(float4(materialInfo.albedo.xyz, 1.0), ret.metallic, ret.dielectricF0); // base albedo, not the diffuse color
     ret.dielectricF0 *= (1.0 - ret.metallic);
     
-    ret.emissive = float3(0.0, 0.0, 0.0); // TODO
+    ret.emissive = materialInfo.emissive; // TODO
 }
 
 float unprojectDepth(float depth, float near, float far)

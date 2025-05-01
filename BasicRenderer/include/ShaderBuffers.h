@@ -280,6 +280,7 @@ enum StaticBufferRootConstants {
     AOTextureDescriptorIndex,
 	AlbedoTextureDescriptorIndex,
 	MetallicRoughnessTextureDescriptorIndex,
+	EmissiveTextureDescriptorIndex,
     NumStaticBufferRootConstants,
 };
 
