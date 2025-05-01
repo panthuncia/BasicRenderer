@@ -140,7 +140,7 @@ private:
 		// Compile shaders
 		Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
 		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"VSMain", L"vs_6_6", {}, vertexShader);
+		PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
 		PSOManager::GetInstance().CompileShader(L"shaders/PPLL.hlsl", L"PPLLResolvePS", L"ps_6_6", {}, pixelShader);
 
 		static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {

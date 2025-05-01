@@ -17,7 +17,7 @@ static const float2 QuadCorners[4] =
     float2(-1, 1), float2(1, 1),
 };
 
-FULLSCREEN_VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0, uint vid : SV_VertexID)
+FULLSCREEN_VS_OUTPUT FullscreenVSMain(float3 pos : POSITION, float2 uv : TEXCOORD0, uint vid : SV_VertexID)
 {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];

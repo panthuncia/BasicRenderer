@@ -233,7 +233,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
 	}
 	else {
 		psoDesc.NumRenderTargets = 1;
-		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
 	}
 
     psoDesc.SampleDesc.Count = 1;
@@ -628,7 +628,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
 
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"VSMain", L"vs_6_6", defines, vertexShader);
+    PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", defines, vertexShader);
     PSOManager::GetInstance().CompileShader(L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6", defines, pixelShader);
 
     static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {

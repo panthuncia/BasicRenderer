@@ -181,7 +181,7 @@ private:
 		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
 		manager.CompileShader(L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6", {}, meshShader);
-		manager.CompileShader(L"shaders/sphere.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+		manager.CompileShader(L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6", {}, pixelShader);
 
 		CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 		rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
@@ -191,6 +191,8 @@ private:
 		CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 
 		CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+		depthStencilState.DepthEnable = TRUE;
+		depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 
 		DXGI_FORMAT rtvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 		DXGI_FORMAT dsvFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
