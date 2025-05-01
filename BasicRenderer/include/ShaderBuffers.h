@@ -8,6 +8,7 @@ struct ClippingPlane {
 struct CameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
     DirectX::XMMATRIX view;
+    DirectX::XMMATRIX viewInverse;
     DirectX::XMMATRIX projection;
     DirectX::XMMATRIX projectionInverse;
 	DirectX::XMMATRIX viewProjection;
@@ -21,29 +22,34 @@ struct CameraInfo {
 struct PerFrameCB {
     DirectX::XMVECTOR ambientLighting;
     DirectX::XMVECTOR shadowCascadeSplits;
+
 	unsigned int mainCameraIndex;
 	unsigned int activeLightIndicesBufferIndex;
     unsigned int lightBufferIndex;
     unsigned int numLights;
+
     unsigned int pointLightCubemapBufferIndex;
     unsigned int spotLightMatrixBufferIndex;
     unsigned int directionalLightCascadeBufferIndex;
 	unsigned int numShadowCascades;
-	unsigned int environmentIrradianceMapIndex;
-	unsigned int environmentIrradianceSamplerIndex;
-	unsigned int environmentPrefilteredMapIndex;
-	unsigned int environmentPrefilteredSamplerIndex;
+
+    unsigned int activeEnvironmentIndex;
+    unsigned int environmentBufferDescriptorIndex;
 	unsigned int environmentBRDFLUTIndex;
 	unsigned int environmentBRDFLUTSamplerIndex;
+
     unsigned int outputType;
     unsigned int screenResX;
     unsigned int screenResY;
     unsigned int lightClusterGridSizeX;
+
     unsigned int lightClusterGridSizeY;
 	unsigned int lightClusterGridSizeZ;
     unsigned int nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
-	unsigned int pad[2];
+
+    unsigned int tonemapType;
+    unsigned int pad[3];
 };
 
 struct PerObjectCB {
@@ -212,6 +218,14 @@ struct GTAOInfo {
     uint pad[1];
 };
 
+struct EnvironmentInfo {
+	unsigned int cubeMapDescriptorIndex;
+    unsigned int prefilteredCubemapDescriptorIndex;
+    float sphericalHarmonicsScale;
+    int sphericalHarmonics[27]; // Floats scaled by SH_FLOAT_SCALE
+    uint pad[2];
+};
+
 enum RootSignatureLayout {
     PerObjectRootSignatureIndex,
     PerMeshRootSignatureIndex,
@@ -221,7 +235,8 @@ enum RootSignatureLayout {
 	VariableBufferRootSignatureIndex,
 	TransparencyInfoRootSignatureIndex,
 	LightClusterRootSignatureIndex,
-	MiscRootSignatureIndex,
+	MiscUintRootSignatureIndex,
+	MiscFloatRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -263,6 +278,8 @@ enum StaticBufferRootConstants {
     DrawSetCommandBufferDescriptorIndex,
 	NormalsTextureDescriptorIndex,
     AOTextureDescriptorIndex,
+	AlbedoTextureDescriptorIndex,
+	MetallicRoughnessTextureDescriptorIndex,
     NumStaticBufferRootConstants,
 };
 
@@ -289,8 +306,16 @@ enum LightClusterRootConstants {
 	NumLightClusterRootConstants
 };
 
-enum MiscRootConstants { // Used for pass-specific one-off constants
-	UintRootConstant0,
-	UintRootConstant1,
-	NumMiscRootConstants
+enum MiscUintRootConstants { // Used for pass-specific one-off constants
+    UintRootConstant0,
+    UintRootConstant1,
+    UintRootConstant2,
+    UintRootConstant3,
+	NumMiscUintRootConstants
+};
+
+enum MiscFloatRootConstants { // Used for pass-specific one-off constants
+	FloatRootConstant0,
+	FloatRootConstant1,
+	NumMiscFloatRootConstants
 };

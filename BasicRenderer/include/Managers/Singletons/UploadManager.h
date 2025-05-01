@@ -65,7 +65,7 @@ private:
 	uint8_t m_numFramesInFlight = 0;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 
 	std::function<uint8_t()> getNumFramesInFlight;
 	std::vector<ResourceUpdate> m_resourceUpdates;

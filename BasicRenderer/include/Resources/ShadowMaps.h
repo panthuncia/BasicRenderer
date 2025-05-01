@@ -18,7 +18,6 @@ public:
     ShadowMaps(const std::wstring& name)
         : ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
-		currentState = ResourceState::UNKNOWN;
 	}
 
     std::shared_ptr<Texture> AddMap(LightInfo* light, uint16_t shadowResolution) {

@@ -18,32 +18,34 @@ struct BarrierGroups {
 
 class Resource {
 public:
-    Resource() : currentState(ResourceState::UNKNOWN) {
+    Resource() {
         m_globalResourceID = globalResourceCount.fetch_add(1, std::memory_order_relaxed);
     }
 
-    virtual ResourceState GetState() const { return currentState; }
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& name) { this->name = name; OnSetName(); }
 	virtual ID3D12Resource* GetAPIResource() const = 0;
-    uint32_t GetGlobalResourceID() const { return m_globalResourceID; }
-
+    virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
+	virtual ResourceAccessType GetCurrentAccessType() const { return m_currentAccessType; }
+	virtual ResourceLayout GetCurrentLayout() const { return m_currentLayout; }
+	virtual ResourceSyncState GetPrevSyncState() const { return m_prevSyncState; }
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
+	bool HasLayout() const { return m_hasLayout; }
 protected:
-    virtual std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) = 0;
-    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
     virtual void OnSetName() {}
-    virtual void SetState(ResourceState state) { currentState = state; }
 
-    ResourceState currentState;
-	ResourceSyncState currentSyncState = ResourceSyncState::NONE;
+    ResourceAccessType m_currentAccessType = ResourceAccessType::COMMON;
+    ResourceLayout m_currentLayout = ResourceLayout::LAYOUT_COMMON;
+    ResourceSyncState m_prevSyncState = ResourceSyncState::ALL;
     std::wstring name;
+	bool m_hasLayout = false; // Only textures have a layout
 private:
     bool m_uploadInProgress = false;
-    inline static std::atomic<uint32_t> globalResourceCount;
-    uint32_t m_globalResourceID;
+    inline static std::atomic<uint64_t> globalResourceCount;
+    uint64_t m_globalResourceID;
 
-    friend class RenderGraph;
+    //friend class RenderGraph;
     friend class ResourceGroup;
     friend class ResourceManager;
     friend class DynamicResource;

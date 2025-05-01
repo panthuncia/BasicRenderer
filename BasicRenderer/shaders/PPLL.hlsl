@@ -4,6 +4,7 @@
 #include "tonemapping.hlsli"
 #include "outputTypes.hlsli"
 #include "utilities.hlsli"
+#include "fullscreenVS.hlsli"
 
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
@@ -49,15 +50,18 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
+
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
 
     // Light fragment
-    FragmentInfo fragmentInfo = GetFragmentInfoDirectTransparent(input);
+    FragmentInfo fragmentInfo;
+    GetFragmentInfoDirect(input, viewDir, enableGTAO, true, isFrontFace, fragmentInfo);
     
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, input, materialInfo, meshBuffer, perFrameBuffer, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
 
     
     // Fill the PPLL buffers with the fragment data
@@ -72,92 +76,68 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     int nNewFragmentAddress = AllocateFragment(vScreenAddress, LinkedListCounter);
     int nOldFragmentAddress = MakeFragmentLink(vScreenAddress, nNewFragmentAddress, RWFragmentListHead);
     
-    float4 finalOutput;
-    switch (perFrameBuffer.outputType) {
+    float4 finalOutput = float4(lightingOutput.lighting.xyz, fragmentInfo.alpha);
+    /*switch (perFrameBuffer.outputType) {
         case OUTPUT_COLOR:
-            finalOutput = float4(lightingOutput.lighting.xyz, lightingOutput.baseColor.a);
+            finalOutput = float4(lightingOutput.lighting.xyz, fragmentInfo.alpha);
             break;
         case OUTPUT_NORMAL: // Normal
-            finalOutput = float4(lightingOutput.normalWS * 0.5 + 0.5, lightingOutput.baseColor.a);
+            finalOutput = float4(fragmentInfo.normalWS * 0.5 + 0.5, fragmentInfo.alpha);
             break;
         case OUTPUT_ALBEDO:
-            finalOutput = float4(lightingOutput.baseColor.rgb, lightingOutput.baseColor.a);
+            finalOutput = float4(fragmentInfo.diffuseColor.rgb, fragmentInfo.alpha);
             break;
         case OUTPUT_METALLIC:
-            finalOutput = float4(lightingOutput.metallic, lightingOutput.metallic, lightingOutput.metallic, lightingOutput.baseColor.a);
+            finalOutput = float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.alpha);
             break;
         case OUTPUT_ROUGHNESS:
-            finalOutput = float4(lightingOutput.roughness, lightingOutput.roughness, lightingOutput.roughness, lightingOutput.baseColor.a);
+            finalOutput = float4(fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.alpha);
             break;
         case OUTPUT_EMISSIVE:{
                 if (materialInfo.materialFlags & MATERIAL_EMISSIVE_TEXTURE) {
-                    float3 srgbEmissive = LinearToSRGB(lightingOutput.emissive);
-                    finalOutput = float4(srgbEmissive, lightingOutput.baseColor.a);
+                    float3 srgbEmissive = LinearToSRGB(fragmentInfo.emissive);
+                    finalOutput = float4(srgbEmissive, fragmentInfo.alpha);
                 }
                 else {
-                    finalOutput = float4(materialInfo.emissiveFactor.rgb, lightingOutput.baseColor.a);
+                    finalOutput = float4(materialInfo.emissiveFactor.rgb, fragmentInfo.alpha);
                 }
                 break;
             }
         case OUTPUT_AO:
-            finalOutput = float4(lightingOutput.ao, lightingOutput.ao, lightingOutput.ao, lightingOutput.baseColor.a);
+            finalOutput = float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.alpha);
             break;
         case OUTPUT_DEPTH:{
                 float depth = abs(input.positionViewSpace.z) * 0.1;
-                finalOutput = float4(depth, depth, depth, lightingOutput.baseColor.a);
+                finalOutput = float4(depth, depth, depth, fragmentInfo.alpha);
                 break;
             }
 #if defined(PSO_IMAGE_BASED_LIGHTING)
-        case OUTPUT_METAL_BRDF_IBL:
-            finalOutput = float4(lightingOutput.f_metal_brdf_ibl, lightingOutput.baseColor.a);
-            break;
-        case OUTPUT_DIELECTRIC_BRDF_IBL:
-            finalOutput = float4(lightingOutput.f_dielectric_brdf_ibl, lightingOutput.baseColor.a);
-            break;
-        case OUTPUT_SPECULAR_IBL:
-            finalOutput = float4(lightingOutput.f_specular_metal, lightingOutput.baseColor.a);
-            break;
-        case OUTPUT_METAL_FRESNEL_IBL:
-            finalOutput = float4(lightingOutput.f_metal_fresnel_ibl, lightingOutput.baseColor.a);
-            break;
-        case OUTPUT_DIELECTRIC_FRESNEL_IBL:
-            finalOutput = float4(lightingOutput.f_dielectric_fresnel_ibl, lightingOutput.baseColor.a);
+        case OUTPUT_DIFFUSE_IBL:
+            finalOutput = float4(lightingOutput.diffuseIBL, fragmentInfo.alpha);
             break;
 #endif // IMAGE_BASED_LIGHTING
         case OUTPUT_MESHLETS:{
-                finalOutput = lightUints(input.meshletIndex, lightingOutput.normalWS, lightingOutput.viewDir);
+                finalOutput = lightUints(input.meshletIndex, fragmentInfo.normalWS, viewDir);
                 break;
             }
         case OUTPUT_MODEL_NORMALS:{
-                finalOutput = float4(input.normalModelSpace * 0.5 + 0.5, lightingOutput.baseColor.a);
+                finalOutput = float4(input.normalModelSpace * 0.5 + 0.5, fragmentInfo.alpha);
                 break;
             }
-        case OUTPUT_LIGHT_CLUSTER_ID:{
-                finalOutput = lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
-                break;
-            }
-        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
-                finalOutput = lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
-                break;
-            }
+        //case OUTPUT_LIGHT_CLUSTER_ID:{
+        //        finalOutput = lightUints(lightingOutput.clusterID, lightingOutput.normalWS, viewDir);
+        //        break;
+        //    }
+        //case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
+        //        finalOutput = lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, viewDir);
+        //        break;
+        //    }
         default:
             finalOutput = float4(1.0, 0.0, 0.0, 1.0);
             break;
-    }
+    }*/
     
     WriteFragmentAttributes(nNewFragmentAddress, nOldFragmentAddress, float4(finalOutput.rgb, finalOutput.a), input.position.z, LinkedListUAV);
-}
-
-//Resolve vertex Shader
-struct VS_OUTPUT {
-    float4 position : SV_POSITION;
-    float2 uv : TEXCOORD1;
-};
-VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0) {
-    VS_OUTPUT output;
-    output.position = float4(pos, 1.0f);
-    output.uv = uv;
-    return output;
 }
 
 struct KBUFFER_STRUCT {
@@ -188,7 +168,7 @@ void SortNearest(inout KBUFFER_STRUCT fragments[K_NEAREST]) {
     }
 }
 
-float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
+float4 PPLLResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target {
     
     Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
     StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
@@ -285,7 +265,23 @@ float4 PPLLResolvePS(VS_OUTPUT input) : SV_Target {
         outColor = outColor + srcColor * (1.0f - outColor.a);
     }
 
-    outColor.xyz = reinhardJodie(outColor.xyz);
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    
+    switch (perFrameBuffer.tonemapType)
+    {
+        case TONEMAP_REINHARD_JODIE:
+            outColor.xyz = reinhardJodie(outColor.xyz);
+            break;
+        case TONEMAP_KRONOS_PBR_NEUTRAL:
+            outColor.xyz = toneMap_KhronosPbrNeutral(outColor.xyz);
+            break;
+        case TONEMAP_ACES_HILL:
+            outColor.xyz = toneMapACES_Hill(outColor.xyz);
+            break;
+        default:
+            break;
+    }
+    
     outColor.xyz = LinearToSRGB(outColor.xyz);
 
     return outColor;

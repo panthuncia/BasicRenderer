@@ -57,7 +57,7 @@ public:
         invalidated = false;
 
         auto path = GetCacheFilePath(L"lut.dds", L"luts");
-        ReadbackManager::GetInstance().RequestReadback(m_lutTexture, path, nullptr, false);
+        ReadbackManager::GetInstance().RequestReadback(m_lutTexture->GetBuffer(), path, nullptr, false);
 
         return { { commandList.Get() }, nullptr, 0 };
     }
@@ -103,7 +103,7 @@ private:
         CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)fullscreenQuadVertices);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)fullscreenQuadVertices);
         UploadManager::GetInstance().UploadData((void*)fullscreenQuadVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};

@@ -179,5 +179,8 @@ target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLU
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
 
+# Disable warnings for signed/unsigned mismatch
+add_compile_options("/wd4267")
+
 # Find and link DirectX 12
 target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib")

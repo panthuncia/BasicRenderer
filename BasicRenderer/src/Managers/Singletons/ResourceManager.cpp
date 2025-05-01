@@ -230,65 +230,65 @@ void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandL
 	ThrowIfFailed(commandAllocator->Reset());
 }
 
-std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, ResourceState usageType, void* pInitialData, bool UAV) {
+std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 	auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
 	if (pInitialData) {
 		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}
 
-	ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
-#if defined(_DEBUG)
-		transition.name = L"Buffer";
-#endif
-	QueueResourceTransition(transition);
+//	ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
+//#if defined(_DEBUG)
+//		transition.name = L"Buffer";
+//#endif
+//	QueueResourceTransition(transition);
 	return dataBuffer;
 }
 
-void ResourceManager::QueueResourceTransition(const ResourceTransition& transition) {
-	queuedResourceTransitions.push_back(transition);
-}
+//void ResourceManager::QueueResourceTransition(const ResourceTransition& transition) {
+//	queuedResourceTransitions.push_back(transition);
+//}
 
-void ResourceManager::ExecuteResourceTransitions() {
-	queuedResourceTransitions.clear();
-	return;
-	auto& device = DeviceManager::GetInstance().GetDevice();
-	auto& commandList = transitionCommandList;
-	auto& commandAllocator = transitionCommandAllocator;
-	if (queuedResourceTransitions.size() == 0) {
-		return;
-	}
+//void ResourceManager::ExecuteResourceTransitions() {
+//	queuedResourceTransitions.clear();
+//	return;
+//	auto& device = DeviceManager::GetInstance().GetDevice();
+//	auto& commandList = transitionCommandList;
+//	auto& commandAllocator = transitionCommandAllocator;
+//	if (queuedResourceTransitions.size() == 0) {
+//		return;
+//	}
+//
+//	auto hr = commandList->Reset(commandAllocator.Get(), nullptr);
+//	if (FAILED(hr)) {
+//		spdlog::error("Failed to reset command list");
+//	}
+//	std::vector<D3D12_RESOURCE_BARRIER> barriers;
+//	for (auto& transition : queuedResourceTransitions) {
+//		if (transition.resource == nullptr) {
+//			spdlog::error("Resource is null in transition");
+//			throw std::runtime_error("Resource is null");
+//		}
+//		auto& trans = transition.resource->GetTransitions(transition.beforeState, transition.afterState);
+//		for (auto& barrier : trans) {
+//			barriers.push_back(barrier);
+//		}
+//		transition.resource->SetState(transition.afterState);
+//	}
+//	transitionCommandList->ResourceBarrier(barriers.size(), barriers.data());
+//
+//	hr = commandList->Close();
+//	if (FAILED(hr)) {
+//		spdlog::error("Failed to close command list");
+//	}
+//
+//	ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get() };
+//	transitionCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+//
+//	//queuedResourceTransitions.clear();
+//}
 
-	auto hr = commandList->Reset(commandAllocator.Get(), nullptr);
-	if (FAILED(hr)) {
-		spdlog::error("Failed to reset command list");
-	}
-	std::vector<D3D12_RESOURCE_BARRIER> barriers;
-	for (auto& transition : queuedResourceTransitions) {
-		if (transition.resource == nullptr) {
-			spdlog::error("Resource is null in transition");
-			throw std::runtime_error("Resource is null");
-		}
-		auto& trans = transition.resource->GetTransitions(transition.beforeState, transition.afterState);
-		for (auto& barrier : trans) {
-			barriers.push_back(barrier);
-		}
-		transition.resource->SetState(transition.afterState);
-	}
-	transitionCommandList->ResourceBarrier(barriers.size(), barriers.data());
-
-	hr = commandList->Close();
-	if (FAILED(hr)) {
-		spdlog::error("Failed to close command list");
-	}
-
-	ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get() };
-	transitionCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-
-	queuedResourceTransitions.clear();
-}
-
-std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, ResourceState usage, std::wstring name, bool byteAddress, bool UAV) {
+std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress, bool UAV) {
 #if defined(_DEBUG)
 	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
 	assert(byteAddress ? numElements % 4 == 0 : true);
@@ -300,14 +300,14 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	// Create the dynamic structured buffer instance
 	UINT bufferID = GetNextResizableBufferID();
 	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name, UAV);
-	ResourceTransition transition;
-	transition.resource = pDynamicBuffer.get();
-	transition.beforeState = ResourceState::UNKNOWN;
-	transition.afterState = usage;
-#if defined(_DEBUG)
-	transition.name = name;
-#endif
-	QueueResourceTransition(transition);
+//	ResourceTransition transition;
+//	transition.resource = pDynamicBuffer.get();
+//	transition.beforeState = ResourceState::UNKNOWN;
+//	transition.afterState = usage;
+//#if defined(_DEBUG)
+//	transition.name = name;
+//#endif
+//	QueueResourceTransition(transition);
 	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
 		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer, UAV);
 		});
@@ -357,19 +357,19 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	return pDynamicBuffer;
 }
 
-std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(ResourceState usage, UINT capacity, std::wstring name) {
+std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(UINT capacity, std::wstring name) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
 	UINT bufferID = GetNextResizableBufferID();
 	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(bufferID, capacity, name);
-	ResourceTransition transition;
-	transition.resource = pBuffer.get();
-	transition.beforeState = ResourceState::UNKNOWN;
-	transition.afterState = usage;
-#if defined(_DEBUG)
-	transition.name = name;
-#endif
-	QueueResourceTransition(transition);
+//	ResourceTransition transition;
+//	transition.resource = pBuffer.get();
+//	transition.beforeState = ResourceState::UNKNOWN;
+//	transition.afterState = usage;
+//#if defined(_DEBUG)
+//	transition.name = name;
+//#endif
+	//QueueResourceTransition(transition);
 	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
 		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer, false);
 		});
@@ -452,6 +452,16 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 			colorClearValue.Color[0] = 0.0f;
 			colorClearValue.Color[1] = 0.0f;
 			colorClearValue.Color[2] = 0.0f;
+			colorClearValue.Color[3] = 1.0f;
+		}
+		else if (desc.channels == 2) {
+			colorClearValue.Color[0] = 0.0f;
+			colorClearValue.Color[1] = 0.0f;
+			colorClearValue.Color[2] = 0.0f;
+			colorClearValue.Color[3] = 1.0f;
+		}
+		else {
+			assert(false && "Unsupported number of channels for color clear value");
 		}
 		clearValue = &colorClearValue;
 	}

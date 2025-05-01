@@ -52,13 +52,11 @@ public:
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
 
 protected:
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
-        currentState = newState;
-        return m_dataBuffer->GetTransitions(prevState, newState);
-    }
-    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-        currentState = newState;
-        return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+        m_currentAccessType = newAccessType;
+        m_currentLayout = newLayout;
+        m_prevSyncState = newSyncState;
+        return m_dataBuffer->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
     }
 
 private:
@@ -77,11 +75,6 @@ private:
         else {
             m_dataBuffer->SetName(m_baseName.c_str());
         }
-    }
-
-    void SetState(ResourceState state) override {
-        currentState = state;
-        m_dataBuffer->SetState(state);
     }
 
 	size_t m_elementSize;

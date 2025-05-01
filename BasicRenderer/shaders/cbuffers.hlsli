@@ -3,6 +3,12 @@
 
 #include "structs.hlsli"
 
+// point-clamp at s0
+SamplerState g_pointClamp : register(s0);
+
+// linear-clamp at s1
+SamplerState g_linearClamp : register(s1);
+
 cbuffer PerObject : register(b1) {
     uint perObjectBufferIndex;
 };
@@ -37,6 +43,8 @@ cbuffer StaticBufferInfo : register(b5) {
     uint drawSetCommandBufferDescriptorIndex;
     uint normalsTextureDescriptorIndex;
     uint aoTextureDescriptorIndex;
+    uint albedoTextureDescriptorIndex;
+    uint metallicRoughnessTextureDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {
@@ -59,9 +67,18 @@ cbuffer LightClusterInfo : register(b8) {
     uint lightPagesPoolSize;
 }
 
-cbuffer MiscRootConstants : register(b9) { // Used for pass-specific one-off constants
+cbuffer MiscUintRootConstants : register(b9) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
     uint UintRootConstant1;
+    uint UintRootConstant2;
+    uint UintRootConstant3;
 }
+
+cbuffer MiscFloatRootConstants : register(b10) { // Used for pass-specific one-off constants
+    float FloatRootConstant0;
+    float FloatRootConstant1;
+}
+
+
 
 #endif // __CBUFFERS_HLSL__

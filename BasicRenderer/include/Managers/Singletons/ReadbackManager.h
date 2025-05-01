@@ -15,7 +15,7 @@
 
 struct ReadbackInfo {
     bool cubemap;
-	std::shared_ptr<Texture> texture;
+	std::shared_ptr<PixelBuffer> texture;
 	std::wstring outputFile;
 	std::function<void()> callback;
 };
@@ -30,7 +30,7 @@ public:
         m_readbackPass->SetReadbackFence(readbackFence);
 	}
 
-	void RequestReadback(std::shared_ptr<Texture> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
+	void RequestReadback(std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
 		m_queuedReadbacks.push_back({cubemap, texture, outputFile, callback });
 	}
 
@@ -117,8 +117,8 @@ private:
 		m_readbackPass = std::make_shared<ReadbackPass>();
     }
 
-    void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, Texture* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
-    void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, Texture* texture, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, PixelBuffer* texture, const std::wstring& outputFile, UINT64 fenceValue);
 
     std::vector<ReadbackInfo> m_queuedReadbacks;
 	std::shared_ptr<ReadbackPass> m_readbackPass;

@@ -97,6 +97,13 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPPLLPSO(UINT psoF
     return m_meshPPLLPSOCache[key];
 }
 
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetDeferredPSO(UINT psoFlags) {
+    if (m_deferredPSOCache.find(psoFlags) == m_deferredPSOCache.end()) {
+        m_deferredPSOCache[psoFlags] = CreateDeferredPSO(psoFlags);
+    }
+    return m_deferredPSOCache[psoFlags];
+}
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
@@ -218,8 +225,16 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+    if (psoFlags & PSO_DEFERRED) {
+        psoDesc.NumRenderTargets = 3;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+        psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+        psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+	}
+	else {
+		psoDesc.NumRenderTargets = 1;
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	}
 
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
@@ -504,8 +519,16 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     pipelineStateStream.DepthStencilState = depthStencilState;
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    rtvFormats.NumRenderTargets = 1;
-	rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+    if (psoFlags & PSO_DEFERRED) {
+        rtvFormats.NumRenderTargets = 3;
+        rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+        rtvFormats.RTFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+        rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Matallic and Roughness
+	}
+	else {
+        rtvFormats.NumRenderTargets = 1;
+        rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+	}
     pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;
@@ -599,6 +622,88 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
     return pso;
 }
 
+Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT psoFlags) {
+    auto defines = GetShaderDefines(psoFlags);
+
+
+    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"VSMain", L"vs_6_6", defines, vertexShader);
+    PSOManager::GetInstance().CompileShader(L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6", defines, pixelShader);
+
+    static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+    };
+
+    D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
+    inputLayoutDesc.pInputElementDescs = inputElementDescs;
+    inputLayoutDesc.NumElements = _countof(inputElementDescs);
+
+    D3D12_RASTERIZER_DESC rasterizerDesc = {};
+    rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+    rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
+    rasterizerDesc.FrontCounterClockwise = FALSE;
+    rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+    rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+    rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+    rasterizerDesc.DepthClipEnable = TRUE;
+    rasterizerDesc.MultisampleEnable = FALSE;
+    rasterizerDesc.AntialiasedLineEnable = FALSE;
+    rasterizerDesc.ForcedSampleCount = 0;
+    rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+    D3D12_BLEND_DESC blendDesc = {};
+    blendDesc.AlphaToCoverageEnable = FALSE;
+    blendDesc.IndependentBlendEnable = FALSE;
+    blendDesc.RenderTarget[0].BlendEnable = TRUE;
+    blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+    blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+    blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+    blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
+    depthStencilDesc.DepthEnable = true;
+    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
+    depthStencilDesc.StencilEnable = FALSE;
+    depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
+
+    DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout = inputLayoutDesc;
+    psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
+    psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+    psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
+    psoDesc.RasterizerState = rasterizerDesc;
+    psoDesc.BlendState = blendDesc;
+    psoDesc.DepthStencilState = depthStencilDesc;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = renderTargetFormat;
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleDesc.Quality = 0;
+    psoDesc.InputLayout = inputLayoutDesc;
+
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+    auto& device = DeviceManager::GetInstance().GetDevice();
+    auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso));
+    if (FAILED(hr)) {
+        throw std::runtime_error("Failed to create debug PSO");
+    }
+    return pso;
+}
+
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
     std::vector<DxcDefine> defines = {};
     if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
@@ -643,6 +748,13 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
 		macro.Name = L"PSO_PREPASS";
 		defines.insert(defines.begin(), macro);
 	}
+	if (psoFlags & PSOFlags::PSO_DEFERRED) {
+        DxcDefine macro;
+		macro.Value = L"1";
+		macro.Name = L"PSO_DEFERRED";
+		defines.insert(defines.begin(), macro);
+	}
+
     return defines;
 }
 
@@ -756,7 +868,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[9] = {};
+    D3D12_ROOT_PARAMETER1 parameters[10] = {};
 
     // PerObject buffer index
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -817,16 +929,44 @@ void PSOManager::createRootSignature() {
 	parameters[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[8].Constants.ShaderRegister = 9;
 	parameters[8].Constants.RegisterSpace = 0;
-	parameters[8].Constants.Num32BitValues = NumMiscRootConstants;
+	parameters[8].Constants.Num32BitValues = NumMiscUintRootConstants;
 	parameters[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+	parameters[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	parameters[9].Constants.ShaderRegister = 10;
+	parameters[9].Constants.RegisterSpace = 0;
+	parameters[9].Constants.Num32BitValues = NumMiscFloatRootConstants;
+	parameters[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
+
+    // point-clamp at s0
+    auto& pointClamp = staticSamplers[0];
+    pointClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    pointClamp.AddressU       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClamp.AddressV       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClamp.AddressW       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    pointClamp.MipLODBias     = 0;
+    pointClamp.MaxAnisotropy  = 0;
+    pointClamp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    pointClamp.MinLOD         = 0;
+    pointClamp.MaxLOD         = D3D12_FLOAT32_MAX;
+    pointClamp.ShaderRegister = 0;
+    pointClamp.RegisterSpace  = 0;
+    pointClamp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // linear-clamp at s1
+    auto& linearClamp = staticSamplers[1];
+    linearClamp = pointClamp;
+    linearClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    linearClamp.ShaderRegister = 1;
 
     // Root Signature Description
     D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
     rootSignatureDesc.NumParameters = _countof(parameters);
     rootSignatureDesc.pParameters = parameters;
-    rootSignatureDesc.NumStaticSamplers = 0;
-    rootSignatureDesc.pStaticSamplers = nullptr;
+    rootSignatureDesc.NumStaticSamplers = _countof(staticSamplers);
+    rootSignatureDesc.pStaticSamplers   = staticSamplers;
     rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
 
     // Serialize and create the root signature
@@ -842,7 +982,7 @@ void PSOManager::createRootSignature() {
 	// Compute root signature
     ComPtr<ID3DBlob> computeSignature;
     ComPtr<ID3DBlob> computeError;
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
+    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
     versionedDesc.Desc_1_1 = rootSignatureDesc;
 	ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &computeSignature, &computeError));
 	ThrowIfFailed(device->CreateRootSignature(0, computeSignature->GetBufferPointer(), computeSignature->GetBufferSize(), IID_PPV_ARGS(&computeRootSignature)));
@@ -859,6 +999,13 @@ ComPtr<ID3D12RootSignature> PSOManager::GetComputeRootSignature() {
 void PSOManager::ReloadShaders() {
     m_psoCache.clear();
 	m_meshPSOCache.clear();
+	m_deferredPSOCache.clear();
+	m_PPLLPSOCache.clear();
+	m_shadowPSOCache.clear();
+	m_meshPrePassPSOCache.clear();
+	m_prePassPSOCache.clear();
+	m_shadowMeshPSOCache.clear();
+    m_prePassPSOCache.clear();
 }
 
 D3D12_BLEND_DESC PSOManager::GetBlendDesc(BlendState blendState) {

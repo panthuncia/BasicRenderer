@@ -24,6 +24,7 @@ using Microsoft::WRL::ComPtr;
 class LazyDynamicStructuredBufferBase : public ViewedDynamicBufferBase { // Necessary to store these in a templateless vector
 public:
 	virtual size_t GetElementSize() const = 0;
+    virtual void UpdateView(BufferView* view, const void* data) = 0;
 };
 
 template <typename T>
@@ -91,22 +92,22 @@ public:
 
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
 
-    virtual ResourceState GetState() const override { return m_dataBuffer->GetState(); }
 
 protected:
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState prevState, ResourceState newState) override {
-		currentState = newState;
-        return m_dataBuffer->GetTransitions(prevState, newState);
-    }
 
-    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-        currentState = newState;
-        return m_dataBuffer->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+        m_currentAccessType = newAccessType;
+        m_currentLayout = newLayout;
+        m_prevSyncState = newSyncState;
+        return m_dataBuffer->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
     }
 
 private:
     LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
+        if (alignment == 0) {
+			alignment = 1;
+        }
 		m_elementSize = ((sizeof(T) + alignment - 1) / alignment) * alignment;
         CreateBuffer(capacity);
 		SetName(name);

@@ -14,12 +14,8 @@
 
 class EnvironmentFilterPass : public RenderPass {
 public:
-    EnvironmentFilterPass(std::shared_ptr<Texture> environmentTexture, std::shared_ptr<Texture> preFilteredEnvironment, std::string environmentName){
-        m_environmentName = s2ws(environmentName);
-        m_texture = environmentTexture;
-		m_prefilteredEnvironment = preFilteredEnvironment;
+    EnvironmentFilterPass(){
         m_viewMatrices = GetCubemapViewMatrices({ 0.0, 0.0, 0.0 });
-        getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
     }
 
     void Setup() override {
@@ -39,8 +35,6 @@ public:
     // This pass was broken into multiple passes to avoid device timeout on slower GPUs
     RenderPassReturn Execute(RenderContext& context) override {
 
-        uint16_t skyboxRes = getSkyboxResolution();
-
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
 
         ThrowIfFailed(m_allocator->Reset());
@@ -59,43 +53,44 @@ public:
 
         commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-        commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
+		auto environments = context.environmentManager->GetAndClearEnvironmentsToPrefilter();
 
-        commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-        commandList->SetPipelineState(PSO.Get());
-        auto& rtvs = m_prefilteredEnvironment->GetBuffer()->GetRTVInfos();
-        unsigned int maxMipLevels = rtvs.size()/6;
-        for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
-        {
-            unsigned int mipWidth = skyboxRes * std::pow(0.5, mip);
-            unsigned int mipHeight = skyboxRes * std::pow(0.5, mip);
-            CD3DX12_VIEWPORT viewport(0.0f, 0.0f, mipWidth, mipHeight);
-            CD3DX12_RECT scissorRect(0, 0, mipWidth, mipHeight);
-            commandList->RSSetViewports(1, &viewport);
-            commandList->RSSetScissorRects(1, &scissorRect);
+        for (auto& env : environments) {
+			auto prefilteredRes = env->GetReflectionCubemapResolution();
+			auto& texture = env->GetEnvironmentCubemap();
+            auto& prefilteredEnvironment = env->GetEnvironmentPrefilteredCubemap();
 
-            float roughness = (float)mip / (float)(maxMipLevels - 1);
-            commandList->SetGraphicsRoot32BitConstants(2, 1, &roughness, 0);
-            for (int i = 0; i < 6; i++) {
+            commandList->SetGraphicsRootDescriptorTable(0, texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
 
-				CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6*mip+i].cpuHandle;
+            commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+            commandList->SetPipelineState(PSO.Get());
+            auto& rtvs = prefilteredEnvironment->GetBuffer()->GetRTVInfos();
+            unsigned int maxMipLevels = rtvs.size() / 6;
+            for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
+            {
+                unsigned int mipWidth = prefilteredRes * std::pow(0.5, mip);
+                unsigned int mipHeight = prefilteredRes * std::pow(0.5, mip);
+                CD3DX12_VIEWPORT viewport(0.0f, 0.0f, mipWidth, mipHeight);
+                CD3DX12_RECT scissorRect(0, 0, mipWidth, mipHeight);
+                commandList->RSSetViewports(1, &viewport);
+                commandList->RSSetScissorRects(1, &scissorRect);
 
-                commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+                float roughness = (float)mip / (float)(maxMipLevels - 1);
+                commandList->SetGraphicsRoot32BitConstants(2, 1, &roughness, 0);
+                for (int i = 0; i < 6; i++) {
 
-                auto viewMatrix = m_viewMatrices[i];
-                auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
-                commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
-                commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+                    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6 * mip + i].cpuHandle;
+
+                    commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+                    auto viewMatrix = m_viewMatrices[i];
+                    auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, projection);
+                    commandList->SetGraphicsRoot32BitConstants(1, 16, &viewProjectionMatrix, 0);
+                    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                    commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+                }
             }
         }
-
-        // We can reuse the results of this pass
-
-        invalidated = false;
-
-        auto path = GetCacheFilePath(m_environmentName + L"_prefiltered.dds", L"environments");
-		ReadbackManager::GetInstance().RequestReadback(m_prefilteredEnvironment, path, nullptr, true);
 
         m_commandList->Close();
         commandLists.push_back(m_commandList.Get());
@@ -111,12 +106,7 @@ private:
 
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
-    std::wstring m_environmentName;
-    std::shared_ptr<Texture> m_texture = nullptr;
-	std::shared_ptr<Texture> m_prefilteredEnvironment = nullptr;
     std::array<XMMATRIX, 6> m_viewMatrices;
-
-    std::function<uint16_t()> getSkyboxResolution;
 
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_allocator;
@@ -179,8 +169,8 @@ private:
 
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
-		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
+        UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 

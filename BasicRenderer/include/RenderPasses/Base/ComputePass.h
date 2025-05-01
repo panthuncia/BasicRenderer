@@ -7,11 +7,14 @@
 #include "Resources/Resource.h"
 #include "Render/RenderContext.h"
 #include "Resources/ResourceStates.h"
+#include "Render/ResourceRequirements.h"
 
 struct ComputePassParameters {
 	std::vector<std::shared_ptr<Resource>> shaderResources;
 	std::vector<std::shared_ptr<Resource>> constantBuffers;
 	std::vector<std::shared_ptr<Resource>> unorderedAccessViews;
+
+	std::vector<ResourceRequirement> resourceRequirements;
 };
 
 struct ComputePassReturn {

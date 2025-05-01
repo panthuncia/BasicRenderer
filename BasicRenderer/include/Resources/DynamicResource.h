@@ -12,7 +12,7 @@ public:
     DynamicResource(std::shared_ptr<Resource> initialResource)
         : resource(std::move(initialResource)) {
         if (resource) {
-            currentState = resource->GetState();
+            //currentState = resource->GetState();
             name = resource->GetName();
         }
     }
@@ -24,7 +24,7 @@ public:
         }
 
         resource = std::move(newResource);
-        currentState = resource->GetState();
+        //currentState = resource->GetState();
         name = resource->GetName();
     }
 
@@ -32,18 +32,16 @@ public:
         return resource;
     }
 
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(
-        ResourceState prevState, ResourceState newState) override {
-        if (resource) {
-            SetState(newState); // Keep the wrapper's state in sync
-            return resource->GetTransitions(prevState, newState);
-        }
-    }
+    ResourceAccessType GetCurrentAccessType() const override { return resource->GetCurrentAccessType(); }
+    ResourceLayout GetCurrentLayout() const override { return resource->GetCurrentLayout(); }
+    ResourceSyncState GetPrevSyncState() const override { return resource->GetPrevSyncState(); }
 
-    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
         if (resource) {
-            SetState(newState); // Keep the wrapper's state in sync
-            return resource->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
+            m_currentAccessType = newAccessType;
+            m_currentLayout = newLayout;
+            m_prevSyncState = newSyncState;
+            return resource->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
         }
     }
 
@@ -70,7 +68,7 @@ public:
     DynamicGloballyIndexedResource(std::shared_ptr<GloballyIndexedResource> initialResource)
         : m_resource(std::move(initialResource)) {
         if (m_resource) {
-            currentState = m_resource->GetState();
+            //currentState = m_resource->GetState();
             name = m_resource->GetName();
         }
     }
@@ -81,7 +79,7 @@ public:
             throw std::runtime_error("Cannot set a null resource.");
         }
         m_resource = std::move(newResource);
-        currentState = m_resource->GetState();
+        //currentState = m_resource->GetState();
         name = m_resource->GetName();
     }
 
@@ -89,18 +87,10 @@ public:
         return m_resource;
     }
 
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(
-        ResourceState prevState, ResourceState newState) override {
-        if (m_resource) {
-            SetState(newState); // Keep the wrapper's state in sync
-            return m_resource->GetTransitions(prevState, newState);
-        }
-    }
-
-    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 		if (m_resource) {
-			SetState(newState); // Keep the wrapper's state in sync
-			return m_resource->GetEnhancedBarrierGroup(prevState, newState, prevAccessType, newAccessType, prevSyncState, newSyncState);
+			//SetState(newState); // Keep the wrapper's state in sync
+			return m_resource->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
 		}
     }
 

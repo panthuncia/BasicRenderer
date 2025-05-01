@@ -1,6 +1,10 @@
 #ifndef __TONEMAPPING_HLSLI__
 #define __TONEMAPPING_HLSLI__
 
+#define TONEMAP_REINHARD_JODIE 0
+#define TONEMAP_KRONOS_PBR_NEUTRAL 1
+#define TONEMAP_ACES_HILL 2
+
 float luminanceFromColor(float3 color) {
     //standard luminance coefficients
     return dot(color, float3(0.2126f, 0.7152f, 0.0722f));

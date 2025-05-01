@@ -2,12 +2,9 @@
 #define __SHADOWS_HLSLI__
 
 #include "structs.hlsli"
+#include "utilities.hlsli"
 
-float unprojectDepth(float depth, float near, float far) {
-    return near * far / (far - depth * (far - near));
-}
-
-float calculatePointShadow(float4 fragPosWorldSpace, float3 normal, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+float calculatePointShadow(float3 fragPosWorldSpace, float3 normal, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz - light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
     float3 worldDir = normalize(lightToFrag);
@@ -67,7 +64,7 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
 }
 
 
-float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+float calculateCascadedShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     
     float depth = abs(fragPosViewSpace.z);
     int cascadeIndex = calculateShadowCascadeIndex(depth, numCascades, cascadeSplits);
@@ -76,7 +73,7 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace,
     
     Camera lightCamera = cameraBuffer[cascadeCameraIndexBuffer[infoIndex]];
     
-    float4 fragPosLightSpace = mul(fragPosWorldSpace, lightCamera.viewProjection);
+    float4 fragPosLightSpace = mul(float4(fragPosWorldSpace, 1.0), lightCamera.viewProjection);
     float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
     uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
     uv.y = 1.0 - uv.y;
@@ -93,8 +90,8 @@ float calculateCascadedShadow(float4 fragPosWorldSpace, float4 fragPosViewSpace,
     return shadow;
 }
 
-float calculateSpotShadow(float4 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix, float near, float far) {
-    float4 fragPosLightProjection = mul(fragPosWorldSpace, lightMatrix);
+float calculateSpotShadow(float3 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix, float near, float far) {
+    float4 fragPosLightProjection = mul(float4(fragPosWorldSpace, 1.0), lightMatrix);
     float3 uv = fragPosLightProjection.xyz / fragPosLightProjection.w;
     uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
     uv.y = 1.0 - uv.y;

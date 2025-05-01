@@ -66,7 +66,7 @@ std::shared_ptr<DynamicGloballyIndexedResource> IndirectCommandBufferManager::Cr
 		commandBufferSize = m_blendCommandBufferSize;
 		break;
 	}
-    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(DispatchMeshIndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
+    auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(DispatchMeshIndirectCommand), false, true, true);
 	resource->SetName(L"IndirectCommandBuffer ("+std::to_wstring(entityID)+L")");
     std::shared_ptr<DynamicGloballyIndexedResource> pResource = std::make_shared<DynamicGloballyIndexedResource>(resource);
     m_buffers[bucket][entityID].push_back(pResource);
@@ -166,7 +166,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
             case MaterialBuckets::Blend:
 				commandBufferSize = m_blendCommandBufferSize;
 			}
-            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(DispatchMeshIndirectCommand), ResourceState::UNORDERED_ACCESS, false, true, true);
+            auto resource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(commandBufferSize, sizeof(DispatchMeshIndirectCommand), false, true, true);
             buffer->SetResource(resource);
         }
     }

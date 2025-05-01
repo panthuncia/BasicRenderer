@@ -22,8 +22,7 @@ public:
     ComPtr<ID3D12Resource> GetTexture() const {
 		return handle.texture;
     }
-    std::vector<D3D12_RESOURCE_BARRIER>& GetTransitions(ResourceState fromState, ResourceState toState);
-    BarrierGroups& GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+    BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 

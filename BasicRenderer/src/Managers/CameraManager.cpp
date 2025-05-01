@@ -4,7 +4,7 @@
 
 CameraManager::CameraManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_pCameraBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<CameraInfo>(ResourceState::ALL_SRV, 1, L"cameraBuffer<CameraInfo>");
+	m_pCameraBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<CameraInfo>(1, L"cameraBuffer<CameraInfo>");
 }
 
 std::shared_ptr<BufferView> CameraManager::AddCamera(CameraInfo& camera) {

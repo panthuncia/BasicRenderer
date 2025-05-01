@@ -8,7 +8,7 @@ cbuffer SphereParams : register(b1) {
     uint objectBufferDescriptorIndex;
 }
 
-struct PSInput {
+struct SpherePSInput {
     float4 position : SV_Position;
     float3 normal : NORMAL;
 };
@@ -18,7 +18,7 @@ struct PSInput {
 void MSMain(
     const uint uGroupThreadID : SV_GroupThreadID,
     const uint3 vGroupID : SV_GroupID,
-    out vertices PSInput outputVertices[42],
+    out vertices SpherePSInput outputVertices[42],
     out indices uint3 outputTriangles[80]) {
     SetMeshOutputCounts(42, 80);
 
@@ -164,7 +164,7 @@ void MSMain(
         PerObjectBuffer object = objects[objectBufferIndex];
         Camera camera = cameras[perFrameBuffer.mainCameraIndex];
         
-        PSInput vertex;
+        SpherePSInput vertex;
         float4 pos = float4(thisPosition, 1.0f);
         float4 worldPosition = mul(mul(pos, object.model), camera.view);
         vertex.position = mul(worldPosition, camera.projection);
@@ -180,6 +180,7 @@ void MSMain(
     }
 }
 
-float4 PSMain(PSInput input) : SV_TARGET {
+float4 SpherePSInput(PSInput input) : SV_TARGET
+{
     return float4(1.0f, 0.0f, 0.0f, 1.0f);
 }

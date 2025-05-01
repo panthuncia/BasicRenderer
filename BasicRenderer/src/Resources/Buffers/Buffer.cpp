@@ -66,31 +66,11 @@ Buffer::Buffer(
 	m_size = bufferSize;
 }
 
-std::vector<D3D12_RESOURCE_BARRIER>& Buffer::GetTransitions(ResourceState fromState, ResourceState toState) {
+BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
-	if (fromState != currentState) {
-		throw(std::runtime_error("Buffer state mismatch"));
-	}
-	if (fromState == toState) {
-		throw(std::runtime_error("Useless transition"));
-	}
-#endif
-
-	D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
-	D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);
-	m_transitions[0].Transition.StateBefore = d3dFromState;
-	m_transitions[0].Transition.StateAfter = d3dToState;
-
-	currentState = toState;
-
-	return m_transitions;
-}
-
-BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-#if defined(_DEBUG)
-	if (prevState != currentState) {
-		throw(std::runtime_error("Buffer state mismatch"));
-	}
+	//if (prevState != currentState) {
+	//	throw(std::runtime_error("Buffer state mismatch"));
+	//}
 	//if (prevSyncState != currentSyncState) {
 	//	throw(std::runtime_error("Buffer sync state mismatch"));
 	//}
@@ -99,13 +79,14 @@ BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceState prevState, Resource
 	//}
 #endif
 	
-	m_bufferBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevAccessType);
-	m_bufferBarrier.AccessAfter = ResourceStateToD3D12AccessType(newAccessType);
+	m_bufferBarrier.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
+	m_bufferBarrier.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
 	m_bufferBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
 	m_bufferBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 
-	currentState = newState;
-	currentSyncState = newSyncState;
+	m_currentAccessType = newAccessType;
+	m_currentLayout = newLayout;
+	m_prevSyncState = newSyncState;
 
 	return m_barrierGroups;
 }

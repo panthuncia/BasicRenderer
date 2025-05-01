@@ -18,6 +18,7 @@
 #include "Render/OutputTypes.h"
 #include "Import/ModelLoader.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Render/TonemapTypes.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -58,6 +59,7 @@ private:
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
+    void DrawTonemapTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
     void DisplaySceneNode(flecs::entity node, bool isOnlyChild);
@@ -87,6 +89,7 @@ private:
 	std::function<void(bool)> setShadowsEnabled;
 
 	std::function<void(unsigned int)> setOutputType;
+    std::function<void(unsigned int)> setTonemapType;
 
     bool meshShaderEnabled = false;
     bool indirectDrawsWereEnabled = false;
@@ -114,6 +117,10 @@ private:
     bool clusteredLighting = true;
 	std::function<bool()> getClusteredLightingEnabled;
 	std::function<void(bool)> setClusteredLightingEnabled;
+
+	bool deferredRendering = true;
+	std::function<bool()> getDeferredRenderingEnabled;
+	std::function<void(bool)> setDeferredRenderingEnabled;
 
 	bool m_gtaoEnabled = true;
 	std::function<bool()> getGTAOEnabled;
@@ -194,6 +201,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
         });
 
 	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
+	setTonemapType = settingsManager.getSettingSetter<unsigned int>("tonemapType");
 
     getSceneRoot = settingsManager.getSettingGetter<std::function<flecs::entity()>>("getSceneRoot")();
 
@@ -220,6 +228,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setClusteredLightingEnabled = settingsManager.getSettingSetter<bool>("enableClusteredLighting");
 	getClusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting");
 	clusteredLighting = getClusteredLightingEnabled();
+
+	setDeferredRenderingEnabled = settingsManager.getSettingSetter<bool>("enableDeferredRendering");
+	getDeferredRenderingEnabled = settingsManager.getSettingGetter<bool>("enableDeferredRendering");
+	deferredRendering = getDeferredRenderingEnabled();
 
 	getGTAOEnabled = settingsManager.getSettingGetter<bool>("enableGTAO");
 	setGTAOEnabled = settingsManager.getSettingSetter<bool>("enableGTAO");
@@ -287,9 +299,14 @@ inline void Menu::Render(const RenderContext& context) {
         if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
 			setClusteredLightingEnabled(clusteredLighting);
         }
+		if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
+			setDeferredRenderingEnabled(deferredRendering);
+		}
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
 		}
+        DrawTonemapTypeDropdown();
+
         DrawEnvironmentsDropdown();
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();
@@ -364,18 +381,22 @@ inline int Menu::FindFileIndex(const std::vector<std::string>& hdrFiles, const s
 }
 
 inline void Menu::DrawEnvironmentsDropdown() {
-
     static int selectedItemIndex = FindFileIndex(hdrFiles, environmentName);
-    if (ImGui::BeginCombo("HDR Files", hdrFiles[selectedItemIndex].c_str())) // Current item
+
+    const char* previewValue = (selectedItemIndex >= 0)
+        ? hdrFiles[selectedItemIndex].c_str()
+        : "Select Environment";
+
+    if (ImGui::BeginCombo("HDR Files", previewValue))
     {
-        for (int i = 0; i < hdrFiles.size(); ++i)
+        for (int i = 0; i < (int)hdrFiles.size(); ++i)
         {
             bool isSelected = (selectedItemIndex == i);
             if (ImGui::Selectable(hdrFiles[i].c_str(), isSelected))
             {
-                selectedItemIndex = i;  // Update the selected index
-				environmentName = hdrFiles[i];
-				setEnvironment(hdrFiles[i]);
+                selectedItemIndex = i;
+                environmentName   = hdrFiles[i];
+                setEnvironment(hdrFiles[i]);
             }
             if (isSelected)
                 ImGui::SetItemDefaultFocus();
@@ -397,6 +418,23 @@ inline void Menu::DrawOutputTypeDropdown() {
 				ImGui::SetItemDefaultFocus();
 		}
 		ImGui::EndCombo();
+
+    }
+}
+
+inline void Menu::DrawTonemapTypeDropdown() {
+    static int selectedItemIndex = 0;
+    if (ImGui::BeginCombo("Tonemap Type", TonemapTypeNames[selectedItemIndex].c_str())) {
+        for (int i = 0; i < TonemapTypeNames.size(); ++i) {
+            bool isSelected = (selectedItemIndex == i);
+            if (ImGui::Selectable(TonemapTypeNames[i].c_str(), isSelected)) {
+                selectedItemIndex = i;
+                setTonemapType(i);
+            }
+            if (isSelected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
 
     }
 }

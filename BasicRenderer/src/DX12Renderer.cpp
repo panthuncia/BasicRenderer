@@ -27,6 +27,7 @@
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
+#include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/BRDFIntegrationPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
@@ -41,6 +42,7 @@
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
+#include "RenderPasses/DeferredRenderPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -55,6 +57,8 @@
 #include "Scene/MovementState.h"
 #include "Animation/AnimationController.h"
 #include "ThirdParty/XeGTAO.h"
+#include "Managers/EnvironmentManager.h"
+#include "Render/TonemapTypes.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -155,10 +159,12 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pObjectManager = ObjectManager::CreateUnique();
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pCameraManager = CameraManager::CreateUnique();
+	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
+	ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
 	m_pLightManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Also for indirect command buffers
 
-	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get());
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -199,11 +205,13 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
 
         if (entity.has<Components::Camera>() && entity.has<Components::CameraBufferView>()) {
-            auto inverseMatrix = XMMatrixInverse(nullptr, mOut.matrix);
+            auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
 
             Components::Camera* camera = entity.get_mut<Components::Camera>();
-            camera->info.view = RemoveScalingFromMatrix(inverseMatrix);
+            camera->info.view = XMMatrixInverse(nullptr, cameraModel);
+			camera->info.viewInverse = cameraModel;
             camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
+			camera->info.projectionInverse = XMMatrixInverse(nullptr, camera->info.projection);
 
             auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
             camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
@@ -260,14 +268,17 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
+    settingsManager.registerSetting<uint16_t>("reflectionCubemapResolution", 512);
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
-	settingsManager.registerSetting<unsigned int>("outputType", 0);
+	settingsManager.registerSetting<unsigned int>("outputType", OutputType::COLOR);
+	settingsManager.registerSetting<unsigned int>("tonemapType", TonemapType::REINHARD_JODIE);
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
-    settingsManager.registerSetting<bool>("enableClusteredLighting", true);
+    settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
+	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -302,9 +313,13 @@ void DX12Renderer::SetSettings() {
         });
 	settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
 		SetEnvironmentInternal(s2ws(newValue));
+		rebuildRenderGraph = true;
 		});
 	settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
+		});
+	settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
+		ResourceManager::GetInstance().SetTonemapType(newValue);
 		});
 	settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
 		ToggleMeshShaders(newValue);
@@ -331,6 +346,10 @@ void DX12Renderer::SetSettings() {
 		});
 	settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
 		m_gtaoEnabled = newValue;
+		rebuildRenderGraph = true;
+		});
+	settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
+		m_deferredRendering = newValue;
 		rebuildRenderGraph = true;
 		});
     m_numFramesInFlight = getNumFramesInFlight();
@@ -636,6 +655,9 @@ void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 
 void DX12Renderer::Update(double elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+
+	m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
+
     auto& updateManager = UploadManager::GetInstance();
     updateManager.ProcessDeferredReleases(m_frameIndex);
 
@@ -674,7 +696,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
     updateManager.ExecuteResourceCopies(m_frameIndex, graphicsQueue.Get());// copies come before uploads to avoid overwriting data
 	updateManager.ProcessUploads(m_frameIndex, graphicsQueue.Get());
 
-    resourceManager.ExecuteResourceTransitions();
+    //resourceManager.ExecuteResourceTransitions();
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 }
 
@@ -706,6 +728,7 @@ void DX12Renderer::Render() {
 	m_context.meshManager = m_pMeshManager.get();
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
 	m_context.lightManager = m_pLightManager.get();
+	m_context.environmentManager = m_pEnvironmentManager.get();
 	m_context.drawStats = *drawStats;
 
     unsigned int globalPSOFlags = 0;
@@ -714,6 +737,9 @@ void DX12Renderer::Render() {
     }
 	if (m_clusteredLighting) {
 		globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
+	}
+	if (m_deferredRendering) {
+		globalPSOFlags |= PSOFlags::PSO_DEFERRED;
 	}
 	m_context.globalPSOFlags = globalPSOFlags;
 
@@ -939,11 +965,11 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
-    StallPipeline();
+    //StallPipeline();
 
-    auto newGraph = std::make_unique<RenderGraph>();
+    auto newGraph = std::make_shared<RenderGraph>();
     std::shared_ptr<PixelBuffer> depthTexture = m_depthStencilBuffer;
-	newGraph->AddResource(depthTexture, false, ResourceState::DEPTH_WRITE);
+	newGraph->AddResource(depthTexture, false);
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
@@ -952,6 +978,8 @@ void DX12Renderer::CreateRenderGraph() {
 	auto& preSkinningVertices = meshManager->GetPreSkinningVertices();
 	auto& postSkinningVertices = meshManager->GetPostSkinningVertices();
 	auto& normalMatrixBuffer = objectManager->GetNormalMatrixBuffer();
+	auto& environmentsBuffer = m_pEnvironmentManager->GetEnvironmentInfoBuffer();
+    auto& environmentPrefilteredGroup = m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup();
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -970,8 +998,8 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_clusteredLighting) {
         clusterBuffer = m_pLightManager->GetClusterBuffer();
         lightPagesBuffer = m_pLightManager->GetLightPagesBuffer();
-        newGraph->AddResource(clusterBuffer, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(lightPagesBuffer, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(clusterBuffer, false);
+        newGraph->AddResource(lightPagesBuffer, false);
     }
     newGraph->AddResource(cameraBuffer);
     newGraph->AddResource(lightBufferResourceGroup);
@@ -981,6 +1009,8 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->AddResource(perMeshBuffer);
     newGraph->AddResource(perObjectBuffer);
     newGraph->AddResource(meshResourceGroup);
+	newGraph->AddResource(environmentsBuffer);
+	newGraph->AddResource(environmentPrefilteredGroup);
 
     // Frustrum culling goes before Z prepass
     bool indirect = getIndirectDrawsEnabled();
@@ -1025,12 +1055,47 @@ void DX12Renderer::CreateRenderGraph() {
 	normalsWorldSpaceDesc.imageDimensions.push_back(dims);
 	auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
 	normalsWorldSpace->SetName(L"Normals World Space");
-	newGraph->AddResource(normalsWorldSpace, false, ResourceState::UNORDERED_ACCESS);
+	newGraph->AddResource(normalsWorldSpace, false);
+
+	std::shared_ptr<PixelBuffer> albedo;
+	std::shared_ptr<PixelBuffer> metallicRoughness;
+
+    if (m_deferredRendering) {
+        TextureDescription albedoDesc;
+        albedoDesc.arraySize = 1;
+        albedoDesc.channels = 4;
+        albedoDesc.isCubemap = false;
+        albedoDesc.hasRTV = true;
+        albedoDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        albedoDesc.generateMipMaps = false;
+        albedoDesc.hasSRV = true;
+        albedoDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        ImageDimensions albedoDims = { m_xRes, m_yRes, 0, 0 };
+        albedoDesc.imageDimensions.push_back(albedoDims);
+        albedo = PixelBuffer::Create(albedoDesc);
+        albedo->SetName(L"Albedo");
+        newGraph->AddResource(albedo, false);
+
+        TextureDescription metallicRoughnessDesc;
+        metallicRoughnessDesc.arraySize = 1;
+        metallicRoughnessDesc.channels = 2;
+        metallicRoughnessDesc.isCubemap = false;
+        metallicRoughnessDesc.hasRTV = true;
+        metallicRoughnessDesc.format = DXGI_FORMAT_R8G8_UNORM;
+        metallicRoughnessDesc.generateMipMaps = false;
+        metallicRoughnessDesc.hasSRV = true;
+        metallicRoughnessDesc.srvFormat = DXGI_FORMAT_R8G8_UNORM;
+        ImageDimensions metallicRoughnessDims = { m_xRes, m_yRes, 0, 0 };
+        metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
+        metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
+        metallicRoughness->SetName(L"Metallic Roughness");
+        newGraph->AddResource(metallicRoughness, false);
+    }
 
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace)
-        .WithDepthTarget(depthTexture);
+        .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness)
+        .WithDepthReadWrite(depthTexture);
 
 	if (useMeshShaders) {
 		zBuilder.WithShaderResource(meshResourceGroup);
@@ -1038,7 +1103,7 @@ void DX12Renderer::CreateRenderGraph() {
 			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-    zBuilder.Build<ZPrepass>(normalsWorldSpace, getWireframeEnabled(), useMeshShaders, indirect);
+    zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, getWireframeEnabled(), useMeshShaders, indirect);
 
     auto debugPassParameters = RenderPassParameters();
 
@@ -1085,14 +1150,14 @@ void DX12Renderer::CreateRenderGraph() {
         workingAOTerm2->SetName(L"GTAO Working AO Term 2");
         outputAO = PixelBuffer::Create(workingAOTermDesc);
         outputAO->SetName(L"GTAO Output AO Term");
-        newGraph->AddResource(workingAOTerm1, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(workingAOTerm2, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(outputAO, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(workingDepths, false, ResourceState::UNORDERED_ACCESS);
-        newGraph->AddResource(workingEdges, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(workingAOTerm1, false);
+        newGraph->AddResource(workingAOTerm2, false);
+        newGraph->AddResource(outputAO, false);
+        newGraph->AddResource(workingDepths, false);
+        newGraph->AddResource(workingEdges, false);
 
         auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
-        newGraph->AddResource(GTAOConstantBuffer, false, ResourceState::CONSTANT);
+        newGraph->AddResource(GTAOConstantBuffer, false);
 
         // Point-clamp sampler
         D3D12_SAMPLER_DESC samplerDesc = {};
@@ -1157,9 +1222,9 @@ void DX12Renderer::CreateRenderGraph() {
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
         // light pages counter
-        auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+        auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
         lightPagesCounter->SetName(L"Light Pages Counter");
-        newGraph->AddResource(lightPagesCounter, false, ResourceState::UNORDERED_ACCESS);
+        newGraph->AddResource(lightPagesCounter, false);
 
 		newGraph->BuildComputePass("ClusterGenerationPass")
 			.WithShaderResource(cameraBuffer)
@@ -1172,90 +1237,57 @@ void DX12Renderer::CreateRenderGraph() {
 			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
     }
     
-    auto forwardBuilder = newGraph->BuildRenderPass("ForwardPass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithDepthTarget(depthTexture);
+    auto primaryPassBuilder = newGraph->BuildRenderPass("ForwardPass")
+        .WithShaderResource(cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup());
+    
+    if (!m_deferredRendering) {
+        primaryPassBuilder.WithDepthReadWrite(depthTexture);
+	}
+	else {
+		primaryPassBuilder.WithDepthRead(depthTexture);
+	}
+
+	if (!m_deferredRendering) { // Don't need object and mesh info for deferred rendering
+        primaryPassBuilder.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices);
+    }
 
     if (m_clusteredLighting) {
-		forwardBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
+        primaryPassBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
     }
 
     if (m_gtaoEnabled) {
-        forwardBuilder.WithShaderResource(outputAO);
+        primaryPassBuilder.WithShaderResource(outputAO);
     }
 
-    if (useMeshShaders) {
-		forwardBuilder.WithShaderResource(meshResourceGroup);
+	if (useMeshShaders && !m_deferredRendering) { // Don't need meshlets for deferred rendering
+        primaryPassBuilder.WithShaderResource(meshResourceGroup);
 		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-			forwardBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+            primaryPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
         }
 	}
 
-    if (m_lutTexture == nullptr) {
-		TextureDescription lutDesc;
-        ImageDimensions dims;
-		dims.height = 512;
-		dims.width = 512;
-		dims.rowPitch = 512 * 2 * sizeof(float);
-		dims.slicePitch = dims.rowPitch * 512;
-		lutDesc.imageDimensions.push_back(dims);
-		lutDesc.channels = 2;
-		lutDesc.isCubemap = false;
-		lutDesc.hasRTV = true;
-		lutDesc.format = DXGI_FORMAT_R16G16_FLOAT;
-		auto lutBuffer = PixelBuffer::Create(lutDesc);
-		auto sampler = Sampler::GetDefaultSampler();
-		m_lutTexture = std::make_shared<Texture>(lutBuffer, sampler);
-		m_lutTexture->SetName(L"LUTTexture");
+    newGraph->AddResource(m_pEnvironmentManager->GetWorkingHDRIGroup());
+    newGraph->AddResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup());
+    //newGraph->AddResource(m_environmentIrradiance);
 
-        ResourceManager::GetInstance().setEnvironmentBRDFLUTIndex(m_lutTexture->GetBuffer()->GetSRVInfo()[0].index);
-		ResourceManager::GetInstance().setEnvironmentBRDFLUTSamplerIndex(m_lutTexture->GetSamplerDescriptorIndex());
-
-		newGraph->BuildRenderPass("BRDFIntegrationPass")
-			.WithRenderTarget(m_lutTexture)
-			.Build<BRDFIntegrationPass>(m_lutTexture);
-    }
-
-    newGraph->AddResource(m_lutTexture);
-	forwardBuilder.WithShaderResource(m_lutTexture);
-
-    // Check if we've already computed this environment
-    bool skipEnvironmentPass = false;
-    if (currentRenderGraph != nullptr) {
-        auto currentEnvironmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
-        if (currentEnvironmentPass != nullptr) {
-            if (!currentEnvironmentPass->IsInvalidated()) {
-                skipEnvironmentPass = true;
-                DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
-                m_currentEnvironmentTexture = nullptr;
-            }
-        }
-    }
-
-    if (m_currentEnvironmentTexture != nullptr && !skipEnvironmentPass) {
-
-        newGraph->AddResource(m_currentEnvironmentTexture);
-        //newGraph->AddResource(m_currentSkybox);
-        //newGraph->AddResource(m_environmentIrradiance);
-
-		newGraph->BuildRenderPass("EnvironmentConversionPass")
-			.WithShaderResource(m_currentEnvironmentTexture)
-			.WithRenderTarget(m_currentSkybox, m_environmentIrradiance)
-			.Build<EnvironmentConversionPass>(m_currentEnvironmentTexture, m_currentSkybox, m_environmentIrradiance, m_environmentName);
+	newGraph->BuildRenderPass("Environment Conversion Pass")
+		.WithShaderResource(m_pEnvironmentManager->GetWorkingHDRIGroup())
+		.WithRenderTarget(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+		.Build<EnvironmentConversionPass>();
         
-		newGraph->BuildRenderPass("EnvironmentFilterPass")
-			.WithShaderResource(m_currentEnvironmentTexture)
-			.WithRenderTarget(m_prefilteredEnvironment)
-			.Build<EnvironmentFilterPass>(m_currentEnvironmentTexture, m_prefilteredEnvironment, m_environmentName);
-	}
+    newGraph->BuildComputePass("Environment Spherical Harmonics Pass")
+        .WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+        .WithUnorderedAccess(environmentsBuffer)
+		.Build<EnvironmentSHPass>();
 
-    if (m_prefilteredEnvironment != nullptr) {
-        newGraph->AddResource(m_prefilteredEnvironment);
-		forwardBuilder.WithShaderResource(m_prefilteredEnvironment);
-    }
-    if (m_environmentIrradiance != nullptr) {
-        newGraph->AddResource(m_environmentIrradiance);
-		forwardBuilder.WithShaderResource(m_environmentIrradiance);
+	newGraph->BuildRenderPass("Environment Prefilter Pass")
+		.WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+		.WithRenderTarget(environmentPrefilteredGroup)
+		.Build<EnvironmentFilterPass>();
+
+    if (m_currentEnvironment != nullptr) {
+		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap());
+        primaryPassBuilder.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap());
     }
 
 	auto& lightViewResourceGroup = m_pLightManager->GetLightViewInfoResourceGroup();
@@ -1267,7 +1299,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 		auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-			.WithDepthTarget(m_shadowMaps);
+			.WithDepthReadWrite(m_shadowMaps);
 
 		if (useMeshShaders) {
 			shadowBuilder.WithShaderResource(meshResourceGroup);
@@ -1280,17 +1312,21 @@ void DX12Renderer::CreateRenderGraph() {
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
     }
 
-    if (m_currentSkybox != nullptr) {
-        newGraph->AddResource(m_currentSkybox);
-
+    if (m_currentEnvironment != nullptr) {
 		newGraph->BuildRenderPass("SkyboxPass")
-			.WithShaderResource(m_currentSkybox)
-			.WithDepthTarget(depthTexture)
-			.Build<SkyboxRenderPass>(m_currentSkybox);
+			.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap())
+			.WithDepthReadWrite(depthTexture)
+			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
-    forwardBuilder.WithShaderResource(normalsWorldSpace);
-	forwardBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
-
+	if (m_deferredRendering) { // G-Buffer resources + depth
+        primaryPassBuilder.WithShaderResource(normalsWorldSpace, albedo, metallicRoughness, depthTexture);
+    }
+    if (m_deferredRendering) {
+		primaryPassBuilder.Build<DeferredRenderPass>(m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index, metallicRoughness->GetSRVInfo()[0].index, depthTexture->GetSRVInfo()[0].index);
+    }
+    else {
+        primaryPassBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0);
+    }
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
 	static const size_t PPLLNodeSize = 24; // two uints, four floats
@@ -1306,12 +1342,11 @@ void DX12Renderer::CreateRenderGraph() {
     desc.hasRTV = false;
     desc.hasUAV = true;
 	desc.hasNonShaderVisibleUAV = true;
-    desc.initialState = ResourceState::PIXEL_SRV;
 	auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
 	PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
-    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, ResourceState::UNORDERED_ACCESS, false, true, false);
+    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, false, true, false);
 	PPLLBuffer->SetName(L"PPLLBuffer");
-    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), ResourceState::UNORDERED_ACCESS, false, true, false);
+    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
 	PPLLCounter->SetName(L"PPLLCounter");
 	newGraph->AddResource(PPLLHeadPointerTexture);
 	newGraph->AddResource(PPLLBuffer);
@@ -1319,7 +1354,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto PPLLFillBuilder = newGraph->BuildRenderPass("PPFillPass")
         .WithUnorderedAccess(PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter)
-        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_prefilteredEnvironment, m_environmentIrradiance, cameraBuffer, outputAO, normalsWorldSpace);
+        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup(), m_pEnvironmentManager->GetEnvironmentInfoBuffer(), cameraBuffer, outputAO, normalsWorldSpace);
     if (drawShadows) {
 		PPLLFillBuilder.WithShaderResource(m_shadowMaps);
     }
@@ -1344,7 +1379,7 @@ void DX12Renderer::CreateRenderGraph() {
 		debugPass->SetTexture(m_currentDebugTexture.get());
 		//debugPassParameters.shaderResources.push_back(m_shadowMaps);
 	}
-    newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
+    //newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
 
     if (getDrawBoundingSpheres()) {
         auto debugSpherePass = std::make_shared<DebugSpherePass>();
@@ -1354,144 +1389,56 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->Compile();
     newGraph->Setup();
 
+    DeletionManager::GetInstance().MarkForDelete(currentRenderGraph);
 	currentRenderGraph = std::move(newGraph);
 
 	rebuildRenderGraph = false;
 }
 
 void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
-	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
-    auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
-    auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
-	auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
-    if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
-        if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
-            DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
-            m_currentEnvironmentTexture = nullptr;
-        }
-		// Load the cached environment
-        auto skybox = loadCubemapFromFile(skyboxPath);
-		auto radiance = loadCubemapFromFile(radiancePath);
-        auto prefiltered = loadCubemapFromFile(prefilteredPath);
-		SetSkybox(skybox);
-		SetIrradiance(radiance);
-		SetPrefilteredEnvironment(prefiltered);
-        rebuildRenderGraph = true;
+
+    std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
+
+    if (std::filesystem::exists(envpath)) {
+		m_preFrameDeferredFunctions.defer([envpath, name, this]() { // Don't change this during rendering
+            m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment(name);
+            m_pEnvironmentManager->SetFromHDRI(m_currentEnvironment.get(), envpath.string());
+            ResourceManager::GetInstance().SetActiveEnvironmentIndex(m_currentEnvironment->GetEnvironmentIndex());
+			});
     }
     else {
-        std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
-        
-        if (std::filesystem::exists(envpath)) {
-            auto skyHDR = loadTextureFromFileSTBI(envpath.string());
-            SetEnvironmentTexture(skyHDR, ws2s(name));
-        }
-        else {
-            spdlog::error("Environment file not found: " + envpath.string());
-        }
+        spdlog::error("Environment file not found: " + envpath.string());
     }
-}
 
-void DX12Renderer::SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName) {
-	m_environmentName = environmentName;
-	if (m_currentEnvironmentTexture != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
-	}
-    m_currentEnvironmentTexture = texture;
-    m_currentEnvironmentTexture->SetName(L"EnvironmentTexture");
-    auto buffer = m_currentEnvironmentTexture->GetBuffer();
-    // Create blank texture for skybox
-	uint16_t skyboxResolution = getSkyboxResolution();
-
-	TextureDescription skyboxDesc;
-    ImageDimensions dims;
-    dims.height = skyboxResolution;
-	dims.width = skyboxResolution;
-	dims.rowPitch = skyboxResolution * 4;
-	dims.slicePitch = skyboxResolution * skyboxResolution * 4;
-    for (int i = 0; i < 6; i++) {
-        skyboxDesc.imageDimensions.push_back(dims);
-    }
-    skyboxDesc.channels = buffer->GetChannels();
-	skyboxDesc.isCubemap = true;
-    skyboxDesc.hasRTV = true;
-	skyboxDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    auto envCubemap = PixelBuffer::Create(skyboxDesc);
-    auto sampler = Sampler::GetDefaultSampler();
-    auto skybox = std::make_shared<Texture>(envCubemap, sampler);
-	SetSkybox(skybox);
-
-	TextureDescription irradianceDesc;
-    for (int i = 0; i < 6; i++) {
-        irradianceDesc.imageDimensions.push_back(dims);
-    }
-	irradianceDesc.channels = buffer->GetChannels();
-	irradianceDesc.isCubemap = true;
-	irradianceDesc.hasRTV = true;
-	irradianceDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    auto envRadianceCubemap = PixelBuffer::Create(irradianceDesc);
-    auto irradiance = std::make_shared<Texture>(envRadianceCubemap, sampler);
-	SetIrradiance(irradiance);
-
-	TextureDescription prefilteredDesc;
-    for (int i = 0; i < 6; i++) {
-        prefilteredDesc.imageDimensions.push_back(dims);
-    }
-	prefilteredDesc.channels = buffer->GetChannels();
-	prefilteredDesc.isCubemap = true;
-	prefilteredDesc.hasRTV = true;
-	prefilteredDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	prefilteredDesc.generateMipMaps = true;
-
-	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
-	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
-	SetPrefilteredEnvironment(prefilteredEnvironment);
-
-    if (currentRenderGraph != nullptr) {
-        auto environmentPass = currentRenderGraph->GetRenderPassByName("EnvironmentConversionPass");
-        if (environmentPass != nullptr) {
-            environmentPass->Invalidate();
-        }
-		auto environmentFilterPass = currentRenderGraph->GetRenderPassByName("EnvironmentFilterPass");
-        if (environmentFilterPass != nullptr) {
-            environmentFilterPass->Invalidate();
-        }
-    }
-    rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SetSkybox(std::shared_ptr<Texture> texture) {
-    if (m_currentSkybox != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_currentSkybox);
-    }
-    m_currentSkybox = texture;
-    m_currentSkybox->SetName(L"Skybox");
-    rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SetIrradiance(std::shared_ptr<Texture> texture) {
-    if (m_environmentIrradiance != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_environmentIrradiance);
-    }
-	m_environmentIrradiance = texture;
-    m_environmentIrradiance->SetName(L"EnvironmentRadiance");
-    auto& manager = ResourceManager::GetInstance();
-	manager.setEnvironmentIrradianceMapIndex(m_environmentIrradiance->GetBuffer()->GetSRVInfo()[0].index);
-	manager.setEnvironmentIrradianceMapSamplerIndex(m_environmentIrradiance->GetSamplerDescriptorIndex());
-	rebuildRenderGraph = true;
-}
-
-void DX12Renderer::SetPrefilteredEnvironment(std::shared_ptr<Texture> texture) {
-	if (m_prefilteredEnvironment != nullptr) { // Don't delete resources mid-frame
-        DeletionManager::GetInstance().MarkForDelete(m_prefilteredEnvironment);
-	}
-	m_prefilteredEnvironment = texture;
-	m_prefilteredEnvironment->SetName(L"PrefilteredEnvironment");
-	auto& manager = ResourceManager::GetInstance();
-	manager.setPrefilteredEnvironmentMapIndex(m_prefilteredEnvironment->GetBuffer()->GetSRVInfo()[0].index);
-	manager.setPrefilteredEnvironmentMapSamplerIndex(m_prefilteredEnvironment->GetSamplerDescriptorIndex());
-	rebuildRenderGraph = true;
+	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
+ //   auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
+ //   auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
+	//auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
+ //   if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
+ //       if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
+ //           DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
+ //           m_currentEnvironmentTexture = nullptr;
+ //       }
+	//	// Load the cached environment
+ //       auto skybox = loadCubemapFromFile(skyboxPath);
+	//	auto radiance = loadCubemapFromFile(radiancePath);
+ //       auto prefiltered = loadCubemapFromFile(prefilteredPath);
+	//	SetSkybox(skybox);
+	//	SetIrradiance(radiance);
+	//	SetPrefilteredEnvironment(prefiltered);
+ //       rebuildRenderGraph = true;
+ //   }
+ //   else {
+ //       std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
+ //       
+ //       if (std::filesystem::exists(envpath)) {
+ //           auto skyHDR = loadTextureFromFileSTBI(envpath.string());
+ //           SetEnvironmentTexture(skyHDR, ws2s(name));
+ //       }
+ //       else {
+ //           spdlog::error("Environment file not found: " + envpath.string());
+ //       }
+ //   }
 }
 
 void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {

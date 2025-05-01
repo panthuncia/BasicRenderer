@@ -2,18 +2,6 @@ cbuffer RootConstants1 : register(b1) {
     matrix viewProjectionMatrix;
 };
 
-cbuffer RootConstants2 : register(b2) {
-    float startPhi; // Start of the integration range
-};
-
-cbuffer RootConstants3 : register(b3) {
-    float endPhi; // End of the integration range
-};
-
-cbuffer RootConstants4 : register(b4) {
-    float normalizationFactor; // Normalizes irradiance based on total sample number
-};
-
 Texture2D environmentTexture : register(t0);
 SamplerState environmentSamplerState : register(s0);
 
@@ -45,36 +33,12 @@ float2 CubeToSpherical(float3 dir) {
 
 struct PS_OUTPUT {
     float4 color : SV_Target0;
-    float4 radiance : SV_Target1;
 };
 
 PS_OUTPUT PSMain(VS_OUTPUT input) {
     float3 color = environmentTexture.Sample(environmentSamplerState, CubeToSpherical(input.direction.xyz)).xyz;
     
-    float3 irradiance = float3(0.0, 0.0, 0.0);
-
-    float3 normal = input.direction.xyz;
-    float3 up = float3(0.0, 1.0, 0.0);
-    float3 right = normalize(cross(up, normal));
-    up = normalize(cross(normal, right));
-
-    float sampleDelta = 0.025;
-    // https://learnopengl.com/PBR/IBL/Diffuse-irradiance
-    for (float phi = startPhi; phi < endPhi; phi += sampleDelta) {
-        for (float theta = 0.0; theta < 0.5 * PI; theta += sampleDelta) {
-            // spherical to cartesian (in tangent space)
-            float3 tangentSample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-            // tangent space to world
-            float3 sampleVec = tangentSample.x * right + tangentSample.y * up + tangentSample.z * normal;
-
-            irradiance += environmentTexture.Sample(environmentSamplerState, CubeToSpherical(sampleVec)).rgb * cos(theta) * sin(theta);
-        }
-    }
-    
-    irradiance = irradiance * normalizationFactor;
-    
     PS_OUTPUT output;
     output.color = float4(color, 1.0);
-    output.radiance = float4(irradiance, 1.0);
     return output;
 }

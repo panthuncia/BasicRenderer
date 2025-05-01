@@ -22,7 +22,6 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 		SetRTVDescriptors(handle.rtvHeap, handle.RTVInfo);
 	if (desc.hasDSV)
 	    SetDSVDescriptors(handle.dsvHeap, handle.DSVInfo);
-    currentState = ResourceState::UNKNOWN;
 	m_width = desc.imageDimensions[0].width;
 	m_height = desc.imageDimensions[0].height;
 	m_channels = desc.channels;
@@ -46,33 +45,16 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 
 	m_barrierGroups.numTextureBarrierGroups = 1;
 	m_barrierGroups.textureBarriers = &m_barrierGroup;
+
+    m_hasLayout = true;
 }
 
-std::vector<D3D12_RESOURCE_BARRIER>& PixelBuffer::GetTransitions (ResourceState fromState, ResourceState toState) {
+
+BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
-    if (fromState != currentState) {
-        throw(std::runtime_error("Texture state mismatch"));
-    }
-    if (fromState == toState) {
-        throw(std::runtime_error("Useless transition"));
-    }
-#endif
-
-    D3D12_RESOURCE_STATES d3dFromState = ResourceStateToD3D12(fromState);
-    D3D12_RESOURCE_STATES d3dToState = ResourceStateToD3D12(toState);
-
-    m_transitions[0].Transition.StateBefore = d3dFromState;
-    m_transitions[0].Transition.StateAfter = d3dToState;
-
-    currentState = toState;
-	return m_transitions;
-}
-
-BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, ResourceState newState, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-#if defined(_DEBUG)
-    if (prevState != currentState) {
-        throw(std::runtime_error("Texture state mismatch"));
-    }
+    //if (prevAccessType) {
+    //    throw(std::runtime_error("Texture state mismatch"));
+    //}
     //if (prevSyncState != currentSyncState) {
     //    throw(std::runtime_error("Texture sync state mismatch"));
     //}
@@ -80,15 +62,16 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceState prevState, Res
     //    throw(std::runtime_error("Useless transition"));
     //}
 #endif
-    m_textureBarrier.AccessBefore = ResourceStateToD3D12AccessType(prevAccessType);
-    m_textureBarrier.AccessAfter = ResourceStateToD3D12AccessType(newAccessType);
+    m_textureBarrier.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
+    m_textureBarrier.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
     m_textureBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
     m_textureBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
-	m_textureBarrier.LayoutBefore = ResourceStateToD3D12GraphicsBarrierLayout(prevState);
-	m_textureBarrier.LayoutAfter = ResourceStateToD3D12GraphicsBarrierLayout(newState);
+	m_textureBarrier.LayoutBefore = (D3D12_BARRIER_LAYOUT)prevLayout;
+    m_textureBarrier.LayoutAfter = (D3D12_BARRIER_LAYOUT)newLayout;
 
-    currentState = newState;
-    currentSyncState = newSyncState;
+    m_currentAccessType = newAccessType;
+    m_currentLayout = newLayout;
+    m_prevSyncState = newSyncState;
 
     return m_barrierGroups;
 }

@@ -28,10 +28,31 @@
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
+#include "Managers/EnvironmentManager.h"
 #include "Scene/MovementState.h"
 #include "Scene/Components.h"
 
 using namespace Microsoft::WRL;
+
+class DeferredFunctions {
+public:
+    // enqueue any void() callable
+    void defer(std::function<void()> fn) {
+        _queue.emplace_back(std::move(fn));
+    }
+
+    // invoke all, then clear
+    void flush() {
+        for (auto &fn : _queue)
+            fn();
+        _queue.clear();
+    }
+
+    bool empty() const { return _queue.empty(); }
+
+private:
+    std::vector<std::function<void()>> _queue;
+};
 
 class DX12Renderer {
 public:
@@ -50,10 +71,6 @@ public:
     void SetInputMode(InputMode mode);
     void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
-    void SetSkybox(std::shared_ptr<Texture> texture);
-	void SetIrradiance(std::shared_ptr<Texture> texture);
-	void SetPrefilteredEnvironment(std::shared_ptr<Texture> texture);
-    void SetEnvironmentTexture(std::shared_ptr<Texture> texture, std::string environmentName);
 
 private:
     ComPtr<IDXGIFactory7> factory;
@@ -86,7 +103,7 @@ private:
 
     std::shared_ptr<Scene> currentScene;
 
-    std::unique_ptr<RenderGraph> currentRenderGraph = nullptr;
+    std::shared_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool rebuildRenderGraph = true;
 
     UINT m_xRes;
@@ -94,12 +111,8 @@ private:
 
     RenderContext m_context;
 
-	std::shared_ptr<Texture> m_currentSkybox = nullptr;
-	std::shared_ptr<Texture> m_currentEnvironmentTexture = nullptr;
-	std::shared_ptr<Texture> m_environmentIrradiance = nullptr;
-	std::shared_ptr<Texture> m_prefilteredEnvironment = nullptr;
-	std::shared_ptr<Texture> m_lutTexture = nullptr;
 	std::string m_environmentName;
+	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
 	std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
@@ -110,6 +123,7 @@ private:
     std::unique_ptr<ObjectManager> m_pObjectManager = nullptr;
     std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
     std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;
@@ -134,11 +148,16 @@ private:
 
     void StallPipeline();
 
+	void RunBeforeNextFrame(std::function<void()> fn) {
+		m_preFrameDeferredFunctions.defer(fn);
+	}
+
 	// Settings
 	bool m_allowTearing = false;
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
 	bool m_gtaoEnabled = true;
+	bool m_deferredRendering = false;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<uint16_t()> getShadowResolution;
@@ -161,6 +180,8 @@ private:
     // Nsight Aftermath instrumentation
     GFSDK_Aftermath_ContextHandle m_hAftermathCommandListContext;
     GpuCrashTracker m_gpuCrashTracker;
+
+	DeferredFunctions m_preFrameDeferredFunctions;
 };
 
 #endif //DX12RENDERER_H

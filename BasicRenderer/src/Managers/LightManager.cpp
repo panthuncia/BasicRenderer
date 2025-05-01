@@ -17,11 +17,11 @@
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
 
-	m_activeLightIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(ResourceState::ALL_SRV, 1, L"activeLightIndices");
-    m_lightBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<LightInfo>(ResourceState::ALL_SRV, 10, L"lightBuffer<LightInfo>");
-    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"spotViewInfo<matrix>");
-    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"pointViewInfo<matrix>");
-    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(ResourceState::ALL_SRV, 1, L"direcitonalViewInfo<matrix>");
+	m_activeLightIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeLightIndices");
+    m_lightBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<LightInfo>(10, L"lightBuffer<LightInfo>");
+    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"spotViewInfo<matrix>");
+    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"pointViewInfo<matrix>");
+    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"direcitonalViewInfo<matrix>");
 
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
@@ -40,12 +40,12 @@ LightManager::LightManager() {
 	auto lightClusterSize = getClusterSize();
 
 	auto numClusters = lightClusterSize.x * lightClusterSize.y * lightClusterSize.z;
-	m_pClusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), ResourceState::UNORDERED_ACCESS, false, true, false);
+	m_pClusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), false, true, false);
 	m_pClusterBuffer->SetName(L"lightingClusterBuffer");
 
 	static const size_t avgPagesPerCluster = 10;
 	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
-	m_pLightPagesBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), ResourceState::UNORDERED_ACCESS, false, true, false);
+	m_pLightPagesBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), false, true, false);
 	m_pLightPagesBuffer->SetName(L"lightPagesBuffer");
 }
 

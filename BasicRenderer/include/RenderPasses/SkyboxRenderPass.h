@@ -11,7 +11,7 @@
 class SkyboxRenderPass : public RenderPass {
 public:
     SkyboxRenderPass(std::shared_ptr<Texture> skyboxTexture) {
-		m_texture = skyboxTexture;
+        m_texture = skyboxTexture;
     }
 
     void Setup() override {
@@ -29,7 +29,7 @@ public:
             m_commandLists.push_back(commandList);
         }
         CreateSkyboxRootSignature();
-		CreateSkyboxPSO();
+        CreateSkyboxPSO();
     }
 
     RenderPassReturn Execute(RenderContext& context) override {
@@ -53,23 +53,23 @@ public:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
+        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
 
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
         commandList->SetPipelineState(skyboxPSO.Get());
         commandList->SetGraphicsRootSignature(skyboxRootSignature.Get());
 
-		auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.view;
-		viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
-		auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.projection);
+        auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.view;
+        viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
+        auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.projection);
         commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
-		commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo()[0].index, 0);
+        commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo()[0].index, 0);
         commandList->SetGraphicsRoot32BitConstant(2, m_texture->GetSamplerDescriptorIndex(), 0);
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+        commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
 
-		commandList->Close();
+        commandList->Close();
         return { { commandList.Get() } };
     }
 
@@ -143,9 +143,9 @@ private:
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, ResourceState::VERTEX, (void*)skyboxVertices);
-        
-		UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
+        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
+
+        UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
 
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
 
@@ -163,8 +163,32 @@ private:
         skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox texture index
         skyboxRootParameters[2].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox sampler index
 
+        D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
+
+        // point-clamp at s0
+        auto& pointClamp = staticSamplers[0];
+        pointClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        pointClamp.AddressU       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClamp.AddressV       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClamp.AddressW       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClamp.MipLODBias     = 0;
+        pointClamp.MaxAnisotropy  = 0;
+        pointClamp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        pointClamp.MinLOD         = 0;
+        pointClamp.MaxLOD         = D3D12_FLOAT32_MAX;
+        pointClamp.ShaderRegister = 0;
+        pointClamp.RegisterSpace  = 0;
+        pointClamp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+        // linear-clamp at s1
+        auto& linearClamp = staticSamplers[1];
+        linearClamp = pointClamp;
+        linearClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        linearClamp.ShaderRegister = 1;
+
+
         CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init_1_1(_countof(skyboxRootParameters), skyboxRootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
+        rootSignatureDesc.Init_1_1(_countof(skyboxRootParameters), skyboxRootParameters, 2, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
 
         ComPtr<ID3DBlob> serializedRootSig;
         ComPtr<ID3DBlob> errorBlob;

@@ -15,8 +15,11 @@ class DynamicBufferBase : public GloballyIndexedResource {
 public:
     DynamicBufferBase() {}
     std::shared_ptr<Buffer> m_dataBuffer = nullptr;
+
+    ResourceAccessType GetCurrentAccessType() const override { return m_dataBuffer->GetCurrentAccessType(); }
+    ResourceLayout GetCurrentLayout() const override { return m_dataBuffer->GetCurrentLayout(); }
+    ResourceSyncState GetPrevSyncState() const override { return m_dataBuffer->GetPrevSyncState(); }
 protected:
-    virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {};
 };
 
 class ViewedDynamicBufferBase : public DynamicBufferBase {
@@ -38,6 +41,5 @@ public:
     virtual void UpdateView(BufferView* view, const void* data) = 0;
 
 protected:
-    virtual void Transition(const RenderContext& context, ResourceState prevState, ResourceState newState) {};
     std::vector<BufferView*> m_dirtyViews;
 };

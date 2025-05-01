@@ -19,6 +19,7 @@ struct ClippingPlane {
 struct Camera {
     float4 positionWorldSpace;
     row_major matrix view;
+    row_major matrix viewInverse;
     row_major matrix projection;
     row_major matrix projectionInverse;
     row_major matrix viewProjection;
@@ -32,29 +33,34 @@ struct Camera {
 struct PerFrameBuffer {
     float4 ambientLighting;
     float4 shadowCascadeSplits;
+    
     uint mainCameraIndex;
     uint activeLightIndicesBufferIndex;
     uint lightBufferIndex;
     uint numLights;
+    
     uint pointLightCubemapBufferIndex;
     uint spotLightMatrixBufferIndex;
     uint directionalLightCascadeBufferIndex;
     uint numShadowCascades;
-    uint environmentIrradianceMapIndex;
-    uint environmentIrradianceSamplerIndex;
-    uint environmentPrefilteredMapIndex;
-    uint environmentPrefilteredSamplerIndex;
+    
+    unsigned int activeEnvironmentIndex;
+    unsigned int environmentBufferDescriptorIndex;
     uint environmentBRDFLUTIndex;
     uint environmentBRDFLUTSamplerIndex;
+    
     uint outputType;
     uint screenResX;
     uint screenResY;
     uint lightClusterGridSizeX;
+    
     uint lightClusterGridSizeY;
     uint lightClusterGridSizeZ;
     uint nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
-    unsigned int pad[2];
+    
+    uint tonemapType;
+    uint pad[3];
 };
 
 struct BoundingSphere {
@@ -217,8 +223,38 @@ struct GTAOInfo {
 };
 
 struct FragmentInfo {
+    float2 pixelCoords;
+    float3 fragPosWorldSpace;
+    float3 fragPosViewSpace;
     float3 normalWS;
-    float ambientOcclusion;
+    float3 diffuseColor;
+    float3 albedo;
+    float alpha;
+    float diffuseAmbientOcclusion;
+    float metallic;
+    float perceptualRoughnessUnclamped;
+    float perceptualRoughness;
+    float roughness;
+    float roughnessUnclamped;
+    float3 emissive;
+    //float2 DFG; // Replaced by MaterialX quadratic fit
+    float3 viewWS;
+    float NdotV;
+    float reflectance;
+    float dielectricF0;
+    float3 F0;
+    float3 reflectedWS;
+    uint heightMapIndex;
+    uint heightMapSamplerIndex;
+    uint materialFlags;
+};
+
+struct EnvironmentInfo {
+    uint cubeMapDescriptorIndex;
+    uint prefilteredCubemapDescriptorIndex;
+    float sphericalHarmonicsScale;
+    int sphericalHarmonics[27]; // floats scaled by SH_FLOAT_SCALE
+    uint pad[2];
 };
 
 #endif // __STRUCTS_HLSL__

@@ -226,7 +226,7 @@ std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bo
     return std::make_shared<Texture>(buffer, sampler);
 }
 
-std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
+std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV) {
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
@@ -258,6 +258,7 @@ std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath) {
 	desc.channels = 4;
     desc.format = metadata.format;
 	desc.isCubemap = true;
+	desc.hasRTV = allowRTV;
     if (metadata.mipLevels != 1) {
 		desc.generateMipMaps = true;
     }

@@ -14,19 +14,29 @@
 #include "Resources/TextureDescription.h"
 #include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Managers/ObjectManager.h"
 
-class PPLLResolvePass : public RenderPass {
+class DeferredRenderPass : public RenderPass {
 public:
-	PPLLResolvePass(std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer) {
+	DeferredRenderPass(
+		int aoTextureDescriptorIndex,
+		int normalsTextureDescriptorIndex,
+		unsigned int albedoTextureDescriptorIndex,
+		unsigned int metallicRoughnessTextureDescriptorIndex,
+		unsigned int depthBufferDescriptorIndex) : 
+		m_aoTextureDescriptorIndex(aoTextureDescriptorIndex),
+		m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex), 
+		m_albedoTextureDescriptorIndex(albedoTextureDescriptorIndex),
+		m_metallicRoughnessTextureDescriptorIndex(metallicRoughnessTextureDescriptorIndex),
+		m_depthBufferDescriptorIndex(depthBufferDescriptorIndex) {
 
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-
-		m_PPLLHeadPointerTexture = PPLLHeads;
-		m_PPLLBuffer = PPLLBuffer;
+		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 	}
+
 	void Setup() override {
 		auto& manager = DeviceManager::GetInstance();
 		auto& device = manager.GetDevice();
@@ -42,16 +52,9 @@ public:
 		}
 
 		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer(device.Get());
-		CreatePSO();
 	}
 
 	RenderPassReturn Execute(RenderContext& context) override {
-
-		auto numBlend = context.drawStats.numBlendDraws;
-		if (numBlend == 0) {
-			return {};
-		}
-
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = m_commandLists[context.frameIndex];
 		auto& allocator = m_allocators[context.frameIndex];
@@ -66,7 +69,8 @@ public:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
+		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
@@ -77,18 +81,19 @@ public:
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-		commandList->SetPipelineState(pso.Get());
+		commandList->SetPipelineState(PSOManager::GetInstance().GetDeferredPSO(context.globalPSOFlags).Get());
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-		unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() }; // HLSL bools are 32 bits
-		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
-		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
+		unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
+		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
 		auto& cameraManager = context.cameraManager;
+		auto& lightManager = context.lightManager;
+
 		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
 		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
@@ -97,22 +102,26 @@ public:
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
 		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
-
-		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo()[0].index;
-		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo()[0].index;
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
-
+		staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
+		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
+		staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureDescriptorIndex;
+		staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureDescriptorIndex;
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
+
+		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
+		lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo()[0].index;
+		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo()[0].index;
+		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
+
+		unsigned int misc[NumMiscUintRootConstants] = {};
+		misc[0] = m_depthBufferDescriptorIndex;
+
+		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
-
-		// PPLL heads & buffer
-		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo()[0].index, m_PPLLBuffer->GetSRVInfo()[0].index };
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 2, &indices, 0);
 
 		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
 
@@ -127,92 +136,18 @@ public:
 private:
 	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
 	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
-	ComPtr<ID3D12PipelineState> pso;
-
-	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
-	std::shared_ptr<Buffer> m_PPLLBuffer;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
 
-	void CreatePSO() {
-		// Compile shaders
-		Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"VSMain", L"vs_6_6", {}, vertexShader);
-		PSOManager::GetInstance().CompileShader(L"shaders/PPLL.hlsl", L"PPLLResolvePS", L"ps_6_6", {}, pixelShader);
+	unsigned int m_aoTextureDescriptorIndex;
+	unsigned int m_normalsTextureDescriptorIndex;
+	unsigned int m_albedoTextureDescriptorIndex;
+	unsigned int m_metallicRoughnessTextureDescriptorIndex;
+	unsigned int m_depthBufferDescriptorIndex;
 
-		static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-		};
-
-		D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-		inputLayoutDesc.pInputElementDescs = inputElementDescs;
-		inputLayoutDesc.NumElements = _countof(inputElementDescs);
-
-		D3D12_RASTERIZER_DESC rasterizerDesc = {};
-		rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-		rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
-		rasterizerDesc.FrontCounterClockwise = FALSE;
-		rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-		rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-		rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-		rasterizerDesc.DepthClipEnable = FALSE;
-		rasterizerDesc.MultisampleEnable = FALSE;
-		rasterizerDesc.AntialiasedLineEnable = FALSE;
-		rasterizerDesc.ForcedSampleCount = 0;
-		rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-
-		D3D12_BLEND_DESC blendDesc = {};
-		blendDesc.AlphaToCoverageEnable = FALSE;
-		blendDesc.IndependentBlendEnable = FALSE;
-		blendDesc.RenderTarget[0].BlendEnable = TRUE;
-		blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-		blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-		blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-		blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-		blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-		D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-		depthStencilDesc.DepthEnable = FALSE;
-		depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-		depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-		depthStencilDesc.StencilEnable = FALSE;
-		depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-		depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-		depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-		depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-		depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
-
-		DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-		psoDesc.InputLayout = inputLayoutDesc;
-		psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-		psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
-		psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
-		psoDesc.RasterizerState = rasterizerDesc;
-		psoDesc.BlendState = blendDesc;
-		psoDesc.DepthStencilState = depthStencilDesc;
-		psoDesc.SampleMask = UINT_MAX;
-		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-		psoDesc.NumRenderTargets = 1;
-		psoDesc.RTVFormats[0] = renderTargetFormat;
-		psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-		psoDesc.SampleDesc.Count = 1;
-		psoDesc.SampleDesc.Quality = 0;
-		psoDesc.InputLayout = inputLayoutDesc;
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso));
-		if (FAILED(hr)) {
-			throw std::runtime_error("Failed to create debug PSO");
-		}
-	}
+	bool m_gtaoEnabled = true;
 
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 	std::shared_ptr<Buffer> m_vertexBufferHandle;
