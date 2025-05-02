@@ -359,9 +359,14 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 
         float opacity = 1.0f;
         if (mat->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS && opacity < 1.0f) {
-            blendMode = BlendState::BLEND_STATE_BLEND;
-            psoFlags |= PSOFlags::PSO_BLEND;
-			diffuse.a *= opacity;
+            if (opacity == 0.0f) {
+				spdlog::warn("Material {} is fully transparent. Was this intentional?");
+            }
+            else {
+                blendMode = BlendState::BLEND_STATE_BLEND;
+                psoFlags |= PSOFlags::PSO_BLEND;
+                diffuse.a *= opacity;
+            }
         }
 
 		float transparencyFactor = 0.0f;

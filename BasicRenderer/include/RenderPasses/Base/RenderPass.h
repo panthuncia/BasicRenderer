@@ -8,6 +8,7 @@
 #include "Render/RenderContext.h"
 #include "Resources/ResourceStates.h"
 #include "Render/ResourceRequirements.h"
+#include "RenderPasses/Base/PassReturn.h"
 
 struct RenderPassParameters {
     std::vector<std::shared_ptr<Resource>> shaderResources;
@@ -23,19 +24,13 @@ struct RenderPassParameters {
 	std::vector<ResourceRequirement> resourceRequirements;
 };
 
-struct RenderPassReturn {
-	std::vector<ID3D12GraphicsCommandList*> commandLists;
-	ID3D12Fence* fence = nullptr;
-	uint64_t fenceValue = 0;
-};
-
 class RenderPass {
 public:
     virtual ~RenderPass() = default;
 
     virtual void Setup() = 0;
 	virtual void Update() {};
-    virtual RenderPassReturn Execute(RenderContext& context) = 0;
+    virtual PassReturn Execute(RenderContext& context) = 0;
     virtual void Cleanup(RenderContext& context) = 0;
 
 	void Invalidate() { invalidated = true; }

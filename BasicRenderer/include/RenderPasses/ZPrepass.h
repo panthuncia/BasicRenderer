@@ -44,34 +44,15 @@ public:
     }
 
     void Setup() override {
-        auto& manager = DeviceManager::GetInstance();
-        auto& device = manager.GetDevice();
-        uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-
-        for (int i = 0; i < numFramesInFlight; i++) {
-            ComPtr<ID3D12CommandAllocator> allocator;
-            ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-
-            ComPtr<ID3D12GraphicsCommandList7> commandList7;
-            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList7)));
-            commandList7->Close();
-            m_allocators.push_back(allocator);
-            m_commandLists.push_back(commandList7);
-        }
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
-    RenderPassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
         auto& psoManager = PSOManager::GetInstance();
 
-        // Reset and get the appropriate command list
-        auto& allocator = m_allocators[context.frameIndex];
-        allocator->Reset();
-
-        ID3D12GraphicsCommandList* commandList = m_commandLists[context.frameIndex].Get();
-        commandList->Reset(allocator.Get(), nullptr);
+        auto& commandList = context.commandList;
 
         // Clear the render target
         auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
@@ -106,10 +87,7 @@ public:
             // Regular forward rendering
             ExecuteRegular(context, commandList);
         }
-
-
-        commandList->Close();
-        return { { commandList } };
+        return {};
     }
 
     void Cleanup(RenderContext& context) override {
@@ -323,8 +301,6 @@ private:
 
     flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
     flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
-    std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
-    std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;

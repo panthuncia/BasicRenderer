@@ -22,19 +22,6 @@ public:
 	}
 
 	void Setup() override {
-		auto& manager = DeviceManager::GetInstance();
-		auto& device = manager.GetDevice();
-		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-
-		for (int i = 0; i < numFramesInFlight; i++) {
-			ComPtr<ID3D12CommandAllocator> allocator;
-			ComPtr<ID3D12GraphicsCommandList7> commandList;
-			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)));
-			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-			commandList->Close();
-			m_allocators.push_back(allocator);
-			m_commandLists.push_back(commandList);
-		}
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		opaqueQuery = ecsWorld.query_builder<Components::OpaqueSkinned, Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		alphaTestQuery = ecsWorld.query_builder<Components::AlphaTestSkinned, Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -42,11 +29,8 @@ public:
 		CreatePSO();
 	}
 
-	ComputePassReturn Execute(RenderContext& context) override {
-		auto& commandList = m_commandLists[context.frameIndex];
-		auto& allocator = m_allocators[context.frameIndex];
-		ThrowIfFailed(allocator->Reset());
-		commandList->Reset(allocator.Get(), nullptr);
+	PassReturn Execute(RenderContext& context) override {
+		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
@@ -125,12 +109,7 @@ public:
 				commandList->Dispatch(numGroups, 1, 1);
 			}
 			});
-
-		ThrowIfFailed(commandList->Close());
-
-		//invalidated = false;
-
-		return { { commandList.Get()} };
+		return {};
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -166,8 +145,6 @@ private:
 	flecs::query<Components::OpaqueSkinned, Components::ObjectDrawInfo, Components::OpaqueMeshInstances> opaqueQuery;
 	flecs::query<Components::AlphaTestSkinned, Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> alphaTestQuery;
 	flecs::query<Components::BlendSkinned, Components::ObjectDrawInfo, Components::BlendMeshInstances> blendQuery;
-	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
-	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
 	std::function<bool()> getMeshShadersEnabled;

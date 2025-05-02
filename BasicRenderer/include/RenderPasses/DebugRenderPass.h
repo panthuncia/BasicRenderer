@@ -13,33 +13,16 @@ public:
     DebugRenderPass() {}
 
     void Setup() override {
-        auto& manager = DeviceManager::GetInstance();
-		auto& device = manager.GetDevice();
-		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer(device.Get());
-		for (int i = 0; i < numFramesInFlight; i++) {
-			ComPtr<ID3D12CommandAllocator> allocator;
-			ComPtr<ID3D12GraphicsCommandList> commandList;
-			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-			commandList->Close();
-			m_allocators.push_back(allocator);
-			m_commandLists.push_back(commandList);
-		}
-
 		CreateDebugRootSignature();
 		CreateDebugPSO();
     }
 
-    RenderPassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
         if (m_texture == nullptr) {
-            return { };
+            return {};
         }
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = m_commandLists[context.frameIndex];
-		auto& allocator = m_allocators[context.frameIndex];
-        ThrowIfFailed(allocator->Reset());
-		commandList->Reset(allocator.Get(), nullptr);
+        auto& commandList = context.commandList;
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {
             context.textureDescriptorHeap, // The texture descriptor heap
@@ -66,10 +49,7 @@ public:
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
-
-		commandList->Close();
-
-        return { { commandList.Get() } };
+        return {};
     }
 
     void Cleanup(RenderContext& context) override {
@@ -84,9 +64,6 @@ private:
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
     PixelBuffer* m_texture = nullptr;
-
-	std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
-	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 
     ComPtr<ID3D12RootSignature> debugRootSignature;
     ComPtr<ID3D12PipelineState> debugPSO;

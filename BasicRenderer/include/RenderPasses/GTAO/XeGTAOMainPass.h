@@ -29,13 +29,10 @@ public:
 		CreateXeGTAOComputePSO();
     }
 
-    ComputePassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
         frameIndex++;
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = m_commandLists[context.frameIndex];
-        auto& allocator = m_allocators[context.frameIndex];
-        ThrowIfFailed(allocator->Reset());
-        commandList->Reset(allocator.Get(), nullptr);
+        auto& commandList = context.commandList;
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {
             context.textureDescriptorHeap, // The texture descriptor heap
@@ -58,10 +55,7 @@ public:
         commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, passConstants, 0);
 
         commandList->Dispatch((context.xRes + (XE_GTAO_NUMTHREADS_X * 2) - 1) / (XE_GTAO_NUMTHREADS_X), (context.yRes + XE_GTAO_NUMTHREADS_Y - 1) / XE_GTAO_NUMTHREADS_Y, 1);
-
-        commandList->Close();
-
-        return { { commandList.Get() } };
+        return {};
     }
 
     void Cleanup(RenderContext& context) override {

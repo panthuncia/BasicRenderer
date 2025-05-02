@@ -43,7 +43,9 @@ auto RenderGraph::MakeAddTransition(
 				oldSync = finalResourceSyncStates[r->GetGlobalResourceID()];
 			}
 
-			if (prevAccess == newAccess && prevLayout == newLayout) return;
+			// If the resource is already in the desired state, skip the transition
+			// Unless the resource will be accessed as a UAV, then we need a "UAV barrier"
+			if (prevAccess == newAccess && !(prevAccess & ResourceAccessType::UNORDERED_ACCESS) &&  prevLayout == newLayout) return;
 
 			ResourceTransition T{r,
 				prevAccess, newAccess,
@@ -383,12 +385,7 @@ void RenderGraph::Setup() {
         ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
         commandList->Close();
         m_graphicsCommandAllocators.push_back(allocator);
-        m_graphicsTransitionCommandLists.push_back(commandList);
-
-		ComPtr<ID3D12GraphicsCommandList7> batchEndCommandList;
-		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&batchEndCommandList)));
-		batchEndCommandList->Close();
-		m_graphicsBatchEndTransitionCommandLists.push_back(batchEndCommandList);
+        m_graphicsCommandLists.push_back(commandList);
 
 		ComPtr<ID3D12CommandAllocator> computeAllocator;
 		ComPtr<ID3D12GraphicsCommandList7> computeCommandList;
@@ -396,7 +393,7 @@ void RenderGraph::Setup() {
 		ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, computeAllocator.Get(), nullptr, IID_PPV_ARGS(&computeCommandList)));
 		computeCommandList->Close();
 		m_computeCommandAllocators.push_back(computeAllocator);
-		m_computeTransitionCommandLists.push_back(computeCommandList);
+		m_computeCommandLists.push_back(computeCommandList);
     }
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_graphicsQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_computeQueueFence));
@@ -430,6 +427,8 @@ void RenderGraph::Setup() {
 	//DeviceManager::GetInstance().GetGraphicsQueue()->Signal(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
 	//DeviceManager::GetInstance().GetComputeQueue()->Wait(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
  //   m_initialTransitionFenceValue++;
+
+	CreateBatchCommandLists();
 }
 
 void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name) {
@@ -524,10 +523,9 @@ void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto graphicsQueue = manager.GetGraphicsQueue();
 	auto computeQueue = manager.GetComputeQueue();
-	auto& graphicsTransitionCommandList = m_graphicsTransitionCommandLists[context.frameIndex];
-	auto& graphicsBatchEndTransitionCommandList = m_graphicsBatchEndTransitionCommandLists[context.frameIndex];
+	auto& graphicsCommandList = m_graphicsCommandLists[context.frameIndex];
 	auto& graphicsCommandAllocator = m_graphicsCommandAllocators[context.frameIndex];
-	auto& computeTransitionCommandList = m_computeTransitionCommandLists[context.frameIndex];
+	auto& computeCommandList = m_computeCommandLists[context.frameIndex];
 	auto& computeCommandAllocator = m_computeCommandAllocators[context.frameIndex];
 
     UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue*context.frameFenceValue;
@@ -550,7 +548,7 @@ void RenderGraph::Execute(RenderContext& context) {
 		}
 
 		// Perform resource transitions
-		computeTransitionCommandList->Reset(computeCommandAllocator.Get(), NULL);
+		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
@@ -560,10 +558,10 @@ void RenderGraph::Execute(RenderContext& context) {
 			computeBarriers.insert(computeBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
 		}
 		if (computeBarriers.size() > 0) {
-			computeTransitionCommandList->Barrier(static_cast<UINT>(computeBarriers.size()), computeBarriers.data());
+			computeCommandList->Barrier(static_cast<UINT>(computeBarriers.size()), computeBarriers.data());
 		}
-		computeTransitionCommandList->Close();
-		ID3D12CommandList* ppCommandLists[] = { computeTransitionCommandList.Get() };
+		computeCommandList->Close();
+		ID3D12CommandList* ppCommandLists[] = { computeCommandList.Get() };
 		computeQueue->ExecuteCommandLists(1, ppCommandLists);
 		if (batch.computeTransitionSignal) {
 			computeQueue->Signal(m_computeQueueFence.Get(), currentComputeQueueFenceOffset+batch.computeTransitionFenceValue);
@@ -575,17 +573,27 @@ void RenderGraph::Execute(RenderContext& context) {
 		}
 
 		// Execute all passes in the batch
+		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
+		context.commandList = computeCommandList.Get();
+		std::vector<PassReturn> computeFencesToSignal;
 		for (auto& passAndResources : batch.computePasses) {
 			if (passAndResources.pass->IsInvalidated()) {
 				auto passReturn = passAndResources.pass->Execute(context);
-				ID3D12CommandList** ppComputeCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
-				computeQueue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppComputeCommandLists);
-                
 				if (passReturn.fence != nullptr) {
-					computeQueue->Signal(passReturn.fence, passReturn.fenceValue); // External fences for readback: TODO merge with new fence system
+					computeFencesToSignal.push_back(passReturn);
 				}
 			}
 		}
+		computeCommandList->Close();
+
+		// Execute commands recorded by compute passes
+		ID3D12CommandList* ppComputeBatchesCommandLists[] = { computeCommandList.Get() };
+		computeQueue->ExecuteCommandLists(1, ppComputeBatchesCommandLists);
+
+		for (auto& passReturn : computeFencesToSignal) {
+			computeQueue->Signal(passReturn.fence, passReturn.fenceValue); // External fences for readback:
+		}
+
 		if (batch.computeCompletionSignal) {
 			computeQueue->Signal(m_computeQueueFence.Get(), currentComputeQueueFenceOffset+batch.computeCompletionFenceValue);
 		}
@@ -599,7 +607,7 @@ void RenderGraph::Execute(RenderContext& context) {
 
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
-        graphicsTransitionCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
+        graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
         for (auto& transition : batch.renderTransitions) {
             auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
@@ -609,10 +617,10 @@ void RenderGraph::Execute(RenderContext& context) {
 			renderBarriers.insert(renderBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
         }
         if (renderBarriers.size() > 0) {
-            graphicsTransitionCommandList->Barrier(static_cast<UINT>(renderBarriers.size()), renderBarriers.data());
+            graphicsCommandList->Barrier(static_cast<UINT>(renderBarriers.size()), renderBarriers.data());
         }
-        graphicsTransitionCommandList->Close();
-        ID3D12CommandList* ppRenderCommandLists[] = { graphicsTransitionCommandList.Get()};
+        graphicsCommandList->Close();
+        ID3D12CommandList* ppRenderCommandLists[] = { graphicsCommandList.Get()};
         graphicsQueue->ExecuteCommandLists(1, ppRenderCommandLists);
         if (batch.renderTransitionSignal) {
             graphicsQueue->Signal(m_graphicsQueueFence.Get(), currentGraphicsQueueFenceOffset+batch.renderTransitionFenceValue);
@@ -625,18 +633,26 @@ void RenderGraph::Execute(RenderContext& context) {
 		}
 
         // Execute all passes in the batch
+		graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
+		context.commandList = graphicsCommandList.Get();
+		std::vector<PassReturn> graphicsFencesToSignal;
         for (auto& passAndResources : batch.renderPasses) {
 			if (passAndResources.pass->IsInvalidated()) {
-
                 auto passReturn = passAndResources.pass->Execute(context);
-				ID3D12CommandList** ppCommandLists = reinterpret_cast<ID3D12CommandList**>(passReturn.commandLists.data());
-                graphicsQueue->ExecuteCommandLists(static_cast<UINT>(passReturn.commandLists.size()), ppCommandLists);
-
                 if (passReturn.fence != nullptr) {
-                    graphicsQueue->Signal(passReturn.fence, passReturn.fenceValue); // External fences for readback: TODO merge with new fence system
+					graphicsFencesToSignal.push_back(passReturn);
                 }
 			}
         }
+
+		graphicsCommandList->Close();
+		// Execute commands recorded by render passes
+		ID3D12CommandList* ppRenderBatchesCommandLists[] = { graphicsCommandList.Get() };
+		graphicsQueue->ExecuteCommandLists(1, ppRenderBatchesCommandLists);
+
+		for (auto& passReturn : graphicsFencesToSignal) {
+			graphicsQueue->Signal(passReturn.fence, passReturn.fenceValue);
+		}
 
 		// Handle special case: Transition resources which will be used on compute queue later, but are in graphic-queue exclusive states
 		std::vector<D3D12_BARRIER_GROUP> passEndBarriers;
@@ -648,12 +664,12 @@ void RenderGraph::Execute(RenderContext& context) {
 			passEndBarriers.insert(passEndBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
 		}
 
-		graphicsBatchEndTransitionCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
+		graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
 		if (passEndBarriers.size() > 0) {
-			graphicsBatchEndTransitionCommandList->Barrier(static_cast<UINT>(passEndBarriers.size()), passEndBarriers.data());
+			graphicsCommandList->Barrier(static_cast<UINT>(passEndBarriers.size()), passEndBarriers.data());
 		}
-		graphicsBatchEndTransitionCommandList->Close();
-		ID3D12CommandList* ppBatchEndCommandLists[] = { graphicsBatchEndTransitionCommandList.Get() };
+		graphicsCommandList->Close();
+		ID3D12CommandList* ppBatchEndCommandLists[] = { graphicsCommandList.Get() };
 		graphicsQueue->ExecuteCommandLists(1, ppBatchEndCommandLists);
 
 		// Signal the batch end transition fence
@@ -679,6 +695,10 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndR
 		if (requirement.access & ResourceAccessType::UNORDERED_ACCESS && computeUAVs.contains(resourceID)) {
 			return true;
 		}
+		if (requirement.layout == ResourceLayout::LAYOUT_UNORDERED_ACCESS && ResourceLayoutIsUnorderedAccess(currentBatch.resourceLayouts[resourceID])) {
+			return true;
+		}
+
 	}
 	return false;
 }
@@ -697,6 +717,9 @@ bool RenderGraph::IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAnd
 			return true;
 		}
 		if (requirement.access & ResourceAccessType::UNORDERED_ACCESS && renderUAVs.contains(resourceID)) {
+			return true;
+		}
+		if (requirement.layout == ResourceLayout::LAYOUT_UNORDERED_ACCESS && ResourceLayoutIsUnorderedAccess(currentBatch.resourceLayouts[resourceID])) {
 			return true;
 		}
 	}
@@ -753,4 +776,27 @@ RenderPassBuilder RenderGraph::BuildRenderPass(std::string name) {
 }
 ComputePassBuilder RenderGraph::BuildComputePass(std::string name) {
 	return ComputePassBuilder(*this, name);
+}
+
+void RenderGraph::CreateBatchCommandLists() {
+	// For each batch, create numFramesInFlight command allocators and lists
+	//auto& device = DeviceManager::GetInstance().GetDevice();
+	//auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+	//for (auto& batch : batches) {
+	//	for (int i = 0; i < numFramesInFlight; i++) {
+	//		if (batch.computePasses.size() > 0) {
+	//			ComPtr<ID3D12GraphicsCommandList7> commandList;
+	//			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, m_computeCommandAllocators[i].Get(), nullptr, IID_PPV_ARGS(&commandList)));
+	//			commandList->Close();
+	//			batch.computeCommandLists.push_back(commandList);
+	//		}
+	//		if (batch.renderPasses.size() > 0) {
+	//			ComPtr<ID3D12GraphicsCommandList7> commandList;
+	//			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_graphicsCommandAllocators[i].Get(), nullptr, IID_PPV_ARGS(&commandList)));
+	//			commandList->Close();
+	//			batch.renderCommandLists.push_back(commandList);
+	//		}
+	//	}
+	//}
+
 }

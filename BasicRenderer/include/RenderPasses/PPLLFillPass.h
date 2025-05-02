@@ -36,54 +36,37 @@ public:
 	}
 
 	void Setup() override {
-		auto& manager = DeviceManager::GetInstance();
-		auto& device = manager.GetDevice();
-		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-		for (int i = 0; i < numFramesInFlight; i++) {
-			ComPtr<ID3D12CommandAllocator> allocator;
-			ComPtr<ID3D12GraphicsCommandList7> commandList;
-			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-			commandList->Close();
-			m_allocators.push_back(allocator);
-			m_commandLists.push_back(commandList);
-		}
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 
-	RenderPassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(RenderContext& context) override {
 
 		auto numBlend = context.drawStats.numBlendDraws;
 		if (numBlend == 0) {
 			return {};
 		}
 
-		auto& commandList = m_commandLists[context.frameIndex];
-		auto& allocator = m_allocators[context.frameIndex];
-		ThrowIfFailed(allocator->Reset());
-		commandList->Reset(allocator.Get(), nullptr);
+		auto& commandList = context.commandList;
 
-		SetupCommonState(context, commandList.Get());
-		SetCommonRootConstants(context, commandList.Get());
+		SetupCommonState(context, commandList);
+		SetCommonRootConstants(context, commandList);
 
 		if (m_meshShaders) {
 			if (m_indirect) {
 				// Indirect drawing
-				ExecuteMeshShaderIndirect(context, static_cast<ID3D12GraphicsCommandList7*>(commandList.Get()));
+				ExecuteMeshShaderIndirect(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
 			}
 			else {
 				// Regular mesh shader drawing
-				ExecuteMeshShader(context, static_cast<ID3D12GraphicsCommandList7*>(commandList.Get()));
+				ExecuteMeshShader(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
 			}
 		}
 		else {
 			// Regular forward rendering
-			ExecuteRegular(context, commandList.Get());
+			ExecuteRegular(context, commandList);
 		} 
-
-		commandList->Close();
-		return { { commandList.Get() } };
+		return {};
 	}
 
 	virtual void Update() override {
@@ -238,8 +221,6 @@ private:
 	}
 
 	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
-	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
-	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;
 	bool m_meshShaders;
 	bool m_indirect;

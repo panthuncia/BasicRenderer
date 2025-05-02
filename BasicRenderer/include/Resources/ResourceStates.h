@@ -66,6 +66,12 @@ enum class ResourceLayout {
 	LAYOUT_COMPUTE_COPY_DEST = D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_COPY_DEST,
 };
 
+inline bool ResourceLayoutIsUnorderedAccess(ResourceLayout layout) {
+	return layout == ResourceLayout::LAYOUT_UNORDERED_ACCESS ||
+		layout == ResourceLayout::LAYOUT_DIRECT_UNORDERED_ACCESS ||
+		layout == ResourceLayout::LAYOUT_COMPUTE_UNORDERED_ACCESS;
+}
+
 enum class ResourceSyncState {
 	NONE,
 	ALL,

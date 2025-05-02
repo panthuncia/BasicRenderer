@@ -21,30 +21,15 @@ public:
 	~DebugSpherePass() {
 	}
 	void Setup() override {
-		auto& manager = DeviceManager::GetInstance();
-		auto& device = manager.GetDevice();
-		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-		for (int i = 0; i < numFramesInFlight; i++) {
-			ComPtr<ID3D12CommandAllocator> allocator;
-			ComPtr<ID3D12GraphicsCommandList7> commandList;
-			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-			commandList->Close();
-			m_allocators.push_back(allocator);
-			m_commandLists.push_back(commandList);
-		}
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 
-	RenderPassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(RenderContext& context) override {
 		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = m_commandLists[context.frameIndex];
-		auto& allocator = m_allocators[context.frameIndex];
-		ThrowIfFailed(allocator->Reset());
-		commandList->Reset(allocator.Get(), nullptr);
+		auto& commandList = context.commandList;
 
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
 			context.textureDescriptorHeap, // The texture descriptor heap
@@ -135,9 +120,7 @@ public:
 				commandList->DispatchMesh(1, 1, 1);
 			}
 			});
-
-		commandList->Close();
-		return { { commandList.Get() } };
+		return {};
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -243,8 +226,6 @@ private:
 	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
 	ComPtr<ID3D12RootSignature> m_debugRootSignature;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
-	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	bool m_wireframe;
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;

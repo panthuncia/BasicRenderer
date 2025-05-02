@@ -21,27 +21,13 @@ public:
     }
 
     void Setup() override {
-        auto& manager = DeviceManager::GetInstance();
-        auto& device = manager.GetDevice();
-        m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
-
-        uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-        for (int i = 0; i < numFramesInFlight; i++) {
-            ComPtr<ID3D12CommandAllocator> allocator;
-            ComPtr<ID3D12GraphicsCommandList> commandList;
-            ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-            commandList->Close();
-            m_allocators.push_back(allocator);
-            m_commandLists.push_back(commandList);
-        }
-
+        m_vertexBufferView = CreateSkyboxVertexBuffer();
 		CreateEnvironmentConversionRootSignature();
 		CreateEnvironmentConversionPSO();
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    RenderPassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
 
 		uint16_t skyboxRes = getSkyboxResolution();
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
@@ -52,9 +38,7 @@ public:
 
 		std::vector<ID3D12GraphicsCommandList*> commandLists;
 		
-        ThrowIfFailed(m_allocators[context.frameIndex]->Reset());
-        auto commandList = m_commandLists[context.frameIndex].Get();
-        commandList->Reset(m_allocators[context.frameIndex].Get(), environmentConversionPSO.Get());
+        auto commandList = context.commandList;
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {
             ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
@@ -89,13 +73,7 @@ public:
             }
         }
 
-		commandList->Close();
-		commandLists.push_back(commandList);
-
-		RenderPassReturn passReturn;
-
-		passReturn.commandLists = std::move(commandLists);
-		return passReturn;
+        return {};
     }
 
     void Cleanup(RenderContext& context) override {
@@ -109,9 +87,6 @@ private:
     std::array<XMMATRIX, 6> m_viewMatrices;
 
     std::function<uint16_t()> getSkyboxResolution;
-
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
-    std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_allocators;
 
     ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
     ComPtr<ID3D12PipelineState> environmentConversionPSO;
@@ -166,7 +141,7 @@ private:
 
     };
     // Create the vertex buffer for the skybox
-    D3D12_VERTEX_BUFFER_VIEW CreateSkyboxVertexBuffer(ID3D12Device* device) {
+    D3D12_VERTEX_BUFFER_VIEW CreateSkyboxVertexBuffer() {
         ComPtr<ID3D12Resource> vertexBuffer;
 
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));

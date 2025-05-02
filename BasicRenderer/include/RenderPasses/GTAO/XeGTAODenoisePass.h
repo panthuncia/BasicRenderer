@@ -13,28 +13,13 @@ public:
     GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex(workingBufferIndex) {}
 
     void Setup() override {
-        auto& manager = DeviceManager::GetInstance();
-        auto& device = manager.GetDevice();
-        uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-        for (int i = 0; i < numFramesInFlight; i++) {
-            ComPtr<ID3D12CommandAllocator> allocator;
-            ComPtr<ID3D12GraphicsCommandList7> commandList;
-            ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)));
-            ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-            commandList->Close();
-            m_allocators.push_back(allocator);
-            m_commandLists.push_back(commandList);
-        }
 		CreateXeGTAOComputePSO();
     }
 
-    ComputePassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
 
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = m_commandLists[context.frameIndex];
-        auto& allocator = m_allocators[context.frameIndex];
-        ThrowIfFailed(allocator->Reset());
-        commandList->Reset(allocator.Get(), nullptr);
+        auto& commandList = context.commandList;
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {
             context.textureDescriptorHeap, // The texture descriptor heap
@@ -53,10 +38,8 @@ public:
         commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, gtaoConstants, 0);
 
         commandList->Dispatch((context.xRes + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.yRes + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
-
-        commandList->Close();
-
-        return { { commandList.Get() } };
+    
+        return {};
     }
 
     void Cleanup(RenderContext& context) override {
@@ -65,9 +48,6 @@ public:
 
 private:
     std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
-
-    std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
-    std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 
     ComPtr<ID3D12PipelineState> DenoisePassPSO;
     ComPtr<ID3D12PipelineState> DenoiseLastPassPSO;

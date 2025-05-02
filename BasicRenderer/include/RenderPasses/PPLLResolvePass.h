@@ -28,24 +28,11 @@ public:
 		m_PPLLBuffer = PPLLBuffer;
 	}
 	void Setup() override {
-		auto& manager = DeviceManager::GetInstance();
-		auto& device = manager.GetDevice();
-		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-		for (int i = 0; i < numFramesInFlight; i++) {
-			ComPtr<ID3D12CommandAllocator> allocator;
-			ComPtr<ID3D12GraphicsCommandList7> commandList;
-			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-			commandList->Close();
-			m_allocators.push_back(allocator);
-			m_commandLists.push_back(commandList);
-		}
-
-		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer(device.Get());
+		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer();
 		CreatePSO();
 	}
 
-	RenderPassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(RenderContext& context) override {
 
 		auto numBlend = context.drawStats.numBlendDraws;
 		if (numBlend == 0) {
@@ -53,10 +40,7 @@ public:
 		}
 
 		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = m_commandLists[context.frameIndex];
-		auto& allocator = m_allocators[context.frameIndex];
-		ThrowIfFailed(allocator->Reset());
-		commandList->Reset(allocator.Get(), nullptr);
+		auto& commandList = context.commandList;
 
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
 			context.textureDescriptorHeap, // The texture descriptor heap
@@ -115,9 +99,7 @@ public:
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 2, &indices, 0);
 
 		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
-
-		commandList->Close();
-		return { { commandList.Get() } };
+		return {};
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -125,8 +107,6 @@ public:
 	}
 
 private:
-	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
-	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> pso;
 
 	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
@@ -230,7 +210,7 @@ private:
 
 	};
 	// Create the vertex buffer for the full-screen triangle
-	D3D12_VERTEX_BUFFER_VIEW CreateFullscreenTriangleVertexBuffer(ID3D12Device* device) {
+	D3D12_VERTEX_BUFFER_VIEW CreateFullscreenTriangleVertexBuffer() {
 
 		const UINT vertexBufferSize = static_cast<UINT>(4 * sizeof(FullscreenPassVertex));
 

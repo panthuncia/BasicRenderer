@@ -19,30 +19,14 @@ public:
 	}
 
 	void Setup() override {
-		auto& manager = DeviceManager::GetInstance();
-		auto& device = manager.GetDevice();
-		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-
-		for (int i = 0; i < numFramesInFlight; i++) {
-			ComPtr<ID3D12CommandAllocator> allocator;
-			ComPtr<ID3D12GraphicsCommandList7> commandList;
-			ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)));
-			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-			commandList->Close();
-			m_allocators.push_back(allocator);
-			m_commandLists.push_back(commandList);
-		}
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
 	}
 
-	ComputePassReturn Execute(RenderContext& context) override {
-		auto& commandList = m_commandLists[context.frameIndex];
-		auto& allocator = m_allocators[context.frameIndex];
-		ThrowIfFailed(allocator->Reset());
-		commandList->Reset(allocator.Get(), nullptr);
+	PassReturn Execute(RenderContext& context) override {
+		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
@@ -175,12 +159,7 @@ public:
 				}
 				});
 		}
-
-		ThrowIfFailed(commandList->Close());
-
-		//invalidated = false;
-
-		return { { commandList.Get()} };
+		return {};
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -215,8 +194,6 @@ private:
 	
 	flecs::query<Components::LightViewInfo> lightQuery;
 
-	std::vector<ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
-	std::vector<ComPtr<ID3D12CommandAllocator>> m_allocators;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;

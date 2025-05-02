@@ -98,6 +98,9 @@ private:
 		UINT64 renderCompletionFenceValue = 0;
 		bool computeCompletionSignal = false;
 		UINT64 computeCompletionFenceValue = 0;
+
+		std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> renderCommandLists;
+		std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> computeCommandLists;
 	};
 
     enum class PassType {
@@ -135,12 +138,12 @@ private:
 	std::vector<PassBatch> batches;
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsTransitionCommandLists;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsBatchEndTransitionCommandLists;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsCommandLists;
+	//std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsBatchEndTransitionCommandLists;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_computeCommandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_computeTransitionCommandLists;
+	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_computeCommandLists;
 
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> initialTransitionCommandList;
+	//Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> initialTransitionCommandList;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> initialTransitionCommandAllocator;
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_initialTransitionFence;
 	UINT64 m_initialTransitionFenceValue = 0;
@@ -306,4 +309,6 @@ private:
 		std::unordered_map<uint64_t, unsigned int>& transHistRender,
 		unsigned int                                   batchIndex,
 		PassBatch& currentBatch);
+
+	void CreateBatchCommandLists();
 };

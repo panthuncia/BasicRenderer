@@ -19,30 +19,17 @@ public:
     }
 
     void Setup() override {
-        auto& manager = DeviceManager::GetInstance();
-        auto& device = manager.GetDevice();
-        m_vertexBufferView = CreateSkyboxVertexBuffer(device.Get());
-
-        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocator)));
-
-        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
-        m_commandList->Close();
-
+        m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateRootSignature();
         CreatePSO();
     }
 
     // This pass was broken into multiple passes to avoid device timeout on slower GPUs
-    RenderPassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(RenderContext& context) override {
+
+		auto& commandList = context.commandList;
 
         auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
-
-        ThrowIfFailed(m_allocator->Reset());
-
-        std::vector<ID3D12GraphicsCommandList*> commandLists;
-
-        auto commandList = m_commandList.Get();
-        commandList->Reset(m_allocator.Get(), PSO.Get());
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {
             ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
@@ -91,11 +78,7 @@ public:
                 }
             }
         }
-
-        m_commandList->Close();
-        commandLists.push_back(m_commandList.Get());
-
-        return { commandLists, nullptr, 0 };
+        return {};
     }
 
     void Cleanup(RenderContext& context) override {
@@ -107,9 +90,6 @@ private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
     std::array<XMMATRIX, 6> m_viewMatrices;
-
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_allocator;
 
     ComPtr<ID3D12RootSignature> rootSignature;
     ComPtr<ID3D12PipelineState> PSO;
@@ -164,7 +144,7 @@ private:
 
     };
     // Create the vertex buffer for the skybox
-    D3D12_VERTEX_BUFFER_VIEW CreateSkyboxVertexBuffer(ID3D12Device* device) {
+    D3D12_VERTEX_BUFFER_VIEW CreateSkyboxVertexBuffer() {
         ComPtr<ID3D12Resource> vertexBuffer;
 
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));

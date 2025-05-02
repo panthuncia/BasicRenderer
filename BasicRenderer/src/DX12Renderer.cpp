@@ -28,7 +28,6 @@
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/EnvironmentSHPass.h"
-#include "RenderPasses/BRDFIntegrationPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/frustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
@@ -719,7 +718,7 @@ void DX12Renderer::Render() {
 
     m_context.currentScene = currentScene.get();
 	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
-    m_context.commandList = commandList.Get();
+    //m_context.commandList = commandList.Get();
 	m_context.commandQueue = graphicsQueue.Get();
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
