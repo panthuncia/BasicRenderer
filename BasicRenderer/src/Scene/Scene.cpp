@@ -452,6 +452,9 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		m_primaryCamera.remove<Components::CameraBufferView>();
     }
 
+	SettingsManager::GetInstance().getSettingSetter<float>("maxShadowDistance")(zFar);
+
+
     CameraInfo info;
 	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
 	info.view = XMMatrixIdentity();

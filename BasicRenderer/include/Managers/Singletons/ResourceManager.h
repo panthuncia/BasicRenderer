@@ -43,6 +43,22 @@ public:
 		return perFrameBufferHandle;
     }
 
+	void SetDirectionalCascadeSplits(const std::vector<float>& splits) {
+        switch (perFrameCBData.numShadowCascades) {
+        case 1:
+            perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(splits[0], 0, 0, 0);
+            break;
+        case 2:
+            perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(splits[0], splits[1], 0, 0);
+            break;
+        case 3:
+            perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(splits[0], splits[1], splits[2], 0);
+            break;
+        case 4:
+            perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(splits[0], splits[1], splits[2], splits[3]);
+        }
+	}
+
     template<typename T>
     std::shared_ptr<Buffer> CreateIndexedConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");

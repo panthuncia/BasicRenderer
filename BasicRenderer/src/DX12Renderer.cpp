@@ -286,9 +286,9 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
         });
-    bool meshShadereSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
-	settingsManager.registerSetting<bool>("enableMeshShader", meshShadereSupported);
-	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShadereSupported);
+    bool meshShaderSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
+	settingsManager.registerSetting<bool>("enableMeshShader", meshShaderSupported);
+	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
 	settingsManager.registerSetting<bool>("enableGTAO", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -351,6 +351,15 @@ void DX12Renderer::SetSettings() {
 	settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
 		m_deferredRendering = newValue;
 		rebuildRenderGraph = true;
+		});
+	settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
+		auto& settingsManager = SettingsManager::GetInstance();
+		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
+        });
+	settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
+		ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
 		});
     m_numFramesInFlight = getNumFramesInFlight();
 }
