@@ -17,6 +17,12 @@
 #include "ShaderBuffers.h"
 #include "Import/Filetypes.h"
 
+#ifndef NDEBUG
+#define DEBUG_ONLY(x)   x
+#else
+#define DEBUG_ONLY(x)   ((void)0)
+#endif
+
 class DescriptorHeap;
 class Mesh;
 class Sampler;

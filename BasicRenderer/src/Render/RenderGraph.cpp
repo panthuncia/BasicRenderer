@@ -10,6 +10,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Render/PassBuilders.h"
 #include "Resources/ResourceGroup.h"
+#include "Managers/Singletons/StatisticsManager.h"
 
 // Factory for the transition lambda
 auto RenderGraph::MakeAddTransition(
@@ -247,8 +248,8 @@ void RenderGraph::Compile() {
 				firstResourceSyncStates,
 				batchOfLastComputeQueueTransition,
 				currentBatchIndex);
-			currentBatch.computePasses.push_back(std::get<ComputePassAndResources>(pr.pass));
-			UpdateDesiredResourceStates(currentBatch, std::get<ComputePassAndResources>(pr.pass), computeUAVs);
+			currentBatch.computePasses.push_back(pass);
+			UpdateDesiredResourceStates(currentBatch, pass, computeUAVs);
 		} else {
 			auto& pass = std::get<RenderPassAndResources>(pr.pass);
 			ProcessResourceRequirements(
@@ -263,8 +264,8 @@ void RenderGraph::Compile() {
 				firstResourceSyncStates,
 				batchOfLastRenderQueueTransition,
 				currentBatchIndex);
-			currentBatch.renderPasses.push_back(std::get<RenderPassAndResources>(pr.pass));
-			UpdateDesiredResourceStates(currentBatch, std::get<RenderPassAndResources>(pr.pass), renderUAVs);
+			currentBatch.renderPasses.push_back(pass);
+			UpdateDesiredResourceStates(currentBatch, pass, renderUAVs);
 		}
 
 		if (isCompute) {
@@ -360,6 +361,26 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(const RenderPassAndResources
 }
 
 void RenderGraph::Setup() {
+	// Setup the statistics manager
+	auto& statisticsManager = StatisticsManager::GetInstance();
+	statisticsManager.ClearAll();
+	auto& manager = DeviceManager::GetInstance();
+	for (auto& batch : batches) {
+		for (auto& pass : batch.renderPasses) {
+			if (pass.statisticsIndex == -1) {
+				pass.statisticsIndex = statisticsManager.RegisterPass(pass.name);
+			}
+		}
+		for (auto& pass : batch.computePasses) {
+			if (pass.statisticsIndex == -1) {
+				pass.statisticsIndex = statisticsManager.RegisterPass(pass.name);
+			}
+		}
+	}
+	statisticsManager.RegisterQueue(manager.GetGraphicsQueue());
+	statisticsManager.RegisterQueue(manager.GetComputeQueue());
+	statisticsManager.SetupQueryHeap();
+
     for (auto& pass : passes) {
         switch (pass.type) {
         case PassType::Render: {
@@ -435,6 +456,7 @@ void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassPara
     RenderPassAndResources passAndResources;
     passAndResources.pass = pass;
     passAndResources.resources = resources;
+	passAndResources.name = name;
 	AnyPassAndResources passAndResourcesAny;
 	passAndResourcesAny.type = PassType::Render;
 	passAndResourcesAny.pass = passAndResources;
@@ -449,6 +471,7 @@ void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassP
 	ComputePassAndResources passAndResources;
 	passAndResources.pass = pass;
 	passAndResources.resources = resources;
+	passAndResources.name = name;
 	AnyPassAndResources passAndResourcesAny;
 	passAndResourcesAny.type = PassType::Compute;
 	passAndResourcesAny.pass = passAndResources;
@@ -519,6 +542,8 @@ void RenderGraph::Update() {
     }
 }
 
+#define IFDEBUG(x) 
+
 void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto graphicsQueue = manager.GetGraphicsQueue();
@@ -539,6 +564,8 @@ void RenderGraph::Execute(RenderContext& context) {
 	graphicsQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue);
     graphicsQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue);
 	computeQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue);
+
+	auto& statisticsManager = StatisticsManager::GetInstance();
 
     for (auto& batch : batches) {
 
@@ -578,12 +605,17 @@ void RenderGraph::Execute(RenderContext& context) {
 		std::vector<PassReturn> computeFencesToSignal;
 		for (auto& passAndResources : batch.computePasses) {
 			if (passAndResources.pass->IsInvalidated()) {
+				DEBUG_ONLY(PIXBeginEvent(computeCommandList.Get(), 0, passAndResources.name.c_str()));
+				statisticsManager.BeginQuery(passAndResources.statisticsIndex, context.frameIndex, computeQueue, computeCommandList.Get());
 				auto passReturn = passAndResources.pass->Execute(context);
+				statisticsManager.EndQuery(passAndResources.statisticsIndex, context.frameIndex, computeQueue, computeCommandList.Get());
+				DEBUG_ONLY(PIXEndEvent(computeCommandList.Get()));
 				if (passReturn.fence != nullptr) {
 					computeFencesToSignal.push_back(passReturn);
 				}
 			}
 		}
+		statisticsManager.ResolveQueries(context.frameIndex, computeQueue, computeCommandList.Get());
 		computeCommandList->Close();
 
 		// Execute commands recorded by compute passes
@@ -638,13 +670,17 @@ void RenderGraph::Execute(RenderContext& context) {
 		std::vector<PassReturn> graphicsFencesToSignal;
         for (auto& passAndResources : batch.renderPasses) {
 			if (passAndResources.pass->IsInvalidated()) {
+				DEBUG_ONLY(PIXBeginEvent(graphicsCommandList.Get(), 0, passAndResources.name.c_str()));
+				statisticsManager.BeginQuery(passAndResources.statisticsIndex, context.frameIndex, graphicsQueue, graphicsCommandList.Get());
                 auto passReturn = passAndResources.pass->Execute(context);
+				statisticsManager.EndQuery(passAndResources.statisticsIndex, context.frameIndex, graphicsQueue, graphicsCommandList.Get());
+				DEBUG_ONLY(PIXEndEvent(graphicsCommandList.Get()));
                 if (passReturn.fence != nullptr) {
 					graphicsFencesToSignal.push_back(passReturn);
                 }
 			}
         }
-
+		statisticsManager.ResolveQueries(context.frameIndex, graphicsQueue, graphicsCommandList.Get());
 		graphicsCommandList->Close();
 		// Execute commands recorded by render passes
 		ID3D12CommandList* ppRenderBatchesCommandLists[] = { graphicsCommandList.Get() };

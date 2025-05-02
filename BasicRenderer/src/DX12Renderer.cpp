@@ -58,6 +58,7 @@
 #include "ThirdParty/XeGTAO.h"
 #include "Managers/EnvironmentManager.h"
 #include "Render/TonemapTypes.h"
+#include "Managers/Singletons/StatisticsManager.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -149,6 +150,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
+	StatisticsManager::GetInstance().Initialize();
     CreateTextures();
     CreateGlobalResources();
 
@@ -663,6 +665,9 @@ void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 
 void DX12Renderer::Update(double elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+
+	StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, computeQueue.Get()); // Gather statistics for the last iteration of the frame
+    StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, graphicsQueue.Get()); // Gather statistics for the last iteration of the frame
 
 	m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
 
@@ -1259,8 +1264,8 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithUnorderedAccess(clusterBuffer, lightPagesBuffer, lightPagesCounter)
 			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
     }
-    
-    auto primaryPassBuilder = newGraph->BuildRenderPass("ForwardPass")
+	std::string primaryPassName = m_deferredRendering ? "Deferred Pass" : "Forward Pass";
+    auto primaryPassBuilder = newGraph->BuildRenderPass(primaryPassName)
         .WithShaderResource(cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup());
     
     if (!m_deferredRendering) {

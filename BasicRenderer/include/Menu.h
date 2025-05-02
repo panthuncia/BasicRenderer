@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 
 #include <directx/d3d12.h>
@@ -12,6 +12,8 @@
 #include <windows.h>
 #include <filesystem>
 #include <flecs.h>
+#include <vector>
+#include <algorithm>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -19,6 +21,7 @@
 #include "Import/ModelLoader.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/TonemapTypes.h"
+#include "Managers/Singletons/StatisticsManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -65,6 +68,7 @@ private:
     void DisplaySceneNode(flecs::entity node, bool isOnlyChild);
     void DisplaySceneGraph();
     void DisplaySelectedNode();
+    void DrawPassTimingWindow();
 
 	bool m_meshShadersSupported = false;
     
@@ -323,6 +327,7 @@ inline void Menu::Render(const RenderContext& context) {
 
 		DisplaySelectedNode();
 
+        DrawPassTimingWindow();
     }
 
 	// Rendering
@@ -595,4 +600,91 @@ inline void Menu::DisplaySelectedNode() {
 
         ImGui::End();
     }
+}
+
+inline void Menu::DrawPassTimingWindow() {
+    auto& names = StatisticsManager::GetInstance().GetPassNames();
+    auto& stats = StatisticsManager::GetInstance().GetStats();
+    if (names.empty()) return;
+
+    // static pin state per-pass and sort toggle
+    static std::vector<bool> pinned;
+    static bool sortEnabled = true;
+    if (pinned.size() != names.size()) pinned.assign(names.size(), false);
+
+    // Separate pinned and unpinned
+    std::vector<int> pinnedIndices;
+    std::vector<std::pair<int,double>> unpinnedItems;
+    pinnedIndices.reserve(names.size());
+    unpinnedItems.reserve(names.size());
+    for (int i = 0; i < (int)names.size(); ++i) {
+        if (pinned[i]) pinnedIndices.push_back(i);
+        else           unpinnedItems.emplace_back(i, stats[i].ema);
+    }
+
+    // Sort unpinned if enabled
+    if (sortEnabled) {
+        std::sort(unpinnedItems.begin(), unpinnedItems.end(), [](auto &a, auto &b){ return a.second > b.second; });
+    }
+
+    // Build display order: pinned first, then unpinned
+    std::vector<int> displayOrder;
+    displayOrder.reserve(names.size());
+    displayOrder.insert(displayOrder.end(), pinnedIndices.begin(), pinnedIndices.end());
+    for (auto& p : unpinnedItems) displayOrder.push_back(p.first);
+
+    // Compute column widths based on content (including icon and sort toggle)
+    ImGuiStyle& style = ImGui::GetStyle();
+    float maxNameWidth = ImGui::CalcTextSize("Pass").x;
+    float maxNumWidth  = ImGui::CalcTextSize("Avg (ms)").x;
+    // ensure space for sort toggle button
+    float btnWidth     = ImGui::CalcTextSize(sortEnabled ? "v" : ">").x + style.FramePadding.x * 2;
+    float headerWidth  = ImGui::CalcTextSize("Avg (ms)").x + style.ItemSpacing.x + btnWidth;
+    if (headerWidth > maxNumWidth) maxNumWidth = headerWidth;
+    char buf[64];
+    for (int idx : displayOrder) {
+        std::string nameWithIcon = pinned[idx] ? "> " + names[idx] : names[idx];
+        float w = ImGui::CalcTextSize(nameWithIcon.c_str()).x;
+        if (w > maxNameWidth) maxNameWidth = w;
+        snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
+        w = ImGui::CalcTextSize(buf).x;
+        if (w > maxNumWidth) maxNumWidth = w;
+    }
+    maxNameWidth += style.CellPadding.x * 2;
+    maxNumWidth  += style.CellPadding.x * 2;
+
+    ImGui::Begin("Pass Timings");
+    ImGui::Columns(2, nullptr, false);
+    ImGui::SetColumnWidth(0, maxNameWidth);
+    ImGui::SetColumnWidth(1, maxNumWidth);
+
+    // Header with sort toggle
+    ImGui::TextUnformatted("Pass"); ImGui::NextColumn();
+    ImGui::TextUnformatted("Avg (ms)"); ImGui::SameLine();
+    if (ImGui::SmallButton(sortEnabled ? "v" : ">")) {
+        sortEnabled = !sortEnabled;
+    }
+    ImGui::NextColumn();
+    ImGui::Separator();
+
+    for (int idx : displayOrder) {
+        ImGui::PushID(idx);
+        if (pinned[idx]) {
+            if (ImGui::SmallButton(">")) pinned[idx] = false;
+        } else {
+            if (ImGui::SmallButton("Pin")) pinned[idx] = true;
+        }
+        ImGui::PopID();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(names[idx].c_str());
+        ImGui::NextColumn();
+
+        snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
+        ImGui::TextUnformatted(buf);
+        ImGui::NextColumn();
+        ImGui::Separator();
+    }
+
+    ImGui::Columns(1);
+    ImGui::End();
 }

@@ -7,6 +7,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "ThirdParty/pix/pix3.h"
 
 void UploadManager::Initialize() {
 	auto& device = DeviceManager::GetInstance().GetDevice();
@@ -138,6 +139,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Reset(commandAllocator.Get(), nullptr);
+	DEBUG_ONLY(PIXBeginEvent(commandList.Get(), 0, L"UploadManager::ProcessUploads"));
 	//auto maxNumTransitions = m_resourceUpdates.size();
 	//std::vector<D3D12_RESOURCE_BARRIER> barriers;
 	//barriers.reserve(maxNumTransitions);
@@ -189,7 +191,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 
  //   }
 	//commandList->ResourceBarrier(barriers.size(), barriers.data());
-
+	DEBUG_ONLY(PIXEndEvent(commandList.Get()));
 	commandList->Close();
 
 	ID3D12CommandList* commandLists[] = { commandList.Get() };
@@ -210,6 +212,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Reset(commandAllocator.Get(), nullptr);
+	DEBUG_ONLY(PIXBeginEvent(commandList.Get(), 0, L"UploadManager::ExecuteResourceCopies"));
 	for (auto& copy : queuedResourceCopies) {
 		auto sourceIntialAccessType = copy.source->GetCurrentAccessType();
 		auto sourceInitialLayout = copy.source->GetCurrentLayout();
@@ -255,6 +258,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 
 		commandList->Barrier(barriers.size(), barriers.data());
 	}
+	DEBUG_ONLY(PIXEndEvent(commandList.Get()));
 	commandList->Close();
 
 	ID3D12CommandList* commandLists[] = { commandList.Get() };

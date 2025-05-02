@@ -40,11 +40,15 @@ private:
 	struct RenderPassAndResources {
 		std::shared_ptr<RenderPass> pass;
 		RenderPassParameters resources;
+		std::string name;
+		int statisticsIndex = -1;
 	};
 
 	struct ComputePassAndResources {
 		std::shared_ptr<ComputePass> pass;
 		ComputePassParameters resources;
+		std::string name;
+		int statisticsIndex = -1;
 	};
 
 	struct ResourceTransition {
