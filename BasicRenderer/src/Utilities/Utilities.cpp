@@ -401,7 +401,7 @@ std::vector<Cascade> setupCascades(
         float r = XMVectorGetX(maxs);
         float b = XMVectorGetY(mins);
         float t = XMVectorGetY(maxs);
-        float n = (std::min)(XMVectorGetZ(maxs), -10.0f); // TODO: hack to avoid near shadows disappearing on objects behind the camera. Is there a better way?
+        float n = (std::min)(XMVectorGetZ(maxs), -20.0f); // TODO: hack to avoid near shadows disappearing on objects behind the camera. Is there a better way?
         float f = -XMVectorGetZ(mins); // far
 
         XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(l, r, b, t, n, f);
