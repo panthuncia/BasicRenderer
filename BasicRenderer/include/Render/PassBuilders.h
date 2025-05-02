@@ -117,6 +117,16 @@ public:
         return std::move(*this);
     }
 
+	RenderPassBuilder& IsGeometryPass()& {
+		params.isGeometryPass = true;
+		return *this;
+	}
+
+    RenderPassBuilder IsGeometryPass() && {
+        params.isGeometryPass = true;
+		return std::move(*this);
+    }
+
     // First build, callable on Lvalues
     template<typename PassT, typename... CtorArgs>
     RenderPassBuilder& Build(CtorArgs&&... args) & {

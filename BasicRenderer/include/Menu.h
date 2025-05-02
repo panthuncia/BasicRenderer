@@ -603,86 +603,86 @@ inline void Menu::DisplaySelectedNode() {
 }
 
 inline void Menu::DrawPassTimingWindow() {
-    auto& names = StatisticsManager::GetInstance().GetPassNames();
-    auto& stats = StatisticsManager::GetInstance().GetStats();
+    auto& names     = StatisticsManager::GetInstance().GetPassNames();
+    auto& stats     = StatisticsManager::GetInstance().GetPassStats();
+    auto& meshStats = StatisticsManager::GetInstance().GetMeshStats();
+    // you’ll need an accessor or public m_isGeometryPass here:
+    auto& isGeom    = StatisticsManager::GetInstance().GetIsGeometryPassVector(); 
+
     if (names.empty()) return;
 
-    // static pin state per-pass and sort toggle
     static std::vector<bool> pinned;
     static bool sortEnabled = true;
-    if (pinned.size() != names.size()) pinned.assign(names.size(), false);
+    if (pinned.size() != names.size()) 
+        pinned.assign(names.size(), false);
 
-    // Separate pinned and unpinned
-    std::vector<int> pinnedIndices;
-    std::vector<std::pair<int,double>> unpinnedItems;
-    pinnedIndices.reserve(names.size());
-    unpinnedItems.reserve(names.size());
+    // split pinned vs unpinned
+    std::vector<int> pins;
+    std::vector<std::pair<int,double>> unsorted;
     for (int i = 0; i < (int)names.size(); ++i) {
-        if (pinned[i]) pinnedIndices.push_back(i);
-        else           unpinnedItems.emplace_back(i, stats[i].ema);
+        if (pinned[i]) pins.push_back(i);
+        else           unsorted.emplace_back(i, stats[i].ema);
     }
+    if (sortEnabled)
+        std::sort(unsorted.begin(), unsorted.end(), [](auto &a, auto &b){ return a.second > b.second; });
 
-    // Sort unpinned if enabled
-    if (sortEnabled) {
-        std::sort(unpinnedItems.begin(), unpinnedItems.end(), [](auto &a, auto &b){ return a.second > b.second; });
-    }
+    std::vector<int> order;
+    order.insert(order.end(), pins.begin(), pins.end());
+    for (auto &p : unsorted) order.push_back(p.first);
 
-    // Build display order: pinned first, then unpinned
-    std::vector<int> displayOrder;
-    displayOrder.reserve(names.size());
-    displayOrder.insert(displayOrder.end(), pinnedIndices.begin(), pinnedIndices.end());
-    for (auto& p : unpinnedItems) displayOrder.push_back(p.first);
-
-    // Compute column widths based on content (including icon and sort toggle)
+    // measure column widths
     ImGuiStyle& style = ImGui::GetStyle();
-    float maxNameWidth = ImGui::CalcTextSize("Pass").x;
-    float maxNumWidth  = ImGui::CalcTextSize("Avg (ms)").x;
-    // ensure space for sort toggle button
-    float btnWidth     = ImGui::CalcTextSize(sortEnabled ? "v" : ">").x + style.FramePadding.x * 2;
-    float headerWidth  = ImGui::CalcTextSize("Avg (ms)").x + style.ItemSpacing.x + btnWidth;
-    if (headerWidth > maxNumWidth) maxNumWidth = headerWidth;
+    float wName = ImGui::CalcTextSize("Pass").x;
+    float wNum  = ImGui::CalcTextSize("Avg (ms)").x;
     char buf[64];
-    for (int idx : displayOrder) {
-        std::string nameWithIcon = pinned[idx] ? "> " + names[idx] : names[idx];
-        float w = ImGui::CalcTextSize(nameWithIcon.c_str()).x;
-        if (w > maxNameWidth) maxNameWidth = w;
+    for (int idx : order) {
+        std::string label = (pinned[idx] ? "[P] " : "P") + names[idx];
+        wName = std::max(wName, ImGui::CalcTextSize(label.c_str()).x);
         snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
-        w = ImGui::CalcTextSize(buf).x;
-        if (w > maxNumWidth) maxNumWidth = w;
+        wNum  = std::max(wNum, ImGui::CalcTextSize(buf).x);
     }
-    maxNameWidth += style.CellPadding.x * 2;
-    maxNumWidth  += style.CellPadding.x * 2;
+    wName += style.CellPadding.x*2;
+    wNum  += style.CellPadding.x*2 + style.ItemSpacing.x + ImGui::CalcTextSize(sortEnabled?"v":">").x + style.FramePadding.x*2;
 
     ImGui::Begin("Pass Timings");
     ImGui::Columns(2, nullptr, false);
-    ImGui::SetColumnWidth(0, maxNameWidth);
-    ImGui::SetColumnWidth(1, maxNumWidth);
+    ImGui::SetColumnWidth(0, wName);
+    ImGui::SetColumnWidth(1, wNum);
 
-    // Header with sort toggle
+    // header
     ImGui::TextUnformatted("Pass"); ImGui::NextColumn();
     ImGui::TextUnformatted("Avg (ms)"); ImGui::SameLine();
-    if (ImGui::SmallButton(sortEnabled ? "v" : ">")) {
-        sortEnabled = !sortEnabled;
-    }
+    if (ImGui::SmallButton(sortEnabled ? "v" : ">")) sortEnabled = !sortEnabled;
     ImGui::NextColumn();
     ImGui::Separator();
 
-    for (int idx : displayOrder) {
+    // rows
+    for (int idx : order) {
         ImGui::PushID(idx);
         if (pinned[idx]) {
             if (ImGui::SmallButton(">")) pinned[idx] = false;
         } else {
             if (ImGui::SmallButton("Pin")) pinned[idx] = true;
         }
-        ImGui::PopID();
         ImGui::SameLine();
-        ImGui::TextUnformatted(names[idx].c_str());
-        ImGui::NextColumn();
+        bool open = ImGui::TreeNodeEx(names[idx].c_str(), ImGuiTreeNodeFlags_SpanFullWidth);
+        ImGui::PopID();
 
+        ImGui::NextColumn();
         snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
         ImGui::TextUnformatted(buf);
         ImGui::NextColumn();
-        ImGui::Separator();
+
+        if (open) {
+            if (isGeom[idx]) {
+                ImGui::Indent();
+                ImGui::Text("Mesh Invocations: %.0f", meshStats[idx].invocationsEma);
+                ImGui::Text("Mesh Primitives:  %.0f", meshStats[idx].primitivesEma);
+                ImGui::Unindent();
+            }
+            ImGui::TreePop();
+            ImGui::Separator();
+        }
     }
 
     ImGui::Columns(1);

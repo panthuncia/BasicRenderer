@@ -369,6 +369,9 @@ void RenderGraph::Setup() {
 		for (auto& pass : batch.renderPasses) {
 			if (pass.statisticsIndex == -1) {
 				pass.statisticsIndex = statisticsManager.RegisterPass(pass.name);
+				if (pass.resources.isGeometryPass) {
+					statisticsManager.MarkGeometryPass(pass.name);
+				}
 			}
 		}
 		for (auto& pass : batch.computePasses) {

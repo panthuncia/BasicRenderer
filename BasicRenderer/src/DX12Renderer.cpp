@@ -1123,7 +1123,8 @@ void DX12Renderer::CreateRenderGraph() {
     auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
         .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness, emissive)
-        .WithDepthReadWrite(depthTexture);
+        .WithDepthReadWrite(depthTexture)
+        .IsGeometryPass();
 
 	if (useMeshShaders) {
 		zBuilder.WithShaderResource(meshResourceGroup);
@@ -1270,6 +1271,7 @@ void DX12Renderer::CreateRenderGraph() {
     
     if (!m_deferredRendering) {
         primaryPassBuilder.WithDepthReadWrite(depthTexture);
+        primaryPassBuilder.IsGeometryPass();
 	}
 	else {
 		primaryPassBuilder.WithDepthRead(depthTexture);
@@ -1327,7 +1329,8 @@ void DX12Renderer::CreateRenderGraph() {
 
 		auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-			.WithDepthReadWrite(m_shadowMaps);
+			.WithDepthReadWrite(m_shadowMaps)
+            .IsGeometryPass();
 
 		if (useMeshShaders) {
 			shadowBuilder.WithShaderResource(meshResourceGroup);

@@ -13,64 +13,77 @@ struct PassStats {
     static constexpr double alpha = 0.1;  // smoothing factor
 };
 
+// per-pass mesh shader stats EMA
+struct MeshPipelineStats {
+    double invocationsEma = 0.0;
+    double primitivesEma  = 0.0;
+};
+
 class StatisticsManager {
 public:
     static StatisticsManager& GetInstance();
 
     void Initialize();
 
-    // Register pass names (order defines pass index)
     void RegisterPasses(const std::vector<std::string>& passNames);
+    
+    unsigned RegisterPass(const std::string& passName);
 
-    unsigned int RegisterPass(const std::string& passName);
+    void MarkGeometryPass(const std::string& passName);
 
     void RegisterQueue(ID3D12CommandQueue* queue);
 
     void SetupQueryHeap();
 
+    // Timestamp + mesh-stats queries for any pass
     void BeginQuery(unsigned passIndex,
         unsigned frameIndex,
         ID3D12CommandQueue* queue,
         ID3D12GraphicsCommandList* cmdList);
-
     void EndQuery(unsigned passIndex,
         unsigned frameIndex,
         ID3D12CommandQueue* queue,
         ID3D12GraphicsCommandList* cmdList);
 
-    // Call once per batch, after stamping end queries but before closing the command list
+    // Resolve all queries for a frame before closing
     void ResolveQueries(unsigned frameIndex,
         ID3D12CommandQueue* queue,
         ID3D12GraphicsCommandList* cmdList);
 
-    // After the GPU fence for this frameIndex + queue signals, map and update EMAs
     void OnFrameComplete(unsigned frameIndex,
         ID3D12CommandQueue* queue);
 
-    const std::vector<std::string>& GetPassNames() const { return m_passNames; }
-    const std::vector<PassStats>&   GetStats()     const { return m_stats; }
-
     void ClearAll();
+
+	const std::vector<bool>& GetIsGeometryPassVector() const { return m_isGeometryPass; }
+
+    const std::vector<std::string>&        GetPassNames() const { return m_passNames; }
+    const std::vector<PassStats>&          GetPassStats() const { return m_stats; }
+    const std::vector<MeshPipelineStats>&  GetMeshStats() const { return m_meshStatsEma; }
 
 private:
     StatisticsManager() = default;
     ~StatisticsManager() = default;
 
-    Microsoft::WRL::ComPtr<ID3D12QueryHeap>                              m_queryHeap;
-    UINT64                                                               m_gpuTimestampFrequency = 0;
-    unsigned                                                             m_numPasses = 0;
-    unsigned                                                             m_numFramesInFlight = 0;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timestampHeap;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_pipelineStatsHeap;
 
-    std::vector<std::string>                                             m_passNames;
-    std::vector<PassStats>                                               m_stats;
+    std::unordered_map<ID3D12CommandQueue*, Microsoft::WRL::ComPtr<ID3D12Resource>> m_timestampBuffers;
+    std::unordered_map<ID3D12CommandQueue*, Microsoft::WRL::ComPtr<ID3D12Resource>> m_meshStatsBuffers;
 
+    UINT64    m_gpuTimestampFreq = 0;
+    unsigned  m_numPasses = 0;
+    unsigned  m_numFramesInFlight = 0;
+
+    // Per-pass data
+    std::vector<std::string>        m_passNames;
+    std::vector<PassStats>          m_stats;
+    std::vector<bool>               m_isGeometryPass;
+    std::vector<MeshPipelineStats>  m_meshStatsEma;
+
+    // Recording helpers per queue/frame
     std::unordered_map<ID3D12CommandQueue*,
-        Microsoft::WRL::ComPtr<ID3D12Resource>>                          m_readbackBuffers;
-
+        std::unordered_map<unsigned, std::vector<unsigned>>> m_recordedQueries;
     std::unordered_map<ID3D12CommandQueue*,
-        std::unordered_map<unsigned, std::vector<unsigned>>>            m_recordedQueries;
-
-    std::unordered_map<ID3D12CommandQueue*,
-        std::unordered_map<unsigned, std::vector<std::pair<unsigned, unsigned>>>>
-        m_pendingResolves;
+        std::unordered_map<unsigned, std::vector<std::pair<unsigned,unsigned>>>> m_pendingResolves;
 };

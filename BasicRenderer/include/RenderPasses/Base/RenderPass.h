@@ -22,6 +22,7 @@ struct RenderPassParameters {
 	std::vector<std::shared_ptr<Resource>> indirectArgumentBuffers;
 
 	std::vector<ResourceRequirement> resourceRequirements;
+	bool isGeometryPass = false;
 };
 
 class RenderPass {
