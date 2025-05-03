@@ -36,6 +36,8 @@ public:
 
 	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_parentResourceGroup; }
 
+	std::shared_ptr<ResourceGroup> GetMeshletCullingCommandResourceGroup() { return m_meshletCullingCommandResourceGroup; }
+
 	//std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
 	//std::shared_ptr<Buffer>& GetAlphaTestClearBuffer() { return m_clearBufferAlphaTest; }
 	//std::shared_ptr<Buffer>& GetBlendClearBuffer() { return m_clearBufferBlend; }
@@ -46,11 +48,14 @@ private:
 	unsigned int m_opaqueCommandBufferSize = 0;
 	unsigned int m_alphaTestCommandBufferSize = 0;
 	unsigned int m_blendCommandBufferSize = 0;
+	unsigned int m_totalIndirectCommands = 0;
     unsigned int m_incrementSize = 1000; // TODO: Values are small for testing
 	std::shared_ptr<ResourceGroup> m_alphaTestResourceGroup;
 	std::shared_ptr<ResourceGroup> m_opaqueResourceGroup;
 	std::shared_ptr<ResourceGroup> m_blendResourceGroup;
 	std::shared_ptr<ResourceGroup> m_parentResourceGroup;
+
+	std::shared_ptr<ResourceGroup> m_meshletCullingCommandResourceGroup;
 	//std::shared_ptr<Buffer> m_clearBufferOpaque;
 	//std::shared_ptr<Buffer> m_clearBufferAlphaTest;
 	//std::shared_ptr<Buffer> m_clearBufferBlend;

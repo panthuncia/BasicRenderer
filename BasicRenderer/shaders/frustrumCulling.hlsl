@@ -1,7 +1,7 @@
 #include "cbuffers.hlsli"
 #include "vertex.hlsli"
 
-struct IndirectCommand {
+struct DispatchMeshIndirectCommand {
     uint perObjectBufferIndex;
     uint perMeshBufferIndex;
     uint perMeshInstanceBufferIndex;
@@ -10,19 +10,32 @@ struct IndirectCommand {
     uint dispatchMeshZ;
 };
 
+struct DispatchIndirectCommand {
+    uint perObjectBufferIndex;
+    uint perMeshBufferIndex;
+    uint perMeshInstanceBufferIndex;
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+};
+
+// Object culling, one thread per object
 [numthreads(64, 1, 1)]
 void CSMain(uint dispatchID : SV_DispatchThreadID) {
     if (dispatchID > maxDrawIndex) {
         return;
     }
     StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
-    StructuredBuffer<IndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];
-    AppendStructuredBuffer<IndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
+    StructuredBuffer<DispatchMeshIndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];
+    // Per-drawset indirect command buffer
+    AppendStructuredBuffer<DispatchMeshIndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
+    // Meshlets from all drawsets are culled together
+    AppendStructuredBuffer<DispatchIndirectCommand> meshletFrustrumCullingIndirectCommandOutputBuffer = ResourceDescriptorHeap[meshletCullingIndirectCommandBufferDescriptorIndex];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     
     uint index = activeDrawSetIndicesBuffer[dispatchID];
-    IndirectCommand command = indirectCommandBuffer[index];
+    DispatchMeshIndirectCommand command = indirectCommandBuffer[index];
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera camera = cameras[lightViewIndex]; // In compute root signature, this directly indexes the camera buffer instead of using indirection through light view index buffers
@@ -62,4 +75,47 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     }
     
     indirectCommandOutputBuffer.Append(command);
+    DispatchIndirectCommand meshletFrustrumCullingCommand;
+    meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
+    meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;
+    meshletFrustrumCullingCommand.dispatchZ = command.dispatchMeshZ;
+    meshletFrustrumCullingCommand.perMeshBufferIndex = command.perMeshBufferIndex;
+    meshletFrustrumCullingCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
+    meshletFrustrumCullingCommand.perObjectBufferIndex = command.perObjectBufferIndex;
+        
+    meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
+
 }
+/*
+// Meshlet culling, one thread per meshlet
+[numthreads(128, 1, 1)]
+void MeshletFrustrumCullingCSMain(uint dispatchID : SV_DispatchThreadID)
+{
+    if (dispatchID > maxDrawIndex)
+    {
+        return;
+    }
+    StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
+    StructuredBuffer<IndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];
+    AppendStructuredBuffer<IndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    
+    uint index = activeDrawSetIndicesBuffer[dispatchID];
+    IndirectCommand command = indirectCommandBuffer[index];
+    
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    Camera camera = cameras[lightViewIndex]; // In compute root signature, this directly indexes the camera buffer instead of using indirection through light view index buffers
+    
+    PerMeshInstanceBuffer perMeshInstance = perMeshBuffer[command.perMeshInstanceBufferIndex];
+    RWStructuredBuffer<bool> meshletCullingBitfield = ResourceDescriptorHeap[UintRootConstant0];
+    StructuredBuffer<BoundingSphere> meshletBoundingSpheres = ResourceDescriptorHeap[UintRootConstant1];
+    
+    BoundingSphere meshletBoundingSphere = meshletBoundingSpheres[perMeshInstance.meshletBoundsBufferStartIndex +];
+    
+    // Frustrum culling
+    
+    
+    // Calculate the scale factor for the bounding sphere radius
+}
+*/

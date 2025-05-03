@@ -7,6 +7,7 @@
 #include "Resources/Buffers/BufferView.h"
 #include "Mesh/MeshInstance.h"
 #include "Resources/Buffers/DynamicBuffer.h"
+#include "Managers/CameraManager.h"
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -15,6 +16,8 @@ MeshManager::MeshManager() {
 	m_meshletOffsets = resourceManager.CreateIndexedDynamicBuffer(sizeof(meshopt_Meshlet), 1, L"meshletOffsets");
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
+	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
+	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true);
 	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
 	m_resourceGroup->AddResource(m_meshletOffsets);
 	m_resourceGroup->AddResource(m_meshletIndices);
@@ -38,7 +41,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, b
 	auto& manager = ResourceManager::GetInstance();
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
-
+	std::unique_ptr<BufferView> meshletBoundsView = nullptr;
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
@@ -46,6 +49,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, b
 	}
 	else {
 		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexByteSize, vertexByteSize);
+		meshletBoundsView = m_meshletBoundsBuffer->AddData(mesh->GetMeshletBounds().data(), mesh->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
 	}
 
 	auto& meshlets = mesh->GetMeshlets();
@@ -75,6 +79,7 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 	// - Meshlet triangles
 	// - Pre-skinning vertices, if any
 	// - Post-skinning vertices
+	// - Meshlet bounds
 
 	auto meshletOffsetsView = mesh->GetMeshletOffsetsBufferView();
 	if (meshletOffsetsView != nullptr) {
@@ -101,10 +106,15 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 	if (perMeshBufferView != nullptr) {
 		m_perMeshBuffers->Deallocate(perMeshBufferView.get());
 	}
+	auto meshletBoundsView = mesh->GetMeshletBoundsBufferView();
+	if (meshletBoundsView != nullptr) {
+		m_meshletBoundsBuffer->Deallocate(meshletBoundsView);
+	}
 
 	mesh->SetPerMeshBufferView(nullptr);
 	mesh->SetBufferViews(nullptr, nullptr, nullptr, nullptr, nullptr);
 	mesh->SetCurrentMeshManager(nullptr);
+	mesh->SetMeshletBoundsBufferView(nullptr);
 }
 
 void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices) {
@@ -116,12 +126,21 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
 		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize);
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
-		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
+		auto meshletBoundsBufferView = m_meshletBoundsBuffer->AddData(mesh->GetMesh()->GetMeshletBounds().data(), mesh->GetMesh()->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
+		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView), std::move(meshletBoundsBufferView));
 	}
 	else { // Non-skinned meshes can share post-skinning vertex buffers
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
 		mesh->SetBufferViewUsingBaseMesh(std::move(perMeshInstanceBufferView));
 	}
+
+	unsigned int meshletBitfieldSize = m_meshletBitfieldBuffer->Size();
+	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(mesh->GetMesh()->GetMeshletCount(), 1);
+	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
+		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size());
+	}
+	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
+
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
@@ -129,7 +148,7 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	// Things to remove:
 	// - Post-skinning vertices
 	// - Per-mesh instance buffer
-
+	// - Meshlet bounds
 	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
 	if (postSkinningView != nullptr) {
 		m_postSkinningVertices->Deallocate(postSkinningView);
@@ -138,7 +157,11 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	if (perMeshInstanceBufferView != nullptr) {
 		m_perMeshInstanceBuffers->Deallocate(perMeshInstanceBufferView);
 	}
-	mesh->SetBufferViews(nullptr, nullptr);
+	auto meshletBoundsView = mesh->GetMeshletBoundsBufferView();
+	if (meshletBoundsView != nullptr) {
+		m_meshletBoundsBuffer->Deallocate(meshletBoundsView);
+	}
+	mesh->SetBufferViews(nullptr, nullptr, nullptr);
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

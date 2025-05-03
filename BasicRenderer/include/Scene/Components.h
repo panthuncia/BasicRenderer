@@ -128,12 +128,14 @@ namespace Components {
 		std::shared_ptr<DynamicGloballyIndexedResource> opaqueIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> alphaTestIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> blendIndirectCommandBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshletFrustrumCullingIndirectCommandBuffer;
 	};
 	struct RenderView {
 		uint64_t viewID;
 		std::shared_ptr<BufferView> cameraBufferView;;
 		uint64_t cameraBufferIndex;
 		IndirectCommandBuffers indirectCommandBuffers;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBufferView;
 	};
 	struct LightViewInfo {
 		std::vector<RenderView> renderViews;

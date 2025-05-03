@@ -51,6 +51,7 @@ cbuffer StaticBufferInfo : register(b5) {
 cbuffer variableBufferInfo : register(b6) {
     uint activeDrawSetIndicesBufferDescriptorIndex;
     uint indirectCommandBufferDescriptorIndex;
+    uint meshletCullingIndirectCommandBufferDescriptorIndex;
     uint maxDrawIndex;
 }
 

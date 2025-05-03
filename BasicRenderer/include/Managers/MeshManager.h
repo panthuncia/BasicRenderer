@@ -13,6 +13,7 @@ class MeshInstance;
 class DynamicBuffer;
 class ResourceGroup;
 class BufferView;
+class CameraManager;
 
 class MeshManager {
 public:
@@ -39,6 +40,7 @@ public:
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
+	void SetCameraManager(CameraManager* cameraManager) { m_pCameraManager = cameraManager; }
 private:
 	MeshManager();
 	std::shared_ptr<DynamicBuffer> m_preSkinningVertices;
@@ -46,6 +48,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets;
 	std::shared_ptr<DynamicBuffer> m_meshletIndices;
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
+	std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
+	std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;
 
 	// Base meshes
 	std::shared_ptr<DynamicBuffer> m_perMeshBuffers;
@@ -54,4 +58,6 @@ private:
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;
 	
 	std::shared_ptr<ResourceGroup> m_resourceGroup;
+
+	CameraManager* m_pCameraManager;
 };

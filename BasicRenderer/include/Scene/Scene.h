@@ -36,6 +36,7 @@ public:
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
     std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
 	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
+    std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer();
     void ProcessEntitySkins(bool overrideExistingSkins = false);
     std::shared_ptr<Scene> Clone() const;
 	void DisableShadows();

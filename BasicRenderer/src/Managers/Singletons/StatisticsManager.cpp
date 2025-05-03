@@ -15,13 +15,16 @@ void StatisticsManager::Initialize() {
     auto queue = DeviceManager::GetInstance().GetGraphicsQueue();
     queue->GetTimestampFrequency(&m_gpuTimestampFreq);
 
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    D3D12_FEATURE_DATA_D3D12_OPTIONS9 opts9 = {};
-    device->CheckFeatureSupport(
-        D3D12_FEATURE_D3D12_OPTIONS9,
-        &opts9, sizeof(opts9)
-    );
-    assert(opts9.MeshShaderPipelineStatsSupported);
+	m_getCollectPipelineStatistics =
+		SettingsManager::GetInstance().getSettingGetter<bool>("collectPipelineStatistics");
+
+    //auto& device = DeviceManager::GetInstance().GetDevice();
+    //D3D12_FEATURE_DATA_D3D12_OPTIONS9 opts9 = {};
+    //device->CheckFeatureSupport(
+    //    D3D12_FEATURE_D3D12_OPTIONS9,
+    //    &opts9, sizeof(opts9)
+    //);
+    //assert(opts9.MeshShaderPipelineStatsSupported);
 }
 
 void StatisticsManager::RegisterPasses(const std::vector<std::string>& passNames) {
@@ -100,7 +103,7 @@ void StatisticsManager::BeginQuery(unsigned passIndex,
     UINT tsIdx = (frameIndex*m_numPasses + passIndex)*2;
     cmd->EndQuery(m_timestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsIdx);
 
-    if (m_isGeometryPass[passIndex]) {
+    if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
         UINT psIdx = frameIndex*m_numPasses + passIndex;
         cmd->BeginQuery(m_pipelineStatsHeap.Get(),
             D3D12_QUERY_TYPE_PIPELINE_STATISTICS1,
@@ -117,7 +120,7 @@ void StatisticsManager::EndQuery(unsigned passIndex,
     UINT tsIdx = (frameIndex*m_numPasses + passIndex)*2 + 1;
     cmd->EndQuery(m_timestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsIdx);
 
-    if (m_isGeometryPass[passIndex]) {
+    if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
         UINT psIdx = frameIndex*m_numPasses + passIndex;
         cmd->EndQuery(m_pipelineStatsHeap.Get(),
             D3D12_QUERY_TYPE_PIPELINE_STATISTICS1,
@@ -158,6 +161,7 @@ void StatisticsManager::ResolveQueries(unsigned frameIndex,
         );
         m_pendingResolves[queue][frameIndex].push_back(r);
 
+		if (!m_collectPipelineStatistics) continue;
         // For each stamped pass in this range, resolve mesh-stats if geometry
         for (unsigned idx = r.first; idx < r.first + r.second; idx += 2) {
             unsigned base = idx / 2;
@@ -178,6 +182,8 @@ void StatisticsManager::ResolveQueries(unsigned frameIndex,
 
 void StatisticsManager::OnFrameComplete(unsigned frameIndex,
     ID3D12CommandQueue* queue) {
+	m_collectPipelineStatistics = m_getCollectPipelineStatistics();
+
     auto& buf = m_timestampBuffers[queue];
     auto& psBuf = m_meshStatsBuffers[queue];
     auto& pending = m_pendingResolves[queue][frameIndex];
@@ -196,6 +202,8 @@ void StatisticsManager::OnFrameComplete(unsigned frameIndex,
             UINT64 t1 = mappedTs[idx+1];
             double ms = double(t1-t0)*1000.0/double(m_gpuTimestampFreq);
             m_stats[pi].ema = m_stats[pi].ema*(1.0-PassStats::alpha) + ms*PassStats::alpha;
+
+			if (!m_collectPipelineStatistics) continue;
 
             if (m_isGeometryPass[pi]) {
                 // mesh-stats resolve

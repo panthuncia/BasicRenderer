@@ -29,7 +29,7 @@ public:
     }
 
     std::unique_ptr<BufferView> Allocate(size_t size, size_t elementSize);
-    void Deallocate(BufferView* view);
+    void Deallocate(const BufferView* view);
 	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize);
 	void UpdateView(BufferView* view, const void* data);
 

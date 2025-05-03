@@ -18,7 +18,7 @@ public:
     BufferView* GetPostSkinningVertexBufferView();
 	BufferView* GetPerMeshInstanceBufferView() { return m_perMeshInstanceBufferView.get(); }
 
-	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> perMeshInstanceBufferView);
+	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> perMeshInstanceBufferView, std::unique_ptr<BufferView> meshletBoundsBufferView);
     void SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView);
 
     void SetSkeleton(std::shared_ptr<Skeleton> skeleton);
@@ -49,12 +49,30 @@ public:
 		return m_perMeshInstanceBufferData;
 	}
 
+	void SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> meshletBitfieldBufferView) {
+		m_meshletBitfieldBufferView = std::move(meshletBitfieldBufferView);
+	}
+
 	void SetAnimationSpeed(float speed) {
 		m_animationSpeed = speed;
 		if (m_skeleton != nullptr) {
 			m_skeleton->SetAnimationSpeed(speed);
 		}
 	}
+
+    void SetMeshletBoundsBufferView(std::unique_ptr<BufferView> view) {
+        m_meshletBoundsBufferView = std::move(view);
+    }
+
+    void SetMeshletBoundsFromBaseMesh() {
+		if (m_mesh->GetMeshletBoundsBufferView() != nullptr) {
+			
+		}
+    }
+
+    BufferView* GetMeshletBoundsBufferView() {
+        return m_meshletBoundsBufferView.get();
+    }
 
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
@@ -69,5 +87,7 @@ private:
     MeshManager* m_pCurrentMeshManager = nullptr;
     std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
+	std::unique_ptr<BufferView> m_meshletBitfieldBufferView = nullptr;
+    std::unique_ptr<BufferView> m_meshletBoundsBufferView = nullptr;
 	float m_animationSpeed = 1.0f;
 };

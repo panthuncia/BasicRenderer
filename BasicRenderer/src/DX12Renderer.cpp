@@ -164,6 +164,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
 	m_pCameraManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Camera manager needs to make indirect command buffers
+    m_pMeshManager->SetCameraManager(m_pCameraManager.get());
 
 	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
 
@@ -280,6 +281,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
+    settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -1032,18 +1034,21 @@ void DX12Renderer::CreateRenderGraph() {
     }
 
     std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
+	std::shared_ptr<ResourceGroup> meshletCullingCommandBufferResourceGroup = nullptr;
     if (indirect) {
         // Clear UAVs
         indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
+        meshletCullingCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetMeshletCullingCommandResourceGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
+		newGraph->AddResource(meshletCullingCommandBufferResourceGroup);
 
         newGraph->BuildRenderPass("ClearUAVsPass")
-            .WithCopyDest(indirectCommandBufferResourceGroup)
+            .WithCopyDest(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup)
             .Build<ClearUAVsPass>();
 
 		newGraph->BuildComputePass("FrustrumCullingPass")
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-			.WithUnorderedAccess(indirectCommandBufferResourceGroup)
+			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup)
 			.Build<FrustrumCullingPass>();
     }
 

@@ -83,7 +83,8 @@ struct PerMeshCB {
 struct PerMeshInstanceCB {
     unsigned int boneTransformBufferIndex;
     unsigned int postSkinningVertexBufferOffset;
-    unsigned int pad[2];
+	unsigned int meshletBoundsBufferStartIndex;
+    unsigned int pad[1];
 };
 
 struct PerMaterialCB {
@@ -287,6 +288,7 @@ enum StaticBufferRootConstants {
 enum VariableBufferRootConstants {
     ActiveDrawSetIndicesBufferDescriptorIndex,
     IndirectCommandBufferDescriptorIndex,
+    MeshletCullingIndirectCommandBufferDescriptorIndex,
     MaxDrawIndex,
 	NumVariableBufferRootConstants
 };

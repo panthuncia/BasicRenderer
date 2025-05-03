@@ -622,6 +622,11 @@ std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraBlendIndi
 	return view->indirectCommandBuffers.blendIndirectCommandBuffer;
 }
 
+std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() {
+	auto view = m_primaryCamera.get<Components::RenderView>();
+	return view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
+}
+
 void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {
 	if (src.has<Components::SkeletonRoot>()) {
 		return; // Skip skeleton roots, they are handled separately

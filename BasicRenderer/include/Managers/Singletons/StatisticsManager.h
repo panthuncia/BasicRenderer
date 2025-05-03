@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <functional>
 
 // per-pass exponential moving average data
 struct PassStats {
@@ -64,6 +65,9 @@ public:
 private:
     StatisticsManager() = default;
     ~StatisticsManager() = default;
+
+	bool m_collectPipelineStatistics = false;
+	std::function<bool()> m_getCollectPipelineStatistics;
 
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timestampHeap;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_pipelineStatsHeap;

@@ -59,6 +59,30 @@ void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
     
 	auto meshletCount = meshopt_buildMeshlets(m_meshlets.data(), m_meshletVertices.data(), m_meshletTriangles.data(), indices.data(), indices.size(), (float*)m_vertices->data(), m_vertices->size()/m_perMeshBufferData.vertexByteSize, m_perMeshBufferData.vertexByteSize, maxVertices, maxPrimitives, 0);
 	m_meshlets.resize(meshletCount);
+
+	size_t globalVertexCount =
+		m_vertices->size() / m_perMeshBufferData.vertexByteSize;
+
+	for (size_t i = 0; i < m_meshlets.size(); ++i) {
+		auto& meshlet = m_meshlets[i];
+
+		const unsigned int* verts = m_meshletVertices.data() + meshlet.vertex_offset;
+		const unsigned char* tris = m_meshletTriangles.data() + meshlet.triangle_offset;
+
+		meshopt_Bounds bounds = meshopt_computeMeshletBounds(
+			verts,
+			tris,
+			meshlet.triangle_count,
+			reinterpret_cast<const float*>(m_vertices->data()),
+			globalVertexCount,
+			m_perMeshBufferData.vertexByteSize
+		);
+
+		m_meshletBounds.push_back({
+			{ bounds.center[0], bounds.center[1], bounds.center[2], 1.0f },
+			bounds.radius
+			});
+	}
 }
 
 void Mesh::ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max) {

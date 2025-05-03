@@ -71,7 +71,7 @@ void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
 	uploadManager.UploadData(data, view->GetSize(), this, view->GetOffset());
 }
 
-void DynamicBuffer::Deallocate(BufferView* view) {
+void DynamicBuffer::Deallocate(const BufferView* view) {
     size_t offset = view->GetOffset();
     size_t size = view->GetSize();
 

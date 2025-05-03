@@ -10,9 +10,11 @@ public:
 	static CommandSignatureManager& GetInstance();
 	void Initialize();
 	ID3D12CommandSignature* GetDispatchMeshCommandSignature();
+	ID3D12CommandSignature* GetDispatchCommandSignature() { return m_dispatchCommandSignature.Get(); }
 
 private:
 	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchMeshCommandSignature;
+	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchCommandSignature;
 };
 
 inline CommandSignatureManager& CommandSignatureManager::GetInstance() {

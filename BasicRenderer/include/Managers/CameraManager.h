@@ -3,6 +3,7 @@
 #include <memory.h>
 #include <mutex>
 #include <atomic>
+#include <flecs.h>
 
 #include "ShaderBuffers.h"
 
@@ -38,12 +39,16 @@ public:
 
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 
+	void SetMeshletBitfieldSize(unsigned int numMeshlets);
 
 private:
 	CameraManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
 	std::mutex m_cameraUpdateMutex;
 	std::atomic<uint64_t> m_viewIDCounter = 0;
+	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshletBitfieldBuffers;
 
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
+
+	unsigned int m_currentMeshletBitfieldSize = 0;
 };

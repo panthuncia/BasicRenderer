@@ -151,7 +151,8 @@ struct PerMeshBuffer {
 struct PerMeshInstanceBuffer {
     uint boneTransformBufferIndex;
     uint postSkinningVertexBufferOffset;
-    uint pad[2];
+    uint meshletBoundsBufferStartIndex;
+    uint pad[1];
 };
 
 #define LIGHTS_PER_PAGE 12

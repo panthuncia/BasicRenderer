@@ -94,6 +94,18 @@ public:
 
 	void UpdateVertexCount(bool meshletReorderedVertices);
 
+	std::vector<BoundingSphere>& GetMeshletBounds() {
+		return m_meshletBounds;
+	}
+
+	void SetMeshletBoundsBufferView(std::unique_ptr<BufferView> view) {
+		m_meshletBoundsBufferView = std::move(view);
+	}
+
+	const BufferView* GetMeshletBoundsBufferView() {
+		return m_meshletBoundsBufferView.get();
+	}
+
 private:
     Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
     void CreateVertexBuffer();
@@ -112,6 +124,7 @@ private:
 	std::vector<meshopt_Meshlet> m_meshlets;
 	std::vector<unsigned int> m_meshletVertices;
     std::vector<unsigned char> m_meshletTriangles;
+	std::vector<BoundingSphere> m_meshletBounds;
 	std::vector<std::byte> m_meshletReorderedVertices;
 	std::vector<std::byte> m_meshletReorderedSkinningVertices;
 
@@ -130,6 +143,7 @@ private:
     PerMeshCB m_perMeshBufferData = { 0 };
 	unsigned int m_skinningVertexSize = 0;
 	std::unique_ptr<BufferView> m_perMeshBufferView;
+	std::unique_ptr<BufferView> m_meshletBoundsBufferView;
 	MeshManager* m_pCurrentMeshManager = nullptr;
 
 	std::shared_ptr<Skeleton> m_baseSkeleton = nullptr;
