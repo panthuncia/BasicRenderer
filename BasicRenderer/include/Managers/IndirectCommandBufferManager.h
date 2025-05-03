@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include "Materials/MaterialBuckets.h"
+#include "Scene/Components.h"
 
 class DynamicGloballyIndexedResource;
 class ResourceGroup;
@@ -23,10 +24,10 @@ public:
 	}
 
     // Add a single buffer to an existing ID
-    std::shared_ptr<DynamicGloballyIndexedResource> CreateBuffer(uint64_t entityID, MaterialBuckets bucket);
+    Components::IndirectCommandBuffers CreateBuffersForView(uint64_t viewID);
 
     // Remove buffers associated with an ID
-    void UnregisterBuffers(uint64_t entityID);
+    void UnregisterBuffers(uint64_t viewID);
 
     // Update all buffers when the number of draws changes
     void UpdateBuffersForBucket(MaterialBuckets bucket, unsigned int numDraws);
@@ -41,7 +42,7 @@ public:
 
 private:
     IndirectCommandBufferManager();
-    std::unordered_map<MaterialBuckets, std::unordered_map<int, std::vector<std::shared_ptr<DynamicGloballyIndexedResource>>>> m_buffers;
+	std::unordered_map<uint64_t, Components::IndirectCommandBuffers> m_viewIDToBuffers;
 	unsigned int m_opaqueCommandBufferSize = 0;
 	unsigned int m_alphaTestCommandBufferSize = 0;
 	unsigned int m_blendCommandBufferSize = 0;

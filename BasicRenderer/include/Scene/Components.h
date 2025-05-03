@@ -94,13 +94,6 @@ namespace Components {
 		CameraInfo info;
 	};
 
-	struct CameraBufferView {
-		CameraBufferView() = default;
-		CameraBufferView(std::shared_ptr<BufferView> view, uint64_t index) : view(view), index(index) {}
-		std::shared_ptr<BufferView> view;
-		uint64_t index;
-	}; // Represents a camera buffer view;
-
 	struct ProjectionMatrix {
 		ProjectionMatrix() : matrix(DirectX::XMMatrixIdentity()) {}
 		ProjectionMatrix(const DirectX::XMMATRIX& matrix) : matrix(matrix) {}
@@ -132,13 +125,18 @@ namespace Components {
 	};
 
 	struct IndirectCommandBuffers {
-		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> opaqueIndirectCommandBuffers;
-		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> alphaTestIndirectCommandBuffers;
-		std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> blendIndirectCommandBuffers;
+		std::shared_ptr<DynamicGloballyIndexedResource> opaqueIndirectCommandBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> alphaTestIndirectCommandBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> blendIndirectCommandBuffer;
+	};
+	struct RenderView {
+		uint64_t viewID;
+		std::shared_ptr<BufferView> cameraBufferView;;
+		uint64_t cameraBufferIndex;
+		IndirectCommandBuffers indirectCommandBuffers;
 	};
 	struct LightViewInfo {
-		std::vector<std::shared_ptr<BufferView>> cameraBufferViews;
-		IndirectCommandBuffers commandBuffers;
+		std::vector<RenderView> renderViews;
 		std::shared_ptr<BufferView> lightBufferView;
 		uint64_t lightBufferIndex;
 		uint64_t viewInfoBufferIndex;

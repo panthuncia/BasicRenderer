@@ -40,7 +40,6 @@ public:
     unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
     unsigned int GetNumLights();
     void SetCurrentCamera(flecs::entity camera);
-	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 	void SetCameraManager(CameraManager* cameraManager);
 	void UpdateLightBufferView(BufferView* view, LightInfo& data);
     void UpdateLightViewInfo(flecs::entity light);
@@ -76,7 +75,6 @@ private:
     std::function<uint16_t()> getShadowResolution;
     std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
     std::function<void(std::shared_ptr<void>)> markForDelete;
-	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
     CameraManager* m_pCameraManager = nullptr;
 	unsigned int m_lightPagePoolSize = 0;
 

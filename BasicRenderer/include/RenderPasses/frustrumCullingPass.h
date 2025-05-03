@@ -60,7 +60,7 @@ public:
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int numCascades = getNumDirectionalLightCascades();
-		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::CameraBufferView>()->index;
+		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>()->cameraBufferIndex;
 		// opaque buffer
 		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
@@ -82,12 +82,12 @@ public:
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
-				for (auto& buffer : lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers) {
+				for (auto& view : lightViewInfo.renderViews) {
+					auto& buffer = view.indirectCommandBuffers.opaqueIndirectCommandBuffer;
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
-					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
+					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
@@ -114,12 +114,12 @@ public:
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
-				for (auto& buffer : lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers) {
+				for (auto& view : lightViewInfo.renderViews) {
+					auto& buffer = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
-					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
+					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);
@@ -147,12 +147,12 @@ public:
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				auto& lightViews = lightViewInfo.cameraBufferViews;
 				int i = 0;
-				for (auto& buffer : lightViewInfo.commandBuffers.blendIndirectCommandBuffers) {
+				for (auto& view : lightViewInfo.renderViews) {
+					auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
-					unsigned int lightCameraIndex = lightViews[i]->GetOffset() / sizeof(CameraInfo);
+					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
 					commandList->Dispatch(numThreadGroups, 1, 1);

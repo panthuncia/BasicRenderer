@@ -137,7 +137,7 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 
 	auto projection = GetProjectionMatrixForLight(info);
 
-	// For each face of the cubemap, create a camera view and command buffers.
+	// For each face of the cubemap, create a camera view
 	for (int i = 0; i < 6; i++) {
 		CameraInfo camera = {};
 		camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
@@ -145,17 +145,9 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 		camera.projection = projection;
 		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.projection);
 
-		auto view = m_pCameraManager->AddCamera(camera);
-		viewInfo.cameraBufferViews.push_back(view);
-		m_pointViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
-
-		// Create and attach the command buffers.
-		viewInfo.commandBuffers.opaqueIndirectCommandBuffers.push_back(
-			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Opaque));
-		viewInfo.commandBuffers.alphaTestIndirectCommandBuffers.push_back(
-			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::AlphaTest));
-		viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
-			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
+		auto renderView = m_pCameraManager->AddCamera(camera);
+		m_pointViewInfo->Add(renderView.cameraBufferIndex);
+		viewInfo.renderViews.push_back(renderView);
 	}	
 	
 	viewInfo.projectionMatrix = Components::Matrix(projection);
@@ -178,16 +170,9 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	camera.projection = GetProjectionMatrixForLight(info);
 	camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, camera.projection);
 
-	auto view = m_pCameraManager->AddCamera(camera);
-	viewInfo.cameraBufferViews.push_back(view);
-	m_spotViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
-
-	viewInfo.commandBuffers.opaqueIndirectCommandBuffers.push_back(
-		m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Opaque));
-	viewInfo.commandBuffers.alphaTestIndirectCommandBuffers.push_back(
-		m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::AlphaTest));
-	viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
-		m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
+	auto renderView = m_pCameraManager->AddCamera(camera);
+	m_spotViewInfo->Add(renderView.cameraBufferIndex);
+	viewInfo.renderViews.push_back(renderView);
 
 	viewInfo.projectionMatrix = Components::Matrix(camera.projection);
 	return { viewInfo, std::nullopt };
@@ -231,16 +216,9 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.projection = cascades[i].orthoMatrix;
 		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 
-		auto view = m_pCameraManager->AddCamera(cameraInfo);
-		viewInfo.cameraBufferViews.push_back(view);
-		m_directionalViewInfo->Add(view->GetOffset() / sizeof(CameraInfo));
-
-		viewInfo.commandBuffers.opaqueIndirectCommandBuffers.push_back(
-			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Opaque));
-		viewInfo.commandBuffers.alphaTestIndirectCommandBuffers.push_back(
-			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::AlphaTest));
-		viewInfo.commandBuffers.blendIndirectCommandBuffers.push_back(
-			m_pCommandBufferManager->CreateBuffer(entityId, MaterialBuckets::Blend));
+		auto renderView = m_pCameraManager->AddCamera(cameraInfo);
+		m_directionalViewInfo->Add(renderView.cameraBufferIndex);
+		viewInfo.renderViews.push_back(renderView);
 	}
 	return { viewInfo, cascadePlanes };
 }
@@ -249,7 +227,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	//auto projectionMatrix = light.get<Components::ProjectionMatrix>();
 	auto viewInfo = light.get<Components::LightViewInfo>();
-	auto& views = viewInfo->cameraBufferViews;
+	auto& renderViews = viewInfo->renderViews;
 	auto lightInfo = light.get<Components::Light>();
 	auto lightMatrix = light.get<Components::Matrix>();
 	auto planes = light.get<Components::FrustrumPlanes>()->frustumPlanes;
@@ -269,7 +247,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[3] = planes[i][3];
 			info.clippingPlanes[4] = planes[i][4];
 			info.clippingPlanes[5] = planes[i][5];
-			m_pCameraManager->UpdateCamera(views[i], info);
+			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
 	}
@@ -286,7 +264,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		camera.clippingPlanes[3] = planes[0][3];
 		camera.clippingPlanes[4] = planes[0][4];
 		camera.clippingPlanes[5] = planes[0][5];
-		m_pCameraManager->UpdateCamera(views[0], camera);
+		m_pCameraManager->UpdateCamera(renderViews[0], camera);
 		break;
 	}
 	case Components::LightType::Directional: {
@@ -312,7 +290,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[3] = cascades[i].frustumPlanes[3];
 			info.clippingPlanes[4] = cascades[i].frustumPlanes[4];
 			info.clippingPlanes[5] = cascades[i].frustumPlanes[5];
-			m_pCameraManager->UpdateCamera(views[i], info);
+			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
 	}
@@ -323,23 +301,23 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 
 void LightManager::RemoveLightViewInfo(flecs::entity light) {
 
-	m_pCommandBufferManager->UnregisterBuffers(light.id()); // Remove indirect command buffers
+	//m_pCommandBufferManager->UnregisterBuffers(light.id()); // Remove indirect command buffers
 	auto lightInfo = light.get<Components::Light>();
 	auto viewInfo = light.get<Components::LightViewInfo>();
 	switch (lightInfo->type) {
 	case Components::LightType::Point: {
-		auto& views = viewInfo->cameraBufferViews;
+		auto& views = viewInfo->renderViews;
 		for (int i = 0; i < 6; i++) {
 			m_pCameraManager->RemoveCamera(views[i]);
 		}
 		break;
 	}
 	case Components::LightType::Spot: {
-		m_pCameraManager->RemoveCamera(viewInfo->cameraBufferViews[0]);
+		m_pCameraManager->RemoveCamera(viewInfo->renderViews[0]);
 		break;
 	}
 	case Components::LightType::Directional: {
-		auto& views = viewInfo->cameraBufferViews;
+		auto& views = viewInfo->renderViews;
 		for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
 			m_pCameraManager->RemoveCamera(views[i]);
 		}
@@ -354,9 +332,6 @@ void LightManager::SetCurrentCamera(flecs::entity camera) {
 	m_currentCamera = camera;
 }
 
-void LightManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {
-	m_pCommandBufferManager = commandBufferManager;
-}
 
 void LightManager::SetCameraManager(CameraManager* cameraManager) {
 	m_pCameraManager = cameraManager;

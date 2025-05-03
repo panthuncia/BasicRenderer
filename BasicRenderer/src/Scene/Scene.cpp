@@ -225,8 +225,8 @@ void Scene::ActivateLight(flecs::entity& entity) {
 
 void Scene::ActivateCamera(flecs::entity& entity) {
 	auto cameraInfo = entity.get_mut<Components::Camera>()->info;
-	auto cameraBufferView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
-	entity.set<Components::CameraBufferView>({cameraBufferView, cameraBufferView->GetOffset()/sizeof(CameraInfo)});
+	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
+	entity.set<Components::RenderView>(renderView);
 }
 
 void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
@@ -443,13 +443,8 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
     if (m_primaryCamera.is_valid()) {
 
         m_managerInterface.GetIndirectCommandBufferManager()->UnregisterBuffers(m_primaryCamera.id());
-        m_pPrimaryCameraOpaqueIndirectCommandBuffer = nullptr;
-		m_pPrimaryCameraAlphaTestIndirectCommandBuffer = nullptr;
-		m_pPrimaryCameraBlendIndirectCommandBuffer = nullptr;
 
-		auto cameraBufferView = m_primaryCamera.get<Components::CameraBufferView>();
-		m_managerInterface.GetCameraManager()->RemoveCamera(cameraBufferView->view);
-		m_primaryCamera.remove<Components::CameraBufferView>();
+		m_managerInterface.GetCameraManager()->RemoveCamera(*m_primaryCamera.get<Components::RenderView>());
     }
 
 	SettingsManager::GetInstance().getSettingSetter<float>("maxShadowDistance")(zFar);
@@ -497,9 +492,6 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	if (m_managerInterface.GetLightManager() != nullptr) {
 		m_managerInterface.GetLightManager()->SetCurrentCamera(entity);
 	}
-    m_pPrimaryCameraOpaqueIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Opaque);
-	m_pPrimaryCameraAlphaTestIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::AlphaTest);
-	m_pPrimaryCameraBlendIndirectCommandBuffer = m_managerInterface.GetIndirectCommandBufferManager()->CreateBuffer(entity.id(), MaterialBuckets::Blend);
 
 	m_primaryCamera = entity;
 }
@@ -616,15 +608,18 @@ void Scene::Activate(ManagerInterface managerInterface) {
 }
 
 std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() {
-	return m_pPrimaryCameraOpaqueIndirectCommandBuffer;
+	auto view = m_primaryCamera.get<Components::RenderView>();
+	return view->indirectCommandBuffers.opaqueIndirectCommandBuffer;
 }
 
 std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraAlphaTestIndirectCommandBuffer() {
-	return m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+	auto view = m_primaryCamera.get<Components::RenderView>();
+	return view->indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 }
 
 std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraBlendIndirectCommandBuffer() {
-	return m_pPrimaryCameraBlendIndirectCommandBuffer;
+	auto view = m_primaryCamera.get<Components::RenderView>();
+	return view->indirectCommandBuffers.blendIndirectCommandBuffer;
 }
 
 void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {

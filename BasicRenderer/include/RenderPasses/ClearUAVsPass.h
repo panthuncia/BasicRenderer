@@ -55,22 +55,20 @@ public:
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
 		lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-			for (auto& buffer : lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers) {
-				auto resource = buffer->GetResource();
+			for (auto& view : lightViewInfo.renderViews) {
+				auto resource = view.indirectCommandBuffers.opaqueIndirectCommandBuffer->GetResource();
 				auto counterOffset = resource->GetUAVCounterOffset();
 				auto apiResource = resource->GetAPIResource();
 				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
-			}
-			for (auto& buffer : lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers) {
-				auto resource = buffer->GetResource();
-				auto counterOffset = resource->GetUAVCounterOffset();
-				auto apiResource = resource->GetAPIResource();
+
+				resource = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer->GetResource();
+				counterOffset = resource->GetUAVCounterOffset();
+				apiResource = resource->GetAPIResource();
 				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
-			}
-			for (auto& buffer : lightViewInfo.commandBuffers.blendIndirectCommandBuffers) {
-				auto resource = buffer->GetResource();
-				auto counterOffset = resource->GetUAVCounterOffset();
-				auto apiResource = resource->GetAPIResource();
+
+				resource = view.indirectCommandBuffers.blendIndirectCommandBuffer->GetResource();
+				counterOffset = resource->GetUAVCounterOffset();
+				apiResource = resource->GetAPIResource();
 				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 			}
 			});

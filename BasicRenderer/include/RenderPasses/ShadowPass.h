@@ -370,9 +370,10 @@ private:
                 commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
-                auto& opaque = lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers[0];
-                auto& alphaTest = lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers[0];
-                auto& blend = lightViewInfo.commandBuffers.blendIndirectCommandBuffers[0];
+                auto& views = lightViewInfo.renderViews;
+                auto& opaque = views[0].indirectCommandBuffers.opaqueIndirectCommandBuffer;
+				auto& alphaTest = views[0].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
+				auto& blend = views[0].indirectCommandBuffers.blendIndirectCommandBuffer;
                 drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 break;
             }
@@ -386,9 +387,10 @@ private:
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
-                    auto& opaque = lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers[i];
-                    auto& alphaTest = lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers[i];
-                    auto& blend = lightViewInfo.commandBuffers.blendIndirectCommandBuffers[i];
+					auto& views = lightViewInfo.renderViews;
+					auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
+					auto& alphaTest = views[i].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
+					auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
                     drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 }
                 break;
@@ -403,9 +405,10 @@ private:
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
-                    auto& opaque = lightViewInfo.commandBuffers.opaqueIndirectCommandBuffers[i];
-                    auto& alphaTest = lightViewInfo.commandBuffers.alphaTestIndirectCommandBuffers[i];
-                    auto& blend = lightViewInfo.commandBuffers.blendIndirectCommandBuffers[i];
+					auto& views = lightViewInfo.renderViews;
+					auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
+					auto& alphaTest = views[i].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
+					auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
                     drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 }
             }

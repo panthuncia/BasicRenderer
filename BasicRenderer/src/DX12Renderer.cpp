@@ -163,7 +163,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
 	ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
-	m_pLightManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Also for indirect command buffers
+	m_pCameraManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Camera manager needs to make indirect command buffers
 
 	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
 
@@ -205,7 +205,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
         }
 
-        if (entity.has<Components::Camera>() && entity.has<Components::CameraBufferView>()) {
+        if (entity.has<Components::Camera>() && entity.has<Components::RenderView>()) {
             auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
 
             Components::Camera* camera = entity.get_mut<Components::Camera>();
@@ -217,8 +217,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
             camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
 
-            auto cameraBufferView = entity.get_mut<Components::CameraBufferView>();
-			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(cameraBufferView->view.get(), camera->info);
+            auto renderView = entity.get_mut<Components::RenderView>();
+			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(renderView->cameraBufferView.get(), camera->info);
         }
 
         if (entity.has<Components::Light>()) {
@@ -694,7 +694,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 	world.progress();
 
     auto camera = currentScene->GetPrimaryCamera();
-    unsigned int cameraIndex = camera.get<Components::CameraBufferView>()->index;
+    unsigned int cameraIndex = camera.get<Components::RenderView>()->cameraBufferIndex;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
 

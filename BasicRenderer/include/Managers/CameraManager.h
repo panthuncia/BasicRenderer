@@ -2,10 +2,13 @@
 
 #include <memory.h>
 #include <mutex>
+#include <atomic>
 
 #include "ShaderBuffers.h"
 
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
+
+class IndirectCommandBufferManager;
 
 class CameraManager {
 public:
@@ -17,11 +20,11 @@ public:
 		return m_pCameraBuffer->GetSRVInfo()[0].index;
 	}
 
-	std::shared_ptr<BufferView> AddCamera(CameraInfo& camera);
-	void RemoveCamera(std::shared_ptr<BufferView> view);
+	Components::RenderView AddCamera(CameraInfo& camera);
+	void RemoveCamera(Components::RenderView);
 
-	void UpdateCamera(std::shared_ptr<BufferView> view, CameraInfo& camera) {
-		m_pCameraBuffer->UpdateView(view.get(), &camera);
+	void UpdateCamera(const Components::RenderView& view, CameraInfo& camera) {
+		m_pCameraBuffer->UpdateView(view.cameraBufferView.get(), &camera);
 	}
 
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>>& GetCameraBuffer() {
@@ -33,8 +36,14 @@ public:
 		m_pCameraBuffer->UpdateView(view, &data);
 	}
 
+	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
+
+
 private:
 	CameraManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
 	std::mutex m_cameraUpdateMutex;
+	std::atomic<uint64_t> m_viewIDCounter = 0;
+
+	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
 };
