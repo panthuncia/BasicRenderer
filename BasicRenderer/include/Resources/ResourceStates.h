@@ -159,7 +159,13 @@ inline ResourceLayout AccessToLayout(ResourceAccessType access, bool directQueue
 }
 
 
-inline ResourceSyncState ComputeSyncFromAccess(ResourceAccessType) {
+inline ResourceSyncState ComputeSyncFromAccess(ResourceAccessType access) {
+	bool needsIndirect = (access & ResourceAccessType::INDIRECT_ARGUMENT) != 0;
+
+	if (needsIndirect) {
+		return ResourceSyncState::EXECUTE_INDIRECT;
+	}
+
 	return ResourceSyncState::COMPUTE_SHADING;
 }
 

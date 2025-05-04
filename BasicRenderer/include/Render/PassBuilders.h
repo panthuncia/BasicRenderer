@@ -353,6 +353,12 @@ public:
         return *this;
     }
 
+    template<typename... Args>
+    ComputePassBuilder& WithIndirectArguments(Args&&... args) & {
+        (addIndirectArguments(std::forward<Args>(args)), ...);
+        return *this;
+    }
+
     // Second set, callable on temporaries
     template<typename... Args>
     ComputePassBuilder WithShaderResource(Args&&... args) && {
@@ -369,6 +375,12 @@ public:
     template<typename... Args>
     ComputePassBuilder WithUnorderedAccess(Args&&... args) && {
         (addUnorderedAccess(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    ComputePassBuilder WithIndirectArguments(Args&&... args) && {
+        (addIndirectArguments(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
@@ -442,6 +454,18 @@ private:
         }
     }
 
+	// Indirect arguments
+	void addIndirectArguments(const std::shared_ptr<Resource>& r) {
+		if (!r) return;
+		params.indirectArgumentBuffers.push_back(r);
+	}
+	void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
+		for (auto& r : list) {
+			if (!r) continue;
+			params.indirectArgumentBuffers.push_back(r);
+		}
+	}
+
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");
     }
@@ -462,6 +486,7 @@ private:
         accumulate(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
         accumulate(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
         accumulate(params.unorderedAccessViews,ResourceAccessType::UNORDERED_ACCESS);
+		accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
 
         std::vector<ResourceRequirement> reqs;
         reqs.reserve(accessMap.size());
@@ -472,7 +497,7 @@ private:
             rr.layout   = AccessToLayout(flags, false);
             rr.sync     = ComputeSyncFromAccess(flags);
 
-            if (!rr.resource->HasLayout() && !ValidateResourceLayoutAndAccessType(rr.layout, rr.access)) {
+            if (rr.resource->HasLayout() && !ValidateResourceLayoutAndAccessType(rr.layout, rr.access)) {
                 throw std::runtime_error("Resource layout and state validation failed");
             }
 

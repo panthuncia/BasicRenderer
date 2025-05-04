@@ -10,6 +10,7 @@
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 
 class IndirectCommandBufferManager;
+class ResourceGroup;
 
 class CameraManager {
 public:
@@ -40,6 +41,9 @@ public:
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 
 	void SetMeshletBitfieldSize(unsigned int numMeshlets);
+	const std::shared_ptr<ResourceGroup>& GetMeshletCullingBitfieldGroup() const {
+		return m_meshletCullingBitfieldGroup;
+	}
 
 private:
 	CameraManager();
@@ -49,6 +53,7 @@ private:
 	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshletBitfieldBuffers;
 
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
+	std::shared_ptr<ResourceGroup> m_meshletCullingBitfieldGroup;
 
 	unsigned int m_currentMeshletBitfieldSize = 0;
 };

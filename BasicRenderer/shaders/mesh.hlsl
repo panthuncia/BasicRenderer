@@ -111,6 +111,15 @@ void MSMain(
     out vertices PSInput outputVertices[64],
     out indices uint3 outputTriangles[64]) {
 
+    // Test if this meshlet is culled
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+    StructuredBuffer<bool> meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
+    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBoundsBufferStartIndex + vGroupID.x;
+    
+    bool bCulled = meshletCullingBitfieldBuffer[meshletBitfieldIndex];
+    
+    
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex]; // Base vertex buffer
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferDescriptorIndex]; // Meshlets, containing vertex & primitive offset & num
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferDescriptorIndex]; // Meshlet vertices, as indices into base vertex buffer
@@ -118,15 +127,25 @@ void MSMain(
     
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
-    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
     
     uint meshletOffset = meshBuffer.meshletBufferOffset;
     Meshlet meshlet = meshletBuffer[meshletOffset+vGroupID.x];
-    SetMeshOutputCounts(meshlet.VertCount, meshlet.TriCount);
+    
+    uint vertCount = 0;
+    uint triCount = 0;
+    if (!bCulled)
+    {
+        vertCount = meshlet.VertCount;
+        triCount = meshlet.TriCount;
+    }
+    SetMeshOutputCounts(vertCount, triCount);
+    if (bCulled)
+    {
+        return;
+    }
     
     uint triOffset = meshBuffer.meshletTrianglesBufferOffset + meshlet.TriOffset + uGroupThreadID * 3;
     

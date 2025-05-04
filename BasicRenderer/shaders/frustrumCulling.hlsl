@@ -86,36 +86,66 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
 
 }
-/*
-// Meshlet culling, one thread per meshlet
-[numthreads(128, 1, 1)]
-void MeshletFrustrumCullingCSMain(uint dispatchID : SV_DispatchThreadID)
+
+// Meshlet culling, one thread per meshlet, one dispatch per mesh, similar to mesh shader
+[numthreads(64, 1, 1)]
+void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
 {
-    if (dispatchID > maxDrawIndex)
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    
+    if (perMeshBuffer[perMeshBufferIndex].numMeshlets <= vDispatchThreadID.x)
     {
         return;
     }
-    StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
-    StructuredBuffer<IndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];
-    AppendStructuredBuffer<IndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
-    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    PerMeshBuffer perMesh = perMeshBuffer[perMeshBufferIndex];
     
-    uint index = activeDrawSetIndicesBuffer[dispatchID];
-    IndirectCommand command = indirectCommandBuffer[index];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+    uint meshletBoundsIndex = meshInstanceBuffer.meshletBoundsBufferStartIndex + vDispatchThreadID.x;
+    
+    StructuredBuffer<BoundingSphere> meshletBoundsBuffer = ResourceDescriptorHeap[UintRootConstant0];
+    BoundingSphere meshletBounds = meshletBoundsBuffer[meshletBoundsIndex];
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
-    Camera camera = cameras[lightViewIndex]; // In compute root signature, this directly indexes the camera buffer instead of using indirection through light view index buffers
+    Camera camera = cameras[lightViewIndex];
     
-    PerMeshInstanceBuffer perMeshInstance = perMeshBuffer[command.perMeshInstanceBufferIndex];
-    RWStructuredBuffer<bool> meshletCullingBitfield = ResourceDescriptorHeap[UintRootConstant0];
-    StructuredBuffer<BoundingSphere> meshletBoundingSpheres = ResourceDescriptorHeap[UintRootConstant1];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    PerObjectBuffer perObject = perObjectBuffer[perObjectBufferIndex];
+
+    float4 objectSpaceCenter = float4(meshletBounds.center.xyz, 1.0);
+    float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
+    float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
     
-    BoundingSphere meshletBoundingSphere = meshletBoundingSpheres[perMeshInstance.meshletBoundsBufferStartIndex +];
+    float3 scaleFactors = float3(
+    length(perObject.model[0].xyz),
+    length(perObject.model[1].xyz),
+    length(perObject.model[2].xyz)
+    );
     
-    // Frustrum culling
+    float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
+    float scaledBoundingRadius = meshletBounds.radius * maxScale;
+
+    RWStructuredBuffer<bool> meshletBitfieldBuffer = ResourceDescriptorHeap[UintRootConstant1]; // TODO: use actual bits, not bools
     
+    // Disable culling for skinned meshes for now, as the bounding sphere is not updated
+    if (!(perMesh.vertexFlags & VERTEX_SKINNED))
+    { // TODO: Implement skinned mesh culling
     
-    // Calculate the scale factor for the bounding sphere radius
+        bool bCulled = false;
+    
+        for (uint i = 0; i < 6; i++)
+        {
+            float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
+            float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
+            float boundingRadius = perMesh.boundingSphere.radius;
+            bCulled |= distance < -scaledBoundingRadius;
+        }
+    
+        if (bCulled)
+        {
+            meshletBitfieldBuffer[meshletBoundsIndex] = true; // TODO: change when using actual bits
+            return;
+        }
+    }
+    meshletBitfieldBuffer[meshletBoundsIndex] = false;
 }
-*/

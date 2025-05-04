@@ -31,6 +31,7 @@ public:
 	unsigned int GetMeshletOffsetBufferSRVIndex() const;
 	unsigned int GetMeshletIndexBufferSRVIndex() const;
 	unsigned int GetMeshletTriangleBufferSRVIndex() const;
+	unsigned int GetMeshletBoundsBufferSRVIndex() const;
 	std::shared_ptr<ResourceGroup> GetResourceGroup();
 	unsigned int GetPerMeshBufferSRVIndex() const;
 	std::shared_ptr<DynamicBuffer>& GetPerMeshBuffers();

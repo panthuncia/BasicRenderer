@@ -55,7 +55,7 @@ public:
 	BufferView* GetMeshletVerticesBufferView() { return m_meshletVerticesBufferView.get(); }
 	BufferView* GetMeshletTrianglesBufferView() { return m_meshletTrianglesBufferView.get(); }
 
-	void SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView);
+	void SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView, std::unique_ptr<BufferView> meshletBoundsBufferView);
 	void SetBaseSkin(std::shared_ptr<Skeleton> skeleton);
 	bool HasBaseSkin() const { return m_baseSkeleton != nullptr; }
 	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }

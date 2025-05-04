@@ -145,7 +145,7 @@ struct PerMeshBuffer {
     uint meshletTrianglesBufferOffset;
     BoundingSphere boundingSphere;
     uint numVertices;
-    uint pad[1];
+    uint numMeshlets;
 };
 
 struct PerMeshInstanceBuffer {

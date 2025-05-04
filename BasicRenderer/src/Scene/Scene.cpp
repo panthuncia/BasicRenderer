@@ -607,24 +607,29 @@ void Scene::Activate(ManagerInterface managerInterface) {
 	MakeResident();
 }
 
-std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() {
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() const {
 	auto view = m_primaryCamera.get<Components::RenderView>();
 	return view->indirectCommandBuffers.opaqueIndirectCommandBuffer;
 }
 
-std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraAlphaTestIndirectCommandBuffer() {
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraAlphaTestIndirectCommandBuffer() const {
 	auto view = m_primaryCamera.get<Components::RenderView>();
 	return view->indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 }
 
-std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraBlendIndirectCommandBuffer() {
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraBlendIndirectCommandBuffer() const {
 	auto view = m_primaryCamera.get<Components::RenderView>();
 	return view->indirectCommandBuffers.blendIndirectCommandBuffer;
 }
 
-std::shared_ptr<DynamicGloballyIndexedResource> Scene::GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() {
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() const {
 	auto view = m_primaryCamera.get<Components::RenderView>();
 	return view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
+}
+
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const {
+	auto view = m_primaryCamera.get<Components::RenderView>();
+	return view->meshletBitfieldBuffer;
 }
 
 void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {

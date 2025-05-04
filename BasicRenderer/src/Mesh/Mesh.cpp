@@ -83,6 +83,8 @@ void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 			bounds.radius
 			});
 	}
+
+	m_perMeshBufferData.numMeshlets = static_cast<unsigned int>(m_meshlets.size());
 }
 
 void Mesh::ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max) {
@@ -245,12 +247,13 @@ void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 	}
 }
 
-void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView) {
+void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView, std::unique_ptr<BufferView> meshletBoundsBufferView) {
 	m_postSkinningVertexBufferView = std::move(postSkinningVertexBufferView);
 	m_preSkinningVertexBufferView = std::move(preSkinningVertexBufferView);
 	m_meshletBufferView = std::move(meshletBufferView);
 	m_meshletVerticesBufferView = std::move(meshletVerticesBufferView);
 	m_meshletTrianglesBufferView = std::move(meshletTrianglesBufferView);
+	m_meshletBoundsBufferView = std::move(meshletBoundsBufferView);
 	if (m_meshletBufferView == nullptr || m_meshletVerticesBufferView == nullptr || m_meshletTrianglesBufferView == nullptr) {
 		return; // We're probably deleting the mesh
 	}
@@ -263,7 +266,6 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferVie
 	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset() / sizeof(meshopt_Meshlet);
 	m_perMeshBufferData.meshletVerticesBufferOffset = m_meshletVerticesBufferView->GetOffset() / 4;
 	m_perMeshBufferData.meshletTrianglesBufferOffset = m_meshletTrianglesBufferView->GetOffset();
-
 	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}

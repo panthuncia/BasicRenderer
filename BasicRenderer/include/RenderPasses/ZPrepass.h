@@ -147,6 +147,11 @@ private:
         staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
 		staticBufferIndices[NormalsTextureDescriptorIndex] = m_pNormals->GetRTVInfos()[0].index;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
+
+		unsigned int variableRootConstants[NumVariableBufferRootConstants] = {};
+		variableRootConstants[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+
+		commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableRootConstants, 0);
     }
 
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList* commandList) {

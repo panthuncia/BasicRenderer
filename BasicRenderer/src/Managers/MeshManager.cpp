@@ -17,7 +17,7 @@ MeshManager::MeshManager() {
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
 	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
-	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true);
+	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(4, 4, L"meshletBitfieldBuffer", false, true);
 	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
 	m_resourceGroup->AddResource(m_meshletOffsets);
 	m_resourceGroup->AddResource(m_meshletIndices);
@@ -67,7 +67,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, b
 	auto perMeshBufferView = m_perMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 
-	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView));
+	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView), std::move(meshletBoundsView));
 	mesh->UpdateVertexCount(useMeshletReorderedVertices);
 }
 
@@ -112,9 +112,8 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 	}
 
 	mesh->SetPerMeshBufferView(nullptr);
-	mesh->SetBufferViews(nullptr, nullptr, nullptr, nullptr, nullptr);
+	mesh->SetBufferViews(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
 	mesh->SetCurrentMeshManager(nullptr);
-	mesh->SetMeshletBoundsBufferView(nullptr);
 }
 
 void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices) {
@@ -208,3 +207,7 @@ std::shared_ptr<DynamicBuffer>&  MeshManager::GetPostSkinningVertices() {
 unsigned int  MeshManager::GetPerMeshInstanceBufferSRVIndex() const {
 	return m_perMeshInstanceBuffers->GetSRVInfo()[0].index;
 }
+unsigned int MeshManager::GetMeshletBoundsBufferSRVIndex() const {
+	return m_meshletBoundsBuffer->GetSRVInfo()[0].index;
+}
+

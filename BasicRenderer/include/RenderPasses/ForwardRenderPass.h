@@ -128,6 +128,9 @@ private:
         lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo()[0].index;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
+		unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+		variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetSRVInfo()[0].index;
+
     }
 
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList* commandList) {

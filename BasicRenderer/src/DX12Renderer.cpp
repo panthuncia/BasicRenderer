@@ -29,7 +29,8 @@
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
-#include "RenderPasses/frustrumCullingPass.h"
+#include "RenderPasses/FrustrumCullingPass.h"
+#include "RenderPasses/MeshletFrustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
 #include "RenderPasses/PPLLFillPass.h"
 #include "RenderPasses/PPLLResolvePass.h"
@@ -995,7 +996,8 @@ void DX12Renderer::CreateRenderGraph() {
 	auto& normalMatrixBuffer = objectManager->GetNormalMatrixBuffer();
 	auto& environmentsBuffer = m_pEnvironmentManager->GetEnvironmentInfoBuffer();
     auto& environmentPrefilteredGroup = m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup();
-
+    auto& meshletCullingBitfieldBufferGroup = m_pCameraManager->GetMeshletCullingBitfieldGroup();
+    auto& primaryCameraMeshletBitfieldBuffer = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
         useMeshShaders = false;
@@ -1026,6 +1028,8 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->AddResource(meshResourceGroup);
 	newGraph->AddResource(environmentsBuffer);
 	newGraph->AddResource(environmentPrefilteredGroup);
+	newGraph->AddResource(meshletCullingBitfieldBufferGroup);
+	newGraph->AddResource(primaryCameraMeshletBitfieldBuffer);
 
     // Frustrum culling goes before Z prepass
     bool indirect = getIndirectDrawsEnabled();
@@ -1050,6 +1054,12 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
 			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup)
 			.Build<FrustrumCullingPass>();
+
+        newGraph->BuildComputePass("MeshletFrustrumCullingPass")
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+			.Build<MeshletFrustrumCullingPass>();
     }
 
     // Skinning comes before Z prepass
@@ -1132,7 +1142,7 @@ void DX12Renderer::CreateRenderGraph() {
         .IsGeometryPass();
 
 	if (useMeshShaders) {
-		zBuilder.WithShaderResource(meshResourceGroup);
+		zBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
 		if (indirect) {
 			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
@@ -1276,15 +1286,12 @@ void DX12Renderer::CreateRenderGraph() {
     
     if (!m_deferredRendering) {
         primaryPassBuilder.WithDepthReadWrite(depthTexture);
+		primaryPassBuilder.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices);
         primaryPassBuilder.IsGeometryPass();
 	}
 	else {
 		primaryPassBuilder.WithDepthRead(depthTexture);
 	}
-
-	if (!m_deferredRendering) { // Don't need object and mesh info for deferred rendering
-        primaryPassBuilder.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices);
-    }
 
     if (m_clusteredLighting) {
         primaryPassBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
@@ -1295,7 +1302,7 @@ void DX12Renderer::CreateRenderGraph() {
     }
 
 	if (useMeshShaders && !m_deferredRendering) { // Don't need meshlets for deferred rendering
-        primaryPassBuilder.WithShaderResource(meshResourceGroup);
+        primaryPassBuilder.WithShaderResource(meshResourceGroup,  primaryCameraMeshletBitfieldBuffer);
 		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
             primaryPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
         }

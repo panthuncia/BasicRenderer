@@ -77,7 +77,7 @@ struct PerMeshCB {
     unsigned int meshletTrianglesBufferOffset;
 	BoundingSphere boundingSphere;
 	unsigned int numVertices;
-    unsigned int pad[1];
+    unsigned int numMeshlets;
 };
 
 struct PerMeshInstanceCB {
@@ -289,6 +289,7 @@ enum VariableBufferRootConstants {
     ActiveDrawSetIndicesBufferDescriptorIndex,
     IndirectCommandBufferDescriptorIndex,
     MeshletCullingIndirectCommandBufferDescriptorIndex,
+    MeshletCullingBitfieldBufferDescriptorIndex,
     MaxDrawIndex,
 	NumVariableBufferRootConstants
 };

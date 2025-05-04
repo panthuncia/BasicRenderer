@@ -101,6 +101,10 @@ public:
 		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo()[0].index;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
+		unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+		variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetSRVInfo()[0].index;
+		commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
+
 		unsigned int misc[NumMiscUintRootConstants] = {};
 		misc[0] = m_depthBufferDescriptorIndex;
 

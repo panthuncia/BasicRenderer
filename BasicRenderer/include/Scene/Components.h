@@ -135,7 +135,7 @@ namespace Components {
 		std::shared_ptr<BufferView> cameraBufferView;;
 		uint64_t cameraBufferIndex;
 		IndirectCommandBuffers indirectCommandBuffers;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBufferView;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
 	};
 	struct LightViewInfo {
 		std::vector<RenderView> renderViews;

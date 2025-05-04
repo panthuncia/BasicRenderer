@@ -4,10 +4,12 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Resources/DynamicResource.h"
+#include "Resources/ResourceGroup.h"
 
 CameraManager::CameraManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_pCameraBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<CameraInfo>(1, L"cameraBuffer<CameraInfo>");
+	m_meshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshletCullingBitfieldGroup");
 }
 
 Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
@@ -19,9 +21,11 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	view.cameraBufferView = m_pCameraBuffer->Add();
 	view.cameraBufferIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 	auto bitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshletBitfieldSize, sizeof(unsigned int), false, true, false);
-	view.meshletBitfieldBufferView = std::make_shared<DynamicGloballyIndexedResource>(bitfield);
+	bitfield->SetName(L"MeshletBitfieldBuffer (" + std::to_wstring(viewID) + L")");
+	view.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(bitfield);
 
-	m_meshletBitfieldBuffers[viewID] = view.meshletBitfieldBufferView;
+	m_meshletBitfieldBuffers[viewID] = view.meshletBitfieldBuffer;
+	m_meshletCullingBitfieldGroup->AddResource(view.meshletBitfieldBuffer);
 
 	m_pCameraBuffer->UpdateView(view.cameraBufferView.get(), &camera);
 
@@ -31,6 +35,7 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 void CameraManager::RemoveCamera(Components::RenderView view) {
 	m_pCameraBuffer->Remove(view.cameraBufferView.get());
 	m_meshletBitfieldBuffers.erase(view.viewID);
+	m_meshletCullingBitfieldGroup->RemoveResource(view.meshletBitfieldBuffer.get());
 }
 
 void CameraManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {

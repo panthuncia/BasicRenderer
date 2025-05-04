@@ -33,10 +33,12 @@ public:
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
     //LightManager& GetLightManager();
     void Activate(ManagerInterface managerInterface);
-	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraOpaqueIndirectCommandBuffer();
-    std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraAlphaTestIndirectCommandBuffer();
-	std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraBlendIndirectCommandBuffer();
-    std::shared_ptr<DynamicGloballyIndexedResource> GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer();
+    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraOpaqueIndirectCommandBuffer() const;
+    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraAlphaTestIndirectCommandBuffer() const;
+    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraBlendIndirectCommandBuffer() const;
+    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() const;
+    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const;
+
     void ProcessEntitySkins(bool overrideExistingSkins = false);
     std::shared_ptr<Scene> Clone() const;
 	void DisableShadows();
