@@ -38,4 +38,54 @@ float4 LoadFloat4(uint offset, ByteAddressBuffer buffer) {
     return result;
 }
 
+uint GetBit(ByteAddressBuffer bits, uint bitIndex)
+{
+    // which 32-bit word, and byte offset in the buffer
+    uint wordIdx = bitIndex >> 5; // divide by 32
+    uint byteOff = wordIdx * 4; // 4 bytes per 32-bit word
+    uint bitInWord = bitIndex & 31; // mod 32
+
+    uint word = bits.Load(byteOff);
+    return (word >> bitInWord) & 1u;
+}
+
+void WriteBit(RWByteAddressBuffer bits, uint bitIndex, uint value)
+{
+    uint wordIdx = bitIndex >> 5;
+    uint byteOff = wordIdx * 4;
+    uint bitInWord = bitIndex & 31;
+    uint mask = 1u << bitInWord;
+
+    // load-modify-store
+    uint word = bits.Load(byteOff);
+    word = (word & ~mask) // clear that bit
+         | ((value & 1u) << bitInWord); // set it to (value & 1)
+    bits.Store(byteOff, word);
+}
+
+
+void SetBitAtomic(RWByteAddressBuffer bits, uint bitIndex)
+{
+    uint wordIdx = bitIndex >> 5;
+    uint byteOff = wordIdx * 4;
+    uint bitInWord = bitIndex & 31;
+    uint mask = 1u << bitInWord;
+
+    // atomically OR in the mask
+    uint old;
+    bits.InterlockedOr(byteOff, mask, old);
+}
+
+void ClearBitAtomic(RWByteAddressBuffer bits, uint bitIndex)
+{
+    uint wordIdx = bitIndex >> 5;
+    uint byteOff = wordIdx * 4;
+    uint bitInWord = bitIndex & 31;
+    uint mask = ~(1u << bitInWord);
+
+    // atomically AND with the inverse mask
+    uint old;
+    bits.InterlockedAnd(byteOff, mask, old);
+}
+
 #endif // __LOADING_UTILITY_HLSL__

@@ -2,6 +2,7 @@
 #include "utilities.hlsli"
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
+#include "loadingUtils.hlsli"
 
 PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
@@ -114,11 +115,10 @@ void MSMain(
     // Test if this meshlet is culled
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
-    StructuredBuffer<bool> meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
+    ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
     unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBoundsBufferStartIndex + vGroupID.x;
     
-    bool bCulled = meshletCullingBitfieldBuffer[meshletBitfieldIndex];
-    
+    bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
     
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex]; // Base vertex buffer
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferDescriptorIndex]; // Meshlets, containing vertex & primitive offset & num

@@ -74,6 +74,11 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     
     // Allocate a new fragment
     int nNewFragmentAddress = AllocateFragment(vScreenAddress, LinkedListCounter);
+    if (nNewFragmentAddress == FRAGMENT_LIST_NULL)
+    {
+        // No more space in the fragment list
+        return;
+    }
     int nOldFragmentAddress = MakeFragmentLink(vScreenAddress, nNewFragmentAddress, RWFragmentListHead);
     
     float4 finalOutput = float4(lightingOutput.lighting.xyz, fragmentInfo.alpha);

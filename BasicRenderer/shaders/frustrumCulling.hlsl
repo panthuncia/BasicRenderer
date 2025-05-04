@@ -1,5 +1,6 @@
 #include "cbuffers.hlsli"
 #include "vertex.hlsli"
+#include "loadingUtils.hlsli"
 
 struct DispatchMeshIndirectCommand {
     uint perObjectBufferIndex;
@@ -125,7 +126,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
     float scaledBoundingRadius = meshletBounds.radius * maxScale;
 
-    RWStructuredBuffer<bool> meshletBitfieldBuffer = ResourceDescriptorHeap[UintRootConstant1]; // TODO: use actual bits, not bools
+    RWByteAddressBuffer meshletBitfieldBuffer = ResourceDescriptorHeap[UintRootConstant1];
     
     // Disable culling for skinned meshes for now, as the bounding sphere is not updated
     if (!(perMesh.vertexFlags & VERTEX_SKINNED))
@@ -143,9 +144,10 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     
         if (bCulled)
         {
-            meshletBitfieldBuffer[meshletBoundsIndex] = true; // TODO: change when using actual bits
+            // TODO: Could avoid the atomic if we use eight ExecuteIndirect calls, one for each bit of a byte
+            SetBitAtomic(meshletBitfieldBuffer, meshletBoundsIndex);
             return;
         }
     }
-    meshletBitfieldBuffer[meshletBoundsIndex] = false;
+    ClearBitAtomic(meshletBitfieldBuffer, meshletBoundsIndex);
 }

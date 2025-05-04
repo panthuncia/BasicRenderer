@@ -182,16 +182,16 @@ add_compile_definitions(NOMINMAX)
 # Disable warnings for signed/unsigned mismatch
 add_compile_options("/wd4267")
 
-if (MSVC)
-  # Tell the compiler to generate Program Database debug info
-  set(CMAKE_CXX_FLAGS_RELEASE
-      "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
-  # Tell the linker to embed or emit the .pdb file
-  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE
-      "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG")
-  set(CMAKE_EXE_LINKER_FLAGS_RELEASE
-      "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG")
-endif()
+#if (MSVC)
+#  # Tell the compiler to generate Program Database debug info
+#  set(CMAKE_CXX_FLAGS_RELEASE
+#      "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
+#  # Tell the linker to embed or emit the .pdb file
+#  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE
+#      "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG")
+#  set(CMAKE_EXE_LINKER_FLAGS_RELEASE
+#      "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG")
+#endif()
 
 # Find and link DirectX 12
 target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib")

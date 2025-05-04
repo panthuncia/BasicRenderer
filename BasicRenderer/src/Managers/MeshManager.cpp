@@ -17,7 +17,7 @@ MeshManager::MeshManager() {
 	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"meshletIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
 	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
-	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(4, 4, L"meshletBitfieldBuffer", false, true);
+	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
 	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
 	m_resourceGroup->AddResource(m_meshletOffsets);
 	m_resourceGroup->AddResource(m_meshletIndices);
@@ -134,9 +134,9 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	}
 
 	unsigned int meshletBitfieldSize = m_meshletBitfieldBuffer->Size();
-	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(mesh->GetMesh()->GetMeshletCount(), 1);
+	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(((float)std::ceil(mesh->GetMesh()->GetMeshletCount()) / 8.f), 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
-		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size());
+		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()); // All render views must be updated
 	}
 	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
 
