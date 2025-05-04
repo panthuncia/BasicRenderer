@@ -83,7 +83,7 @@ public:
 					auto& buffer = view.indirectCommandBuffers.opaqueIndirectCommandBuffer;
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &bufferIndices[IndirectCommandBufferDescriptorIndex], 0);
+					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
@@ -117,7 +117,7 @@ public:
 					auto& buffer = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
+					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;
@@ -152,7 +152,7 @@ public:
 					auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
 					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 					bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, 1, &bufferIndices[IndirectCommandBufferDescriptorIndex], IndirectCommandBufferDescriptorIndex);
+					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 					i++;

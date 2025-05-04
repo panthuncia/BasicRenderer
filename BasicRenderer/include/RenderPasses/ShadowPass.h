@@ -299,6 +299,11 @@ private:
 
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+
+                unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+                variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+				commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
+
                 drawObjects();
                 break;
             }
@@ -311,6 +316,11 @@ private:
                     commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+
+                    unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+					variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+					commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
+
                     lightViewIndex += 1;
                     drawObjects();
                 }
@@ -325,6 +335,11 @@ private:
                     commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+
+                    unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+					variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+					commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
+
                     lightViewIndex += 1;
                     drawObjects();
 
@@ -374,6 +389,11 @@ private:
                 auto& opaque = views[0].indirectCommandBuffers.opaqueIndirectCommandBuffer;
 				auto& alphaTest = views[0].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 				auto& blend = views[0].indirectCommandBuffers.blendIndirectCommandBuffer;
+
+                unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+                variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+                commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
+
                 drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 break;
             }
@@ -391,6 +411,11 @@ private:
 					auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
 					auto& alphaTest = views[i].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 					auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
+
+                    unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+                    variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+                    commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
+
                     drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 }
                 break;
@@ -409,6 +434,11 @@ private:
 					auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
 					auto& alphaTest = views[i].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 					auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
+
+                    unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+                    variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+                    commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
+
                     drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 }
             }

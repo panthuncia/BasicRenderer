@@ -142,10 +142,10 @@ void MSMain(
         triCount = meshlet.TriCount;
     }
     SetMeshOutputCounts(vertCount, triCount);
-    if (bCulled)
-    {
-        return;
-    }
+    //if (bCulled) // Early out works in debug mode, but compiler returns a null shader without error in release mode
+    //{
+    //    return;
+    //}
     
     uint triOffset = meshBuffer.meshletTrianglesBufferOffset + meshlet.TriOffset + uGroupThreadID * 3;
     
