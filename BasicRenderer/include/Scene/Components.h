@@ -146,10 +146,11 @@ namespace Components {
 	};
 	struct ShadowMap {
 		ShadowMap() = default;
-		ShadowMap(std::shared_ptr<Texture> shadowMap)
-			: shadowMap(shadowMap) {
+		ShadowMap(std::shared_ptr<Texture> shadowMap, std::shared_ptr<Texture> downsampledShadowMap)
+			: shadowMap(shadowMap), downsampledShadowMap(downsampledShadowMap) {
 		}
 		std::shared_ptr<Texture> shadowMap;
+		std::shared_ptr<Texture> downsampledShadowMap;
 	};
 
 	struct SceneNode {}; // Represents a generic node in the scene graph

@@ -255,7 +255,9 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
 void DX12Renderer::CreateGlobalResources() {
     m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
+	m_downsampledShadowMaps = std::make_shared<DownsampledShadowMaps>(L"DownsampledShadowMaps");
     setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
+	setDownsampledShadowMaps(m_downsampledShadowMaps.get());
 }
 
 void DX12Renderer::SetSettings() {
@@ -269,6 +271,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
+	settingsManager.registerSetting<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
@@ -297,6 +300,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
 	settingsManager.registerSetting<bool>("enableGTAO", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
+	setDownsampledShadowMaps = settingsManager.getSettingSetter<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");
@@ -1160,6 +1164,8 @@ void DX12Renderer::CreateRenderGraph() {
 	downsampledDepthDesc.hasUAV = true;
 	downsampledDepthDesc.format = DXGI_FORMAT_R32_FLOAT;
 	downsampledDepthDesc.generateMipMaps = true;
+	downsampledDepthDesc.hasSRV = true;
+	downsampledDepthDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
 	ImageDimensions downsampledDepthsDims = { m_xRes / 2, m_yRes / 2, 0, 0 }; // Top slice is first mip of full depth
 	downsampledDepthDesc.imageDimensions.push_back(downsampledDepthsDims);
 	auto downsampledDepths = PixelBuffer::Create(downsampledDepthDesc);

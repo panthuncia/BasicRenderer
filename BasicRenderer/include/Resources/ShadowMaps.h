@@ -70,3 +70,63 @@ public:
 private:
 	std::function<uint8_t()> getNumCascades;
 };
+
+class DownsampledShadowMaps : public ResourceGroup {
+public:
+	DownsampledShadowMaps(const std::wstring& name)
+		: ResourceGroup(name) {
+		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+	}
+
+	std::shared_ptr<Texture> AddMap(LightInfo* light, uint16_t shadowResolution) {
+		std::shared_ptr<PixelBuffer> shadowMap;
+		auto shadowSampler = Sampler::GetDefaultShadowSampler();
+		TextureDescription desc;
+		ImageDimensions dims;
+		unsigned int res = shadowResolution / 2;
+		dims.height = res;
+		dims.width = res;
+		dims.rowPitch = res * 4;
+		dims.slicePitch = res * res * 4;
+		desc.imageDimensions.push_back(dims);
+		desc.channels = 1;
+		desc.format = DXGI_FORMAT_R32_FLOAT;
+		desc.hasSRV = true;
+		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.hasUAV = true;
+		desc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.generateMipMaps = true;
+		switch (light->type) {
+		case Components::LightType::Point: // Cubemap
+			desc.isCubemap = true;
+			shadowMap = PixelBuffer::Create(desc);
+			shadowMap->SetName(L"DownsampledPointShadowMap");
+			break;
+		case Components::LightType::Spot: // 2D texture
+			shadowMap = PixelBuffer::Create(desc);
+			shadowMap->SetName(L"DownsampledSpotShadowMap");
+			break;
+		case Components::LightType::Directional: // Texture array
+			desc.isArray = true;
+			desc.arraySize = getNumCascades();
+			shadowMap = PixelBuffer::Create(desc);
+			shadowMap->SetName(L"DownsampledDirectionalShadowMap");
+			break;
+
+		}
+		std::shared_ptr<Texture> map = std::make_shared<Texture>(shadowMap, shadowSampler);
+		//light->SetShadowMap(map);
+		AddResource(map->GetBuffer());
+		return map;
+	}
+
+	void RemoveMap(std::shared_ptr<Texture> map) {
+		if (map != nullptr) {
+			RemoveResource(map.get());
+		}
+
+	}
+
+private:
+	std::function<uint8_t()> getNumCascades;
+};

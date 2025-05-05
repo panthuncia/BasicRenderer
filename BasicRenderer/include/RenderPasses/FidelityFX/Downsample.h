@@ -1,5 +1,7 @@
 #pragma once
 
+#include <flecs.h>
+
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -7,6 +9,8 @@
 #include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/ECSManager.h"
+#include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 
 #define A_CPU
 #include "../shaders/FidelityFX/ffx_a.h"
@@ -23,8 +27,12 @@ ASU1 mips
 
 class DownsamplePass : public ComputePass {
 public:
-    DownsamplePass(std::shared_ptr<GloballyIndexedResource> pDownsampleMips, std::shared_ptr<GloballyIndexedResource> pSrcDepths) : m_pDownsampleMips(pDownsampleMips), m_pSrcDepths(pSrcDepths) {}
 
+    DownsamplePass(std::shared_ptr<GloballyIndexedResource> pDownsampleMips, std::shared_ptr<GloballyIndexedResource> pSrcDepths) : m_pDownsampleMips(pDownsampleMips), m_pSrcDepths(pSrcDepths) {}
+    ~DownsamplePass() {
+		addObserver.destruct(); // Needed for clean shutdown
+		removeObserver.destruct();
+    }
     void Setup() override {
 		DirectX::XMUINT2 screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
 		unsigned int workGroupOffset[2];
@@ -43,15 +51,33 @@ public:
         m_spdConstants.workGroupOffset[0] = workGroupOffset[0];
         m_spdConstants.workGroupOffset[1] = workGroupOffset[1];
         
-        m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(spdConstants));
-        UploadManager::GetInstance().UploadData(
-            &m_spdConstants,
-            sizeof(spdConstants),
-            m_pDownsampleConstants.get(),
-            0);
+        m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<spdConstants>(1, L"Downsample constants");
+        auto primaryViewConstants = m_pDownsampleConstants->Add();
+		m_pDownsampleConstants->UpdateView(primaryViewConstants.get(), &m_spdConstants);
 
-		m_pDownsampleAtomicCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6, false, true);
+		m_pDownsampleAtomicCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, false, true); // 6 ints per slice, up to 6 slices
 
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::ShadowMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+
+        // For each existing shadow map, allocate a downsample constant
+        lightQuery.each([&](flecs::entity e, Components::Light, Components::LightViewInfo, Components::ShadowMap shadowMap) {
+			AddMapInfo(e, shadowMap);
+            });
+
+        addObserver = ecsWorld.observer<Components::ShadowMap>()
+            .event(flecs::OnSet)
+            .each([&](flecs::entity e, const Components::ShadowMap& p) {
+			AddMapInfo(e, p);
+                });
+
+        removeObserver = ecsWorld.observer<Components::ShadowMap>()
+            .event(flecs::OnRemove)
+            .each([&](flecs::entity e, const Components::ShadowMap& p) {
+			RemoveMapInfo(e);
+                });
+
+		m_numDirectionalCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
         CreateDownsampleComputePSO();
     }
 
@@ -74,16 +100,44 @@ public:
         // UintRootConstant1 is the index of start of the dst images in the heap
         // UintRootConstant2 is the index of the source image
         // UintRootConstant3 is the index of the single-element spdConstants structured buffer
+		// UintRootConstant4 is the index of the current constants
         unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
         downsampleRootConstants[UintRootConstant0] = m_pDownsampleAtomicCounter->GetUAVShaderVisibleInfo()[0].index;
-		downsampleRootConstants[UintRootConstant1] = m_pDownsampleMips->GetUAVShaderVisibleInfo()[0].index;
+		downsampleRootConstants[UintRootConstant1] = m_pDownsampleMips->GetUAVShaderVisibleInfo()[0].index; // TODO: Why are these causing a crash after a few render graph rebuilds?
         downsampleRootConstants[UintRootConstant2] = m_pSrcDepths->GetSRVInfo()[0].index;
 		downsampleRootConstants[UintRootConstant3] = m_pDownsampleConstants->GetSRVInfo()[0].index;
+        downsampleRootConstants[UintRootConstant4] = 0; // Primary constants always at index 0
 
         commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
 
-		// Dispatch the compute shader
-		commandList->Dispatch(m_dispatchThreadGroupCountXY[0], m_dispatchThreadGroupCountXY[1], 1);
+		// Dispatch the compute shader for primary depth
+		//commandList->Dispatch(m_dispatchThreadGroupCountXY[0], m_dispatchThreadGroupCountXY[1], 1);
+
+		// Process each shadow map
+        lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::ShadowMap shadowMap) {
+			auto& mapInfo = m_perViewMapInfo[e.id()];
+            
+            downsampleRootConstants[UintRootConstant1] = shadowMap.downsampledShadowMap->GetBuffer()->GetUAVShaderVisibleInfo()[0].index;
+            downsampleRootConstants[UintRootConstant2] = shadowMap.shadowMap->GetBuffer()->GetSRVInfo()[0].index;
+			downsampleRootConstants[UintRootConstant4] = mapInfo.constantsIndex;
+
+			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
+
+            switch (light.type) {
+			case Components::LightType::Point:
+				commandList->SetPipelineState(downsampleArrayPSO.Get());
+				commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 6);
+				break;
+			case Components::LightType::Spot:
+				commandList->SetPipelineState(downsamplePassPSO.Get());
+				commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 1);
+				break;
+			case Components::LightType::Directional:
+				commandList->SetPipelineState(downsampleArrayPSO.Get());
+                commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], m_numDirectionalCascades);
+            }
+
+            });
 
         return {};
     }
@@ -93,6 +147,8 @@ public:
     }
 
 private:
+    flecs::query<Components::Light, Components::LightViewInfo, Components::ShadowMap> lightQuery;
+
     struct spdConstants
     {
         uint mips;
@@ -102,16 +158,29 @@ private:
         unsigned int pad[2];
     };
 
+    struct PerMapInfo {
+        unsigned int constantsIndex;
+		std::shared_ptr<BufferView> pConstantsBufferView;
+		unsigned int dispatchThreadGroupCountXY[2];
+    };
+	std::unordered_map<uint64_t, PerMapInfo> m_perViewMapInfo;
+
 	spdConstants m_spdConstants;
     unsigned int m_dispatchThreadGroupCountXY[2];
 
+    unsigned int m_numDirectionalCascades = 0;
+
     std::shared_ptr<GloballyIndexedResource> m_pDownsampleMips;
-    std::shared_ptr<GloballyIndexedResource> m_pDownsampleConstants;
+    std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
 	std::shared_ptr<GloballyIndexedResource> m_pDownsampleAtomicCounter;
 
     std::shared_ptr<GloballyIndexedResource> m_pSrcDepths;
 
     ComPtr<ID3D12PipelineState> downsamplePassPSO;
+	ComPtr<ID3D12PipelineState> downsampleArrayPSO;
+
+    flecs::observer addObserver;
+	flecs::observer removeObserver;
 
     void CreateDownsampleComputePSO()
     {
@@ -121,10 +190,59 @@ private:
         psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
         psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
-        Microsoft::WRL::ComPtr<ID3DBlob> CSDenoisePass;
-        PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", {}, CSDenoisePass);
-        psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSDenoisePass.Get());
+        Microsoft::WRL::ComPtr<ID3DBlob> downsample;
+        PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", {}, downsample);
+        psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsample.Get());
         ThrowIfFailed(device->CreateComputePipelineState(
             &psoDesc, IID_PPV_ARGS(&downsamplePassPSO)));
+
+        DxcDefine define;
+		define.Name = L"DOWNSAMPLE_ARRAY";
+		define.Value = L"1";
+
+        Microsoft::WRL::ComPtr<ID3DBlob> downsampleArray;
+        PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", { define }, downsampleArray);
+        psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsampleArray.Get());
+        ThrowIfFailed(device->CreateComputePipelineState(
+            &psoDesc, IID_PPV_ARGS(&downsampleArrayPSO)));
     }
+
+    void AddMapInfo(flecs::entity e, const Components::ShadowMap& shadowMap) {
+        auto& shadowMapResource = shadowMap.shadowMap;
+        unsigned int workGroupOffset[2];
+        unsigned int numWorkGroupsAndMips[2];
+        unsigned int rectInfo[4];
+        rectInfo[0] = 0;
+        rectInfo[1] = 0;
+        rectInfo[2] = shadowMapResource->GetBuffer()->GetWidth();
+        rectInfo[3] = shadowMapResource->GetBuffer()->GetHeight();
+        unsigned int threadGroupCountXY[2];
+        SpdSetup(threadGroupCountXY, workGroupOffset, numWorkGroupsAndMips, rectInfo);
+
+        spdConstants spdConstants;
+        spdConstants.invInputSize[0] = 1.0f / static_cast<float>(shadowMapResource->GetBuffer()->GetWidth());
+        spdConstants.invInputSize[1] = 1.0f / static_cast<float>(shadowMapResource->GetBuffer()->GetHeight());
+        spdConstants.mips = numWorkGroupsAndMips[1];
+        spdConstants.numWorkGroups = numWorkGroupsAndMips[0];
+        spdConstants.workGroupOffset[0] = workGroupOffset[0];
+        spdConstants.workGroupOffset[1] = workGroupOffset[1];
+
+        auto view = m_pDownsampleConstants->Add();
+        m_pDownsampleConstants->UpdateView(view.get(), &spdConstants);
+
+        PerMapInfo mapInfo;
+        mapInfo.constantsIndex = view.get()->GetOffset() / sizeof(spdConstants);
+        mapInfo.pConstantsBufferView = view;
+        mapInfo.dispatchThreadGroupCountXY[0] = threadGroupCountXY[0];
+        mapInfo.dispatchThreadGroupCountXY[1] = threadGroupCountXY[1];
+        m_perViewMapInfo[e.id()] = mapInfo;
+    }
+
+	void RemoveMapInfo(flecs::entity e) {
+		auto it = m_perViewMapInfo.find(e.id());
+		if (it != m_perViewMapInfo.end()) {
+			m_pDownsampleConstants->Remove(it->second.pConstantsBufferView.get());
+			m_perViewMapInfo.erase(it);
+		}
+	}
 };

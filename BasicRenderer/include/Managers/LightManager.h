@@ -15,6 +15,7 @@
 #include "Scene/Components.h"
 
 class ShadowMaps;
+class DownsampledShadowMaps;
 class IndirectCommandBufferManager;
 class CameraManager;
 class SortedUnsignedIntBuffer;
@@ -74,6 +75,7 @@ private:
     std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
     std::function<uint16_t()> getShadowResolution;
     std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
+	std::function<DownsampledShadowMaps*()> getCurrentDownsampledShadowMapResourceGroup;
     std::function<void(std::shared_ptr<void>)> markForDelete;
     CameraManager* m_pCameraManager = nullptr;
 	unsigned int m_lightPagePoolSize = 0;

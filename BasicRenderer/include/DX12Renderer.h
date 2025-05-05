@@ -115,6 +115,7 @@ private:
 	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
+	std::shared_ptr<DownsampledShadowMaps> m_downsampledShadowMaps = nullptr;
 	std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 
     // GPU resource managers
@@ -160,6 +161,7 @@ private:
 	bool m_deferredRendering = false;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
+    std::function<void(DownsampledShadowMaps*)> setDownsampledShadowMaps;
     std::function<uint16_t()> getShadowResolution;
 	std::function<void(float)> setCameraSpeed;
 	std::function<float()> getCameraSpeed;

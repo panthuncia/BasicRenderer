@@ -315,6 +315,7 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant1,
     UintRootConstant2,
     UintRootConstant3,
+	UintRootConstant4,
 	NumMiscUintRootConstants
 };
 

@@ -31,34 +31,55 @@ struct spdConstants
 // UintRootConstant0 is the index of the global atomic buffer
 // UintRootConstant1 is the index of start of the dst images in the heap
 // UintRootConstant2 is the index of the source image
-// UintRootConstant3 is the index of the single-element spdConstants structured buffer
-
+// UintRootConstant3 is the index of the spdConstants structured buffer
+// UintRootConstant4 is the index of the constants in the spdConstants structured buffer
 
 AF4 SpdLoadSourceImage(ASU2 p, AU1 slice)
 {
-    Texture2D<float> imgSrc = ResourceDescriptorHeap[UintRootConstant2];
     StructuredBuffer<spdConstants> constants = ResourceDescriptorHeap[UintRootConstant3];
-    float2 invInputSize = constants[0].invInputSize;
+    float2 invInputSize = constants[UintRootConstant4].invInputSize;
     AF2 textureCoord = p * invInputSize + invInputSize;
+    
+    #if defined (DOWNSAMPLE_ARRAY)
+    Texture2DArray<float> imgSrc = ResourceDescriptorHeap[UintRootConstant2];
+    float result = imgSrc.SampleLevel(g_linearClamp, float3(textureCoord, slice), 0);
+    #else
+    Texture2D<float> imgSrc = ResourceDescriptorHeap[UintRootConstant2];
     float result = imgSrc.SampleLevel(g_linearClamp, textureCoord, 0);
+    #endif
     return AF4(result, result, result, result);
 }
 AF4 SpdLoad(ASU2 tex, AU1 slice)
 {
+    #if defined (DOWNSAMPLE_ARRAY)
+    globallycoherent RWTexture2DArray<float4> imgDst5 = ResourceDescriptorHeap[UintRootConstant1 + 5];
+    return imgDst5[float3(tex, slice)];
+    #else
     globallycoherent RWTexture2D<float4> imgDst5 = ResourceDescriptorHeap[UintRootConstant1 + 5];
     return imgDst5[tex];
+    #endif
 }
 void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
 {
     unsigned int imgArrayStart = UintRootConstant1;
     if (index == 5)
     {
+        #if defined (DOWNSAMPLE_ARRAY)
+        globallycoherent RWTexture2DArray<float4> imgDst5 = ResourceDescriptorHeap[imgArrayStart+5];
+        imgDst5[float3(pix, slice)] = outValue;
+        #else
         globallycoherent RWTexture2D<float4> imgDst5 = ResourceDescriptorHeap[imgArrayStart+5];
         imgDst5[pix] = outValue;
+        #endif
         return;
     }
+    #if defined (DOWNSAMPLE_ARRAY)
+    RWTexture2DArray<float4> imgDst = ResourceDescriptorHeap[imgArrayStart + index]; // Must be sequential in heap. TODO: Can we actually guarantee this?
+    imgDst[float3(pix, slice)] = outValue;
+    #else
     RWTexture2D<float4> imgDst = ResourceDescriptorHeap[imgArrayStart + index]; // Must be sequential in heap. TODO: Can we actually guarantee this?
     imgDst[pix] = outValue;
+    #endif
 }
 
 AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)
@@ -107,7 +128,7 @@ void SpdStoreIntermediate(AU1 x, AU1 y, AF4 value)
 void DownsampleCSMain(uint3 WorkGroupId : SV_GroupID, uint LocalThreadIndex : SV_GroupIndex)
 {
     StructuredBuffer<spdConstants> constantsBuf = ResourceDescriptorHeap[UintRootConstant3];
-    spdConstants constants = constantsBuf[0];
+    spdConstants constants = constantsBuf[UintRootConstant4];
     SpdDownsample(
         AU2(WorkGroupId.xy),
         AU1(LocalThreadIndex),
