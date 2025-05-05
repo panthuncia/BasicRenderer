@@ -71,6 +71,10 @@ private:
                     readbackManager.SaveTextureToDDS(context.device, commandList, context.commandQueue, readback.texture.get(), readback.outputFile, m_fenceValue);
 				}
             }
+            
+			// Clear the readbacks after processing
+			readbackManager.ClearReadbacks();
+
             return { m_readbackFence, m_fenceValue };
         }
 
