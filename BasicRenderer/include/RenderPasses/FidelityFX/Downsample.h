@@ -24,7 +24,7 @@ outAU2 numWorkGroupsAndMips, // GPU side: pass in as constant
 inAU4 rectInfo, // left, top, width, height
 ASU1 mips
 */
-
+int num = 0;
 class DownsamplePass : public ComputePass {
 public:
 
@@ -34,6 +34,7 @@ public:
 		removeObserver.destruct();
     }
     void Setup() override {
+        num++;
 		DirectX::XMUINT2 screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
 		unsigned int workGroupOffset[2];
 		unsigned int numWorkGroupsAndMips[2];
@@ -58,22 +59,22 @@ public:
 		m_pDownsampleAtomicCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, false, true); // 6 ints per slice, up to 6 slices
 
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::ShadowMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
 
         // For each existing shadow map, allocate a downsample constant
-        lightQuery.each([&](flecs::entity e, Components::Light, Components::LightViewInfo, Components::ShadowMap shadowMap) {
+        lightQuery.each([&](flecs::entity e, Components::Light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			AddMapInfo(e, shadowMap);
             });
 
-        addObserver = ecsWorld.observer<Components::ShadowMap>()
+        addObserver = ecsWorld.observer<Components::DepthMap>()
             .event(flecs::OnSet)
-            .each([&](flecs::entity e, const Components::ShadowMap& p) {
+            .each([&](flecs::entity e, const Components::DepthMap& p) {
 			AddMapInfo(e, p);
                 });
 
-        removeObserver = ecsWorld.observer<Components::ShadowMap>()
+        removeObserver = ecsWorld.observer<Components::DepthMap>()
             .event(flecs::OnRemove)
-            .each([&](flecs::entity e, const Components::ShadowMap& p) {
+            .each([&](flecs::entity e, const Components::DepthMap& p) {
 			RemoveMapInfo(e);
                 });
 
@@ -103,7 +104,10 @@ public:
 		// UintRootConstant4 is the index of the current constants
         unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
         downsampleRootConstants[UintRootConstant0] = m_pDownsampleAtomicCounter->GetUAVShaderVisibleInfo()[0].index;
-		downsampleRootConstants[UintRootConstant1] = m_pDownsampleMips->GetUAVShaderVisibleInfo()[0].index; // TODO: Why are these causing a crash after a few render graph rebuilds?
+        if (num > 6) {
+			spdlog::info("num > 6");
+        }
+        downsampleRootConstants[UintRootConstant1] = m_pDownsampleMips->GetUAVShaderVisibleInfo()[0].index; // TODO: Why are these causing a crash after a few render graph rebuilds?
         downsampleRootConstants[UintRootConstant2] = m_pSrcDepths->GetSRVInfo()[0].index;
 		downsampleRootConstants[UintRootConstant3] = m_pDownsampleConstants->GetSRVInfo()[0].index;
         downsampleRootConstants[UintRootConstant4] = 0; // Primary constants always at index 0
@@ -111,14 +115,14 @@ public:
         commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
 
 		// Dispatch the compute shader for primary depth
-		//commandList->Dispatch(m_dispatchThreadGroupCountXY[0], m_dispatchThreadGroupCountXY[1], 1);
+		commandList->Dispatch(m_dispatchThreadGroupCountXY[0], m_dispatchThreadGroupCountXY[1], 1);
 
 		// Process each shadow map
-        lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::ShadowMap shadowMap) {
+        lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			auto& mapInfo = m_perViewMapInfo[e.id()];
             
-            downsampleRootConstants[UintRootConstant1] = shadowMap.downsampledShadowMap->GetBuffer()->GetUAVShaderVisibleInfo()[0].index;
-            downsampleRootConstants[UintRootConstant2] = shadowMap.shadowMap->GetBuffer()->GetSRVInfo()[0].index;
+            downsampleRootConstants[UintRootConstant1] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo()[0].index;
+            downsampleRootConstants[UintRootConstant2] = shadowMap.depthMap->GetSRVInfo()[0].index;
 			downsampleRootConstants[UintRootConstant4] = mapInfo.constantsIndex;
 
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
@@ -147,7 +151,7 @@ public:
     }
 
 private:
-    flecs::query<Components::Light, Components::LightViewInfo, Components::ShadowMap> lightQuery;
+    flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
 
     struct spdConstants
     {
@@ -207,21 +211,21 @@ private:
             &psoDesc, IID_PPV_ARGS(&downsampleArrayPSO)));
     }
 
-    void AddMapInfo(flecs::entity e, const Components::ShadowMap& shadowMap) {
-        auto& shadowMapResource = shadowMap.shadowMap;
+    void AddMapInfo(flecs::entity e, const Components::DepthMap& shadowMap) {
+        auto& shadowMapResource = shadowMap.depthMap;
         unsigned int workGroupOffset[2];
         unsigned int numWorkGroupsAndMips[2];
         unsigned int rectInfo[4];
         rectInfo[0] = 0;
         rectInfo[1] = 0;
-        rectInfo[2] = shadowMapResource->GetBuffer()->GetWidth();
-        rectInfo[3] = shadowMapResource->GetBuffer()->GetHeight();
+        rectInfo[2] = shadowMapResource->GetWidth();
+        rectInfo[3] = shadowMapResource->GetHeight();
         unsigned int threadGroupCountXY[2];
         SpdSetup(threadGroupCountXY, workGroupOffset, numWorkGroupsAndMips, rectInfo);
 
         spdConstants spdConstants;
-        spdConstants.invInputSize[0] = 1.0f / static_cast<float>(shadowMapResource->GetBuffer()->GetWidth());
-        spdConstants.invInputSize[1] = 1.0f / static_cast<float>(shadowMapResource->GetBuffer()->GetHeight());
+        spdConstants.invInputSize[0] = 1.0f / static_cast<float>(shadowMapResource->GetWidth());
+        spdConstants.invInputSize[1] = 1.0f / static_cast<float>(shadowMapResource->GetHeight());
         spdConstants.mips = numWorkGroupsAndMips[1];
         spdConstants.numWorkGroups = numWorkGroupsAndMips[0];
         spdConstants.workGroupOffset[0] = workGroupOffset[0];

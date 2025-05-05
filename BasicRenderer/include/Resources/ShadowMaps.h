@@ -20,7 +20,7 @@ public:
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
 
-    std::shared_ptr<Texture> AddMap(LightInfo* light, uint16_t shadowResolution) {
+    std::shared_ptr<PixelBuffer> AddMap(LightInfo* light, uint16_t shadowResolution) {
 		std::shared_ptr<PixelBuffer> shadowMap;
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		TextureDescription desc;
@@ -54,10 +54,9 @@ public:
 			break;
 
 		}
-		std::shared_ptr<Texture> map = std::make_shared<Texture>(shadowMap, shadowSampler);
 		//light->SetShadowMap(map);
-        AddResource(map->GetBuffer());
-		return map;
+        AddResource(shadowMap);
+		return shadowMap;
     }
 
 	void RemoveMap(std::shared_ptr<Texture> map) {
@@ -78,7 +77,7 @@ public:
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
 
-	std::shared_ptr<Texture> AddMap(LightInfo* light, uint16_t shadowResolution) {
+	std::shared_ptr<PixelBuffer> AddMap(LightInfo* light, uint16_t shadowResolution) {
 		std::shared_ptr<PixelBuffer> shadowMap;
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		TextureDescription desc;
@@ -86,8 +85,6 @@ public:
 		unsigned int res = shadowResolution / 2;
 		dims.height = res;
 		dims.width = res;
-		dims.rowPitch = res * 4;
-		dims.slicePitch = res * res * 4;
 		desc.imageDimensions.push_back(dims);
 		desc.channels = 1;
 		desc.format = DXGI_FORMAT_R32_FLOAT;
@@ -114,10 +111,8 @@ public:
 			break;
 
 		}
-		std::shared_ptr<Texture> map = std::make_shared<Texture>(shadowMap, shadowSampler);
-		//light->SetShadowMap(map);
-		AddResource(map->GetBuffer());
-		return map;
+		AddResource(shadowMap);
+		return shadowMap;
 	}
 
 	void RemoveMap(std::shared_ptr<Texture> map) {

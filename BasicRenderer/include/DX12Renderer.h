@@ -82,7 +82,7 @@ private:
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
-	std::shared_ptr<PixelBuffer> m_depthStencilBuffer;
+	Components::DepthMap m_depthMap;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
     std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
     UINT rtvDescriptorSize;

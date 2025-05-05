@@ -15,6 +15,7 @@
 class MeshInstance;
 class DynamicGloballyIndexedResource;
 class Texture;
+class PixelBuffer;
 class Mesh;
 
 namespace Components {
@@ -130,6 +131,14 @@ namespace Components {
 		std::shared_ptr<DynamicGloballyIndexedResource> blendIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletFrustrumCullingIndirectCommandBuffer;
 	};
+	struct DepthMap {
+		DepthMap() = default;
+		DepthMap(std::shared_ptr<PixelBuffer> depthMap, std::shared_ptr<PixelBuffer> downsampledDepthMap)
+			: depthMap(depthMap), downsampledDepthMap(downsampledDepthMap) {
+		}
+		std::shared_ptr<PixelBuffer> depthMap;
+		std::shared_ptr<PixelBuffer> downsampledDepthMap;
+	};
 	struct RenderView {
 		uint64_t viewID;
 		std::shared_ptr<BufferView> cameraBufferView;;
@@ -137,6 +146,7 @@ namespace Components {
 		IndirectCommandBuffers indirectCommandBuffers;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceBitfieldBuffer;
+		DepthMap depthMap;
 	};
 	struct LightViewInfo {
 		std::vector<RenderView> renderViews;
@@ -144,14 +154,6 @@ namespace Components {
 		uint64_t lightBufferIndex;
 		uint64_t viewInfoBufferIndex;
 		Matrix projectionMatrix;
-	};
-	struct ShadowMap {
-		ShadowMap() = default;
-		ShadowMap(std::shared_ptr<Texture> shadowMap, std::shared_ptr<Texture> downsampledShadowMap)
-			: shadowMap(shadowMap), downsampledShadowMap(downsampledShadowMap) {
-		}
-		std::shared_ptr<Texture> shadowMap;
-		std::shared_ptr<Texture> downsampledShadowMap;
 	};
 
 	struct SceneNode {}; // Represents a generic node in the scene graph

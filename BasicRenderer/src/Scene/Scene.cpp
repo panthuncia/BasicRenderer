@@ -18,6 +18,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Animation/AnimationController.h"
 #include "Utilities/MathUtils.h"
+#include "Resources/Sampler.h"
 
 std::atomic<uint64_t> Scene::globalSceneCount = 0;
 
@@ -211,9 +212,9 @@ void Scene::ActivateLight(flecs::entity& entity) {
 	AddLightReturn addInfo = m_managerInterface.GetLightManager()->AddLight(&newInfo.lightInfo, entity.id());
 	entity.set<Components::LightViewInfo>({ addInfo.lightViewInfo });
 	if (addInfo.shadowMap.has_value()) {
-		entity.set<Components::ShadowMap>({ addInfo.shadowMap.value() });
-		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().shadowMap->GetBuffer()->GetSRVInfo()[0].index;
-		newInfo.lightInfo.shadowSamplerIndex = addInfo.shadowMap.value().shadowMap->GetSamplerDescriptorIndex();
+		entity.set<Components::DepthMap>({ addInfo.shadowMap.value() });
+		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().depthMap->GetSRVInfo()[0].index;
+		newInfo.lightInfo.shadowSamplerIndex = Sampler::GetDefaultShadowSampler()->GetDescriptorIndex();
 		newInfo.lightInfo.shadowViewInfoIndex = addInfo.lightViewInfo.viewInfoBufferIndex;
 		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), newInfo.lightInfo);
 		entity.set<Components::Light>(newInfo);
@@ -226,7 +227,10 @@ void Scene::ActivateLight(flecs::entity& entity) {
 void Scene::ActivateCamera(flecs::entity& entity) {
 	auto cameraInfo = entity.get_mut<Components::Camera>()->info;
 	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
+	auto screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
+	auto depth = CreateDepthMapComponent(screenRes.x, screenRes.y, 1, false);
 	entity.set<Components::RenderView>(renderView);
+	entity.set<Components::DepthMap>(depth);
 }
 
 void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
@@ -438,6 +442,13 @@ void Scene::Update() {
     PostUpdate();
 }
 
+void Scene::SetDepthMap(Components::DepthMap depthMap) {
+	m_primaryCameraDepthMap = depthMap;
+	if (m_primaryCamera.is_valid()) {
+		m_primaryCamera.set<Components::DepthMap>(depthMap);
+	}
+}
+
 void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, float zNear, float zFar) {
 		
     if (m_primaryCamera.is_valid()) {
@@ -481,6 +492,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		.set<Components::Scale>({ 1, 1, 1 })
 		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
 		.set<Components::Name>("Primary Camera")
+		.set<Components::DepthMap>({ m_primaryCameraDepthMap })
 		.child_of(ECSSceneRoot);
 
 	if (ECSSceneRoot.has<Components::ActiveScene>()) {

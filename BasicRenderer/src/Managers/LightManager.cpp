@@ -65,7 +65,7 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
     m_activeLightIndices->Insert(lightIndex);
 
     Components::LightViewInfo viewInfo;
-    std::optional<Components::ShadowMap> shadowMapComponent = std::nullopt;
+    std::optional<Components::DepthMap> shadowMapComponent = std::nullopt;
     std::optional<Components::FrustrumPlanes> planes = std::nullopt;
 
     if (lightInfo->shadowCaster) {
@@ -89,7 +89,7 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
         if (shadowMaps != nullptr) {
             auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
 			auto downsampledMap = downsampledMaps->AddMap(lightInfo, getShadowResolution());
-            shadowMapComponent = Components::ShadowMap(map, downsampledMap);
+            shadowMapComponent = Components::DepthMap(map, downsampledMap);
         }
     }
 

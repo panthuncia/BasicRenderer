@@ -57,6 +57,6 @@ private:
 	std::shared_ptr<ResourceGroup> m_meshletCullingBitfieldGroup;
 	std::shared_ptr<ResourceGroup> m_meshInstanceCullingBitfieldGroup;
 
-	unsigned int m_currentMeshletBitfieldSize = 0;
-	unsigned int m_currentMeshInstanceBitfieldSize = 0;
+	unsigned int m_currentMeshletBitfieldSize = 1;
+	unsigned int m_currentMeshInstanceBitfieldSize = 1;
 };

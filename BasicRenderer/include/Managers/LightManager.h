@@ -22,7 +22,7 @@ class SortedUnsignedIntBuffer;
 
 struct AddLightReturn {
 	Components::LightViewInfo lightViewInfo;
-	std::optional<Components::ShadowMap> shadowMap;
+	std::optional<Components::DepthMap> shadowMap;
 	std::optional<Components::FrustrumPlanes> frustrumPlanes;
 };
 
