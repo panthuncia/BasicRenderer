@@ -43,6 +43,7 @@
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "RenderPasses/DeferredRenderPass.h"
+#include "RenderPasses/FidelityFX/Downsample.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -283,6 +284,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
+	settingsManager.registerSetting<DirectX::XMUINT2>("screenResolution", { m_xRes, m_yRes });
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -1148,6 +1150,26 @@ void DX12Renderer::CreateRenderGraph() {
 		}
 	}
     zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect);
+
+    // Single-pass downsample
+    TextureDescription downsampledDepthDesc;
+	downsampledDepthDesc.arraySize = 1;
+	downsampledDepthDesc.channels = 1;
+	downsampledDepthDesc.isCubemap = false;
+	downsampledDepthDesc.hasRTV = false;
+	downsampledDepthDesc.hasUAV = true;
+	downsampledDepthDesc.format = DXGI_FORMAT_R32_FLOAT;
+	downsampledDepthDesc.generateMipMaps = true;
+	ImageDimensions downsampledDepthsDims = { m_xRes / 2, m_yRes / 2, 0, 0 }; // Top slice is first mip of full depth
+	downsampledDepthDesc.imageDimensions.push_back(downsampledDepthsDims);
+	auto downsampledDepths = PixelBuffer::Create(downsampledDepthDesc);
+	downsampledDepths->SetName(L"Downsampled Depths");
+	newGraph->AddResource(downsampledDepths, false);
+
+    auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
+        .WithShaderResource(depthTexture)
+		.WithUnorderedAccess(downsampledDepths)
+		.Build<DownsamplePass>(downsampledDepths, depthTexture);
 
     auto debugPassParameters = RenderPassParameters();
 

@@ -15,10 +15,10 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef __INTELLISENSE__    // avoids some pesky intellisense errors
-#include "XeGTAO.h"
+#include "Intel/XeGTAO.h"
 #endif
 
-#include "XeGTAO.hlsli"
+#include "Intel/XeGTAO.hlsli"
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
 #include "utilities.hlsli"
