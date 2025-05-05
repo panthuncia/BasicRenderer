@@ -10,6 +10,7 @@ CameraManager::CameraManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_pCameraBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<CameraInfo>(1, L"cameraBuffer<CameraInfo>");
 	m_meshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshletCullingBitfieldGroup");
+	m_meshInstanceCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"ObjectCullingBitfieldGroup");
 }
 
 Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
@@ -20,12 +21,20 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	view.indirectCommandBuffers = m_pCommandBufferManager->CreateBuffersForView(viewID);
 	view.cameraBufferView = m_pCameraBuffer->Add();
 	view.cameraBufferIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
-	auto bitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshletBitfieldSize, sizeof(unsigned int), false, true, false);
-	bitfield->SetName(L"MeshletBitfieldBuffer (" + std::to_wstring(viewID) + L")");
-	view.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(bitfield);
+	
+	auto meshletBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshletBitfieldSize, sizeof(unsigned int), false, true, false);
+	meshletBitfield->SetName(L"MeshletBitfieldBuffer (" + std::to_wstring(viewID) + L")");
+	view.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshletBitfield);
+
+	auto meshInstanceBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false);
+	meshInstanceBitfield->SetName(L"ObjectBitfieldBuffer (" + std::to_wstring(viewID) + L")");
+	view.meshInstanceBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceBitfield);
 
 	m_meshletBitfieldBuffers[viewID] = view.meshletBitfieldBuffer;
+	m_meshInstanceBitfieldBuffers[viewID] = view.meshInstanceBitfieldBuffer;
+
 	m_meshletCullingBitfieldGroup->AddResource(view.meshletBitfieldBuffer);
+	m_meshInstanceCullingBitfieldGroup->AddResource(view.meshInstanceBitfieldBuffer);
 
 	m_pCameraBuffer->UpdateView(view.cameraBufferView.get(), &camera);
 

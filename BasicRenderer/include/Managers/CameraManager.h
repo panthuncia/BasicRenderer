@@ -51,9 +51,12 @@ private:
 	std::mutex m_cameraUpdateMutex;
 	std::atomic<uint64_t> m_viewIDCounter = 0;
 	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshletBitfieldBuffers;
+	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshInstanceBitfieldBuffers;
 
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
 	std::shared_ptr<ResourceGroup> m_meshletCullingBitfieldGroup;
+	std::shared_ptr<ResourceGroup> m_meshInstanceCullingBitfieldGroup;
 
 	unsigned int m_currentMeshletBitfieldSize = 0;
+	unsigned int m_currentMeshInstanceBitfieldSize = 0;
 };
