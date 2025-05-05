@@ -60,9 +60,9 @@ public:
 
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-
-        // For each existing shadow map, allocate a downsample constant
-        lightQuery.each([&](flecs::entity e, Components::Light, Components::LightViewInfo, Components::DepthMap shadowMap) {
+		depthQuery = ecsWorld.query_builder<Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        // For each existing depth map, allocate a downsample constant
+        depthQuery.each([&](flecs::entity e, Components::DepthMap shadowMap) {
 			AddMapInfo(e, shadowMap);
             });
 
@@ -98,19 +98,18 @@ public:
         commandList->SetPipelineState(downsamplePassPSO.Get());
 
         // UintRootConstant0 is the index of the global atomic buffer
-        // UintRootConstant1 is the index of start of the dst images in the heap
-        // UintRootConstant2 is the index of the source image
-        // UintRootConstant3 is the index of the single-element spdConstants structured buffer
-		// UintRootConstant4 is the index of the current constants
+        // UintRootConstant1 is the index of the source image
+        // UintRootConstant2 is the index of the spdConstants structured buffer
+		// UintRootConstant3 is the index of the current constants
         unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
         downsampleRootConstants[UintRootConstant0] = m_pDownsampleAtomicCounter->GetUAVShaderVisibleInfo()[0].index;
-        if (num > 6) {
-			spdlog::info("num > 6");
+        auto& mapInfo = m_perViewMapInfo[context.currentScene->GetPrimaryCamera().id()];
+        if (!mapInfo.pConstantsBufferView) {
+			spdlog::error("Downsample pass: No constants buffer view for primary depth map");
         }
-        downsampleRootConstants[UintRootConstant1] = m_pDownsampleMips->GetUAVShaderVisibleInfo()[0].index; // TODO: Why are these causing a crash after a few render graph rebuilds?
-        downsampleRootConstants[UintRootConstant2] = m_pSrcDepths->GetSRVInfo()[0].index;
-		downsampleRootConstants[UintRootConstant3] = m_pDownsampleConstants->GetSRVInfo()[0].index;
-        downsampleRootConstants[UintRootConstant4] = 0; // Primary constants always at index 0
+        downsampleRootConstants[UintRootConstant1] = m_pSrcDepths->GetSRVInfo()[0].index;
+		downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo()[0].index;
+        downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
         commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
 
@@ -121,9 +120,8 @@ public:
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			auto& mapInfo = m_perViewMapInfo[e.id()];
             
-            downsampleRootConstants[UintRootConstant1] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo()[0].index;
-            downsampleRootConstants[UintRootConstant2] = shadowMap.depthMap->GetSRVInfo()[0].index;
-			downsampleRootConstants[UintRootConstant4] = mapInfo.constantsIndex;
+            downsampleRootConstants[UintRootConstant1] = shadowMap.depthMap->GetSRVInfo()[0].index;
+			downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
 
@@ -152,6 +150,7 @@ public:
 
 private:
     flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
+    flecs::query<Components::DepthMap> depthQuery;
 
     struct spdConstants
     {
@@ -159,7 +158,8 @@ private:
         uint numWorkGroups;
         uint workGroupOffset[2];
         float invInputSize[2];
-        unsigned int pad[2];
+        unsigned int mipUavDescriptorIndices[11];
+        uint pad[3];
     };
 
     struct PerMapInfo {
@@ -230,6 +230,10 @@ private:
         spdConstants.numWorkGroups = numWorkGroupsAndMips[0];
         spdConstants.workGroupOffset[0] = workGroupOffset[0];
         spdConstants.workGroupOffset[1] = workGroupOffset[1];
+
+		for (int i = 0; i < shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo().size(); i++) {
+			spdConstants.mipUavDescriptorIndices[i] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo()[i].index;
+		}
 
         auto view = m_pDownsampleConstants->Add();
         m_pDownsampleConstants->UpdateView(view.get(), &spdConstants);
