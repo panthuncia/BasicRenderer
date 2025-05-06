@@ -49,6 +49,17 @@ uint GetBit(ByteAddressBuffer bits, uint bitIndex)
     return (word >> bitInWord) & 1u;
 }
 
+uint GetBit(RWByteAddressBuffer bits, uint bitIndex)
+{
+    // which 32-bit word, and byte offset in the buffer
+    uint wordIdx = bitIndex >> 5; // divide by 32
+    uint byteOff = wordIdx * 4; // 4 bytes per 32-bit word
+    uint bitInWord = bitIndex & 31; // mod 32
+
+    uint word = bits.Load(byteOff);
+    return (word >> bitInWord) & 1u;
+}
+
 void WriteBit(RWByteAddressBuffer bits, uint bitIndex, uint value)
 {
     uint wordIdx = bitIndex >> 5;

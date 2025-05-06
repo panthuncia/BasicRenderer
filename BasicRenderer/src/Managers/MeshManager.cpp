@@ -122,6 +122,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	auto numVertices = mesh->GetMesh()->GetNumVertices(useMeshletReorderedVertices);
 
 	auto vertexSize = mesh->GetMesh()->GetPerMeshCBData().vertexByteSize;
+	unsigned int meshInstanceBufferSize = m_perMeshInstanceBuffers->Size();
 	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
 		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize);
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
@@ -133,8 +134,16 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		mesh->SetBufferViewUsingBaseMesh(std::move(perMeshInstanceBufferView));
 	}
 
+	if (meshInstanceBufferSize != m_perMeshInstanceBuffers->Size()) {
+		m_pCameraManager->SetNumMeshInstances(m_perMeshInstanceBuffers->Size()); // All render views must be updated
+	}
+
 	unsigned int meshletBitfieldSize = m_meshletBitfieldBuffer->Size();
-	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(((float)std::ceil(mesh->GetMesh()->GetMeshletCount()) / 8.f), 1); // 1 bit per meshlet
+
+	unsigned int bitsToAllocate = mesh->GetMesh()->GetMeshletCount();
+	unsigned int bytesToAllocate = (bitsToAllocate + 7) / 8; // Round up to the nearest byte
+
+	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
 		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()); // All render views must be updated
 	}

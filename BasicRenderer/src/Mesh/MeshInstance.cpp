@@ -48,3 +48,12 @@ void MeshInstance::SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
 	}
 	//skeleton->SetAnimationSpeed(m_animationSpeed);
 }
+
+void MeshInstance::SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> meshletBitfieldBufferView) {
+	m_meshletBitfieldBufferView = std::move(meshletBitfieldBufferView);
+	if (m_meshletBitfieldBufferView == nullptr) {
+		return; // no need to update
+	}
+	m_perMeshInstanceBufferData.meshletBitfieldStartIndex = m_meshletBitfieldBufferView->GetOffset() * 8;
+	m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
+}

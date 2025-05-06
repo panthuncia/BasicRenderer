@@ -13,6 +13,7 @@ class FrustrumCullingPass : public ComputePass {
 public:
 	FrustrumCullingPass() {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
 
 	~FrustrumCullingPass() {
@@ -54,8 +55,13 @@ public:
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
+		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
+
 		unsigned int numCascades = getNumDirectionalLightCascades();
-		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>()->cameraBufferIndex;
+		auto primaryView = context.currentScene->GetPrimaryCamera().get<Components::RenderView>();
+		unsigned int cameraIndex = primaryView->cameraBufferIndex;
+
+		bool shadows = getShadowsEnabled();
 		// opaque buffer
 		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
@@ -75,21 +81,33 @@ public:
 			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
+			miscRootConstants[UintRootConstant0] = primaryView->meshInstanceBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
-			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				int i = 0;
-				for (auto& view : lightViewInfo.renderViews) {
-					auto& buffer = view.indirectCommandBuffers.opaqueIndirectCommandBuffer;
-					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
-					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
-					i++;
-					commandList->Dispatch(numThreadGroups, 1, 1);
-				}
-				});
+			if (shadows) {
+				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+					int i = 0;
+					for (auto& view : lightViewInfo.renderViews) {
+						auto& buffer = view.indirectCommandBuffers.opaqueIndirectCommandBuffer;
+						bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
+
+						unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
+						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
+
+						miscRootConstants[UintRootConstant0] = view.meshInstanceBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+
+						i++;
+						commandList->Dispatch(numThreadGroups, 1, 1);
+					}
+					});
+			}
 		}
 		// alpha test buffer
 		auto numAlphaTestDraws = context.drawStats.numAlphaTestDraws;
@@ -108,22 +126,33 @@ public:
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+
+			miscRootConstants[UintRootConstant0] = primaryView->meshInstanceBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 		
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
-			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				int i = 0;
-				for (auto& view : lightViewInfo.renderViews) {
-					auto& buffer = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer;
-					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
-					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
-					i++;
-					commandList->Dispatch(numThreadGroups, 1, 1);
-				}
-				});
+			if (shadows) {
+				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+					int i = 0;
+					for (auto& view : lightViewInfo.renderViews) {
+						auto& buffer = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer;
+						bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
+						unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
+						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
+
+						miscRootConstants[UintRootConstant0] = view.meshInstanceBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+
+						i++;
+						commandList->Dispatch(numThreadGroups, 1, 1);
+					}
+					});
+			}
 		}
 
 		// blend buffer
@@ -144,21 +173,32 @@ public:
 			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
+			miscRootConstants[UintRootConstant0] = primaryView->meshInstanceBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
-			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				int i = 0;
-				for (auto& view : lightViewInfo.renderViews) {
-					auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
-					bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-					commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
-					unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
-					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
-					i++;
-					commandList->Dispatch(numThreadGroups, 1, 1);
-				}
-				});
+			if (shadows) {
+				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+					int i = 0;
+					for (auto& view : lightViewInfo.renderViews) {
+						auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
+						bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
+						unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
+						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
+
+						miscRootConstants[UintRootConstant0] = view.meshInstanceBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+
+						i++;
+						commandList->Dispatch(numThreadGroups, 1, 1);
+					}
+					});
+			}
 		}
 		return {};
 	}
@@ -198,5 +238,6 @@ private:
 	ComPtr<ID3D12PipelineState> m_PSO;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
+	std::function<bool()> getShadowsEnabled;
 
 };

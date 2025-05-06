@@ -332,7 +332,7 @@ inline void Menu::Render(const RenderContext& context) {
 	}
 
     {
-		ImGui::Begin("Scene Graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::Begin("Scene Graph", nullptr);
 		DisplaySceneGraph();
 		ImGui::End();
 
@@ -350,7 +350,7 @@ inline void Menu::Render(const RenderContext& context) {
     m_commandList->Reset(frameCtx->CommandAllocator, nullptr);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-	auto dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
+	auto dsvHandle = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>()->depthMap->GetDSVInfos()[0].cpuHandle;
     m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	auto heap = g_pd3dSrvDescHeap.Get();
     m_commandList->SetDescriptorHeaps(1, &heap);

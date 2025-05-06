@@ -43,6 +43,7 @@
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "RenderPasses/DeferredRenderPass.h"
+#include "RenderPasses/FidelityFX/Downsample.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -239,7 +240,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
                 light->lightInfo.boundingSphere = { {mOut.matrix.r[3].m128_f32[0],  // _41
                     mOut.matrix.r[3].m128_f32[1],  // _42
                     mOut.matrix.r[3].m128_f32[2],  // _43
-                    1.0f}, light->lightInfo.maxRange };
+                    light->lightInfo.maxRange} };
             }
 
             if (light->lightInfo.shadowCaster) {
@@ -254,7 +255,9 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
 void DX12Renderer::CreateGlobalResources() {
     m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
+	m_downsampledShadowMaps = std::make_shared<DownsampledShadowMaps>(L"DownsampledShadowMaps");
     setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
+	setDownsampledShadowMaps(m_downsampledShadowMaps.get());
 }
 
 void DX12Renderer::SetSettings() {
@@ -268,6 +271,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
+	settingsManager.registerSetting<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
@@ -283,6 +287,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
+	settingsManager.registerSetting<DirectX::XMUINT2>("screenResolution", { m_xRes, m_yRes });
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -295,6 +300,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
 	settingsManager.registerSetting<bool>("enableGTAO", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
+	setDownsampledShadowMaps = settingsManager.getSettingSetter<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");
@@ -613,8 +619,28 @@ void DX12Renderer::CreateTextures() {
     depthStencilDesc.hasDSV = true;
 	depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
 
-    m_depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
-    m_depthStencilBuffer->SetName(L"DepthStencilBuffer");
+    auto depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
+    depthStencilBuffer->SetName(L"DepthStencilBuffer");
+
+    TextureDescription downsampledDesc;
+    dimensions.height = m_yRes / 2;
+    dimensions.width = m_xRes / 2;
+    downsampledDesc.imageDimensions.push_back(dimensions);
+    downsampledDesc.format = DXGI_FORMAT_R32_FLOAT;
+	downsampledDesc.arraySize = 1;
+    downsampledDesc.hasDSV = false;
+    downsampledDesc.hasSRV = true;
+    downsampledDesc.hasUAV = true;
+    downsampledDesc.channels = 1;
+    downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+    downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+    downsampledDesc.generateMipMaps = true;
+
+    std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc);
+    downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
+
+	m_depthMap.depthMap = depthStencilBuffer;
+	m_depthMap.downsampledDepthMap = downsampledDepthBuffer;
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
@@ -731,8 +757,8 @@ void DX12Renderer::Render() {
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
-	m_context.pPrimaryDepthBuffer = m_depthStencilBuffer.get();
     m_context.renderTargets = renderTargets.data();
+	m_context.pPrimaryDepthBuffer = m_depthMap.depthMap.get();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
@@ -764,7 +790,6 @@ void DX12Renderer::Render() {
     commandList->ResourceBarrier(1, &barrier);
     
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.rtvDescriptorSize);
-	auto& dsvHandle = m_depthStencilBuffer->GetDSVInfos()[0].cpuHandle;
     //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     commandList->Close();
@@ -899,6 +924,7 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	auto& ecs_world = ECSManager::GetInstance().GetWorld();
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
+    currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;
 }
@@ -984,8 +1010,9 @@ void DX12Renderer::CreateRenderGraph() {
     //StallPipeline();
 
     auto newGraph = std::make_shared<RenderGraph>();
-    std::shared_ptr<PixelBuffer> depthTexture = m_depthStencilBuffer;
+    std::shared_ptr<PixelBuffer> depthTexture = m_depthMap.depthMap;
 	newGraph->AddResource(depthTexture, false);
+    newGraph->AddResource(m_depthMap.downsampledDepthMap);
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
@@ -997,6 +1024,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto& environmentsBuffer = m_pEnvironmentManager->GetEnvironmentInfoBuffer();
     auto& environmentPrefilteredGroup = m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup();
     auto& meshletCullingBitfieldBufferGroup = m_pCameraManager->GetMeshletCullingBitfieldGroup();
+	auto& meshInstanceCullingBitfieldBufferGoup = m_pCameraManager->GetMeshInstanceCullingBitfieldGroup();
     auto& primaryCameraMeshletBitfieldBuffer = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1029,7 +1057,9 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(environmentsBuffer);
 	newGraph->AddResource(environmentPrefilteredGroup);
 	newGraph->AddResource(meshletCullingBitfieldBufferGroup);
+    newGraph->AddResource(meshInstanceCullingBitfieldBufferGoup);
 	newGraph->AddResource(primaryCameraMeshletBitfieldBuffer);
+	newGraph->AddResource(m_downsampledShadowMaps);
 
     // Frustrum culling goes before Z prepass
     bool indirect = getIndirectDrawsEnabled();
@@ -1052,7 +1082,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 		newGraph->BuildComputePass("FrustrumCullingPass")
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup)
+			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceCullingBitfieldBufferGoup)
 			.Build<FrustrumCullingPass>();
 
         newGraph->BuildComputePass("MeshletFrustrumCullingPass")
@@ -1148,6 +1178,12 @@ void DX12Renderer::CreateRenderGraph() {
 		}
 	}
     zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect);
+
+    // Single-pass downsample on all depth maps
+    auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
+        .WithShaderResource(depthTexture)
+		.WithUnorderedAccess(m_depthMap.downsampledDepthMap, m_downsampledShadowMaps)
+		.Build<DownsamplePass>(m_depthMap.downsampledDepthMap, depthTexture);
 
     auto debugPassParameters = RenderPassParameters();
 
@@ -1248,7 +1284,7 @@ void DX12Renderer::CreateRenderGraph() {
         UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
 
         newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
-            .WithShaderResource(normalsWorldSpace, m_depthStencilBuffer)
+            .WithShaderResource(normalsWorldSpace, m_depthMap.depthMap)
             .WithUnorderedAccess(workingDepths)
             .Build<GTAOFilterPass>(GTAOConstantBuffer);
 

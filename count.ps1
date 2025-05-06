@@ -2,7 +2,7 @@
 $directory = "BasicRenderer"
 
 # Set a list of directory names to exclude
-$excludedDirectories = @("nlohmann", "stb", "DirectX", "pix")
+$excludedDirectories = @("nlohmann", "stb", "DirectX", "pix", "Intel", "FidelityFX", "ThirdParty")
 
 # File extensions to include in the search (e.g., .txt, .cpp, .h)
 $includeExtensions = @("*.txt", "*.cpp", "*.h")

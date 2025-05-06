@@ -1212,3 +1212,49 @@ XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat) {
     XMStoreFloat4x4(&matFloats, mat);
     return XMFLOAT3(matFloats._41, matFloats._42, matFloats._43);
 }
+
+Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, unsigned int isCubemap) {
+	TextureDescription desc;
+	ImageDimensions dims;
+	dims.width = xRes;
+	dims.height = yRes;
+	desc.imageDimensions.push_back(dims);
+	desc.format = DXGI_FORMAT_R32_TYPELESS;
+    desc.arraySize = arraySize;
+	desc.isArray = arraySize > 1;
+	desc.hasDSV = true;
+	desc.hasSRV = true;
+	desc.isCubemap = isCubemap;
+	desc.channels = 1;
+	desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+	desc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
+    desc.generateMipMaps = false;
+
+	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::Create(desc);
+	depthBuffer->SetName(L"Depth Buffer");
+
+    TextureDescription downsampledDesc;
+	dims.height = yRes / 2;
+	dims.width = xRes / 2;
+	downsampledDesc.imageDimensions.push_back(dims);
+	downsampledDesc.format = DXGI_FORMAT_R32_FLOAT;
+	downsampledDesc.arraySize = arraySize;
+	downsampledDesc.isArray = arraySize > 1;
+	downsampledDesc.hasDSV = false;
+	downsampledDesc.hasSRV = true;
+	downsampledDesc.hasUAV = true;
+	downsampledDesc.isCubemap = isCubemap;
+	downsampledDesc.channels = 1;
+	downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+	downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+	downsampledDesc.generateMipMaps = true;
+
+	std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc);
+	downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
+
+	Components::DepthMap depthMap;
+	depthMap.depthMap = depthBuffer;
+	depthMap.downsampledDepthMap = downsampledDepthBuffer;
+
+	return depthMap;
+}

@@ -49,9 +49,7 @@ public:
 		return m_perMeshInstanceBufferData;
 	}
 
-	void SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> meshletBitfieldBufferView) {
-		m_meshletBitfieldBufferView = std::move(meshletBitfieldBufferView);
-	}
+    void SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> meshletBitfieldBufferView);
 
 	void SetAnimationSpeed(float speed) {
 		m_animationSpeed = speed;

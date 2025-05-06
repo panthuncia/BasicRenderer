@@ -116,7 +116,7 @@ void MSMain(
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
-    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBoundsBufferStartIndex + vGroupID.x;
+    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + vGroupID.x;
     
     bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
     

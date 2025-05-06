@@ -45,7 +45,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     PerObjectBuffer perObject = perObjectBuffer[command.perObjectBufferIndex];
     
     // Frustrum culling
-    float4 objectSpaceCenter = float4(perMesh.boundingSphere.center.xyz, 1.0);
+    float4 objectSpaceCenter = float4(perMesh.boundingSphere.sphere.xyz, 1.0);
     float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
     float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
     
@@ -56,26 +56,58 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     length(perObject.model[2].xyz)
 );
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
-    float scaledBoundingRadius = perMesh.boundingSphere.radius * maxScale;
+    float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * maxScale;
+    
+    RWByteAddressBuffer meshInstanceCullingBitfield = ResourceDescriptorHeap[UintRootConstant0];
+    bool wasPartiallyCulledLastFrame = GetBit(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
+    
+    bool fullyInside = true;
     
     // Disable culling for skinned meshes for now, as the bounding sphere is not updated
-    if (!(perMesh.vertexFlags & VERTEX_SKINNED)) { // TODO: Implement skinned mesh culling
-    
-        bool bCulled = false;
-    
+    if (!(perMesh.vertexFlags & VERTEX_SKINNED)) { // TODO: Implement skinned mesh culling    
         for (uint i = 0; i < 6; i++) {
-            float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
-            float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
-            float boundingRadius = perMesh.boundingSphere.radius;
-            bCulled |= distance < -scaledBoundingRadius; // Can I just exit here?
+            float4 P = camera.clippingPlanes[i].plane; // plane normal.xyz, plane.w
+            float distance = dot(P.xyz, viewSpaceCenter) + P.w;
+
+            // fully outside?
+            if (distance < -scaledBoundingRadius)
+            {
+                return; // reject whole object
+            }
+
+            // does it intersect this plane?
+            if (abs(distance) < scaledBoundingRadius)
+            {
+                // Mark the per-mesh bitfield, since we'll need to reset the meshlet bitfield when this is fully inside later
+                SetBitAtomic(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
+                fullyInside = false;
+            }
         }
-    
-        if (bCulled) {
-            return;
-        }
+
     }
     
     indirectCommandOutputBuffer.Append(command);
+    
+    if (fullyInside)
+    {
+        if (wasPartiallyCulledLastFrame) { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
+            AppendStructuredBuffer<DispatchIndirectCommand> meshletFrustrumCullingResetCommandBuffer = ResourceDescriptorHeap[UintRootConstant1];
+            DispatchIndirectCommand meshletFrustrumCullingResetCommand;
+            meshletFrustrumCullingResetCommand.dispatchX = command.dispatchMeshX;
+            meshletFrustrumCullingResetCommand.dispatchY = command.dispatchMeshY;
+            meshletFrustrumCullingResetCommand.dispatchZ = command.dispatchMeshZ;
+            meshletFrustrumCullingResetCommand.perMeshBufferIndex = command.perMeshBufferIndex;
+            meshletFrustrumCullingResetCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
+            meshletFrustrumCullingResetCommand.perObjectBufferIndex = command.perObjectBufferIndex;
+            
+            meshletFrustrumCullingResetCommandBuffer.Append(meshletFrustrumCullingResetCommand);
+            
+            // Mark as not meshlet culled
+            ClearBitAtomic(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
+        }
+        // If the object is fully inside the frustrum, we can skip the meshlet culling
+        return;
+    }
     DispatchIndirectCommand meshletFrustrumCullingCommand;
     meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
     meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;
@@ -113,7 +145,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer perObject = perObjectBuffer[perObjectBufferIndex];
 
-    float4 objectSpaceCenter = float4(meshletBounds.center.xyz, 1.0);
+    float4 objectSpaceCenter = float4(meshletBounds.sphere.xyz, 1.0);
     float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
     float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
     
@@ -124,9 +156,11 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     );
     
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
-    float scaledBoundingRadius = meshletBounds.radius * maxScale;
+    float scaledBoundingRadius = meshletBounds.sphere.w * maxScale;
 
     RWByteAddressBuffer meshletBitfieldBuffer = ResourceDescriptorHeap[UintRootConstant1];
+    
+    uint meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + vDispatchThreadID.x;
     
     // Disable culling for skinned meshes for now, as the bounding sphere is not updated
     if (!(perMesh.vertexFlags & VERTEX_SKINNED))
@@ -138,16 +172,36 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
         {
             float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
             float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
-            float boundingRadius = perMesh.boundingSphere.radius;
+            float boundingRadius = perMesh.boundingSphere.sphere.w;
             bCulled |= distance < -scaledBoundingRadius;
         }
     
         if (bCulled)
         {
             // TODO: Could avoid the atomic if we use eight ExecuteIndirect calls, one for each bit of a byte
-            SetBitAtomic(meshletBitfieldBuffer, meshletBoundsIndex);
+            SetBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
             return;
         }
     }
-    ClearBitAtomic(meshletBitfieldBuffer, meshletBoundsIndex);
+    ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
+}
+
+[numthreads(64, 1, 1)]
+void ClearMeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
+{
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    
+    if (perMeshBuffer[perMeshBufferIndex].numMeshlets <= vDispatchThreadID.x)
+    {
+        return;
+    }
+    
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+    
+    RWByteAddressBuffer meshletBitfieldBuffer = ResourceDescriptorHeap[UintRootConstant1];
+    
+    uint meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + vDispatchThreadID.x;
+    
+    ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
 }

@@ -27,6 +27,7 @@ public:
     flecs::entity GetRoot() const;
     void Update();
     void SetCamera(DirectX::XMFLOAT3 lookAt, DirectX::XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
+    void SetDepthMap(Components::DepthMap depthMap);
     flecs::entity& GetPrimaryCamera();
     void AddSkeleton(std::shared_ptr<Skeleton>);
     void PostUpdate();
@@ -37,6 +38,7 @@ public:
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraAlphaTestIndirectCommandBuffer() const;
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraBlendIndirectCommandBuffer() const;
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() const;
+    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingResetIndirectCommandBuffer() const;
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const;
 
     void ProcessEntitySkins(bool overrideExistingSkins = false);
@@ -59,6 +61,8 @@ private:
     flecs::entity ECSSceneRoot;
 
 	ManagerInterface m_managerInterface;
+
+	Components::DepthMap m_primaryCameraDepthMap; // Comes from main renderer
 
     std::function<void(std::vector<float>)> setDirectionalLightCascadeSplits;
     std::function<uint8_t()> getNumDirectionalLightCascades;

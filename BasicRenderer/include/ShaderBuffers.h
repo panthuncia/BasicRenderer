@@ -59,8 +59,7 @@ struct PerObjectCB {
 };
 
 struct BoundingSphere {
-	DirectX::XMFLOAT4 center;
-	float radius;
+	DirectX::XMFLOAT4 sphere;
 };
 
 struct PerMeshCB {
@@ -78,13 +77,14 @@ struct PerMeshCB {
 	BoundingSphere boundingSphere;
 	unsigned int numVertices;
     unsigned int numMeshlets;
+    unsigned int pad[1];
 };
 
 struct PerMeshInstanceCB {
     unsigned int boneTransformBufferIndex;
     unsigned int postSkinningVertexBufferOffset;
 	unsigned int meshletBoundsBufferStartIndex;
-    unsigned int pad[1];
+    unsigned int meshletBitfieldStartIndex;
 };
 
 struct PerMaterialCB {
@@ -145,7 +145,7 @@ struct LightInfo {
     bool shadowCaster;
 	BoundingSphere boundingSphere;
     float maxRange;
-	unsigned int pad[1];
+	unsigned int pad[2];
 };
 
 #define LIGHTS_PER_PAGE 12
@@ -315,6 +315,7 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant1,
     UintRootConstant2,
     UintRootConstant3,
+	UintRootConstant4,
 	NumMiscUintRootConstants
 };
 

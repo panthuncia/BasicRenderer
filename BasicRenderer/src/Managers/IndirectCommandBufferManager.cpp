@@ -64,16 +64,22 @@ Components::IndirectCommandBuffers IndirectCommandBufferManager::CreateBuffersFo
 	std::shared_ptr<DynamicGloballyIndexedResource> pBlendDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(blendBuffer);
 	m_blendResourceGroup->AddResource(blendBuffer);
 
-	auto meshletFrustrumCullingBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(DispatchIndirectCommand), false, true, true);
+	auto meshletFrustrumCullingBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true);
 	meshletFrustrumCullingBuffer->SetName(L"MeshletFrustrumCullingIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pMeshletFrustrumCullingDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(meshletFrustrumCullingBuffer);
 	m_meshletCullingCommandResourceGroup->AddResource(meshletFrustrumCullingBuffer);
+
+	auto meshletFrustrumCullingResetBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true);
+	meshletFrustrumCullingResetBuffer->SetName(L"MeshletFrustrumCullingResetIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
+	std::shared_ptr<DynamicGloballyIndexedResource> pMeshletFrustrumCullingResetDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(meshletFrustrumCullingResetBuffer);
+	m_meshletCullingCommandResourceGroup->AddResource(meshletFrustrumCullingResetBuffer);
 
     Components::IndirectCommandBuffers bufferComponent;
 	bufferComponent.opaqueIndirectCommandBuffer = pOpaqueDynamicResource;
 	bufferComponent.alphaTestIndirectCommandBuffer = pAlphaTestDynamicResource;
 	bufferComponent.blendIndirectCommandBuffer = pBlendDynamicResource;
 	bufferComponent.meshletFrustrumCullingIndirectCommandBuffer = pMeshletFrustrumCullingDynamicResource;
+	bufferComponent.meshletFrustrumCullingResetIndirectCommandBuffer = pMeshletFrustrumCullingResetDynamicResource;
 
 	m_viewIDToBuffers[viewID] = bufferComponent;
 
@@ -87,12 +93,14 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.alphaTestIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.blendIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 
 	m_opaqueResourceGroup->RemoveResource(bufferComponent.opaqueIndirectCommandBuffer->GetResource().get());
 	m_alphaTestResourceGroup->RemoveResource(bufferComponent.alphaTestIndirectCommandBuffer->GetResource().get());
 	m_blendResourceGroup->RemoveResource(bufferComponent.blendIndirectCommandBuffer->GetResource().get());
 
 	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource().get());
+	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource().get());
 
 	m_viewIDToBuffers.erase(viewID);
 }
@@ -116,6 +124,9 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
     }
     case MaterialBuckets::AlphaTest: {
         unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
+		if (newSize > 1000) {
+			spdlog::info("Alpha test command buffer size: {}", newSize);
+		}
         if (newSize <= m_alphaTestCommandBufferSize) {
             return;
         }
@@ -158,6 +169,7 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 			break;
 		}
 		bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
+		bufferComponent.meshletFrustrumCullingResetIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
     }
 }
 

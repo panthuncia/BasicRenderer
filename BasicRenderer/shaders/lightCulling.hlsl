@@ -90,7 +90,7 @@ void CSMain(uint3 groupID : SV_GroupID,
         switch (light.type) {
             case 0: // Point light
             case 1: // Spot light
-                if (testSphereAABB(primaryCamera.view, light.boundingSphere.center.xyz, light.boundingSphere.radius, cluster)) {
+                if (testSphereAABB(primaryCamera.view, light.boundingSphere.sphere.xyz, light.boundingSphere.sphere.w, cluster)) {
                     lightPages[pageIndex].lightIndices[numLightsInPage] = activeLightIndices[i];
                     numLightsInPage++;
                     cluster.numLights++;

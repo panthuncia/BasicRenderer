@@ -75,6 +75,7 @@ cbuffer MiscUintRootConstants : register(b9) { // Used for pass-specific one-off
     uint UintRootConstant1;
     uint UintRootConstant2;
     uint UintRootConstant3;
+    uint UintRootConstant4;
 }
 
 cbuffer MiscFloatRootConstants : register(b10) { // Used for pass-specific one-off constants

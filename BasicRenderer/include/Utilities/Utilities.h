@@ -16,6 +16,7 @@
 #include "Resources/HeapIndexInfo.h"
 #include "ShaderBuffers.h"
 #include "Import/Filetypes.h"
+#include "Scene/Components.h"
 
 #ifndef NDEBUG
 #define DEBUG_ONLY(x)   x
@@ -237,3 +238,5 @@ DirectX::XMMATRIX GetProjectionMatrixForLight(LightInfo info);
 DirectX::XMVECTOR QuaternionFromAxisAngle(const DirectX::XMFLOAT3& dir);
 
 DirectX::XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat);
+
+Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, unsigned int isCubemap);

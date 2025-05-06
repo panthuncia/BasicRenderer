@@ -61,6 +61,13 @@ public:
 
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
+		// Meshlet frustrum culling reset buffer
+		resource = currentScene->GetPrimaryCameraMeshletFrustrumCullingResetIndirectCommandBuffer()->GetResource();
+		counterOffset = resource->GetUAVCounterOffset();
+		apiResource = resource->GetAPIResource();
+
+		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+
 		lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
 			for (auto& view : lightViewInfo.renderViews) {
 				auto resource = view.indirectCommandBuffers.opaqueIndirectCommandBuffer->GetResource();
@@ -82,6 +89,12 @@ public:
 				counterOffset = resource->GetUAVCounterOffset();
 				apiResource = resource->GetAPIResource();
 				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+
+				resource = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource();
+				counterOffset = resource->GetUAVCounterOffset();
+				apiResource = resource->GetAPIResource();
+				commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+				resource = view.meshletBitfieldBuffer->GetResource();
 			}
 			});
 		return {};

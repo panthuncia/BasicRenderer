@@ -64,8 +64,7 @@ struct PerFrameBuffer {
 };
 
 struct BoundingSphere {
-    float4 center;
-    float radius;
+    float4 sphere;
 };
 
 struct LightInfo {
@@ -73,18 +72,21 @@ struct LightInfo {
     float innerConeAngle;
     float outerConeAngle;
     int shadowViewInfoIndex; // -1 if no shadow map
+    
     float4 posWorldSpace; // Position of the light
     float4 dirWorldSpace; // Direction of the light
     float4 attenuation; // x,y,z = constant, linear, quadratic attenuation, w= max range
     float4 color; // Color of the light
+    
     float nearPlane;
     float farPlane;
     int shadowMapIndex;
     int shadowSamplerIndex;
+    
     bool shadowCaster;
     BoundingSphere boundingSphere;
     float maxRange;
-    uint pad[1];
+    uint pad[2];
 };
 
 struct MaterialInfo {
@@ -138,21 +140,24 @@ struct PerMeshBuffer {
     uint vertexFlags;
     uint vertexByteSize;
     uint skinningVertexByteSize;
+    
     uint inverseBindMatricesBufferIndex;
     uint vertexBufferOffset;
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
+    
     uint meshletTrianglesBufferOffset;
     BoundingSphere boundingSphere;
     uint numVertices;
     uint numMeshlets;
+    uint pad[1];
 };
 
 struct PerMeshInstanceBuffer {
     uint boneTransformBufferIndex;
     uint postSkinningVertexBufferOffset;
     uint meshletBoundsBufferStartIndex;
-    uint pad[1];
+    uint meshletBitfieldStartIndex;
 };
 
 #define LIGHTS_PER_PAGE 12
