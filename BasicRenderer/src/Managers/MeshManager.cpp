@@ -122,6 +122,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	auto numVertices = mesh->GetMesh()->GetNumVertices(useMeshletReorderedVertices);
 
 	auto vertexSize = mesh->GetMesh()->GetPerMeshCBData().vertexByteSize;
+	unsigned int meshInstanceBufferSize = m_perMeshInstanceBuffers->Size();
 	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
 		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize);
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
@@ -131,6 +132,10 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	else { // Non-skinned meshes can share post-skinning vertex buffers
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
 		mesh->SetBufferViewUsingBaseMesh(std::move(perMeshInstanceBufferView));
+	}
+
+	if (meshInstanceBufferSize != m_perMeshInstanceBuffers->Size()) {
+		m_pCameraManager->SetNumMeshInstances(m_perMeshInstanceBuffers->Size()); // All render views must be updated
 	}
 
 	unsigned int meshletBitfieldSize = m_meshletBitfieldBuffer->Size();

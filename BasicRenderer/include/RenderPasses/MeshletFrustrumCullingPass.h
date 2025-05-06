@@ -80,7 +80,21 @@ public:
 			meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
 		);
 
+		auto meshletCullingClearBuffer = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingResetIndirectCommandBuffer();
+		commandList->SetPipelineState(m_clearPSO.Get());
+
+		commandList->ExecuteIndirect(
+			commandSignature,
+			numDraws,
+			meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+			0,
+			meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+			meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
+		);
+
 		lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+			commandList->SetPipelineState(m_PSO.Get());
+
 			for (auto& view : lightViewInfo.renderViews) {
 
 				cameraIndex = view.cameraBufferIndex;
@@ -96,6 +110,28 @@ public:
 					0,
 					meshletCullingBuffer->GetResource()->GetAPIResource(),
 					meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
+				);
+			}
+			});
+
+		lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+			commandList->SetPipelineState(m_clearPSO.Get());
+
+			for (auto& view : lightViewInfo.renderViews) {
+
+				cameraIndex = view.cameraBufferIndex;
+				commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+
+				miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+				commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+				meshletCullingClearBuffer = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer;
+				commandList->ExecuteIndirect(
+					commandSignature,
+					numDraws,
+					meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+					0,
+					meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+					meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
 				);
 			}
 			});
@@ -131,11 +167,17 @@ private:
 		ID3D12Device2* device2 = nullptr;
 		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
+
+		PSOManager::GetInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6", {}, computeShader);
+
+		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
+		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_clearPSO)));
 	}
 
 	flecs::query<Components::LightViewInfo> lightQuery;
 
 	ComPtr<ID3D12PipelineState> m_PSO;
+	ComPtr<ID3D12PipelineState> m_clearPSO;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 

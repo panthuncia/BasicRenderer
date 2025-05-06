@@ -130,6 +130,7 @@ namespace Components {
 		std::shared_ptr<DynamicGloballyIndexedResource> alphaTestIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> blendIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletFrustrumCullingIndirectCommandBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshletFrustrumCullingResetIndirectCommandBuffer;
 	};
 	struct DepthMap {
 		DepthMap() = default;

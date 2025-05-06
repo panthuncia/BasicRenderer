@@ -27,6 +27,7 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	view.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshletBitfield);
 
 	auto meshInstanceBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false);
+	
 	meshInstanceBitfield->SetName(L"ObjectBitfieldBuffer (" + std::to_wstring(viewID) + L")");
 	view.meshInstanceBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceBitfield);
 
@@ -56,5 +57,13 @@ void CameraManager::SetMeshletBitfieldSize(unsigned int numMeshlets) {
 	for (auto& pair : m_meshletBitfieldBuffers) {
 		auto& buffer = pair.second;
 		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshletBitfieldSize, sizeof(unsigned int), false, true, false));
+	}
+}
+
+void CameraManager::SetNumMeshInstances(unsigned int numMeshInstances) {
+	m_currentMeshInstanceBitfieldSize = numMeshInstances;
+	for (auto& pair : m_meshInstanceBitfieldBuffers) {
+		auto& buffer = pair.second;
+		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false));
 	}
 }

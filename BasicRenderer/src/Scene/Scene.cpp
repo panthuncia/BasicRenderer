@@ -639,6 +639,11 @@ const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMe
 	return view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
 }
 
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingResetIndirectCommandBuffer() const {
+	auto view = m_primaryCamera.get<Components::RenderView>();
+	return view->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer;
+}
+
 const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const {
 	auto view = m_primaryCamera.get<Components::RenderView>();
 	return view->meshletBitfieldBuffer;

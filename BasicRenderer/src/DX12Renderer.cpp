@@ -1024,6 +1024,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto& environmentsBuffer = m_pEnvironmentManager->GetEnvironmentInfoBuffer();
     auto& environmentPrefilteredGroup = m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup();
     auto& meshletCullingBitfieldBufferGroup = m_pCameraManager->GetMeshletCullingBitfieldGroup();
+	auto& meshInstanceCullingBitfieldBufferGoup = m_pCameraManager->GetMeshInstanceCullingBitfieldGroup();
     auto& primaryCameraMeshletBitfieldBuffer = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1056,6 +1057,7 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(environmentsBuffer);
 	newGraph->AddResource(environmentPrefilteredGroup);
 	newGraph->AddResource(meshletCullingBitfieldBufferGroup);
+    newGraph->AddResource(meshInstanceCullingBitfieldBufferGoup);
 	newGraph->AddResource(primaryCameraMeshletBitfieldBuffer);
 	newGraph->AddResource(m_downsampledShadowMaps);
 
@@ -1080,7 +1082,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 		newGraph->BuildComputePass("FrustrumCullingPass")
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup)
+			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceCullingBitfieldBufferGoup)
 			.Build<FrustrumCullingPass>();
 
         newGraph->BuildComputePass("MeshletFrustrumCullingPass")

@@ -45,6 +45,12 @@ public:
 		return m_meshletCullingBitfieldGroup;
 	}
 
+	const std::shared_ptr<ResourceGroup>& GetMeshInstanceCullingBitfieldGroup() const {
+		return m_meshInstanceCullingBitfieldGroup;
+	}
+
+	void SetNumMeshInstances(unsigned int numMeshInstances);
+
 private:
 	CameraManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
