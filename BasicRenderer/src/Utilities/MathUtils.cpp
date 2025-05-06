@@ -66,8 +66,8 @@ BoundingSphere ComputeConeBoundingSphere(const XMVECTOR& origin, const XMVECTOR&
 	XMVECTOR center = origin + DirectX::XMVector4Normalize(direction) * height / 2;
 
 	BoundingSphere sphere;
-	XMStoreFloat4(&sphere.center, center);
-	sphere.radius = t;
+	XMStoreFloat4(&sphere.sphere, center);
+	sphere.sphere.w = t;
 
 	return sphere;
 }

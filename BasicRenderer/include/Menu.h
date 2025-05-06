@@ -332,7 +332,7 @@ inline void Menu::Render(const RenderContext& context) {
 	}
 
     {
-		ImGui::Begin("Scene Graph", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::Begin("Scene Graph", nullptr);
 		DisplaySceneGraph();
 		ImGui::End();
 

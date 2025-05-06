@@ -134,7 +134,11 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	}
 
 	unsigned int meshletBitfieldSize = m_meshletBitfieldBuffer->Size();
-	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(((float)std::ceil(mesh->GetMesh()->GetMeshletCount()) / 8.f), 1); // 1 bit per meshlet
+
+	unsigned int bitsToAllocate = mesh->GetMesh()->GetMeshletCount();
+	unsigned int bytesToAllocate = (bitsToAllocate + 7) / 8; // Round up to the nearest byte
+
+	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
 		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()); // All render views must be updated
 	}

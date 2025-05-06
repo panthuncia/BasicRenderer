@@ -81,10 +81,10 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
-				constants.center[0] = meshData.boundingSphere.center.x;
-				constants.center[1] = meshData.boundingSphere.center.y;
-				constants.center[2] = meshData.boundingSphere.center.z;
-				constants.radius = meshData.boundingSphere.radius;
+				constants.center[0] = meshData.boundingSphere.sphere.x;
+				constants.center[1] = meshData.boundingSphere.sphere.y;
+				constants.center[2] = meshData.boundingSphere.sphere.z;
+				constants.radius = meshData.boundingSphere.sphere.w;
 				constants.perObjectIndex = drawInfo.perObjectCBIndex;
 				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
 				commandList->DispatchMesh(1, 1, 1);
@@ -96,10 +96,10 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
-				constants.center[0] = meshData.boundingSphere.center.x;
-				constants.center[1] = meshData.boundingSphere.center.y;
-				constants.center[2] = meshData.boundingSphere.center.z;
-				constants.radius = meshData.boundingSphere.radius;
+				constants.center[0] = meshData.boundingSphere.sphere.x;
+				constants.center[1] = meshData.boundingSphere.sphere.y;
+				constants.center[2] = meshData.boundingSphere.sphere.z;
+				constants.radius = meshData.boundingSphere.sphere.w;
 				constants.perObjectIndex = drawInfo.perObjectCBIndex;
 				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
 				commandList->DispatchMesh(1, 1, 1);
@@ -111,10 +111,10 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
-				constants.center[0] = meshData.boundingSphere.center.x;
-				constants.center[1] = meshData.boundingSphere.center.y;
-				constants.center[2] = meshData.boundingSphere.center.z;
-				constants.radius = meshData.boundingSphere.radius;
+				constants.center[0] = meshData.boundingSphere.sphere.x;
+				constants.center[1] = meshData.boundingSphere.sphere.y;
+				constants.center[2] = meshData.boundingSphere.sphere.z;
+				constants.radius = meshData.boundingSphere.sphere.w;
 				constants.perObjectIndex = drawInfo.perObjectCBIndex;
 				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
 				commandList->DispatchMesh(1, 1, 1);

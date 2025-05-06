@@ -45,7 +45,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     PerObjectBuffer perObject = perObjectBuffer[command.perObjectBufferIndex];
     
     // Frustrum culling
-    float4 objectSpaceCenter = float4(perMesh.boundingSphere.center.xyz, 1.0);
+    float4 objectSpaceCenter = float4(perMesh.boundingSphere.sphere.xyz, 1.0);
     float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
     float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
     
@@ -56,7 +56,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     length(perObject.model[2].xyz)
 );
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
-    float scaledBoundingRadius = perMesh.boundingSphere.radius * maxScale;
+    float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * maxScale;
     
     // Disable culling for skinned meshes for now, as the bounding sphere is not updated
     if (!(perMesh.vertexFlags & VERTEX_SKINNED)) { // TODO: Implement skinned mesh culling
@@ -66,7 +66,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
         for (uint i = 0; i < 6; i++) {
             float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
             float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
-            float boundingRadius = perMesh.boundingSphere.radius;
+            float boundingRadius = perMesh.boundingSphere.sphere.w;
             bCulled |= distance < -scaledBoundingRadius; // Can I just exit here?
         }
     
@@ -113,7 +113,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer perObject = perObjectBuffer[perObjectBufferIndex];
 
-    float4 objectSpaceCenter = float4(meshletBounds.center.xyz, 1.0);
+    float4 objectSpaceCenter = float4(meshletBounds.sphere.xyz, 1.0);
     float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
     float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
     
@@ -124,9 +124,11 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     );
     
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
-    float scaledBoundingRadius = meshletBounds.radius * maxScale;
+    float scaledBoundingRadius = meshletBounds.sphere.w * maxScale;
 
     RWByteAddressBuffer meshletBitfieldBuffer = ResourceDescriptorHeap[UintRootConstant1];
+    
+    uint meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + vDispatchThreadID.x;
     
     // Disable culling for skinned meshes for now, as the bounding sphere is not updated
     if (!(perMesh.vertexFlags & VERTEX_SKINNED))
@@ -138,16 +140,16 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
         {
             float4 clippingPlane = camera.clippingPlanes[i].plane; // ZYZ normal, W distance
             float distance = dot(clippingPlane.xyz, viewSpaceCenter) + clippingPlane.w;
-            float boundingRadius = perMesh.boundingSphere.radius;
+            float boundingRadius = perMesh.boundingSphere.sphere.w;
             bCulled |= distance < -scaledBoundingRadius;
         }
     
         if (bCulled)
         {
             // TODO: Could avoid the atomic if we use eight ExecuteIndirect calls, one for each bit of a byte
-            SetBitAtomic(meshletBitfieldBuffer, meshletBoundsIndex);
+            SetBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
             return;
         }
     }
-    ClearBitAtomic(meshletBitfieldBuffer, meshletBoundsIndex);
+    ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
 }

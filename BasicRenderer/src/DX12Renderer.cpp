@@ -240,7 +240,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
                 light->lightInfo.boundingSphere = { {mOut.matrix.r[3].m128_f32[0],  // _41
                     mOut.matrix.r[3].m128_f32[1],  // _42
                     mOut.matrix.r[3].m128_f32[2],  // _43
-                    1.0f}, light->lightInfo.maxRange };
+                    light->lightInfo.maxRange} };
             }
 
             if (light->lightInfo.shadowCaster) {

@@ -78,10 +78,7 @@ void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 			m_perMeshBufferData.vertexByteSize
 		);
 
-		m_meshletBounds.push_back({
-			{ bounds.center[0], bounds.center[1], bounds.center[2], 1.0f },
-			bounds.radius
-			});
+		m_meshletBounds.push_back({ { bounds.center[0], bounds.center[1], bounds.center[2], bounds.radius } });
 	}
 
 	m_perMeshBufferData.numMeshlets = static_cast<unsigned int>(m_meshlets.size());
@@ -119,8 +116,7 @@ void Mesh::ComputeBoundingSphere(const std::vector<UINT32>& indices) {
 	float radius = 0.5f * sqrt(diagonal.x * diagonal.x + diagonal.y * diagonal.y + diagonal.z * diagonal.z);
 
 	// Set the bounding sphere
-	sphere.center = DirectX::XMFLOAT4(center.x, center.y, center.z, 1.0);
-	sphere.radius = radius;
+	sphere.sphere = DirectX::XMFLOAT4(center.x, center.y, center.z, radius);
 
 	m_perMeshBufferData.boundingSphere = sphere;
 }

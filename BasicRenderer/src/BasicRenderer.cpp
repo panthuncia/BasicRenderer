@@ -300,6 +300,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto cubeScene = LoadModel("models/sphere.glb");
     cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
+    cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
 	//cubeScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
     cubeScene->DisableShadows();
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
@@ -330,25 +331,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //mountainScene->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-	//renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 1; i++) {
+	for (int i = 0; i < 100; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-		//renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 		auto point = randomPointInSphere(50.0);
-        tigerScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
+        cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
-    auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    //auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(bistro);

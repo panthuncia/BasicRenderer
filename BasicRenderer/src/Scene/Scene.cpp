@@ -85,7 +85,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 		lightInfo.boundingSphere = ComputeConeBoundingSphere(XMLoadFloat3(&position), XMLoadFloat3(&direction), maxRange, outerConeAngle);
 		break;
 	case Components::LightType::Point:
-		lightInfo.boundingSphere = { { position.x, position.y, position.z, 0 }, maxRange };
+		lightInfo.boundingSphere = { { position.x, position.y, position.z, maxRange } };
 	}
 
 	flecs::entity entity = world.entity();
