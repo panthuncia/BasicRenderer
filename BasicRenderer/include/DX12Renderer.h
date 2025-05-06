@@ -158,7 +158,7 @@ private:
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
 	bool m_gtaoEnabled = true;
-	bool m_deferredRendering = false;
+	bool m_deferredRendering = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<void(DownsampledShadowMaps*)> setDownsampledShadowMaps;

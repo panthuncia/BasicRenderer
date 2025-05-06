@@ -22,11 +22,15 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	view.cameraBufferView = m_pCameraBuffer->Add();
 	view.cameraBufferIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 	
-	auto meshletBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshletBitfieldSize, sizeof(unsigned int), false, true, false);
+	auto bits = m_currentMeshletBitfieldSize;
+	auto bytes = (bits + 7) / 8;
+	auto meshletBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
 	meshletBitfield->SetName(L"MeshletBitfieldBuffer (" + std::to_wstring(viewID) + L")");
 	view.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshletBitfield);
 
-	auto meshInstanceBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false);
+	bits = m_currentMeshInstanceBitfieldSize;
+	bytes = (bits + 7) / 8;
+	auto meshInstanceBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
 	
 	meshInstanceBitfield->SetName(L"ObjectBitfieldBuffer (" + std::to_wstring(viewID) + L")");
 	view.meshInstanceBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceBitfield);

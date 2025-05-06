@@ -76,7 +76,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
             }
 
             // does it intersect this plane?
-            if (distance < scaledBoundingRadius)
+            if (abs(distance) < scaledBoundingRadius)
             {
                 // Mark the per-mesh bitfield, since we'll need to reset the meshlet bitfield when this is fully inside later
                 SetBitAtomic(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
@@ -103,7 +103,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
             meshletFrustrumCullingResetCommandBuffer.Append(meshletFrustrumCullingResetCommand);
             
             // Mark as not meshlet culled
-            SetBitAtomic(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
+            ClearBitAtomic(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
         }
         // If the object is fully inside the frustrum, we can skip the meshlet culling
         return;

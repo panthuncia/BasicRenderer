@@ -64,12 +64,12 @@ Components::IndirectCommandBuffers IndirectCommandBufferManager::CreateBuffersFo
 	std::shared_ptr<DynamicGloballyIndexedResource> pBlendDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(blendBuffer);
 	m_blendResourceGroup->AddResource(blendBuffer);
 
-	auto meshletFrustrumCullingBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(DispatchIndirectCommand), false, true, true);
+	auto meshletFrustrumCullingBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true);
 	meshletFrustrumCullingBuffer->SetName(L"MeshletFrustrumCullingIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pMeshletFrustrumCullingDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(meshletFrustrumCullingBuffer);
 	m_meshletCullingCommandResourceGroup->AddResource(meshletFrustrumCullingBuffer);
 
-	auto meshletFrustrumCullingResetBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(DispatchIndirectCommand), false, true, true);
+	auto meshletFrustrumCullingResetBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true);
 	meshletFrustrumCullingResetBuffer->SetName(L"MeshletFrustrumCullingResetIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pMeshletFrustrumCullingResetDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(meshletFrustrumCullingResetBuffer);
 	m_meshletCullingCommandResourceGroup->AddResource(meshletFrustrumCullingResetBuffer);
@@ -124,6 +124,9 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
     }
     case MaterialBuckets::AlphaTest: {
         unsigned int newSize = ((numDraws + m_incrementSize - 1) / m_incrementSize) * m_incrementSize;
+		if (newSize > 1000) {
+			spdlog::info("Alpha test command buffer size: {}", newSize);
+		}
         if (newSize <= m_alphaTestCommandBufferSize) {
             return;
         }

@@ -15,6 +15,7 @@ class MeshletFrustrumCullingPass : public ComputePass {
 public:
 	MeshletFrustrumCullingPass() {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
+		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
 
 	~MeshletFrustrumCullingPass() {
@@ -92,49 +93,51 @@ public:
 			meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
 		);
 
-		lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-			commandList->SetPipelineState(m_PSO.Get());
+		if (getShadowsEnabled()) {
+			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+				commandList->SetPipelineState(m_PSO.Get());
 
-			for (auto& view : lightViewInfo.renderViews) {
+				for (auto& view : lightViewInfo.renderViews) {
 
-				cameraIndex = view.cameraBufferIndex;
-				commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+					cameraIndex = view.cameraBufferIndex;
+					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
-				miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-				commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
-				meshletCullingBuffer = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
-				commandList->ExecuteIndirect(
-					commandSignature,
-					numDraws,
-					meshletCullingBuffer->GetResource()->GetAPIResource(),
-					0,
-					meshletCullingBuffer->GetResource()->GetAPIResource(),
-					meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
-				);
-			}
-			});
+					miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+					meshletCullingBuffer = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
+					commandList->ExecuteIndirect(
+						commandSignature,
+						numDraws,
+						meshletCullingBuffer->GetResource()->GetAPIResource(),
+						0,
+						meshletCullingBuffer->GetResource()->GetAPIResource(),
+						meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
+					);
+				}
+				});
 
-		lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-			commandList->SetPipelineState(m_clearPSO.Get());
+			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
+				commandList->SetPipelineState(m_clearPSO.Get());
 
-			for (auto& view : lightViewInfo.renderViews) {
+				for (auto& view : lightViewInfo.renderViews) {
 
-				cameraIndex = view.cameraBufferIndex;
-				commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+					cameraIndex = view.cameraBufferIndex;
+					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
-				miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
-				commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
-				meshletCullingClearBuffer = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer;
-				commandList->ExecuteIndirect(
-					commandSignature,
-					numDraws,
-					meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-					0,
-					meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-					meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
-				);
-			}
-			});
+					miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+					meshletCullingClearBuffer = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer;
+					commandList->ExecuteIndirect(
+						commandSignature,
+						numDraws,
+						meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+						0,
+						meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+						meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
+					);
+				}
+				});
+		}
 
 		return {};
 	}
@@ -180,5 +183,5 @@ private:
 	ComPtr<ID3D12PipelineState> m_clearPSO;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
-
+	std::function<bool()> getShadowsEnabled;
 };
