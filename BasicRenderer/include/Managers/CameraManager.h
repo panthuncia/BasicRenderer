@@ -51,6 +51,8 @@ public:
 
 	void SetNumMeshInstances(unsigned int numMeshInstances);
 
+	void SetDepthBufferForCamera(Components::RenderView view, Components::DepthMap, bool isArray = false, unsigned int arrayIndex = 0);
+
 private:
 	CameraManager();
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;

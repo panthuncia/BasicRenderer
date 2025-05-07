@@ -240,3 +240,5 @@ DirectX::XMVECTOR QuaternionFromAxisAngle(const DirectX::XMFLOAT3& dir);
 DirectX::XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat);
 
 Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, unsigned int isCubemap);
+
+uint32_t NumMips(uint32_t width, uint32_t height);

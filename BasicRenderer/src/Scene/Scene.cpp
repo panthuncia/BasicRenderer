@@ -226,9 +226,15 @@ void Scene::ActivateLight(flecs::entity& entity) {
 
 void Scene::ActivateCamera(flecs::entity& entity) {
 	auto cameraInfo = entity.get_mut<Components::Camera>()->info;
-	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
+
 	auto screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
 	auto depth = CreateDepthMapComponent(screenRes.x, screenRes.y, 1, false);
+	cameraInfo.depthBufferArrayIndex = 0; // TODO: This is kinda boilerplate, should probably restructure view creation
+	cameraInfo.numDepthMips = NumMips(screenRes.x, screenRes.y);
+	cameraInfo.depthResX = screenRes.x;
+	cameraInfo.depthResY = screenRes.y;
+
+	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
 	entity.set<Components::RenderView>(renderView);
 	entity.set<Components::DepthMap>(depth);
 }

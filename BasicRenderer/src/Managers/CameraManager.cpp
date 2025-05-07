@@ -21,7 +21,7 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	view.indirectCommandBuffers = m_pCommandBufferManager->CreateBuffersForView(viewID);
 	view.cameraBufferView = m_pCameraBuffer->Add();
 	view.cameraBufferIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
-	
+
 	auto bits = m_currentMeshletBitfieldSize;
 	auto bytes = (bits + 7) / 8;
 	auto meshletBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
@@ -31,7 +31,7 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	bits = m_currentMeshInstanceBitfieldSize;
 	bytes = (bits + 7) / 8;
 	auto meshInstanceBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
-	
+
 	meshInstanceBitfield->SetName(L"ObjectBitfieldBuffer (" + std::to_wstring(viewID) + L")");
 	view.meshInstanceBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceBitfield);
 
@@ -62,6 +62,10 @@ void CameraManager::SetMeshletBitfieldSize(unsigned int numMeshlets) {
 		auto& buffer = pair.second;
 		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshletBitfieldSize, sizeof(unsigned int), false, true, false));
 	}
+}
+
+void CameraManager::SetDepthBufferForCamera(Components::RenderView view, Components::DepthMap depth, bool isArray, unsigned int arrayIndex) {
+
 }
 
 void CameraManager::SetNumMeshInstances(unsigned int numMeshInstances) {

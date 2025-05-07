@@ -24,10 +24,17 @@ struct Camera {
     row_major matrix projectionInverse;
     row_major matrix viewProjection;
     ClippingPlane clippingPlanes[6];
+    
     float fov;
     float aspectRatio;
     float zNear;
     float zFar;
+
+    int depthBufferArrayIndex;
+    uint depthResX;
+    
+    uint depthResY;
+    uint numDepthMips;
 };
 
 struct PerFrameBuffer {

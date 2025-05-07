@@ -90,6 +90,10 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
             auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
 			auto downsampledMap = downsampledMaps->AddMap(lightInfo, getShadowResolution());
             shadowMapComponent = Components::DepthMap(map, downsampledMap);
+			viewInfo.depthMap = map;
+			viewInfo.downsampledDepthMap = downsampledMap;
+			viewInfo.depthResX = map->GetWidth();
+			viewInfo.depthResY = map->GetHeight();
         }
     }
 
@@ -239,6 +243,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	case Components::LightType::Point: {
 		auto cubemapMatrices = GetCubemapViewMatrices(globalPos);
 		for (int i = 0; i < 6; i++) {
+			const CameraInfo* oldInfo = light.get<CameraInfo>();
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cubemapMatrices[i];
@@ -250,6 +255,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[3] = planes[i][3];
 			info.clippingPlanes[4] = planes[i][4];
 			info.clippingPlanes[5] = planes[i][5];
+			info.depthBufferArrayIndex = i;
+			info.depthResX = viewInfo->depthResX;
+			info.depthResY = viewInfo->depthResY;
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
@@ -267,6 +275,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		camera.clippingPlanes[3] = planes[0][3];
 		camera.clippingPlanes[4] = planes[0][4];
 		camera.clippingPlanes[5] = planes[0][5];
+		camera.depthBufferArrayIndex = 0;
+		camera.depthResX = viewInfo->depthResX;
+		camera.depthResY = viewInfo->depthResY;
 		m_pCameraManager->UpdateCamera(renderViews[0], camera);
 		break;
 	}
@@ -293,6 +304,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[3] = cascades[i].frustumPlanes[3];
 			info.clippingPlanes[4] = cascades[i].frustumPlanes[4];
 			info.clippingPlanes[5] = cascades[i].frustumPlanes[5];
+			info.depthBufferArrayIndex = i;
+			info.depthResX = viewInfo->depthResX;
+			info.depthResY = viewInfo->depthResY;
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;

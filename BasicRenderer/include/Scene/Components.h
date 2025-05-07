@@ -155,6 +155,10 @@ namespace Components {
 		uint64_t lightBufferIndex;
 		uint64_t viewInfoBufferIndex;
 		Matrix projectionMatrix;
+		std::shared_ptr<PixelBuffer> depthMap;
+		std::shared_ptr<PixelBuffer> downsampledDepthMap;
+		uint32_t depthResX;
+		uint32_t depthResY;
 	};
 
 	struct SceneNode {}; // Represents a generic node in the scene graph

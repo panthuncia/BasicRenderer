@@ -1,8 +1,10 @@
 #include "cbuffers.hlsli"
 #include "vertex.hlsli"
 #include "loadingUtils.hlsli"
+#include "Misc/sphereScreenExtents.hlsli"
 
-struct DispatchMeshIndirectCommand {
+struct DispatchMeshIndirectCommand
+{
     uint perObjectBufferIndex;
     uint perMeshBufferIndex;
     uint perMeshInstanceBufferIndex;
@@ -11,7 +13,8 @@ struct DispatchMeshIndirectCommand {
     uint dispatchMeshZ;
 };
 
-struct DispatchIndirectCommand {
+struct DispatchIndirectCommand
+{
     uint perObjectBufferIndex;
     uint perMeshBufferIndex;
     uint perMeshInstanceBufferIndex;
@@ -20,10 +23,16 @@ struct DispatchIndirectCommand {
     uint dispatchZ;
 };
 
+// UintRootConstant0 is the mesh instance culling bitfield
+// UintRootConstant1 is the meshlet frustrum culling reset command buffer
+// UintRootConstant2 is the downsampled depth SRV index
+
 // Object culling, one thread per object
 [numthreads(64, 1, 1)]
-void CSMain(uint dispatchID : SV_DispatchThreadID) {
-    if (dispatchID > maxDrawIndex) {
+void CSMain(uint dispatchID : SV_DispatchThreadID)
+{
+    if (dispatchID > maxDrawIndex)
+    {
         return;
     }
     StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
@@ -44,7 +53,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     PerMeshBuffer perMesh = perMeshBuffer[command.perMeshBufferIndex];
     PerObjectBuffer perObject = perObjectBuffer[command.perObjectBufferIndex];
     
-    // Frustrum culling
+    // Culling
     float4 objectSpaceCenter = float4(perMesh.boundingSphere.sphere.xyz, 1.0);
     float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
     float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
@@ -58,14 +67,44 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
     float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * maxScale;
     
+    // Occlusion culling
+    float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
+    float4 vLBRT = sphere_screen_extents(worldSpaceCenter.xyz, scaledBoundingRadius, camera.viewProjection);
+    float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
+    float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
+    float4 vAABB = vUV * vHZB.xyxy; // vHZB = [w, h, l]
+    float4 vExtents = vAABB.zw - vAABB.xy; // In pixels
+    
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
+    fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
+    
+    float4 occlusionDepth;
+    if (camera.depthBufferArrayIndex < 0)
+    { // Not a texture array
+        Texture2D<float> depthBuffer = ResourceDescriptorHeap[UintRootConstant2];
+
+    }
+    else
+    {
+        Texture2DArray<float> depthBuffer = ResourceDescriptorHeap[UintRootConstant2];
+        occlusionDepth = float4(
+            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.xy, camera.depthBufferArrayIndex), fMipLevel),
+            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.zy, camera.depthBufferArrayIndex), fMipLevel),
+            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.zw, camera.depthBufferArrayIndex), fMipLevel),
+            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.xw, camera.depthBufferArrayIndex), fMipLevel));
+    }
+    
+    
     RWByteAddressBuffer meshInstanceCullingBitfield = ResourceDescriptorHeap[UintRootConstant0];
     bool wasPartiallyCulledLastFrame = GetBit(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
     
     bool fullyInside = true;
     
     // Disable culling for skinned meshes for now, as the bounding sphere is not updated
-    if (!(perMesh.vertexFlags & VERTEX_SKINNED)) { // TODO: Implement skinned mesh culling    
-        for (uint i = 0; i < 6; i++) {
+    if (!(perMesh.vertexFlags & VERTEX_SKINNED))
+    { // TODO: Implement skinned mesh culling    
+        for (uint i = 0; i < 6; i++)
+        {
             float4 P = camera.clippingPlanes[i].plane; // plane normal.xyz, plane.w
             float distance = dot(P.xyz, viewSpaceCenter) + P.w;
 
@@ -78,8 +117,6 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
             // does it intersect this plane?
             if (abs(distance) < scaledBoundingRadius)
             {
-                // Mark the per-mesh bitfield, since we'll need to reset the meshlet bitfield when this is fully inside later
-                SetBitAtomic(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
                 fullyInside = false;
             }
         }
@@ -90,7 +127,8 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
     
     if (fullyInside)
     {
-        if (wasPartiallyCulledLastFrame) { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
+        if (wasPartiallyCulledLastFrame)
+        { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
             AppendStructuredBuffer<DispatchIndirectCommand> meshletFrustrumCullingResetCommandBuffer = ResourceDescriptorHeap[UintRootConstant1];
             DispatchIndirectCommand meshletFrustrumCullingResetCommand;
             meshletFrustrumCullingResetCommand.dispatchX = command.dispatchMeshX;
@@ -108,6 +146,10 @@ void CSMain(uint dispatchID : SV_DispatchThreadID) {
         // If the object is fully inside the frustrum, we can skip the meshlet culling
         return;
     }
+    
+    // Mark the per-mesh bitfield, since we'll need to reset the meshlet bitfield when this is fully inside later
+    SetBitAtomic(meshInstanceCullingBitfield, command.perMeshInstanceBufferIndex);
+    
     DispatchIndirectCommand meshletFrustrumCullingCommand;
     meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
     meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;

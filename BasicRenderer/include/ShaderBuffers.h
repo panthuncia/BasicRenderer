@@ -13,10 +13,16 @@ struct CameraInfo {
     DirectX::XMMATRIX projectionInverse;
 	DirectX::XMMATRIX viewProjection;
 	ClippingPlane clippingPlanes[6];
+
 	float fov;
 	float aspectRatio;
 	float zNear;
 	float zFar;
+
+    int depthBufferArrayIndex = -1;
+    unsigned int depthResX;
+	unsigned int depthResY;
+    unsigned int numDepthMips;
 };
 
 struct PerFrameCB {

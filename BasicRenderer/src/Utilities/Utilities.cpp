@@ -1258,3 +1258,8 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 
 	return depthMap;
 }
+
+uint32_t NumMips(uint32_t width, uint32_t height) {
+    uint32_t maxSize = std::max(width, height);
+    return 1 + static_cast<uint32_t>(std::floor(std::log2(float(maxSize))));
+}
