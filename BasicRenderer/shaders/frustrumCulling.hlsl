@@ -72,7 +72,7 @@ void BuildOccluderDrawCommandsCSMain(uint dispatchID : SV_DispatchThreadID)
     
     if (!wasVisibleLastFrame)
     {
-        return; // This will have been drawn by the occluders pass
+        return; // This was not an occluder
     }
     
     bool fullyInside = true;
@@ -228,20 +228,22 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
     float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * maxScale;
    
-    /*
+    RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
+
     bool occlusionCulled = false;
     bool partiallyOcclusionCulled = false;
     OcclusionCulling(occlusionCulled, partiallyOcclusionCulled, camera, worldSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
     if (occlusionCulled)
     {
+        // Update bitfield
+        ClearBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
         return; // reject whole object
     }
-    */    
+    
 
     RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
     bool wasPartiallyCulledLastFrame = GetBit(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
     
-    RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
     bool wasVisibleLastFrame = GetBit(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
     
     bool fullyInside = true;
@@ -275,7 +277,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
     
     if (wasVisibleLastFrame)
     {
-        return; // This will have been drawn by the occluders pass
+        //return; // This will have been drawn by the occluders pass
     }
     
     indirectCommandOutputBuffer.Append(command);
