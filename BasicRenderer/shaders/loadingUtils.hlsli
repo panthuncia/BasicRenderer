@@ -40,9 +40,7 @@ float4 LoadFloat4(uint offset, ByteAddressBuffer buffer) {
 
 uint GetBit(ByteAddressBuffer bits, uint bitIndex)
 {
-    // which 32-bit word, and byte offset in the buffer
-    uint wordIdx = bitIndex >> 5; // divide by 32
-    uint byteOff = wordIdx * 4; // 4 bytes per 32-bit word
+    uint byteOff = bitIndex >> 3; // divide by 8
     uint bitInWord = bitIndex & 31; // mod 32
 
     uint word = bits.Load(byteOff);
@@ -51,9 +49,7 @@ uint GetBit(ByteAddressBuffer bits, uint bitIndex)
 
 uint GetBit(RWByteAddressBuffer bits, uint bitIndex)
 {
-    // which 32-bit word, and byte offset in the buffer
-    uint wordIdx = bitIndex >> 5; // divide by 32
-    uint byteOff = wordIdx * 4; // 4 bytes per 32-bit word
+    uint byteOff = bitIndex >> 3; // divide by 8
     uint bitInWord = bitIndex & 31; // mod 32
 
     uint word = bits.Load(byteOff);
@@ -62,8 +58,7 @@ uint GetBit(RWByteAddressBuffer bits, uint bitIndex)
 
 void WriteBit(RWByteAddressBuffer bits, uint bitIndex, uint value)
 {
-    uint wordIdx = bitIndex >> 5;
-    uint byteOff = wordIdx * 4;
+    uint byteOff = bitIndex >> 3; // divide by 8
     uint bitInWord = bitIndex & 31;
     uint mask = 1u << bitInWord;
 
@@ -77,8 +72,7 @@ void WriteBit(RWByteAddressBuffer bits, uint bitIndex, uint value)
 
 void SetBitAtomic(RWByteAddressBuffer bits, uint bitIndex)
 {
-    uint wordIdx = bitIndex >> 5;
-    uint byteOff = wordIdx * 4;
+    uint byteOff = bitIndex >> 3; // divide by 8
     uint bitInWord = bitIndex & 31;
     uint mask = 1u << bitInWord;
 
@@ -89,8 +83,7 @@ void SetBitAtomic(RWByteAddressBuffer bits, uint bitIndex)
 
 void ClearBitAtomic(RWByteAddressBuffer bits, uint bitIndex)
 {
-    uint wordIdx = bitIndex >> 5;
-    uint byteOff = wordIdx * 4;
+    uint byteOff = bitIndex >> 3; // divide by 8
     uint bitInWord = bitIndex & 31;
     uint mask = ~(1u << bitInWord);
 

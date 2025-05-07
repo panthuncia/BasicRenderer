@@ -277,7 +277,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
     
     if (wasVisibleLastFrame)
     {
-        //return; // This will have been drawn by the occluders pass
+        return; // This will have been drawn by the occluders pass
     }
     
     indirectCommandOutputBuffer.Append(command);

@@ -24,13 +24,13 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	view.cameraBufferIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 
 	auto bits = m_currentMeshletBitfieldSize;
-	auto bytes = (bits + 7) / 8;
-	auto meshletBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
+	auto words = (bits + 31) / 32;
+	auto meshletBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(words, sizeof(unsigned int), false, true, false);
 	meshletBitfield->SetName(L"MeshletBitfieldBuffer (" + std::to_wstring(viewID) + L")");
 	view.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshletBitfield);
 
 	bits = m_currentMeshInstanceBitfieldSize;
-	bytes = (bits + 7) / 8;
+	auto bytes = (bits + 7) / 8;
 	auto meshInstanceMeshletCullingBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
 	meshInstanceMeshletCullingBitfield->SetName(L"MeshInstanceMeshletCullingBitfieldBuffer (" + std::to_wstring(viewID) + L")");
 	view.meshInstanceMeshletCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceMeshletCullingBitfield);
