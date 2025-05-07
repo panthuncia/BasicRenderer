@@ -146,8 +146,9 @@ namespace Components {
 		uint64_t cameraBufferIndex;
 		IndirectCommandBuffers indirectCommandBuffers;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceBitfieldBuffer;
-		DepthMap depthMap;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
+		//DepthMap depthMap;
 	};
 	struct LightViewInfo {
 		std::vector<RenderView> renderViews;

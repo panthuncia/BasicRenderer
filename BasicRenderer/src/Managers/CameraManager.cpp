@@ -10,7 +10,8 @@ CameraManager::CameraManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_pCameraBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<CameraInfo>(1, L"cameraBuffer<CameraInfo>");
 	m_meshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshletCullingBitfieldGroup");
-	m_meshInstanceCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"ObjectCullingBitfieldGroup");
+	m_meshInstanceMeshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"ObjectCullingBitfieldGroup");
+	m_meshInstanceOcclusionCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshInstanceOcclusionCullingBitfieldGroup");
 }
 
 Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
@@ -30,16 +31,21 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 
 	bits = m_currentMeshInstanceBitfieldSize;
 	bytes = (bits + 7) / 8;
-	auto meshInstanceBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
+	auto meshInstanceMeshletCullingBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
+	meshInstanceMeshletCullingBitfield->SetName(L"MeshInstanceMeshletCullingBitfieldBuffer (" + std::to_wstring(viewID) + L")");
+	view.meshInstanceMeshletCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceMeshletCullingBitfield);
 
-	meshInstanceBitfield->SetName(L"ObjectBitfieldBuffer (" + std::to_wstring(viewID) + L")");
-	view.meshInstanceBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceBitfield);
+	auto meshInstanceOcclusionCullingBitfield = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), false, true, false);
+	meshInstanceOcclusionCullingBitfield->SetName(L"MeshInstanceOcclusionCullingBitfieldBuffer (" + std::to_wstring(viewID) + L")");
+	view.meshInstanceOcclusionCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshInstanceOcclusionCullingBitfield);
 
 	m_meshletBitfieldBuffers[viewID] = view.meshletBitfieldBuffer;
-	m_meshInstanceBitfieldBuffers[viewID] = view.meshInstanceBitfieldBuffer;
+	m_meshInstanceMeshletCullingBitfieldBuffers[viewID] = view.meshInstanceMeshletCullingBitfieldBuffer;
+	m_meshInstanceOcclusionCullingBitfieldBuffers[viewID] = view.meshInstanceOcclusionCullingBitfieldBuffer;
 
 	m_meshletCullingBitfieldGroup->AddResource(view.meshletBitfieldBuffer);
-	m_meshInstanceCullingBitfieldGroup->AddResource(view.meshInstanceBitfieldBuffer);
+	m_meshInstanceMeshletCullingBitfieldGroup->AddResource(view.meshInstanceMeshletCullingBitfieldBuffer);
+	m_meshInstanceOcclusionCullingBitfieldGroup->AddResource(view.meshInstanceOcclusionCullingBitfieldBuffer);
 
 	m_pCameraBuffer->UpdateView(view.cameraBufferView.get(), &camera);
 
@@ -50,6 +56,7 @@ void CameraManager::RemoveCamera(Components::RenderView view) {
 	m_pCameraBuffer->Remove(view.cameraBufferView.get());
 	m_meshletBitfieldBuffers.erase(view.viewID);
 	m_meshletCullingBitfieldGroup->RemoveResource(view.meshletBitfieldBuffer.get());
+	m_meshInstanceMeshletCullingBitfieldGroup->RemoveResource(view.meshInstanceMeshletCullingBitfieldBuffer.get());
 }
 
 void CameraManager::SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager) {
@@ -70,7 +77,12 @@ void CameraManager::SetDepthBufferForCamera(Components::RenderView view, Compone
 
 void CameraManager::SetNumMeshInstances(unsigned int numMeshInstances) {
 	m_currentMeshInstanceBitfieldSize = numMeshInstances;
-	for (auto& pair : m_meshInstanceBitfieldBuffers) {
+	for (auto& pair : m_meshInstanceMeshletCullingBitfieldBuffers) {
+		auto& buffer = pair.second;
+		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false));
+	}
+
+	for (auto& pair : m_meshInstanceOcclusionCullingBitfieldBuffers) {
 		auto& buffer = pair.second;
 		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false));
 	}

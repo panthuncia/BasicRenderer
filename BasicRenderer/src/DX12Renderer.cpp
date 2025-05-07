@@ -44,6 +44,7 @@
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "RenderPasses/DeferredRenderPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
+#include "RenderPasses/BuildOccluderDrawCommands.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1024,7 +1025,7 @@ void DX12Renderer::CreateRenderGraph() {
 	auto& environmentsBuffer = m_pEnvironmentManager->GetEnvironmentInfoBuffer();
     auto& environmentPrefilteredGroup = m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup();
     auto& meshletCullingBitfieldBufferGroup = m_pCameraManager->GetMeshletCullingBitfieldGroup();
-	auto& meshInstanceCullingBitfieldBufferGoup = m_pCameraManager->GetMeshInstanceCullingBitfieldGroup();
+	auto& meshInstanceMeshletCullingBitfieldBufferGoup = m_pCameraManager->GetMeshInstanceMeshletCullingBitfieldGroup();
     auto& primaryCameraMeshletBitfieldBuffer = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1057,67 +1058,43 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(environmentsBuffer);
 	newGraph->AddResource(environmentPrefilteredGroup);
 	newGraph->AddResource(meshletCullingBitfieldBufferGroup);
-    newGraph->AddResource(meshInstanceCullingBitfieldBufferGoup);
+    newGraph->AddResource(meshInstanceMeshletCullingBitfieldBufferGoup);
 	newGraph->AddResource(primaryCameraMeshletBitfieldBuffer);
 	newGraph->AddResource(m_downsampledShadowMaps);
 
-    // Frustrum culling goes before Z prepass
+    // Skinning comes before Z prepass
+    newGraph->BuildComputePass("SkinningPass")
+        .WithShaderResource(perObjectBuffer, perMeshBuffer, preSkinningVertices, normalMatrixBuffer)
+        .WithUnorderedAccess(postSkinningVertices)
+        .Build<SkinningPass>();
+
+
     bool indirect = getIndirectDrawsEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
         indirect = false;
     }
 
-    std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
-	std::shared_ptr<ResourceGroup> meshletCullingCommandBufferResourceGroup = nullptr;
-    if (indirect) {
-        // Clear UAVs
-        indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
-        meshletCullingCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetMeshletCullingCommandResourceGroup();
-        newGraph->AddResource(indirectCommandBufferResourceGroup);
-		newGraph->AddResource(meshletCullingCommandBufferResourceGroup);
-
-        newGraph->BuildRenderPass("ClearUAVsPass")
-            .WithCopyDest(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup)
-            .Build<ClearUAVsPass>();
-
-		newGraph->BuildComputePass("FrustrumCullingPass")
-			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceCullingBitfieldBufferGoup)
-			.Build<FrustrumCullingPass>();
-
-        newGraph->BuildComputePass("MeshletFrustrumCullingPass")
-            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-			.Build<MeshletFrustrumCullingPass>();
-    }
-
-    // Skinning comes before Z prepass
-	newGraph->BuildComputePass("SkinningPass")
-		.WithShaderResource(perObjectBuffer, perMeshBuffer, preSkinningVertices, normalMatrixBuffer)
-		.WithUnorderedAccess(postSkinningVertices)
-		.Build<SkinningPass>();
-
+    // Gbuffer resources
     // Z prepass goes before light clustering for when active cluster determination is implemented
 
     TextureDescription normalsWorldSpaceDesc;
-	normalsWorldSpaceDesc.arraySize = 1;
-	normalsWorldSpaceDesc.channels = 4;
-	normalsWorldSpaceDesc.isCubemap = false;
-	normalsWorldSpaceDesc.hasRTV = true;
-	normalsWorldSpaceDesc.format = DXGI_FORMAT_R10G10B10A2_UNORM;
-	normalsWorldSpaceDesc.generateMipMaps = false;
+    normalsWorldSpaceDesc.arraySize = 1;
+    normalsWorldSpaceDesc.channels = 4;
+    normalsWorldSpaceDesc.isCubemap = false;
+    normalsWorldSpaceDesc.hasRTV = true;
+    normalsWorldSpaceDesc.format = DXGI_FORMAT_R10G10B10A2_UNORM;
+    normalsWorldSpaceDesc.generateMipMaps = false;
     normalsWorldSpaceDesc.hasSRV = true;
-	normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
-	ImageDimensions dims = { m_xRes, m_yRes, 0, 0 };
-	normalsWorldSpaceDesc.imageDimensions.push_back(dims);
-	auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
-	normalsWorldSpace->SetName(L"Normals World Space");
-	newGraph->AddResource(normalsWorldSpace, false);
+    normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+    ImageDimensions dims = { m_xRes, m_yRes, 0, 0 };
+    normalsWorldSpaceDesc.imageDimensions.push_back(dims);
+    auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
+    normalsWorldSpace->SetName(L"Normals World Space");
+    newGraph->AddResource(normalsWorldSpace, false);
 
-	std::shared_ptr<PixelBuffer> albedo;
-	std::shared_ptr<PixelBuffer> metallicRoughness;
-	std::shared_ptr<PixelBuffer> emissive;
+    std::shared_ptr<PixelBuffer> albedo;
+    std::shared_ptr<PixelBuffer> metallicRoughness;
+    std::shared_ptr<PixelBuffer> emissive;
     if (m_deferredRendering) {
         TextureDescription albedoDesc;
         albedoDesc.arraySize = 1;
@@ -1150,34 +1127,95 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->AddResource(metallicRoughness, false);
 
         TextureDescription emissiveDesc;
-		emissiveDesc.arraySize = 1;
-		emissiveDesc.channels = 4;
-		emissiveDesc.isCubemap = false;
-		emissiveDesc.hasRTV = true;
-		emissiveDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		emissiveDesc.generateMipMaps = false;
-		emissiveDesc.hasSRV = true;
-		emissiveDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-		ImageDimensions emissiveDims = { m_xRes, m_yRes, 0, 0 };
-		emissiveDesc.imageDimensions.push_back(emissiveDims);
-		emissive = PixelBuffer::Create(emissiveDesc);
-		emissive->SetName(L"Emissive");
-		newGraph->AddResource(emissive, false);
+        emissiveDesc.arraySize = 1;
+        emissiveDesc.channels = 4;
+        emissiveDesc.isCubemap = false;
+        emissiveDesc.hasRTV = true;
+        emissiveDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        emissiveDesc.generateMipMaps = false;
+        emissiveDesc.hasSRV = true;
+        emissiveDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        ImageDimensions emissiveDims = { m_xRes, m_yRes, 0, 0 };
+        emissiveDesc.imageDimensions.push_back(emissiveDims);
+        emissive = PixelBuffer::Create(emissiveDesc);
+        emissive->SetName(L"Emissive");
+        newGraph->AddResource(emissive, false);
     }
 
-    auto zBuilder = newGraph->BuildRenderPass("ZPrepass")
+    std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
+	std::shared_ptr<ResourceGroup> meshletCullingCommandBufferResourceGroup = nullptr;
+    if (indirect) {
+        // Clear UAVs
+        indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
+        meshletCullingCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetMeshletCullingCommandResourceGroup();
+        newGraph->AddResource(indirectCommandBufferResourceGroup);
+		newGraph->AddResource(meshletCullingCommandBufferResourceGroup);
+
+		newGraph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
+            .WithCopyDest(indirectCommandBufferResourceGroup)
+            .Build<ClearIndirectDrawCommandUAVsPass>();
+
+        newGraph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass0") // Clear meshlet culling reset command buffers from last frame
+            .WithCopyDest(meshletCullingCommandBufferResourceGroup)
+            .Build<ClearMeshletCullingCommandUAVsPass>();
+
+		newGraph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
+            .WithUnorderedAccess(indirectCommandBufferResourceGroup)
+			.Build<BuildOccluderDrawCommandsPass>();
+
+        newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+            .Build<MeshletFrustrumCullingPass>();
+
+        auto occludersPrepassBuilder = newGraph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
+            .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness, emissive)
+            .WithDepthReadWrite(depthTexture)
+            .IsGeometryPass();
+
+        if (useMeshShaders) {
+            occludersPrepassBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
+            if (indirect) {
+                occludersPrepassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+            }
+        }
+        occludersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, true);
+
+        newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
+            .WithCopyDest(indirectCommandBufferResourceGroup)
+            .Build<ClearIndirectDrawCommandUAVsPass>();
+
+		newGraph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass1") // Clear meshlet culling reset command buffers from prepass
+            .WithCopyDest(meshletCullingCommandBufferResourceGroup)
+            .Build<ClearMeshletCullingCommandUAVsPass>();
+
+		newGraph->BuildComputePass("FrustrumCullingPass") // Performs frustrum and occlusion culling
+			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup)
+			.Build<FrustrumCullingPass>();
+
+		newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum culled are sent to the meshlet culling pass
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+			.Build<MeshletFrustrumCullingPass>();
+    }
+
+    auto newObjectsPrepassBuilder = newGraph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
         .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness, emissive)
         .WithDepthReadWrite(depthTexture)
         .IsGeometryPass();
 
-	if (useMeshShaders) {
-		zBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
-		if (indirect) {
-			zBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-		}
-	}
-    zBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect);
+    if (useMeshShaders) {
+        newObjectsPrepassBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
+        if (indirect) {
+            newObjectsPrepassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+        }
+    }
+    newObjectsPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, false);
 
     // Single-pass downsample on all depth maps
     auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")

@@ -9,14 +9,14 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 
-class FrustrumCullingPass : public ComputePass {
+class BuildOccluderDrawCommandsPass : public ComputePass {
 public:
-	FrustrumCullingPass() {
+	BuildOccluderDrawCommandsPass() {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
 
-	~FrustrumCullingPass() {
+	~BuildOccluderDrawCommandsPass() {
 	}
 
 	void Setup() override {
@@ -137,7 +137,7 @@ public:
 			miscRootConstants[UintRootConstant2] = primaryDepth->downsampledDepthMap->GetSRVInfo()[0].index;
 			miscRootConstants[UintRootConstant3] = primaryView->meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo()[0].index;
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
-		
+
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			if (shadows) {
@@ -225,7 +225,7 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+		PSOManager::GetInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"BuildOccluderDrawCommandsCSMain", L"cs_6_6", {}, computeShader);
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
@@ -245,7 +245,7 @@ private:
 		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
-	
+
 	flecs::query<Components::LightViewInfo, Components::DepthMap> lightQuery;
 
 	ComPtr<ID3D12PipelineState> m_PSO;

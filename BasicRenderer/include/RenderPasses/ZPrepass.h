@@ -26,14 +26,16 @@ public:
 		std::shared_ptr<GloballyIndexedResource> pEmissive,
         bool wireframe,
         bool meshShaders,
-        bool indirect)
+        bool indirect,
+        bool clearGbuffer)
         : m_pNormals(pNormals),
         m_pAlbedo(pAlbedo), 
 		m_pMetallicRoughness(pMetallicRoughness),
 		m_pEmissive(pEmissive),
         m_wireframe(wireframe),
         m_meshShaders(meshShaders),
-        m_indirect(indirect) {
+        m_indirect(indirect),
+        m_clearGbuffer(clearGbuffer){
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
@@ -55,19 +57,21 @@ public:
         auto& commandList = context.commandList;
 
         // Clear the render target
-        auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
-        const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-        commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        if (m_clearGbuffer) {
+            auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
+            const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
-        if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-            auto& rtvHandle2 = m_pAlbedo->GetRTVInfos()[0].cpuHandle;
-            commandList->ClearRenderTargetView(rtvHandle2, clearColor, 0, nullptr);
-            auto& rtvHandle3 = m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle;
-            commandList->ClearRenderTargetView(rtvHandle3, clearColor, 0, nullptr);
+            if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
+                auto& rtvHandle2 = m_pAlbedo->GetRTVInfos()[0].cpuHandle;
+                commandList->ClearRenderTargetView(rtvHandle2, clearColor, 0, nullptr);
+                auto& rtvHandle3 = m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle;
+                commandList->ClearRenderTargetView(rtvHandle3, clearColor, 0, nullptr);
+            }
+
+            auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
+            commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
         }
-
-        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
-        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
@@ -309,6 +313,7 @@ private:
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
+    bool m_clearGbuffer = true;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;
