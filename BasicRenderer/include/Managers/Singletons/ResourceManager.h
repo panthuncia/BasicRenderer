@@ -430,8 +430,13 @@ public:
     template <typename Container = std::vector<const stbi_uc*>>
     TextureHandle<PixelBuffer> CreateTexture(
         const TextureDescription& desc,
-        const Container& initialData = {}) {
-		return CreateTextureInternal(desc, initialData);
+        const Container& initialData = {},
+        PixelBuffer* resourceToAlias = nullptr) {
+		ID3D12Heap* placedResourceHeap = nullptr;
+        if (resourceToAlias != nullptr) {
+            placedResourceHeap = resourceToAlias->GetPlacedResourceHeap();
+        }
+		return CreateTextureInternal(desc, initialData, placedResourceHeap);
     }
 
     std::shared_ptr<Buffer> CreateBuffer(size_t size, void* pInitialData, bool UAV = false);
@@ -455,7 +460,8 @@ private:
     ResourceManager(){};
 	TextureHandle<PixelBuffer> CreateTextureInternal(
 		const TextureDescription& desc,
-		const std::vector<const stbi_uc*>& initialData);
+		const std::vector<const stbi_uc*>& initialData,
+        ComPtr<ID3D12Heap> placedResourceHeap = nullptr);
     void WaitForCopyQueue();
     void WaitForTransitionQueue();
     void InitializeCopyCommandQueue();

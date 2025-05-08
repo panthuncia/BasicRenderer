@@ -64,7 +64,7 @@ public:
     void Update(double elapsedSeconds);
     void Render();
     void Cleanup();
-    ComPtr<ID3D12Device>& GetDevice();
+    ComPtr<ID3D12Device10>& GetDevice();
     std::shared_ptr<Scene>& GetCurrentScene();
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
@@ -74,7 +74,7 @@ public:
 
 private:
     ComPtr<IDXGIFactory7> factory;
-    ComPtr<ID3D12Device> device;
+    ComPtr<ID3D12Device10> device;
     ComPtr<IDXGISwapChain4> swapChain;
     ComPtr<ID3D12CommandQueue> graphicsQueue;
 	ComPtr<ID3D12CommandQueue> computeQueue;

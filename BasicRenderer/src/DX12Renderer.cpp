@@ -910,7 +910,7 @@ void DX12Renderer::SetEnvironment(std::string environmentName) {
 	setEnvironment(environmentName);
 }
 
-ComPtr<ID3D12Device>& DX12Renderer::GetDevice() {
+ComPtr<ID3D12Device10>& DX12Renderer::GetDevice() {
     return device;
 }
 

@@ -36,6 +36,7 @@ public:
 		desc.format = DXGI_FORMAT_R32_TYPELESS;
 		desc.hasSRV = true;
 		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;

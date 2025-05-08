@@ -401,7 +401,8 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 
 TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	const TextureDescription& desc,
-	const std::vector<const stbi_uc*>& initialData) {
+	const std::vector<const stbi_uc*>& initialData, 
+	ComPtr<ID3D12Heap> placedResourceHeap) {
 
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
@@ -467,12 +468,25 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	}
 
 	// Create the texture resource
-	auto textureResource = CreateCommittedTextureResource(
-		device.Get(),
-		textureDesc,
-		clearValue
-	);
 
+	ComPtr<ID3D12Resource> textureResource;
+	if (desc.allowAlias) {
+		textureResource = CreatePlacedTextureResource(
+			device.Get(),
+			textureDesc,
+			clearValue,
+			D3D12_HEAP_TYPE_DEFAULT,
+			placedResourceHeap,
+			D3D12_BARRIER_LAYOUT_COMMON
+		);
+	}
+	else {
+		textureResource = CreateCommittedTextureResource(
+			device.Get(),
+			textureDesc,
+			clearValue
+		);
+	}
 	// Create SRV
 	auto srvInfo = CreateShaderResourceViewsPerMip(
 		device.Get(),
@@ -657,7 +671,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	handle.texture = textureResource;
 	handle.SRVInfo = srvInfo;
 	handle.srvUavHeap = m_cbvSrvUavHeap;
-
+	handle.placedResourceHeap = placedResourceHeap;
 	if (desc.hasUAV) {
 		handle.UAVInfo = uavInfo;
 		handle.NSVUAVInfo = nonShaderUavInfo;

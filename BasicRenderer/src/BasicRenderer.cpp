@@ -331,7 +331,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //mountainScene->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 

@@ -12,9 +12,9 @@ class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
-    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue,  Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue);
+    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue,  Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue);
 	void DiagnoseDeviceRemoval();
-    Microsoft::WRL::ComPtr<ID3D12Device>& GetDevice() {
+    Microsoft::WRL::ComPtr<ID3D12Device10>& GetDevice() {
         return device;
     }
 
@@ -34,7 +34,7 @@ private:
 	ComPtr<ID3D12DeviceRemovedExtendedData> dred;
 
     DeviceManager() = default;
-    Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Device10> device = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue = nullptr;
 	bool m_meshShadersSupported = false;
@@ -48,7 +48,7 @@ inline DeviceManager& DeviceManager::GetInstance() {
     return instance;
 }
 
-inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue) {
+inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue) {
     this->device = device;
 	this->graphicsQueue = graphicsQueue;
 	this->computeQueue = computeQueue;

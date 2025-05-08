@@ -32,7 +32,6 @@ struct Camera {
 
     int depthBufferArrayIndex;
     uint depthResX;
-    
     uint depthResY;
     uint numDepthMips;
 };

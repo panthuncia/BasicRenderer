@@ -13,8 +13,11 @@ using Microsoft::WRL::ComPtr;
 
 class PixelBuffer : public GloballyIndexedResource {
 public:
-    static std::shared_ptr<PixelBuffer> Create(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {}) {
-		return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData));
+    static std::shared_ptr<PixelBuffer> Create(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {}, PixelBuffer* textureToAlias = nullptr) {
+		return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData, textureToAlias));
+    }
+    static std::shared_ptr<PixelBuffer> Create(const TextureDescription& desc, PixelBuffer* textureToAlias) {
+        return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, {}, textureToAlias));
     }
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
@@ -28,10 +31,12 @@ public:
 
 	ID3D12Resource* GetAPIResource() const override { return handle.texture.Get(); }
 
+	ID3D12Heap* GetPlacedResourceHeap() const {
+		return handle.placedResourceHeap.Get();
+	}
+
 private:
-    PixelBuffer(const stbi_uc* image, int width, int height, int channels, bool sRGB);
-    PixelBuffer(const std::array<const stbi_uc*, 6>& images, int width, int height, int channels, bool sRGB);
-    PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {});
+    PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {}, PixelBuffer* textureToAlias = nullptr);
 
     TextureHandle<PixelBuffer> handle;
     unsigned int m_width;

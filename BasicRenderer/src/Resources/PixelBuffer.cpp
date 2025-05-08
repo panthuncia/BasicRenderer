@@ -9,7 +9,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Render/RenderContext.h"
 
-PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData) {
+PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData, PixelBuffer* textureToAlias) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
 
     handle = resourceManager.CreateTexture(desc, initialData);

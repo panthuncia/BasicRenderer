@@ -222,7 +222,17 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.view = cascades[i].viewMatrix;
 		cameraInfo.projection = cascades[i].orthoMatrix;
 		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
-
+		cameraInfo.aspectRatio = camera->aspect;
+		cameraInfo.clippingPlanes[0] = cascades[i].frustumPlanes[0];
+		cameraInfo.clippingPlanes[1] = cascades[i].frustumPlanes[1];
+		cameraInfo.clippingPlanes[2] = cascades[i].frustumPlanes[2];
+		cameraInfo.clippingPlanes[3] = cascades[i].frustumPlanes[3];
+		cameraInfo.clippingPlanes[4] = cascades[i].frustumPlanes[4];
+		cameraInfo.clippingPlanes[5] = cascades[i].frustumPlanes[5];
+		cameraInfo.depthBufferArrayIndex = i;
+		cameraInfo.depthResX = getShadowResolution();
+		cameraInfo.depthResY = getShadowResolution();
+		// TODO: Needs near and far for depth unprojection
 		auto renderView = m_pCameraManager->AddCamera(cameraInfo);
 		m_directionalViewInfo->Add(renderView.cameraBufferIndex);
 		viewInfo.renderViews.push_back(renderView);
