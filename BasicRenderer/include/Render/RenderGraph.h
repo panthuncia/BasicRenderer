@@ -134,7 +134,12 @@ private:
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
 	std::unordered_set<uint64_t> resourcesInGroups;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
-	
+
+	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
+	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
+	std::vector<std::vector<uint64_t>>   aliasGroups;
+	std::vector<int> lastActiveInAliasGroup;
+
 	// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately
 	std::unordered_map<uint64_t, std::vector<uint64_t>> resourcesFromGroupToManageIndependantly;
 
@@ -315,4 +320,5 @@ private:
 		PassBatch& currentBatch);
 
 	void CreateBatchCommandLists();
+
 };

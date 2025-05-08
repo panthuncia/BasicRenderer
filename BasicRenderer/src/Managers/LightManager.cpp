@@ -88,7 +88,7 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
 		auto downsampledMaps = getCurrentDownsampledShadowMapResourceGroup();
         if (shadowMaps != nullptr) {
             auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
-			auto downsampledMap = downsampledMaps->AddMap(lightInfo, getShadowResolution());
+			auto downsampledMap = downsampledMaps->AddMap(lightInfo, getShadowResolution(), map.get());
             shadowMapComponent = Components::DepthMap(map, downsampledMap);
 			viewInfo.depthMap = map;
 			viewInfo.downsampledDepthMap = downsampledMap;

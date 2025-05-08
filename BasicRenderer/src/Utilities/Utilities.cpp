@@ -1265,14 +1265,15 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	desc.channels = 1;
 	desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
 	desc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
-    desc.generateMipMaps = false;
+    desc.generateMipMaps = true;
+    desc.allowAlias = true;
 
 	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::Create(desc);
 	depthBuffer->SetName(L"Depth Buffer");
 
     TextureDescription downsampledDesc;
-	dims.height = yRes / 2;
-	dims.width = xRes / 2;
+	dims.height = yRes;
+	dims.width = xRes;
 	downsampledDesc.imageDimensions.push_back(dims);
 	downsampledDesc.format = DXGI_FORMAT_R32_FLOAT;
 	downsampledDesc.arraySize = arraySize;
@@ -1285,9 +1286,13 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
 	downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
 	downsampledDesc.generateMipMaps = true;
+	downsampledDesc.allowAlias = true;
 
-	std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc);
+	std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc, depthBuffer.get());
 	downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
+
+	depthBuffer->AddAliasedResource(downsampledDepthBuffer.get());
+	downsampledDepthBuffer->AddAliasedResource(depthBuffer.get());
 
 	Components::DepthMap depthMap;
 	depthMap.depthMap = depthBuffer;

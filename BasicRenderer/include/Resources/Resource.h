@@ -32,6 +32,15 @@ public:
 	virtual ResourceSyncState GetPrevSyncState() const { return m_prevSyncState; }
     virtual BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
 	bool HasLayout() const { return m_hasLayout; }
+	void AddAliasedResource(Resource* resource) {
+		m_aliasedResources.push_back(resource);
+	}
+	bool HasAliasedResources() const {
+		return !m_aliasedResources.empty();
+	}
+	std::vector<Resource*> GetAliasedResources() const {
+		return m_aliasedResources;
+	}
 protected:
     virtual void OnSetName() {}
 
@@ -40,6 +49,7 @@ protected:
     ResourceSyncState m_prevSyncState = ResourceSyncState::ALL;
     std::wstring name;
 	bool m_hasLayout = false; // Only textures have a layout
+	std::vector<Resource*> m_aliasedResources; // Resources that are aliased with this resource
 private:
     bool m_uploadInProgress = false;
     inline static std::atomic<uint64_t> globalResourceCount;
