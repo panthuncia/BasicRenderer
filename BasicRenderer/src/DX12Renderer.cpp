@@ -1188,7 +1188,7 @@ void DX12Renderer::CreateRenderGraph() {
                     shadowOccluderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
                 }
             }
-            shadowOccluderPassBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect);
+            shadowOccluderPassBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, true);
         }
 
         auto occludersPrepassBuilder = newGraph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
@@ -1206,10 +1206,10 @@ void DX12Renderer::CreateRenderGraph() {
         occludersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, true);
 
         // Single-pass downsample on all occluder-only depth maps
-        auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
-            .WithShaderResource(depthTexture)
-            .WithUnorderedAccess(m_depthMap.downsampledDepthMap, m_downsampledShadowMaps)
-            .Build<DownsamplePass>(m_depthMap.downsampledDepthMap, depthTexture);
+        //auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
+        //    .WithShaderResource(depthTexture)
+        //    .WithUnorderedAccess(m_depthMap.downsampledDepthMap, m_downsampledShadowMaps)
+        //    .Build<DownsamplePass>(m_depthMap.downsampledDepthMap, depthTexture);
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
             .WithCopyDest(indirectCommandBufferResourceGroup)
@@ -1444,7 +1444,7 @@ void DX12Renderer::CreateRenderGraph() {
 				shadowBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 			}
 		}
-		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect);
+		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, false);
 
         debugPassParameters.shaderResources.push_back(m_shadowMaps);
     }

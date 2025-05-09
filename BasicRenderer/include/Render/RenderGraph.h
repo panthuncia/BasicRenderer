@@ -321,4 +321,19 @@ private:
 
 	void CreateBatchCommandLists();
 
+	std::vector<uint64_t> GetAllAliasIDs(uint64_t id) const {
+		auto it = resourceToAliasGroup.find(id);
+		if (it == resourceToAliasGroup.end()) {
+			// not aliased
+			return { id };
+		}
+		int group = it->second;
+		std::vector<uint64_t> out;
+		// scan for any resource mapped to the same group
+		for (auto const& p : resourceToAliasGroup) {
+			if (p.second == group)
+				out.push_back(p.first);
+		}
+		return out;
+	}
 };

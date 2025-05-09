@@ -23,76 +23,78 @@ auto RenderGraph::MakeAddTransition(
 	unsigned int                                   batchIndex,
 	PassBatch&                                     currentBatch)
 {
-	auto doAliasTransitionIfNecessary = [&](Resource* r, bool useComputeQueue, int batchIndex, bool addToBatchEnd, ResourceLayout newLayout) -> void {
-		// Check if this resource is part of an aliasing group
-		if (resourceToAliasGroup.contains(r->GetGlobalResourceID())) {
-			// We need to add a barrier here to transition the *previously* active resource in this aliasing group
-			// into the layout we need for this resource
-			auto aliasGroup = resourceToAliasGroup[r->GetGlobalResourceID()];
-			int prevID = lastActiveInAliasGroup[aliasGroup];
-
-			if (!(prevID == -1)) {
-				auto& prevResource = resourcesByID[prevID];
-				if (!prevResource->HasLayout()) {
-					spdlog::error("Not implemented");
-					throw(std::runtime_error("Aliased non-texture resources not implemented yet"));
-				}
-				if (prevResource) {
-					auto prevResourceLayout = prevResource->GetCurrentLayout();
-					auto prevResourceAccess = prevResource->GetCurrentAccessType();
-					auto prevResourceSync = prevResource->GetPrevSyncState();
-
-					if (finalResourceAccessTypes.contains(prevID)) {
-						prevResourceAccess = finalResourceAccessTypes[prevID];
-					}
-					if (finalResourceLayouts.contains(prevID)) {
-						prevResourceLayout = finalResourceLayouts[prevID];
-					}
-					if (finalResourceSyncStates.contains(prevID)) {
-						prevResourceSync = finalResourceSyncStates[prevID];
-					}
-
-					if (prevResourceLayout == newLayout) return;
-					ResourceTransition prevT{ prevResource,
-						prevResourceAccess, prevResourceAccess,
-						prevResourceLayout, newLayout,
-						prevResourceSync, prevResourceSync };
-
-					if (useComputeQueue) {
-						//if (initialTransitions.contains(prevResource->GetGlobalResourceID())) {
-						currentBatch.computeTransitions.push_back(prevT);
-						//} else {
-						//	initialTransitions[prevResource->GetGlobalResourceID()] = prevT;
-						//}
-						transHistCompute[prevResource->GetGlobalResourceID()] = batchIndex;
-					}
-					else {
-						//if (initialTransitions.contains(prevResource->GetGlobalResourceID())) {
-						if (addToBatchEnd) {
-							currentBatch.passEndTransitions.push_back(prevT);
-						}
-						else {
-							currentBatch.renderTransitions.push_back(prevT);
-						}
-						//} else {
-						//	initialTransitions[prevResource->GetGlobalResourceID()] = prevT;
-						//}
-						transHistRender[prevResource->GetGlobalResourceID()] = batchIndex;
-					}
-				}
-				else {
-					spdlog::error("Resource {} is part of an aliasing group, but the previous resource {} is not managed by this graph. This should not happen.", r->GetGlobalResourceID(), prevID);
-					throw(std::runtime_error("Resource is part of an aliasing group, but the previous resource is not managed by this graph"));
-				}
-			}
-		}
-	};
 
 	return [&, batchIndex](bool isComputePass, const std::shared_ptr<Resource>& r,
 		ResourceAccessType             newAccess,
 		ResourceLayout 			  newLayout,
 		ResourceSyncState         newSync)
 		{
+
+			auto doAliasTransitionIfNecessary = [&, this](Resource* r, bool useComputeQueue, int batchIndex, bool addToBatchEnd, ResourceLayout newLayout) -> void {
+				// Check if this resource is part of an aliasing group
+				if (resourceToAliasGroup.contains(r->GetGlobalResourceID())) {
+					// We need to add a barrier here to transition the *previously* active resource in this aliasing group
+					// into the layout we need for this resource
+					auto aliasGroup = resourceToAliasGroup[r->GetGlobalResourceID()];
+					int prevID = lastActiveInAliasGroup[aliasGroup];
+
+					if (!(prevID == -1)) {
+						auto& prevResource = resourcesByID[prevID];
+						if (!prevResource->HasLayout()) {
+							spdlog::error("Not implemented");
+							throw(std::runtime_error("Aliased non-texture resources not implemented yet"));
+						}
+						if (prevResource) {
+							auto prevResourceLayout = prevResource->GetCurrentLayout();
+							auto prevResourceAccess = prevResource->GetCurrentAccessType();
+							auto prevResourceSync = prevResource->GetPrevSyncState();
+
+							if (finalResourceAccessTypes.contains(prevID)) {
+								prevResourceAccess = finalResourceAccessTypes[prevID];
+							}
+							if (finalResourceLayouts.contains(prevID)) {
+								prevResourceLayout = finalResourceLayouts[prevID];
+							}
+							if (finalResourceSyncStates.contains(prevID)) {
+								prevResourceSync = finalResourceSyncStates[prevID];
+							}
+
+							if (prevResourceLayout == newLayout) return;
+							ResourceTransition prevT{ prevResource,
+								prevResourceAccess, prevResourceAccess,
+								prevResourceLayout, newLayout,
+								prevResourceSync, prevResourceSync };
+
+							if (useComputeQueue) {
+								//if (initialTransitions.contains(prevResource->GetGlobalResourceID())) {
+								currentBatch.computeTransitions.push_back(prevT);
+								//} else {
+								//	initialTransitions[prevResource->GetGlobalResourceID()] = prevT;
+								//}
+								transHistCompute[prevResource->GetGlobalResourceID()] = batchIndex;
+							}
+							else {
+								//if (initialTransitions.contains(prevResource->GetGlobalResourceID())) {
+								if (addToBatchEnd) {
+									currentBatch.passEndTransitions.push_back(prevT);
+								}
+								else {
+									currentBatch.renderTransitions.push_back(prevT);
+								}
+								//} else {
+								//	initialTransitions[prevResource->GetGlobalResourceID()] = prevT;
+								//}
+								transHistRender[prevResource->GetGlobalResourceID()] = batchIndex;
+							}
+						}
+						else {
+							spdlog::error("Resource {} is part of an aliasing group, but the previous resource {} is not managed by this graph. This should not happen.", r->GetGlobalResourceID(), prevID);
+							throw(std::runtime_error("Resource is part of an aliasing group, but the previous resource is not managed by this graph"));
+						}
+					}
+				}
+				};
+
 			// Determine old state & sync
 			ResourceAccessType prevAccess = r->GetCurrentAccessType();
 			ResourceLayout prevLayout = r->GetCurrentLayout();
@@ -432,42 +434,56 @@ void RenderGraph::Compile() {
 	}
 }
 
-std::pair<int, int> RenderGraph::GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory) {
-	int latestTransition = -1;
-	int latestProducer = -1;
+std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
+	const ComputePassAndResources& pass,
+	std::unordered_map<uint64_t, unsigned int> const& transitionHistory,
+	std::unordered_map<uint64_t, unsigned int> const& producerHistory)
+{
+	int latestTransition = -1, latestProducer = -1;
 
-    auto processResource = [&](const std::shared_ptr<Resource>& resource) {
-        if (transitionHistory.contains(resource->GetGlobalResourceID())) {
-            latestTransition = (std::max)(latestTransition, (int)transitionHistory.at(resource->GetGlobalResourceID()));
-        }
-        if (producerHistory.contains(resource->GetGlobalResourceID())) {
-            latestProducer = (std::max)(latestProducer, (int)producerHistory.at(resource->GetGlobalResourceID()));
-        }
-        };
+	auto processResource = [&](std::shared_ptr<Resource> const& res) {
+		uint64_t id = res->GetGlobalResourceID();
+		// get this ID plus any aliases
+		auto ids = GetAllAliasIDs(id);
+		for (auto rid : ids) {
+			auto itT = transitionHistory.find(rid);
+			if (itT != transitionHistory.end())
+				latestTransition = std::max(latestTransition, (int)itT->second);
 
-	for (const ResourceRequirement& resourceRequirement : pass.resources.resourceRequirements) {
-		processResource(resourceRequirement.resource);
-	}
+			auto itP = producerHistory.find(rid);
+			if (itP != producerHistory.end())
+				latestProducer = std::max(latestProducer, (int)itP->second);
+		}
+		};
+
+	for (auto const& req : pass.resources.resourceRequirements)
+		processResource(req.resource);
 
 	return { latestTransition, latestProducer };
 }
 
-std::pair<int, int> RenderGraph::GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory) {
-	int latestTransition = -1;
-	int latestProducer = -1;
+std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
+	const RenderPassAndResources& pass,
+	std::unordered_map<uint64_t, unsigned int> const& transitionHistory,
+	std::unordered_map<uint64_t, unsigned int> const& producerHistory)
+{
+	int latestTransition = -1, latestProducer = -1;
 
-	auto processResource = [&](const std::shared_ptr<Resource>& resource) {
-		if (transitionHistory.contains(resource->GetGlobalResourceID())) {
-			latestTransition = (std::max)(latestTransition, (int)transitionHistory.at(resource->GetGlobalResourceID()));
-		}
-		if (producerHistory.contains(resource->GetGlobalResourceID())) {
-			latestProducer = (std::max)(latestProducer, (int)producerHistory.at(resource->GetGlobalResourceID()));
+	auto processResource = [&](std::shared_ptr<Resource> const& res) {
+		uint64_t id = res->GetGlobalResourceID();
+		for (auto rid : GetAllAliasIDs(id)) {
+			auto itT = transitionHistory.find(rid);
+			if (itT != transitionHistory.end())
+				latestTransition = std::max(latestTransition, (int)itT->second);
+
+			auto itP = producerHistory.find(rid);
+			if (itP != producerHistory.end())
+				latestProducer = std::max(latestProducer, (int)itP->second);
 		}
 		};
 
-	for (const ResourceRequirement& resourceRequirement : pass.resources.resourceRequirements) {
-		processResource(resourceRequirement.resource);
-	}
+	for (auto const& req : pass.resources.resourceRequirements)
+		processResource(req.resource);
 
 	return { latestTransition, latestProducer };
 }
