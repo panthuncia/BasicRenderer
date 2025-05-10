@@ -37,7 +37,7 @@ public:
 		desc.hasSRV = true;
 		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
 		desc.generateMipMaps = true; // Mips will only be used by aliased downsample maps
-		//desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
+		desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
@@ -84,7 +84,7 @@ public:
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		TextureDescription desc;
 		ImageDimensions dims;
-		unsigned int res = shadowResolution / 2;
+		unsigned int res = shadowResolution;
 		dims.height = res;
 		dims.width = res;
 		desc.imageDimensions.push_back(dims);
@@ -95,7 +95,7 @@ public:
 		desc.hasUAV = true;
 		desc.uavFormat = DXGI_FORMAT_R32_FLOAT;
 		desc.generateMipMaps = true;
-		//desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
+		desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
@@ -115,8 +115,8 @@ public:
 
 		}
 		AddResource(shadowMap);
-		//AddAliasedResource(mapToAlias);
-		//mapToAlias->AddAliasedResource(shadowMap.get());
+		AddAliasedResource(mapToAlias);
+		mapToAlias->AddAliasedResource(shadowMap.get());
 		return shadowMap;
 	}
 

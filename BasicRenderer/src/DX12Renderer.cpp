@@ -622,6 +622,7 @@ void DX12Renderer::CreateTextures() {
     depthStencilDesc.generateMipMaps = false;
     depthStencilDesc.hasDSV = true;
 	depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
+    depthStencilDesc.allowAlias = true;
 
     auto depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
     depthStencilBuffer->SetName(L"DepthStencilBuffer");
@@ -639,12 +640,13 @@ void DX12Renderer::CreateTextures() {
     downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
     downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
     downsampledDesc.generateMipMaps = true;
+	downsampledDesc.allowAlias = true;
 
-    std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc);
+    std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc, depthStencilBuffer.get());
     downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
 
-	//depthStencilBuffer->AddAliasedResource(downsampledDepthBuffer.get());
-	//downsampledDepthBuffer->AddAliasedResource(depthStencilBuffer.get());
+	depthStencilBuffer->AddAliasedResource(downsampledDepthBuffer.get());
+	downsampledDepthBuffer->AddAliasedResource(depthStencilBuffer.get());
 
 	m_depthMap.depthMap = depthStencilBuffer;
 	m_depthMap.downsampledDepthMap = downsampledDepthBuffer;
@@ -1252,8 +1254,6 @@ void DX12Renderer::CreateRenderGraph() {
 	bool clearRTVs = indirect ? false : true;
     newObjectsPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, clearRTVs);
 
-    auto debugPassParameters = RenderPassParameters();
-
     // GTAO pass
     std::shared_ptr<PixelBuffer> outputAO;
     if (m_gtaoEnabled) {
@@ -1345,9 +1345,6 @@ void DX12Renderer::CreateRenderGraph() {
         gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).index;
         gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).index;
 
-        debugPassParameters.shaderResources.push_back(outputAO);
-        SetDebugTexture(outputAO);
-
         UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
 
         newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
@@ -1435,6 +1432,8 @@ void DX12Renderer::CreateRenderGraph() {
         primaryPassBuilder.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap());
     }
 
+    auto debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
+
     auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
     if (drawShadows) {
         newGraph->AddResource(m_shadowMaps);
@@ -1450,9 +1449,10 @@ void DX12Renderer::CreateRenderGraph() {
 				shadowBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 			}
 		}
-		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, false);
+		bool clear = indirect ? false : true;
+		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, clear);
 
-        debugPassParameters.shaderResources.push_back(m_shadowMaps);
+        debugPassBuilder.WithShaderResource(m_shadowMaps);
     }
 
     if (m_currentEnvironment != nullptr) {
@@ -1518,16 +1518,21 @@ void DX12Renderer::CreateRenderGraph() {
         .WithShaderResource(PPLLHeadPointerTexture, PPLLBuffer)
         .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
 
-	auto debugPass = std::make_shared<DebugRenderPass>();
+    debugPassBuilder.Build<DebugRenderPass>();
 	if (m_currentDebugTexture != nullptr) {
-		debugPass->SetTexture(m_currentDebugTexture.get());
-		//debugPassParameters.shaderResources.push_back(m_shadowMaps);
+		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
+		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
+        if (debugPass) {
+            debugPass->SetTexture(m_currentDebugTexture.get());
+        }
 	}
-    //newGraph->AddRenderPass(debugPass, debugPassParameters, "DebugPass");
 
     if (getDrawBoundingSpheres()) {
-        auto debugSpherePass = std::make_shared<DebugSpherePass>();
-        newGraph->AddRenderPass(debugSpherePass, debugPassParameters, "DebugSpherePass");
+		auto debugSphereBuilder = newGraph->BuildRenderPass("DebugSpherePass")
+			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+			.WithDepthReadWrite(depthTexture)
+			.IsGeometryPass()
+			.Build<DebugSpherePass>();
     }
 
     newGraph->Compile();

@@ -253,7 +253,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	case Components::LightType::Point: {
 		auto cubemapMatrices = GetCubemapViewMatrices(globalPos);
 		for (int i = 0; i < 6; i++) {
-			const CameraInfo* oldInfo = light.get<CameraInfo>();
+			//const CameraInfo* oldInfo = light.get<CameraInfo>();
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cubemapMatrices[i];

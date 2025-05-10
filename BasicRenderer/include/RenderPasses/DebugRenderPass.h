@@ -15,6 +15,7 @@ public:
     void Setup() override {
 		CreateDebugRootSignature();
 		CreateDebugPSO();
+		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer(DeviceManager::GetInstance().GetDevice().Get());
     }
 
     PassReturn Execute(RenderContext& context) override {
