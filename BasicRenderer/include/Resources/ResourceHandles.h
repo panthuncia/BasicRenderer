@@ -13,11 +13,11 @@ template<typename T>
 struct TextureHandle {
     Microsoft::WRL::ComPtr<ID3D12Resource> texture; // Texture resource
 	Microsoft::WRL::ComPtr<ID3D12Heap> placedResourceHeap; // If this is a placed resource, this is the heap it was created in
-    std::vector<ShaderVisibleIndexInfo> SRVInfo;
-	std::vector<ShaderVisibleIndexInfo> UAVInfo;
-	std::vector<NonShaderVisibleIndexInfo> NSVUAVInfo;
-    std::vector<NonShaderVisibleIndexInfo> RTVInfo;
-    std::vector<NonShaderVisibleIndexInfo> DSVInfo;
+    std::vector<std::vector<ShaderVisibleIndexInfo>> SRVInfo;
+    std::vector<std::vector<ShaderVisibleIndexInfo>> UAVInfo;
+    std::vector<std::vector<NonShaderVisibleIndexInfo>> NSVUAVInfo;
+    std::vector<std::vector<NonShaderVisibleIndexInfo>> RTVInfo;
+    std::vector<std::vector<NonShaderVisibleIndexInfo>> DSVInfo;
     std::shared_ptr<DescriptorHeap> srvUavHeap;
     std::shared_ptr<DescriptorHeap> uavCPUHeap;
     std::shared_ptr<DescriptorHeap> rtvHeap;

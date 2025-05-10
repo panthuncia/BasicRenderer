@@ -257,6 +257,9 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 void DX12Renderer::CreateGlobalResources() {
     m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
 	m_downsampledShadowMaps = std::make_shared<DownsampledShadowMaps>(L"DownsampledShadowMaps");
+    m_shadowMaps->AddAliasedResource(m_downsampledShadowMaps.get());
+	m_downsampledShadowMaps->AddAliasedResource(m_shadowMaps.get());
+
     setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
 	setDownsampledShadowMaps(m_downsampledShadowMaps.get());
 }
@@ -639,6 +642,9 @@ void DX12Renderer::CreateTextures() {
 
     std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc);
     downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
+
+	//depthStencilBuffer->AddAliasedResource(downsampledDepthBuffer.get());
+	//downsampledDepthBuffer->AddAliasedResource(depthStencilBuffer.get());
 
 	m_depthMap.depthMap = depthStencilBuffer;
 	m_depthMap.downsampledDepthMap = downsampledDepthBuffer;
@@ -1321,23 +1327,23 @@ void DX12Renderer::CreateRenderGraph() {
         gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
 
         // Filter pass
-        gtaoInfo.g_srcRawDepthDescriptorIndex = depthTexture->GetSRVInfo()[0].index;
-        gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[0].index;
-        gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[1].index;
-        gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[2].index;
-        gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[3].index;
-        gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo()[4].index;
+        gtaoInfo.g_srcRawDepthDescriptorIndex = depthTexture->GetSRVInfo(0).index;
+        gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(0).index;
+        gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(1).index;
+        gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(2).index;
+        gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(3).index;
+        gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(4).index;
 
         // Main pass
-        gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo()[0].index;
-        gtaoInfo.g_srcNormalmapDescriptorIndex = normalsWorldSpace->GetSRVInfo()[0].index;
+        gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo(0).index;
+        gtaoInfo.g_srcNormalmapDescriptorIndex = normalsWorldSpace->GetSRVInfo(0).index;
         // TODO: Hilbert lookup table
-        gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo()[0].index;
-        gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo()[0].index;
+        gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo(0).index;
+        gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo(0).index;
 
         // Denoise pass
-        gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo()[0].index;
-        gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo()[0].index;
+        gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).index;
+        gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).index;
 
         debugPassParameters.shaderResources.push_back(outputAO);
         SetDebugTexture(outputAO);
@@ -1357,7 +1363,7 @@ void DX12Renderer::CreateRenderGraph() {
         newGraph->BuildComputePass("GTAODenoisePass") // Denoise pass
             .WithShaderResource(workingEdges, workingAOTerm1)
             .WithUnorderedAccess(outputAO)
-            .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo()[0].index);
+            .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo(0).index);
 
     }
 
@@ -1459,10 +1465,10 @@ void DX12Renderer::CreateRenderGraph() {
         primaryPassBuilder.WithShaderResource(normalsWorldSpace, albedo, metallicRoughness, depthTexture);
     }
     if (m_deferredRendering) {
-		primaryPassBuilder.Build<DeferredRenderPass>(m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index, albedo->GetSRVInfo()[0].index, metallicRoughness->GetSRVInfo()[0].index, emissive->GetSRVInfo()[0].index, depthTexture->GetSRVInfo()[0].index);
+		primaryPassBuilder.Build<DeferredRenderPass>(m_gtaoEnabled ? outputAO->GetSRVInfo(0).index : 0, normalsWorldSpace->GetSRVInfo(0).index, albedo->GetSRVInfo(0).index, metallicRoughness->GetSRVInfo(0).index, emissive->GetSRVInfo(0).index, depthTexture->GetSRVInfo(0).index);
     }
     else {
-        primaryPassBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0);
+        primaryPassBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo(0).index : 0);
     }
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
@@ -1505,7 +1511,7 @@ void DX12Renderer::CreateRenderGraph() {
 			PPLLFillBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 		}
 	}
-	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo()[0].index : 0, normalsWorldSpace->GetSRVInfo()[0].index);
+	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo(0).index : 0, normalsWorldSpace->GetSRVInfo(0).index);
 
 
     newGraph->BuildRenderPass("PPLLResolvePass")

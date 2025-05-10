@@ -56,12 +56,12 @@ public:
 		auto environments = manager.GetAndClearEncironmentsToConvert();
         for (auto& env : environments) {
             auto texture = env->GetHDRITexture();
-            commandList->SetGraphicsRootDescriptorTable(0, texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
+            commandList->SetGraphicsRootDescriptorTable(0, texture->GetBuffer()->GetSRVInfo(0).gpuHandle);
 
             for (int i = 0; i < 6; i++) {
 
                 CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[1];
-                rtvHandles[0] = env->GetEnvironmentCubemap()->GetBuffer()->GetRTVInfos()[i].cpuHandle;
+                rtvHandles[0] = env->GetEnvironmentCubemap()->GetBuffer()->GetRTVInfo(i).cpuHandle;
 
                 commandList->OMSetRenderTargets(1, rtvHandles, FALSE, nullptr);
 

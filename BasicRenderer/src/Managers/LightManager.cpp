@@ -109,23 +109,23 @@ void LightManager::RemoveLight(LightInfo* light) {
 }
 
 unsigned int LightManager::GetLightBufferDescriptorIndex() {
-    return m_lightBuffer->GetSRVInfo()[0].index;
+    return m_lightBuffer->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetActiveLightIndicesBufferDescriptorIndex() {
-	return m_activeLightIndices->GetSRVInfo()[0].index;
+	return m_activeLightIndices->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
-	return m_pointViewInfo->GetSRVInfo()[0].index;
+	return m_pointViewInfo->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
-	return m_spotViewInfo->GetSRVInfo()[0].index;
+	return m_spotViewInfo->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return m_directionalViewInfo->GetSRVInfo()[0].index;
+	return m_directionalViewInfo->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetNumLights() {

@@ -38,7 +38,7 @@ auto RenderGraph::MakeAddTransition(
 					auto aliasGroup = resourceToAliasGroup[r->GetGlobalResourceID()];
 					int prevID = lastActiveInAliasGroup[aliasGroup];
 
-					if (!(prevID == -1)) {
+					if (!(prevID == -1) && !(prevID == r->GetGlobalResourceID())) {
 						auto& prevResource = resourcesByID[prevID];
 						if (!prevResource->HasLayout()) {
 							spdlog::error("Not implemented");
@@ -91,6 +91,9 @@ auto RenderGraph::MakeAddTransition(
 							spdlog::error("Resource {} is part of an aliasing group, but the previous resource {} is not managed by this graph. This should not happen.", r->GetGlobalResourceID(), prevID);
 							throw(std::runtime_error("Resource is part of an aliasing group, but the previous resource is not managed by this graph"));
 						}
+					}
+					else {
+						lastActiveInAliasGroup[aliasGroup] = r->GetGlobalResourceID();
 					}
 				}
 				};

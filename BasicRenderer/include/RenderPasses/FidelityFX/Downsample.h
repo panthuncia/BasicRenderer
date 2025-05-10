@@ -102,13 +102,13 @@ public:
         // UintRootConstant2 is the index of the spdConstants structured buffer
 		// UintRootConstant3 is the index of the current constants
         unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
-        downsampleRootConstants[UintRootConstant0] = m_pDownsampleAtomicCounter->GetUAVShaderVisibleInfo()[0].index;
+        downsampleRootConstants[UintRootConstant0] = m_pDownsampleAtomicCounter->GetUAVShaderVisibleInfo(0).index;
         auto& mapInfo = m_perViewMapInfo[context.currentScene->GetPrimaryCamera().id()];
         if (!mapInfo.pConstantsBufferView) {
 			spdlog::error("Downsample pass: No constants buffer view for primary depth map");
         }
-        downsampleRootConstants[UintRootConstant1] = m_pSrcDepths->GetSRVInfo()[0].index;
-		downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo()[0].index;
+        downsampleRootConstants[UintRootConstant1] = m_pSrcDepths->GetSRVInfo(0).index;
+		downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).index;
         downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
         commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
@@ -120,7 +120,7 @@ public:
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			auto& mapInfo = m_perViewMapInfo[e.id()];
             
-            downsampleRootConstants[UintRootConstant1] = shadowMap.depthMap->GetSRVInfo()[0].index;
+            downsampleRootConstants[UintRootConstant1] = shadowMap.depthMap->GetSRVInfo(0).index;
 			downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
@@ -231,8 +231,8 @@ private:
         spdConstants.workGroupOffset[0] = workGroupOffset[0];
         spdConstants.workGroupOffset[1] = workGroupOffset[1];
 
-		for (int i = 0; i < shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo().size(); i++) {
-			spdConstants.mipUavDescriptorIndices[i] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo()[i].index;
+		for (int i = 0; i < shadowMap.downsampledDepthMap->GetNumUAVMipLevels(); i++) {
+			spdConstants.mipUavDescriptorIndices[i] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo(i).index;
 		}
 
         auto view = m_pDownsampleConstants->Add();

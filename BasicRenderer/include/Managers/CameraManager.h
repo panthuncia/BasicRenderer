@@ -19,7 +19,7 @@ public:
 	}
 
 	unsigned int GetCameraBufferSRVIndex() const {
-		return m_pCameraBuffer->GetSRVInfo()[0].index;
+		return m_pCameraBuffer->GetSRVInfo(0).index;
 	}
 
 	Components::RenderView AddCamera(CameraInfo& camera);

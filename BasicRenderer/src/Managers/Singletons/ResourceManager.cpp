@@ -332,7 +332,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
 
-	pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { srvInfo });
+	pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { { srvInfo } });
 
 	if (UAV) {
 		D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
@@ -351,7 +351,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		ShaderVisibleIndexInfo uavInfo;
 		uavInfo.index = uavShaderVisibleIndex;
 		uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-		pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { uavInfo }, 0);
+		pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, 0);
 	}
 
 	return pDynamicBuffer;
@@ -394,7 +394,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
 
-	pBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { srvInfo });
+	pBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { { srvInfo } });
 
 	return pBuffer;
 }
@@ -500,39 +500,37 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	);
 
 	// UAV
-	std::vector<ShaderVisibleIndexInfo> uavInfo;
+	std::vector<std::vector<ShaderVisibleIndexInfo>> uavInfo;
 	if (desc.hasUAV) {
 		uavInfo = CreateUnorderedAccessViewsPerMip(
 			device.Get(),
 			textureResource.Get(),
 			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
 			m_cbvSrvUavHeap.get(),
+			mipLevels,
 			desc.isArray,
 			arraySize,
-			mipLevels,
-			0,
 			0
 		);
 	}
 
 	// Non-shader visible UAV
-	std::vector<NonShaderVisibleIndexInfo> nonShaderUavInfo;
+	std::vector<std::vector<NonShaderVisibleIndexInfo>> nonShaderUavInfo;
 	if (desc.hasNonShaderVisibleUAV) {
 		nonShaderUavInfo = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
 			device.Get(),
 			textureResource.Get(),
 			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
 			m_nonShaderVisibleHeap.get(),
+			mipLevels,
 			desc.isArray,
 			arraySize,
-			mipLevels,
-			0,
 			0
 		);
 	}
 
 	// Create RTVs if needed
-	std::vector<NonShaderVisibleIndexInfo> rtvInfos;
+	std::vector<std::vector<NonShaderVisibleIndexInfo>> rtvInfos;
 	if (desc.hasRTV) {
 		rtvInfos = CreateRenderTargetViews(
 			device.Get(),
@@ -547,7 +545,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	}
 
 	// Create DSVs if needed
-	std::vector<NonShaderVisibleIndexInfo> dsvInfos;
+	std::vector<std::vector<NonShaderVisibleIndexInfo>> dsvInfos;
 	if (desc.hasDSV) {
 		dsvInfos = CreateDepthStencilViews(
 			device.Get(),
@@ -556,7 +554,8 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 			desc.dsvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.dsvFormat,
 			desc.isCubemap,
 			desc.isArray,
-			arraySize
+			arraySize,
+			mipLevels
 		);
 	}
 

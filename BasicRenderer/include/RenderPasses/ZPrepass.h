@@ -58,18 +58,18 @@ public:
 
         // Clear the render target
         if (m_clearGbuffer) {
-            auto& rtvHandle = m_pNormals->GetRTVInfos()[0].cpuHandle;
+            auto& rtvHandle = m_pNormals->GetRTVInfo(0).cpuHandle;
             const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
             commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
             if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-                auto& rtvHandle2 = m_pAlbedo->GetRTVInfos()[0].cpuHandle;
+                auto& rtvHandle2 = m_pAlbedo->GetRTVInfo(0).cpuHandle;
                 commandList->ClearRenderTargetView(rtvHandle2, clearColor, 0, nullptr);
-                auto& rtvHandle3 = m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle;
+                auto& rtvHandle3 = m_pMetallicRoughness->GetRTVInfo(0).cpuHandle;
                 commandList->ClearRenderTargetView(rtvHandle3, clearColor, 0, nullptr);
             }
 
-            auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
+            auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
             commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
         }
 
@@ -112,14 +112,14 @@ private:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         // Render targets
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfos()[0].cpuHandle;
+		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
         if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[4] = { m_pNormals->GetRTVInfos()[0].cpuHandle, m_pAlbedo->GetRTVInfos()[0].cpuHandle, m_pMetallicRoughness->GetRTVInfos()[0].cpuHandle, m_pEmissive->GetRTVInfos()[0].cpuHandle};
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[4] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pAlbedo->GetRTVInfo(0).cpuHandle, m_pMetallicRoughness->GetRTVInfo(0).cpuHandle, m_pEmissive->GetRTVInfo(0).cpuHandle};
             commandList->OMSetRenderTargets(4, rtvHandles, FALSE, &dsvHandle);
         }
         else {
-			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[1] = { m_pNormals->GetRTVInfos()[0].cpuHandle };
+			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[1] = { m_pNormals->GetRTVInfo(0).cpuHandle };
 			commandList->OMSetRenderTargets(1, rtvHandles, FALSE, &dsvHandle);
         }
 
@@ -149,11 +149,11 @@ private:
         staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
         staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
         staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
-		staticBufferIndices[NormalsTextureDescriptorIndex] = m_pNormals->GetRTVInfos()[0].index;
+		staticBufferIndices[NormalsTextureDescriptorIndex] = m_pNormals->GetRTVInfo(0).index;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int variableRootConstants[NumVariableBufferRootConstants] = {};
-		variableRootConstants[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetUAVShaderVisibleInfo()[0].index;
+		variableRootConstants[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetUAVShaderVisibleInfo(0).index;
 
 		commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableRootConstants, 0);
     }

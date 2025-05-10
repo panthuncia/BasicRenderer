@@ -149,7 +149,7 @@ public:
         ShaderVisibleIndexInfo srvInfo;
         srvInfo.index = index;
         srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        dataBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { srvInfo });
+        dataBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { { srvInfo } });
 
         if (UAV) {
 			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
@@ -185,7 +185,7 @@ public:
 			ShaderVisibleIndexInfo uavInfo;
 			uavInfo.index = uavShaderVisibleIndex;
 			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-            dataBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { uavInfo }, counterOffset);
+            dataBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, counterOffset);
 
 			//NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
 			//uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
@@ -234,7 +234,7 @@ public:
         ShaderVisibleIndexInfo srvInfo;
         srvInfo.index = index;
         srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { srvInfo });
+        pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { { srvInfo } });
 
         return pDynamicBuffer;
     }
@@ -277,7 +277,7 @@ public:
 		ShaderVisibleIndexInfo srvInfo;
 		srvInfo.index = index;
 		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
-        pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { srvInfo });
+        pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { { srvInfo } });
 
         if (UAV) {
             D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
@@ -296,7 +296,7 @@ public:
             ShaderVisibleIndexInfo uavInfo;
             uavInfo.index = uavShaderVisibleIndex;
             uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-            pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { uavInfo }, 0);
+            pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, 0);
         }
 
         return pDynamicBuffer;
@@ -338,7 +338,7 @@ public:
             uavDesc.Buffer.CounterOffsetInBytes = 0;
 
             // Shader visible UAV
-            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo()[0].index);
+            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo(0).index);
 
             device->CreateUnorderedAccessView(buffer->GetAPIResource() , nullptr, &uavDesc, uavShaderVisibleHandle);
         }
@@ -384,7 +384,7 @@ public:
             uavDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_UAV_FLAG_RAW : D3D12_BUFFER_UAV_FLAG_NONE;
 
             // Shader visible UAV
-            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo()[0].index);
+            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo(0).index);
 
             device->CreateUnorderedAccessView(buffer->GetAPIResource(), nullptr, &uavDesc, uavShaderVisibleHandle);
         }

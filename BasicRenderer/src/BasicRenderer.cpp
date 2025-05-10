@@ -217,11 +217,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
 
-    //HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
+    HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
 
-    //if (!hGetPixDLL) {
-    //    spdlog::warn("could not load the PIX library");
-    //}
+    if (!hGetPixDLL) {
+        spdlog::warn("could not load the PIX library");
+    }
 
     // Aftermath
 

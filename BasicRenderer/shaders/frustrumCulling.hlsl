@@ -230,6 +230,8 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
    
     RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
 
+    
+    /*
     bool occlusionCulled = false;
     bool partiallyOcclusionCulled = false;
     OcclusionCulling(occlusionCulled, partiallyOcclusionCulled, camera, worldSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
@@ -238,7 +240,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
         // Update bitfield
         ClearBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
         return; // reject whole object
-    }
+    }*/
     
 
     RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
@@ -264,7 +266,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
                 return; // reject whole object
             }
             // Update bitfield
-            SetBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
+            //SetBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
 
             // does it intersect this plane?
             if (abs(distance) < scaledBoundingRadius)
