@@ -667,7 +667,7 @@ bool RenderGraph::IsNewBatchNeeded(
 		// Changing state?
 		auto it = trackers.find(id);
 		if (it != trackers.end()) {
-			if (it->second->wouldModify(r.resourceAndRange.range, wantState))
+			if (it->second->WouldModify(r.resourceAndRange.range, wantState))
 				return true;
 		}
 		// first-use in this batch never forces a split.
@@ -702,7 +702,7 @@ void RenderGraph::ComputeResourceLoops() {
 
 		auto const& pRes = itRes->second;
 
-		tracker->apply(
+		tracker->Apply(
 			whole, // covers all mips & slices
 			pRes.get(),
 			flushState,    // the state we’re flushing to

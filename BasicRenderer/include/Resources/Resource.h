@@ -4,7 +4,7 @@
 #include <vector>
 #include <directx/d3d12.h>
 #include "Resources/ResourceStates.h"
-#include "Resources/SubresourceView.h"
+#include "Resources/ResourceStateTracker.h"
 
 class RenderContext;
 

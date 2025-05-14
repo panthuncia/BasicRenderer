@@ -13,6 +13,7 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/Base/ComputePass.h"
 #include "Resources/ResourceStates.h"
+#include "Resources/ResourceStateTracker.h"
 
 class Resource;
 class RenderPassBuilder;

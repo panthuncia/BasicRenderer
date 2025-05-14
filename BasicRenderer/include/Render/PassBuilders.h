@@ -2,7 +2,7 @@
 
 #include "RenderGraph.h"
 #include "ResourceRequirements.h"
-#include "Resources/SubresourceView.h"
+#include "Resources/ResourceStateTracker.h"
 
 class RenderPassBuilder {
 public:
@@ -172,6 +172,20 @@ private:
         }
     }
 
+    void addShaderResource(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.shaderResources.push_back(resourceAndRange);
+    }
+
+    void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.shaderResources.push_back(resourceAndRange);
+        }
+    }
+
     // Render target
     void addRenderTarget(const ResourceAndRange& r) {
         if (!r.resource) return;
@@ -182,6 +196,20 @@ private:
         for (auto& r : list) {
             if (!r.resource) continue;
             params.renderTargets.push_back(r);
+        }
+    }
+
+    void addRenderTarget(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.renderTargets.push_back(resourceAndRange);
+    }
+
+    void addRenderTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.renderTargets.push_back(resourceAndRange);
         }
     }
 
@@ -198,6 +226,20 @@ private:
         }
     }
 
+    void addDepthReadWrite(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.depthReadWriteResources.push_back(resourceAndRange);
+    }
+
+    void addDepthReadWrite(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.depthReadWriteResources.push_back(resourceAndRange);
+        }
+    }
+
     void addDepthRead(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.depthReadResources.push_back(r);
@@ -207,6 +249,20 @@ private:
         for (auto& r : list) {
             if (!r.resource) continue;
             params.depthReadResources.push_back(r);
+        }
+    }
+
+    void addDepthRead(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.depthReadResources.push_back(resourceAndRange);
+    }
+
+    void addDepthRead(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.depthReadResources.push_back(resourceAndRange);
         }
     }
 
@@ -223,6 +279,20 @@ private:
         }
     }
 
+    void addConstantBuffer(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.constantBuffers.push_back(resourceAndRange);
+    }
+
+    void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.constantBuffers.push_back(resourceAndRange);
+        }
+    }
+
     // Unordered access
     void addUnorderedAccess(const ResourceAndRange& r) {
         if (!r.resource) return;
@@ -233,6 +303,20 @@ private:
         for (auto& r : list) {
             if (!r.resource) continue;
             params.unorderedAccessViews.push_back(r);
+        }
+    }
+
+    void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.unorderedAccessViews.push_back(resourceAndRange);
+    }
+
+    void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.unorderedAccessViews.push_back(resourceAndRange);
         }
     }
 
@@ -249,6 +333,20 @@ private:
         }
     }
 
+    void addCopyDest(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.copyTargets.push_back(resourceAndRange);
+    }
+
+    void addCopyDest(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.copyTargets.push_back(resourceAndRange);
+        }
+    }
+
     // Copy source
     void addCopySource(const ResourceAndRange& r) {
         if (!r.resource) return;
@@ -262,6 +360,20 @@ private:
         }
     }
 
+    void addCopySource(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.copySources.push_back(resourceAndRange);
+    }
+
+    void addCopySource(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.copySources.push_back(resourceAndRange);
+        }
+    }
+
     // Indirect arguments
     void addIndirectArguments(const ResourceAndRange& r) {
         if (!r.resource) return;
@@ -272,6 +384,20 @@ private:
         for (auto& r : list) {
             if (!r.resource) continue;
             params.indirectArgumentBuffers.push_back(r);
+        }
+    }
+
+    void addIndirectArguments(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.indirectArgumentBuffers.push_back(resourceAndRange);
+    }
+
+    void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.indirectArgumentBuffers.push_back(resourceAndRange);
         }
     }
 
@@ -433,6 +559,20 @@ private:
         }
     }
 
+    void addShaderResource(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.shaderResources.push_back(resourceAndRange);
+    }
+
+    void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.shaderResources.push_back(resourceAndRange);
+        }
+    }
+
     // Constant buffer
     void addConstantBuffer(const ResourceAndRange& r) {
         if (!r.resource) return;
@@ -443,6 +583,20 @@ private:
         for (auto& r : list) {
             if (!r.resource) continue;
             params.constantBuffers.push_back(r);
+        }
+    }
+
+    void addConstantBuffer(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.constantBuffers.push_back(resourceAndRange);
+    }
+
+    void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.constantBuffers.push_back(resourceAndRange);
         }
     }
 
@@ -459,6 +613,20 @@ private:
         }
     }
 
+    void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.unorderedAccessViews.push_back(resourceAndRange);
+    }
+
+    void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.unorderedAccessViews.push_back(resourceAndRange);
+        }
+    }
+
 	// Indirect arguments
 	void addIndirectArguments(const ResourceAndRange& r) {
 		if (!r.resource) return;
@@ -470,6 +638,20 @@ private:
 			params.indirectArgumentBuffers.push_back(r);
 		}
 	}
+
+    void addIndirectArguments(const std::shared_ptr<Resource>& r) {
+        if (!r) return;
+        ResourceAndRange resourceAndRange(r);
+        params.indirectArgumentBuffers.push_back(resourceAndRange);
+    }
+
+    void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
+        for (auto& r : list) {
+            if (!r) continue;
+            ResourceAndRange resourceAndRange(r);
+            params.indirectArgumentBuffers.push_back(resourceAndRange);
+        }
+    }
 
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");

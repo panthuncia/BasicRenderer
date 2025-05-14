@@ -1,62 +1,4 @@
-#pragma once
-
-#include <memory>
-#include <vector>
-#include <optional>
-#include <algorithm>
-
-#include "Resources/ResourceStates.h"
-
-class Resource;
-
-struct ResourceState {
-    ResourceAccessType access;
-    ResourceLayout     layout;
-    ResourceSyncState  sync;
-    bool operator==(ResourceState const& o) const {
-        return access == o.access
-            && layout == o.layout;
-			//&& sync == o.sync; // Sync is not important for equality
-    };
-};
-
-enum class BoundType {
-    Exact,  // == value
-    From,   // >= value
-    UpTo,   // <= value
-    All     // everything
-};
-
-struct Bound {
-    BoundType type;
-    uint32_t  value;  // only for Exact, From, UpTo
-
-    bool operator==(Bound const& o) const noexcept {
-        return type  == o.type
-            && value == o.value;
-    }
-    bool operator!=(Bound const& o) const noexcept {
-        return !(*this == o);
-    }
-};
-
-struct RangeSpec {
-    //std::shared_ptr<Resource> resource;
-    Bound mipLower   = { BoundType::All, 0 };
-    Bound mipUpper   = { BoundType::All, 0 };
-    Bound sliceLower = { BoundType::All, 0 };
-    Bound sliceUpper = { BoundType::All, 0 };
-};
-
-struct SubresourceRange {
-	uint32_t firstMip;
-	uint32_t mipCount;
-	uint32_t firstSlice;
-	uint32_t sliceCount;
-	bool isEmpty() const {
-		return (mipCount == 0) || (sliceCount == 0);
-	}
-};
+#include "Resources/ResourceStateTracker.h"
 
 SubresourceRange ResolveRangeSpec(RangeSpec spec,
     uint32_t totalMips,
@@ -116,22 +58,6 @@ SubresourceRange ResolveRangeSpec(RangeSpec spec,
 
     return { firstMip, numMips, firstSlice, numSlices };
 }
-
-struct ResourceTransition {
-    ResourceTransition() = default;
-    ResourceTransition(Resource* pResource, RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState)
-        : range(range), pResource(pResource), prevAccessType(prevAccessType), newAccessType(newAccessType), prevLayout(prevLayout), newLayout(newLayout), prevSyncState(prevSyncState), newSyncState(newSyncState) {
-    }
-    Resource* pResource;
-    RangeSpec range;
-    ResourceAccessType prevAccessType = ResourceAccessType::NONE;
-    ResourceAccessType newAccessType = ResourceAccessType::NONE;
-    ResourceLayout prevLayout = ResourceLayout::LAYOUT_COMMON;
-    ResourceLayout newLayout = ResourceLayout::LAYOUT_COMMON;
-    ResourceSyncState prevSyncState = ResourceSyncState::NONE;
-    ResourceSyncState newSyncState = ResourceSyncState::NONE;
-};
-
 
 // interpret any Bound as a numeric lower bound
 static uint32_t boundLower(const Bound &b) {
@@ -236,12 +162,7 @@ static RangeSpec intersect(RangeSpec A, RangeSpec B) {
     };
 }
 
-struct Segment {
-    RangeSpec     rangeSpec;
-    ResourceState state;
-};
-
-// 2) test if two 1D ranges [loA..upA] and [loB..upB] overlap or touch
+// test if two 1D ranges [loA..upA] and [loB..upB] overlap or touch
 static bool rangesOverlapOrTouch(const Bound &loA, const Bound &upA,
     const Bound &loB, const Bound &upB)
 {
@@ -250,7 +171,7 @@ static bool rangesOverlapOrTouch(const Bound &loA, const Bound &upA,
     return (aUp + 1 >= bLo) && (bUp + 1 >= aLo);
 }
 
-// 3) for union along one axis, build the new lower/upper Bound
+// for union along one axis, build the new lower/upper Bound
 static Bound unionLower(const Bound &A, const Bound &B) {
     uint32_t lo = (std::min)(boundLower(A), boundLower(B));
     return lo == 0
@@ -302,7 +223,6 @@ static std::optional<Segment> tryMerge(Segment const &A, Segment const &B) {
     return std::nullopt;
 }
 
-// the top-level mergeSymbolic:
 static void mergeSymbolic(std::vector<Segment> &segs) {
     // sort by (sliceLower, sliceUpper, mipLower, mipUpper) numeric order
     std::sort(segs.begin(), segs.end(),
@@ -337,73 +257,56 @@ static void mergeSymbolic(std::vector<Segment> &segs) {
     segs.swap(out);
 }
 
-class SymbolicTracker {
-    std::vector<Segment> _segs;
-public:
-    SymbolicTracker() {
-		RangeSpec whole;
-		//whole.resource = nullptr;
-		whole.mipLower = { BoundType::All, 0 };
-		whole.mipUpper = { BoundType::All, 0 };
-		whole.sliceLower = { BoundType::All, 0 };
-		whole.sliceUpper = { BoundType::All, 0 };
-		_segs.push_back({ whole, ResourceState{ ResourceAccessType::COMMON, ResourceLayout::LAYOUT_COMMON, ResourceSyncState::ALL } });
-    }
-    SymbolicTracker(RangeSpec whole, ResourceState init) {
-        _segs.push_back({ whole, init });
-    }
 
-    // apply a new requirement and emit transitions
-    void apply(RangeSpec want,
-		Resource* pRes,
-        ResourceState newState,
-        std::vector<ResourceTransition>& out)
-    {
-        std::vector<Segment> next;
-        for (auto &seg : _segs) {
-            auto cut = intersect(seg.rangeSpec, want);
-            if (isEmpty(cut)) {
-                // no overlap: keep seg as-is
-                next.push_back(seg);
-            } else {
-                // split seg by cut
-                for (auto &rem : subtract(seg.rangeSpec, cut))
-                    next.push_back({ rem, seg.state });
+void SymbolicTracker::Apply(RangeSpec want,
+    Resource* pRes,
+    ResourceState newState,
+    std::vector<ResourceTransition>& out)
+{
+    std::vector<Segment> next;
+    for (auto &seg : _segs) {
+        auto cut = intersect(seg.rangeSpec, want);
+        if (isEmpty(cut)) {
+            // no overlap: keep seg as-is
+            next.push_back(seg);
+        } else {
+            // split seg by cut
+            for (auto &rem : subtract(seg.rangeSpec, cut))
+                next.push_back({ rem, seg.state });
 
-                // record a transition over 'cut' if state differs
-                if (!(seg.state == newState)) {
-                    out.push_back({
-                        pRes, // resource
-                        cut,
-                        seg.state.access,
-                        newState.access,
-                        seg.state.layout,
-                        newState.layout,
-                        seg.state.sync,
-                        newState.sync
-                        });
-                }
+            // record a transition over 'cut' if state differs
+            if (!(seg.state == newState)) {
+                out.push_back({
+                    pRes, // resource
+                    cut,
+                    seg.state.access,
+                    newState.access,
+                    seg.state.layout,
+                    newState.layout,
+                    seg.state.sync,
+                    newState.sync
+                    });
             }
         }
-
-        // insert the new-state segment
-        next.push_back({ want, newState });
-
-        // merge back any adjacent segments with identical state & identical RangeSpec
-        mergeSymbolic(next);
-        _segs.swap(next);
     }
 
-    bool wouldModify(RangeSpec want, ResourceState newState) const {
-        for (auto const &seg : _segs) {
-            auto cut = intersect(seg.rangeSpec, want);
-            if (!isEmpty(cut) && !(seg.state == newState))
-                return true;
-        }
-        return false;
-    }
+    // insert the new-state segment
+    next.push_back({ want, newState });
 
-    const std::vector<Segment>& getSegments() const noexcept {
-        return _segs;
+    // merge back any adjacent segments with identical state & identical RangeSpec
+    mergeSymbolic(next);
+    _segs.swap(next);
+}
+
+bool SymbolicTracker::WouldModify(RangeSpec want, ResourceState newState) const {
+    for (auto const &seg : _segs) {
+        auto cut = intersect(seg.rangeSpec, want);
+        if (!isEmpty(cut) && !(seg.state == newState))
+            return true;
     }
-};
+    return false;
+}
+
+const std::vector<Segment>& SymbolicTracker::GetSegments() const noexcept {
+	return _segs;
+}

@@ -9,7 +9,7 @@
 #include "Resources/ResourceStates.h"
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
-#include "Resources/SubresourceView.h"
+#include "Resources/ResourceStateTracker.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;

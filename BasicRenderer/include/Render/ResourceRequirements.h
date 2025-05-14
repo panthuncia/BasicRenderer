@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include "Resources/SubresourceView.h"
+#include "Resources/ResourceStateTracker.h"
 
 class Resource;
 
