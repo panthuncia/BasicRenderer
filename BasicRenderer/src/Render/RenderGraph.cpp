@@ -20,7 +20,69 @@ void RenderGraph::AddTransition(
 	bool isComputePass, 
 	const ResourceRequirement& r)
 {
+	auto& resource = r.resourceAndRange.resource;
 
+	std::vector<ResourceTransition> transitions;
+	resource->GetStateTracker()->Apply(r.resourceAndRange.range, resource.get(), r.state, transitions);
+
+	if (currentBatch.passBatchTrackers.contains(resource->GetGlobalResourceID()) && transitions.size()>0) {
+		spdlog::info("How did this happen?");
+	}
+
+	currentBatch.passBatchTrackers[resource->GetGlobalResourceID()] = resource->GetStateTracker(); // We will need to chack subsequent passes against this
+
+	// Check if this is a resource group
+	//std::vector<ResourceTransition> independantlyManagedTransitions;
+	auto group = std::dynamic_pointer_cast<ResourceGroup>(resource);
+	if (group) {
+		for (auto& childID : resourcesFromGroupToManageIndependantly[group->GetGlobalResourceID()]) {
+			auto& child = resourcesByID[childID];
+			if (child) {
+				currentBatch.passBatchTrackers[childID] = child->GetStateTracker();
+				child->GetStateTracker()->Apply(r.resourceAndRange.range, child.get(), r.state, transitions);
+			} else {
+				spdlog::error("Resource group {} has a child resource {} that is marked as independantly managed, but is not managed by this graph. This should not happen.", group->GetGlobalResourceID(), childID);
+				throw(std::runtime_error("Resource group has a child resource that is not managed by this graph"));
+			}
+		}
+	}
+
+	bool isDebug = false;
+	if (resource->GetName() == L"DepthStencilBuffer") {
+		spdlog::info("transitions:");
+		isDebug = true;
+	}
+
+	bool oldSyncHasNonComputeSyncState = false;
+	for (auto& transition : transitions) {
+		if (ResourceSyncStateIsNotComputeSyncState(transition.prevSyncState)) {
+			oldSyncHasNonComputeSyncState = true;
+			if (isDebug) {
+				spdlog::info("Resource {} has non compute sync state");
+			}
+		}
+	}
+	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to palce transitions on render queue
+		unsigned int gfxBatch = context.transHistRender[resource->GetGlobalResourceID()];
+		for (auto& transition : transitions) {
+			context.transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
+			batches[gfxBatch].passEndTransitions.push_back(transition);
+		}
+	}
+	else {
+		if (isComputePass) {
+			for (auto& transition : transitions) {
+				context.transHistCompute[transition.pResource->GetGlobalResourceID()] = batchIndex;
+				currentBatch.computeTransitions.push_back(transition);
+			}
+		}
+		else {
+			for (auto& transition : transitions) {
+				context.transHistRender[transition.pResource->GetGlobalResourceID()] = batchIndex;
+				currentBatch.renderTransitions.push_back(transition);
+			}
+		}
+	}
 }
 
 void RenderGraph::ProcessResourceRequirements(
@@ -33,15 +95,14 @@ void RenderGraph::ProcessResourceRequirements(
 
 	for (auto& resourceRequirement : resourceRequirements) {
 
-		if (resourceRequirement.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
+		if (resourceRequirement.state.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.state.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
 			spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
 		}
 		const auto& id = resourceRequirement.resourceAndRange.resource->GetGlobalResourceID();
 
 		AddTransition(compileContext, batchIndex, currentBatch, isCompute, resourceRequirement);
 
-
-		if (AccessTypeIsWriteType(resourceRequirement.access)) {
+		if (AccessTypeIsWriteType(resourceRequirement.state.access)) {
 			if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
 				for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
 					producerHistory[childID] = batchIndex;
@@ -134,14 +195,19 @@ void RenderGraph::Compile() {
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueProducer;
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueProducer;
 
+	CompileContext context;
+
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
 
 
 		bool isCompute = (pr.type == PassType::Compute);
+		if (currentBatchIndex == 11) {
+			spdlog::info("currentBatchIndex = 11");
+		}
 		if (isCompute) {
 			auto& pass = std::get<ComputePassAndResources>(pr.pass);
-			if (IsNewBatchNeeded(pass.resources.resourceRequirements, renderUAVs)) {
+			if (IsNewBatchNeeded(pass.resources.resourceRequirements, currentBatch.passBatchTrackers, renderUAVs)) {
 				//for (auto& [id, st] : currentBatch.resourceAccessTypes)
 				//	finalResourceAccessTypes[id] = st;
 				//for (auto& [id, st] : currentBatch.resourceLayouts)
@@ -156,7 +222,7 @@ void RenderGraph::Compile() {
 			}
 		} else {
 			auto& pass = std::get<RenderPassAndResources>(pr.pass);
-			if (IsNewBatchNeeded(pass.resources.resourceRequirements, computeUAVs)) {
+			if (IsNewBatchNeeded(pass.resources.resourceRequirements, currentBatch.passBatchTrackers, computeUAVs)) {
 				//for (auto& [id, st] : currentBatch.resourceAccessTypes)
 				//	finalResourceAccessTypes[id] = st;
 				//for (auto& [id, st] : currentBatch.resourceLayouts)
@@ -170,8 +236,6 @@ void RenderGraph::Compile() {
 				++currentBatchIndex;
 			}
 		}
-
-		CompileContext context;
 
 		// dispatch categories
 		if (isCompute) {
@@ -266,7 +330,7 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
 		};
 
 	for (auto const& req : pass.resources.resourceRequirements)
-		processResource(req.resourceAndRange.resource);
+		processResource(req.resourceAndRange.resource.get());
 
 	return { latestTransition, latestProducer };
 }
@@ -292,7 +356,7 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
 		};
 
 	for (auto const& req : pass.resources.resourceRequirements)
-		processResource(req.resourceAndRange.resource);
+		processResource(req.resourceAndRange.resource.get());
 
 	return { latestTransition, latestProducer };
 }
@@ -518,6 +582,9 @@ void RenderGraph::Execute(RenderContext& context) {
 		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
+			if (transition.pResource->GetName() == L"DepthStencilBuffer") {
+				spdlog::info("ResourceGroup::GetEnhancedBarrierGroup() - resource name: {}");
+			}
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			computeBarriers.reserve(computeBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			computeBarriers.insert(computeBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
@@ -582,7 +649,10 @@ void RenderGraph::Execute(RenderContext& context) {
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
         for (auto& transition : batch.renderTransitions) {
-            auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			if (transition.pResource->GetName() == L"DepthStencilBuffer") {
+				spdlog::info("ResourceGroup::GetEnhancedBarrierGroup() - resource name: {}");
+			}
+            BarrierGroups& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			renderBarriers.reserve(renderBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			renderBarriers.insert(renderBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
 			renderBarriers.insert(renderBarriers.end(), transitions.textureBarriers, transitions.textureBarriers + transitions.numTextureBarrierGroups);
@@ -633,6 +703,9 @@ void RenderGraph::Execute(RenderContext& context) {
 		// Handle special case: Transition resources which will be used on compute queue later, but are in graphic-queue exclusive states
 		std::vector<D3D12_BARRIER_GROUP> passEndBarriers;
 		for (auto& transition : batch.passEndTransitions) {
+			if (transition.pResource->GetName() == L"DepthStencilBuffer") {
+				spdlog::info("ResourceGroup::GetEnhancedBarrierGroup() - resource name: {}");
+			}
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			passEndBarriers.reserve(passEndBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			passEndBarriers.insert(passEndBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
@@ -657,26 +730,27 @@ void RenderGraph::Execute(RenderContext& context) {
 
 bool RenderGraph::IsNewBatchNeeded(
 	const std::vector<ResourceRequirement>& reqs,
+	const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
 	const std::unordered_set<uint64_t>& otherQueueUAVs)
 {
 	// For each subresource requirement in this pass:
 	for (auto const &r : reqs) {
 		uint64_t id = r.resourceAndRange.resource->GetGlobalResourceID();
-		ResourceState wantState{ r.access, r.layout, r.sync };
+		ResourceState wantState{ r.state.access, r.state.layout, r.state.sync };
 
 		// Changing state?
-		auto it = trackers.find(id);
-		if (it != trackers.end()) {
+		auto it = passBatchTrackers.find(id);
+		if (it != passBatchTrackers.end()) {
 			if (it->second->WouldModify(r.resourceAndRange.range, wantState))
 				return true;
 		}
 		// first-use in this batch never forces a split.
 
 		// Cross-queue UAV hazard?
-		if ((r.access & ResourceAccessType::UNORDERED_ACCESS)
+		if ((r.state.access & ResourceAccessType::UNORDERED_ACCESS)
 			&& otherQueueUAVs.count(id))
 			return true;
-		if (r.layout == ResourceLayout::LAYOUT_UNORDERED_ACCESS
+		if (r.state.layout == ResourceLayout::LAYOUT_UNORDERED_ACCESS
 			&& otherQueueUAVs.count(id))
 			return true;
 	}
@@ -708,8 +782,8 @@ void RenderGraph::ComputeResourceLoops() {
 			flushState,    // the state we’re flushing to
 			loopBatch.renderTransitions            // collects all transitions
 		);
-		batches.push_back(std::move(loopBatch));
 	}
+	batches.push_back(std::move(loopBatch));
 }
 
 RenderPassBuilder RenderGraph::BuildRenderPass(std::string name) {

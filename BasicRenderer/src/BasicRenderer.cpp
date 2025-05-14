@@ -225,11 +225,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Aftermath
 
-    HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
-    if (!pixLoaded) {
-        // Print the error code for debugging purposes
-        spdlog::warn("Could not load PIX! Error: ", GetLastError());
-    }
+    //HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
+    //if (!pixLoaded) {
+    //    // Print the error code for debugging purposes
+    //    spdlog::warn("Could not load PIX! Error: ", GetLastError());
+    //}
 
     SetDllDirectoryA(".\\D3D\\");
 

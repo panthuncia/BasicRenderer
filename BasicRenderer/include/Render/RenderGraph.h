@@ -92,6 +92,8 @@ private:
 
 		std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> renderCommandLists;
 		std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> computeCommandLists;
+
+		std::unordered_map<uint64_t, SymbolicTracker*> passBatchTrackers; // Trackers for the resources in this batch
 	};
 
     enum class PassType {
@@ -168,6 +170,7 @@ private:
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(
 		const std::vector<ResourceRequirement>& reqs,
+		const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
 		const std::unordered_set<uint64_t>& otherQueueUAVs);
 	
 

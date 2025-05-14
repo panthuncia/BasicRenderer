@@ -50,7 +50,7 @@ public:
 		return std::make_pair(mip, slice);
 	}
 
-	SymbolicTracker* GetStateTracker() {
+	virtual SymbolicTracker* GetStateTracker() {
 		return &m_stateTracker;
 	}
 

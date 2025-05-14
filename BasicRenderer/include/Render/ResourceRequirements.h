@@ -8,7 +8,7 @@ class Resource;
 
 struct ResourceAndRange {
     ResourceAndRange(const std::shared_ptr<Resource>& resource);
-    Resource*                   resource;
+    std::shared_ptr<Resource>                   resource;
     RangeSpec                   range;
 };
 
@@ -17,7 +17,5 @@ struct ResourceRequirement {
 		: resourceAndRange(resourceAndRange) {
 	}
 	ResourceAndRange		  resourceAndRange;    // resource and range
-    ResourceAccessType          access;    // bitmask
-    ResourceLayout              layout;
-    ResourceSyncState           sync;
+    ResourceState state;
 };

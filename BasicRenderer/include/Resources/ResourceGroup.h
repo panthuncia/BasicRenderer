@@ -45,6 +45,9 @@ protected:
 		m_textureBarriers.clear();
 		m_globalBarriers.clear();
 		for (auto& resource : standardTransitionResources) {
+			if (resource->GetName() == L"DepthStencilBuffer") {
+				spdlog::info("ResourceGroup::GetEnhancedBarrierGroup() - resource name: {}");
+			}
 			auto& barrierGroup = resource->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
 			if (barrierGroup.numBufferBarrierGroups > 0) {
 				m_bufferBarriers.insert(m_bufferBarriers.end(), barrierGroup.bufferBarriers, barrierGroup.bufferBarriers + barrierGroup.numBufferBarrierGroups);

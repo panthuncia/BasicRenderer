@@ -407,49 +407,89 @@ private:
 
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
-        std::vector<ResourceRequirement> allReqs;
-        allReqs.reserve(
-            params.shaderResources.size() +
-            params.constantBuffers.size()  +
-            params.renderTargets.size()    +
-			params.depthReadResources.size() +
-			params.depthReadWriteResources.size() +
-			params.unorderedAccessViews.size() +
-			params.copySources.size() +
-			params.copyTargets.size() +
-			params.indirectArgumentBuffers.size()
+        // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
+        std::vector<std::pair<ResourceAndRange,ResourceAccessType>> entries;
+        entries.reserve(
+            params.shaderResources.size()
+            + params.constantBuffers.size()
+            + params.renderTargets.size()
+            + params.depthReadResources.size()
+            + params.depthReadWriteResources.size()
+            + params.unorderedAccessViews.size()
+            + params.copySources.size()
+            + params.copyTargets.size()
+            + params.indirectArgumentBuffers.size()
         );
 
-        auto append = [&](std::vector<ResourceAndRange> const& views, ResourceAccessType access){
-            for (auto const& view : views) {
-                if (!view.resource) continue;
-                ResourceRequirement rr(view);
-                rr.access = access;
-                rr.layout = AccessToLayout(access, /*directQueue*/true);
-                rr.sync   = RenderSyncFromAccess(access);
-
-                // validate layout
-                if (view.resource->HasLayout() &&
-                    !ValidateResourceLayoutAndAccessType(rr.layout, rr.access))
-                {
-                    throw std::runtime_error("Resource layout and state validation failed");
-                }
-
-                allReqs.push_back(std::move(rr));
+        auto accumulate = [&](auto const& list, ResourceAccessType flag){
+            for(auto const& rr : list){
+                if(!rr.resource) continue;
+                entries.emplace_back(rr, flag);
             }
             };
 
-        append(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
-        append(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
-        append(params.renderTargets,      ResourceAccessType::RENDER_TARGET);
-        append(params.depthReadResources, ResourceAccessType::DEPTH_READ);
-        append(params.depthReadWriteResources, ResourceAccessType::DEPTH_READ_WRITE);
-        append(params.unorderedAccessViews, ResourceAccessType::UNORDERED_ACCESS);
-        append(params.copySources,        ResourceAccessType::COPY_SOURCE);
-        append(params.copyTargets,        ResourceAccessType::COPY_DEST);
-        append(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
+        accumulate(params.shaderResources,         ResourceAccessType::SHADER_RESOURCE);
+        accumulate(params.constantBuffers,         ResourceAccessType::CONSTANT_BUFFER);
+        accumulate(params.renderTargets,           ResourceAccessType::RENDER_TARGET);
+        accumulate(params.depthReadResources,      ResourceAccessType::DEPTH_READ);
+        accumulate(params.depthReadWriteResources, ResourceAccessType::DEPTH_READ_WRITE);
+        accumulate(params.unorderedAccessViews,    ResourceAccessType::UNORDERED_ACCESS);
+        accumulate(params.copySources,             ResourceAccessType::COPY_SOURCE);
+        accumulate(params.copyTargets,             ResourceAccessType::COPY_DEST);
+        accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
 
-        return allReqs;
+        // Build a tracker for each resource, applying each (range->state)
+        constexpr ResourceState initialState{
+            ResourceAccessType::NONE,
+            ResourceLayout   ::LAYOUT_COMMON,
+            ResourceSyncState::NONE
+        };
+
+        std::unordered_map<uint64_t,SymbolicTracker> trackers;
+        std::unordered_map<uint64_t,std::shared_ptr<Resource>> ptrMap;
+
+        for(auto& [rar, flag] : entries) {
+            uint64_t id = rar.resource->GetGlobalResourceID();
+            ptrMap[id] = rar.resource;
+
+            // Create a tracker spanning "all" with initial NONE state
+            auto [it, inserted] = trackers.try_emplace(
+                id,
+                /*whole=*/ RangeSpec{},
+                /*init=*/  initialState
+            );
+            auto& tracker = it->second;
+
+            // Find the desired state for this entry
+            ResourceState want {
+                flag,
+                AccessToLayout(flag, /*isRender=*/true),
+                RenderSyncFromAccess(flag)
+            };
+
+            // Apply- use a dummy vector since we don't need per-pass transitions here
+            std::vector<ResourceTransition> dummy;
+            tracker.Apply(rar.range, rar.resource.get(), want, dummy);
+        }
+
+        // Flatten each tracker’s segments into a ResourceRequirement
+        std::vector<ResourceRequirement> out;
+        out.reserve(trackers.size());  // rough
+
+        for(auto& [id, tracker] : trackers) {
+            auto pRes = ptrMap[id];
+            for(auto const& seg : tracker.GetSegments()) {
+                // build a ResourceAndRange for this segment
+                ResourceAndRange rr(pRes);
+                rr.range = seg.rangeSpec;
+
+                ResourceRequirement req(rr);
+                req.state = seg.state;
+                out.push_back(std::move(req));
+            }
+        }
+
+        return out;
     }
 
     // storage
@@ -658,39 +698,79 @@ private:
     }
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
-        std::vector<ResourceRequirement> allReqs;
-        allReqs.reserve(
-            params.shaderResources.size() +
-            params.constantBuffers.size()  +
-            params.unorderedAccessViews.size() +
-			params.indirectArgumentBuffers.size()
+        // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
+        std::vector<std::pair<ResourceAndRange,ResourceAccessType>> entries;
+        entries.reserve(
+            params.shaderResources.size()
+            + params.constantBuffers.size()
+            + params.unorderedAccessViews.size()
+            + params.indirectArgumentBuffers.size()
         );
 
-        auto append = [&](std::vector<ResourceAndRange> const& views, ResourceAccessType access){
-            for (auto const& view : views) {
-                if (!view.resource) continue;
-                ResourceRequirement rr(view);
-                rr.access = access;
-                rr.layout = AccessToLayout(access, /*directQueue*/false);
-                rr.sync   = RenderSyncFromAccess(access);
-
-                // validate layout
-                if (view.resource->HasLayout() &&
-                    !ValidateResourceLayoutAndAccessType(rr.layout, rr.access))
-                {
-                    throw std::runtime_error("Resource layout and state validation failed");
-                }
-
-                allReqs.push_back(std::move(rr));
+        auto accumulate = [&](auto const& list, ResourceAccessType flag){
+            for(auto const& rr : list){
+                if(!rr.resource) continue;
+                entries.emplace_back(rr, flag);
             }
             };
 
-        append(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
-        append(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
-        append(params.unorderedAccessViews, ResourceAccessType::UNORDERED_ACCESS);
-        append(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
+        accumulate(params.shaderResources,         ResourceAccessType::SHADER_RESOURCE);
+        accumulate(params.constantBuffers,         ResourceAccessType::CONSTANT_BUFFER);
+        accumulate(params.unorderedAccessViews,    ResourceAccessType::UNORDERED_ACCESS);
+        accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
 
-        return allReqs;
+        // Build a tracker for each resource, applying each (range->state)
+        constexpr ResourceState initialState{
+            ResourceAccessType::NONE,
+            ResourceLayout   ::LAYOUT_COMMON,
+            ResourceSyncState::NONE
+        };
+
+        std::unordered_map<uint64_t,SymbolicTracker> trackers;
+        std::unordered_map<uint64_t,std::shared_ptr<Resource>> ptrMap;
+
+        for(auto& [rar, flag] : entries) {
+            uint64_t id = rar.resource->GetGlobalResourceID();
+            ptrMap[id] = rar.resource;
+
+            // Create a tracker spanning "all" with initial NONE state
+            auto [it, inserted] = trackers.try_emplace(
+                id,
+                /*whole=*/ RangeSpec{},
+                /*init=*/  initialState
+            );
+            auto& tracker = it->second;
+
+            // Find the desired state for this entry
+            ResourceState want {
+                flag,
+                AccessToLayout(flag, /*isRender=*/true),
+                ComputeSyncFromAccess(flag)
+            };
+
+            // Apply- use a dummy vector since we don't need per-pass transitions here
+            std::vector<ResourceTransition> dummy;
+            tracker.Apply(rar.range, rar.resource.get(), want, dummy);
+        }
+
+        // Flatten each tracker’s segments into a ResourceRequirement
+        std::vector<ResourceRequirement> out;
+        out.reserve(trackers.size());  // rough
+
+        for(auto& [id, tracker] : trackers) {
+            auto pRes = ptrMap[id];
+            for(auto const& seg : tracker.GetSegments()) {
+                // build a ResourceAndRange for this segment
+                ResourceAndRange rr(pRes);
+                rr.range = seg.rangeSpec;
+
+                ResourceRequirement req(rr);
+                req.state = seg.state;
+                out.push_back(std::move(req));
+            }
+        }
+
+        return out;
     }
 
     // storage

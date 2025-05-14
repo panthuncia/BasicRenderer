@@ -214,27 +214,40 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 	commandList->Reset(commandAllocator.Get(), nullptr);
 	DEBUG_ONLY(PIXBeginEvent(commandList.Get(), 0, L"UploadManager::ExecuteResourceCopies"));
 	for (auto& copy : queuedResourceCopies) {
-		//auto sourceIntialAccessType = copy.source->GetCurrentAccessType();
-		//auto sourceInitialLayout = copy.source->GetCurrentLayout();
-		//auto sourceInitialSyncState = copy.source->GetPrevSyncState();
-		//auto destinationInitialAccessType = copy.destination->GetCurrentAccessType();
-		//auto destinationInitialLayout = copy.destination->GetCurrentLayout();
-		//auto destinationInitialSyncState = copy.destination->GetPrevSyncState();
 
-		//auto& sourceTransition = copy.source->GetEnhancedBarrierGroup(sourceIntialAccessType, ResourceAccessType::COPY_SOURCE, sourceInitialLayout, ResourceLayout::LAYOUT_COPY_SOURCE, sourceInitialSyncState, ResourceSyncState::COPY);
-		//auto& destinationTransition = copy.destination->GetEnhancedBarrierGroup(destinationInitialAccessType, ResourceAccessType::COPY_DEST, destinationInitialLayout, ResourceLayout::LAYOUT_COPY_DEST, destinationInitialSyncState, ResourceSyncState::COPY);
+		// Copy initial state of the resources
+		auto initialSourceState = copy.source->GetStateTracker()->GetSegments();
+		auto initialDestinationState = copy.destination->GetStateTracker()->GetSegments();
 
-		//std::vector<D3D12_BARRIER_GROUP> barriers;
-		//barriers.reserve(barriers.size() + sourceTransition.numBufferBarrierGroups + sourceTransition.numTextureBarrierGroups + sourceTransition.numGlobalBarrierGroups + destinationTransition.numBufferBarrierGroups + destinationTransition.numGlobalBarrierGroups + destinationTransition.numTextureBarrierGroups);
-		//barriers.insert(barriers.end(), sourceTransition.bufferBarriers, sourceTransition.bufferBarriers + sourceTransition.numBufferBarrierGroups);
-		//barriers.insert(barriers.end(), sourceTransition.textureBarriers, sourceTransition.textureBarriers + sourceTransition.numTextureBarrierGroups);
-		//barriers.insert(barriers.end(), sourceTransition.globalBarriers, sourceTransition.globalBarriers + sourceTransition.numGlobalBarrierGroups);
-		//barriers.insert(barriers.end(), destinationTransition.bufferBarriers, destinationTransition.bufferBarriers + destinationTransition.numBufferBarrierGroups);
-		//barriers.insert(barriers.end(), destinationTransition.textureBarriers, destinationTransition.textureBarriers + destinationTransition.numTextureBarrierGroups);
-		//barriers.insert(barriers.end(), destinationTransition.globalBarriers, destinationTransition.globalBarriers + destinationTransition.numGlobalBarrierGroups);
+		RangeSpec range = {};
+		ResourceState sourceState;
+		sourceState.access = ResourceAccessType::COPY_SOURCE;
+		sourceState.layout = ResourceLayout::LAYOUT_COPY_SOURCE;
+		sourceState.sync = ResourceSyncState::COPY;
 
-		//commandList->Barrier(barriers.size(), barriers.data());
+		ResourceState destinationState;
+		destinationState.access = ResourceAccessType::COPY_DEST;
+		destinationState.layout = ResourceLayout::LAYOUT_COPY_DEST;
+		destinationState.sync = ResourceSyncState::COPY;
 
+		// Compute transitions to bring full resources into COPY_SOURCE and COPY_DEST
+		std::vector<ResourceTransition> transitions;
+		copy.source->GetStateTracker()->Apply(range, copy.source.get(), sourceState, transitions);
+		copy.destination->GetStateTracker()->Apply(range, copy.destination.get(), destinationState, transitions);
+
+		std::vector<D3D12_BARRIER_GROUP> barriers;
+
+		for (auto& transition : transitions) {
+			auto& sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			barriers.reserve(barriers.size() + sourceTransition.numBufferBarrierGroups + sourceTransition.numTextureBarrierGroups + sourceTransition.numGlobalBarrierGroups);
+			barriers.insert(barriers.end(), sourceTransition.bufferBarriers, sourceTransition.bufferBarriers + sourceTransition.numBufferBarrierGroups);
+			barriers.insert(barriers.end(), sourceTransition.textureBarriers, sourceTransition.textureBarriers + sourceTransition.numTextureBarrierGroups);
+			barriers.insert(barriers.end(), sourceTransition.globalBarriers, sourceTransition.globalBarriers + sourceTransition.numGlobalBarrierGroups);
+		}
+
+		commandList->Barrier(barriers.size(), barriers.data());
+
+		// Perform the copy
         commandList->CopyBufferRegion(
             copy.destination->GetAPIResource(),
             0,
@@ -242,21 +255,26 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
             0,
             copy.size);
 
-		//barriers.clear();
+		barriers.clear();
+		transitions.clear();
 
-		//sourceTransition = copy.source->GetEnhancedBarrierGroup(ResourceAccessType::COPY_SOURCE, sourceIntialAccessType, ResourceLayout::LAYOUT_COPY_SOURCE, sourceInitialLayout, ResourceSyncState::COPY, sourceInitialSyncState);
-		//destinationTransition = copy.destination->GetEnhancedBarrierGroup(ResourceAccessType::COPY_DEST, destinationInitialAccessType, ResourceLayout::LAYOUT_COPY_DEST, destinationInitialLayout, ResourceSyncState::COPY, destinationInitialSyncState);
+		// Copy back the initial state of the resources
+		for (auto& segment : initialSourceState) {
+			copy.source->GetStateTracker()->Apply(segment.rangeSpec, copy.source.get(), segment.state, transitions);
+		}
+		for (auto& segment : initialDestinationState) {
+			copy.destination->GetStateTracker()->Apply(segment.rangeSpec, copy.destination.get(), segment.state, transitions);
+		}
 
-		//barriers.reserve(barriers.size() + sourceTransition.numBufferBarrierGroups + sourceTransition.numTextureBarrierGroups + sourceTransition.numGlobalBarrierGroups + destinationTransition.numBufferBarrierGroups + destinationTransition.numGlobalBarrierGroups + destinationTransition.numTextureBarrierGroups);
-		//barriers.insert(barriers.end(), sourceTransition.bufferBarriers, sourceTransition.bufferBarriers + sourceTransition.numBufferBarrierGroups);
-		//barriers.insert(barriers.end(), sourceTransition.textureBarriers, sourceTransition.textureBarriers + sourceTransition.numTextureBarrierGroups);
-		//barriers.insert(barriers.end(), sourceTransition.globalBarriers, sourceTransition.globalBarriers + sourceTransition.numGlobalBarrierGroups);
-		//barriers.insert(barriers.end(), destinationTransition.bufferBarriers, destinationTransition.bufferBarriers + destinationTransition.numBufferBarrierGroups);
-		//barriers.insert(barriers.end(), destinationTransition.textureBarriers, destinationTransition.textureBarriers + destinationTransition.numTextureBarrierGroups);
-		//	
-		//barriers.insert(barriers.end(), destinationTransition.globalBarriers, destinationTransition.globalBarriers + destinationTransition.numGlobalBarrierGroups);
+		for (auto& transition : transitions) {
+			auto& sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			barriers.reserve(barriers.size() + sourceTransition.numBufferBarrierGroups + sourceTransition.numTextureBarrierGroups + sourceTransition.numGlobalBarrierGroups);
+			barriers.insert(barriers.end(), sourceTransition.bufferBarriers, sourceTransition.bufferBarriers + sourceTransition.numBufferBarrierGroups);
+			barriers.insert(barriers.end(), sourceTransition.textureBarriers, sourceTransition.textureBarriers + sourceTransition.numTextureBarrierGroups);
+			barriers.insert(barriers.end(), sourceTransition.globalBarriers, sourceTransition.globalBarriers + sourceTransition.numGlobalBarrierGroups);
+		}
 
-		//commandList->Barrier(barriers.size(), barriers.data());
+		commandList->Barrier(barriers.size(), barriers.data());
 	}
 	DEBUG_ONLY(PIXEndEvent(commandList.Get()));
 	commandList->Close();

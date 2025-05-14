@@ -31,6 +31,7 @@ public:
 	ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override;
 	ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override;
 	ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override;
+	virtual SymbolicTracker* GetStateTracker() override;
 private:
 	std::shared_ptr<PixelBuffer> m_image;
 	std::shared_ptr<Sampler> m_sampler;

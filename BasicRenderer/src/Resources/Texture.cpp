@@ -46,3 +46,7 @@ uint64_t Texture::GetGlobalResourceID() const {
 ResourceAccessType Texture::GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_image->GetSubresourceAccessType(subresourceIndex); }
 ResourceLayout Texture::GetSubresourceLayout(unsigned int subresourceIndex) const { return m_image->GetSubresourceLayout(subresourceIndex); }
 ResourceSyncState Texture::GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_image->GetSubresourceSyncState(subresourceIndex); }
+
+SymbolicTracker* Texture::GetStateTracker() {
+	return m_image->GetStateTracker();
+}

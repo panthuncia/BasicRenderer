@@ -78,13 +78,13 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAcc
 
 	auto resolvedRange = ResolveRangeSpec(range, m_mipLevels, m_arraySize);
 
-	unsigned int subresourceStart = resolvedRange.firstMip * m_arraySize + resolvedRange.firstSlice;
-	unsigned int subresourceEnd = resolvedRange.firstMip * m_arraySize + resolvedRange.firstSlice + resolvedRange.mipCount * m_arraySize + resolvedRange.sliceCount;
-	for (unsigned int i = subresourceStart; i < subresourceEnd; i++) {
-		m_subresourceAccessTypes[i] = newAccessType;
-		m_subresourceLayouts[i] = newLayout;
-		m_subresourceSyncStates[i] = newSyncState;
-	}
+	//for (unsigned int i = subresourceStart; i < subresourceEnd; i++) {
+	//	m_subresourceAccessTypes[i] = newAccessType;
+	//	m_subresourceLayouts[i] = newLayout;
+	//	m_subresourceSyncStates[i] = newSyncState;
+	//}
+
+    //m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
 
     return m_barrierGroups;
 }

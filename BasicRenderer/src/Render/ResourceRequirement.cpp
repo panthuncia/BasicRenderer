@@ -1,6 +1,6 @@
 #include "Render/ResourceRequirements.h"
 
 ResourceAndRange::ResourceAndRange(const std::shared_ptr<Resource>& pResource) {
-	resource = pResource.get();
+	resource = pResource;
 	range = {}; // full range
 }
