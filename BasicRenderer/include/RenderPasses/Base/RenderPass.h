@@ -9,17 +9,18 @@
 #include "Resources/ResourceStates.h"
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
+#include "Resources/SubresourceView.h"
 
 struct RenderPassParameters {
-    std::vector<std::shared_ptr<Resource>> shaderResources;
-    std::vector<std::shared_ptr<Resource>> renderTargets;
-    std::vector<std::shared_ptr<Resource>> depthReadResources;
-	std::vector<std::shared_ptr<Resource>> depthReadWriteResources;
-	std::vector<std::shared_ptr<Resource>> constantBuffers;
-	std::vector<std::shared_ptr<Resource>> unorderedAccessViews;
-	std::vector<std::shared_ptr<Resource>> copyTargets;
-	std::vector<std::shared_ptr<Resource>> copySources;
-	std::vector<std::shared_ptr<Resource>> indirectArgumentBuffers;
+    std::vector<RangeSpec> shaderResources;
+    std::vector<RangeSpec> renderTargets;
+    std::vector<RangeSpec> depthReadResources;
+	std::vector<RangeSpec> depthReadWriteResources;
+	std::vector<RangeSpec> constantBuffers;
+	std::vector<RangeSpec> unorderedAccessViews;
+	std::vector<RangeSpec> copyTargets;
+	std::vector<RangeSpec> copySources;
+	std::vector<RangeSpec> indirectArgumentBuffers;
 
 	std::vector<ResourceRequirement> resourceRequirements;
 	bool isGeometryPass = false;

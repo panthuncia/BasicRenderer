@@ -18,7 +18,7 @@ public:
 		return m_image;
 	}
 	void SetFilepath(const std::string& path);
-	BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+	BarrierGroups& GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 	virtual void SetName(const std::wstring& name);
 	ID3D12Resource* GetAPIResource() const override;
 	void SetFileType(ImageFiletype fileType) { m_fileType = fileType; }
@@ -28,9 +28,9 @@ public:
 	bool AlphaIsAllOpaque() const { return m_alphaIsAllOpaque; }
 	void SetAlphaIsAllOpaque(bool value) { m_alphaIsAllOpaque = value; }
 	virtual uint64_t GetGlobalResourceID() const;
-	ResourceAccessType GetCurrentAccessType() const override;
-	ResourceLayout GetCurrentLayout() const override;
-	ResourceSyncState GetPrevSyncState() const override;
+	ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override;
+	ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override;
+	ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override;
 private:
 	std::shared_ptr<PixelBuffer> m_image;
 	std::shared_ptr<Sampler> m_sampler;

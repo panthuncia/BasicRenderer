@@ -2,6 +2,7 @@
 
 #include "RenderGraph.h"
 #include "ResourceRequirements.h"
+#include "Resources/SubresourceView.h"
 
 class RenderPassBuilder {
 public:
@@ -158,118 +159,118 @@ private:
         : graph(g), passName(std::move(name)) {}
 
     // Single resource overload
-    void addShaderResource(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addShaderResource(const SubresourceView& r) {
+        if (!r.resource) return;
         params.shaderResources.push_back(r);
     }
 
     // initializer list overload
-    void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addShaderResource(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.shaderResources.push_back(r);
         }
     }
 
     // Render target
-    void addRenderTarget(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addRenderTarget(const SubresourceView& r) {
+        if (!r.resource) return;
         params.renderTargets.push_back(r);
     }
 
-    void addRenderTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addRenderTarget(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.renderTargets.push_back(r);
         }
     }
 
     // Depth target
-    void addDepthReadWrite(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addDepthReadWrite(const SubresourceView& r) {
+        if (!r.resource) return;
         params.depthReadWriteResources.push_back(r);
     }
 
-    void addDepthReadWrite(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addDepthReadWrite(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.depthReadWriteResources.push_back(r);
         }
     }
 
-    void addDepthRead(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addDepthRead(const SubresourceView& r) {
+        if (!r.resource) return;
         params.depthReadResources.push_back(r);
     }
 
-    void addDepthRead(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addDepthRead(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.depthReadResources.push_back(r);
         }
     }
 
     // Constant buffer
-    void addConstantBuffer(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addConstantBuffer(const SubresourceView& r) {
+        if (!r.resource) return;
         params.constantBuffers.push_back(r);
     }
 
-    void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addConstantBuffer(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.constantBuffers.push_back(r);
         }
     }
 
     // Unordered access
-    void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addUnorderedAccess(const SubresourceView& r) {
+        if (!r.resource) return;
         params.unorderedAccessViews.push_back(r);
     }
 
-    void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addUnorderedAccess(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.unorderedAccessViews.push_back(r);
         }
     }
 
     // Copy destination
-    void addCopyDest(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addCopyDest(const SubresourceView& r) {
+        if (!r.resource) return;
         params.copyTargets.push_back(r);
     }
 
-    void addCopyDest(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addCopyDest(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.copyTargets.push_back(r);
         }
     }
 
     // Copy source
-    void addCopySource(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addCopySource(const SubresourceView& r) {
+        if (!r.resource) return;
         params.copySources.push_back(r);
     }
 
-    void addCopySource(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addCopySource(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.copySources.push_back(r);
         }
     }
 
     // Indirect arguments
-    void addIndirectArguments(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addIndirectArguments(const SubresourceView& r) {
+        if (!r.resource) return;
         params.indirectArgumentBuffers.push_back(r);
     }
 
-    void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addIndirectArguments(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.indirectArgumentBuffers.push_back(r);
         }
     }
@@ -280,45 +281,49 @@ private:
 
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
-        std::unordered_map<uint64_t, ResourceAccessType> accessMap;
-        std::unordered_map<uint64_t, std::shared_ptr<Resource>> ptrMap;
+        std::vector<ResourceRequirement> allReqs;
+        allReqs.reserve(
+            params.shaderResources.size() +
+            params.constantBuffers.size()  +
+            params.renderTargets.size()    +
+			params.depthReadResources.size() +
+			params.depthReadWriteResources.size() +
+			params.unorderedAccessViews.size() +
+			params.copySources.size() +
+			params.copyTargets.size() +
+			params.indirectArgumentBuffers.size()
+        );
 
-        // helper to fold in one list
-        auto accumulate = [&](const std::vector<std::shared_ptr<Resource>>& list, ResourceAccessType flag){
-            for(const std::shared_ptr<Resource>& r : list){
-                if(!r) continue;
-                accessMap[r->GetGlobalResourceID()] = accessMap[r->GetGlobalResourceID()] | flag;
-                ptrMap[r->GetGlobalResourceID()] = r;
+        auto append = [&](auto const& views, ResourceAccessType access){
+            for (auto const& view : views) {
+                if (!view.resource) continue;
+                ResourceRequirement rr(view);
+                rr.access = access;
+                rr.layout = AccessToLayout(access, /*directQueue*/true);
+                rr.sync   = RenderSyncFromAccess(access);
+
+                // validate layout
+                if (view.resource->HasLayout() &&
+                    !ValidateResourceLayoutAndAccessType(rr.layout, rr.access))
+                {
+                    throw std::runtime_error("Resource layout and state validation failed");
+                }
+
+                allReqs.push_back(std::move(rr));
             }
             };
 
-        accumulate(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
-        accumulate(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
-        accumulate(params.renderTargets,      ResourceAccessType::RENDER_TARGET);
-        accumulate(params.depthReadResources, ResourceAccessType::DEPTH_READ);
-        accumulate(params.depthReadWriteResources,ResourceAccessType::DEPTH_READ_WRITE);
-        accumulate(params.unorderedAccessViews,ResourceAccessType::UNORDERED_ACCESS);
-        accumulate(params.copySources,        ResourceAccessType::COPY_SOURCE);
-        accumulate(params.copyTargets,        ResourceAccessType::COPY_DEST);
-        accumulate(params.indirectArgumentBuffers,
-            ResourceAccessType::INDIRECT_ARGUMENT);
+        append(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
+        append(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
+        append(params.renderTargets,      ResourceAccessType::RENDER_TARGET);
+        append(params.depthReadResources, ResourceAccessType::DEPTH_READ);
+        append(params.depthReadWriteResources, ResourceAccessType::DEPTH_READ_WRITE);
+        append(params.unorderedAccessViews, ResourceAccessType::UNORDERED_ACCESS);
+        append(params.copySources,        ResourceAccessType::COPY_SOURCE);
+        append(params.copyTargets,        ResourceAccessType::COPY_DEST);
+        append(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
 
-        std::vector<ResourceRequirement> reqs;
-        reqs.reserve(accessMap.size());
-        for(auto & [raw, flags] : accessMap){
-            ResourceRequirement rr;
-            rr.resource = ptrMap[raw];
-            rr.access   = flags;
-            rr.layout   = AccessToLayout(flags, true);
-            rr.sync     = RenderSyncFromAccess(flags);
-
-			if (rr.resource->HasLayout() && !ValidateResourceLayoutAndAccessType(rr.layout, rr.access)) {
-				throw std::runtime_error("Resource layout and state validation failed");
-			}
-
-            reqs.push_back(rr);
-        }
-        return reqs;
+        return allReqs;
     }
 
     // storage
@@ -415,53 +420,53 @@ private:
         : graph(g), passName(std::move(name)) {}
 
     // Single resource overload
-    void addShaderResource(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addShaderResource(const SubresourceView& r) {
+        if (!r.resource) return;
         params.shaderResources.push_back(r);
     }
 
     // initializer list overload
-    void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addShaderResource(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.shaderResources.push_back(r);
         }
     }
 
     // Constant buffer
-    void addConstantBuffer(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addConstantBuffer(const SubresourceView& r) {
+        if (!r.resource) return;
         params.constantBuffers.push_back(r);
     }
 
-    void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addConstantBuffer(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.constantBuffers.push_back(r);
         }
     }
 
     // Unordered access
-    void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
+    void addUnorderedAccess(const SubresourceView& r) {
+        if (!r.resource) return;
         params.unorderedAccessViews.push_back(r);
     }
 
-    void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
+    void addUnorderedAccess(std::initializer_list<SubresourceView> list) {
         for (auto& r : list) {
-            if (!r) continue;
+            if (!r.resource) continue;
             params.unorderedAccessViews.push_back(r);
         }
     }
 
 	// Indirect arguments
-	void addIndirectArguments(const std::shared_ptr<Resource>& r) {
-		if (!r) return;
+	void addIndirectArguments(const SubresourceView& r) {
+		if (!r.resource) return;
 		params.indirectArgumentBuffers.push_back(r);
 	}
-	void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
+	void addIndirectArguments(std::initializer_list<SubresourceView> list) {
 		for (auto& r : list) {
-			if (!r) continue;
+			if (!r.resource) continue;
 			params.indirectArgumentBuffers.push_back(r);
 		}
 	}
@@ -471,39 +476,39 @@ private:
     }
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
-        std::unordered_map<uint64_t, ResourceAccessType> accessMap;
-        std::unordered_map<uint64_t, std::shared_ptr<Resource>> ptrMap;
+        std::vector<ResourceRequirement> allReqs;
+        allReqs.reserve(
+            params.shaderResources.size() +
+            params.constantBuffers.size()  +
+            params.unorderedAccessViews.size() +
+			params.indirectArgumentBuffers.size()
+        );
 
-        // helper to fold in one list
-        auto accumulate = [&](const std::vector<std::shared_ptr<Resource>>& list, ResourceAccessType flag){
-            for(const std::shared_ptr<Resource>& r : list){
-                if(!r) continue;
-                accessMap[r->GetGlobalResourceID()] = accessMap[r->GetGlobalResourceID()] | flag;
-                ptrMap[r->GetGlobalResourceID()] = r;
+        auto append = [&](auto const& views, ResourceAccessType access){
+            for (auto const& view : views) {
+                if (!view.resource) continue;
+                ResourceRequirement rr(view);
+                rr.access = access;
+                rr.layout = AccessToLayout(access, /*directQueue*/false);
+                rr.sync   = RenderSyncFromAccess(access);
+
+                // validate layout
+                if (view.resource->HasLayout() &&
+                    !ValidateResourceLayoutAndAccessType(rr.layout, rr.access))
+                {
+                    throw std::runtime_error("Resource layout and state validation failed");
+                }
+
+                allReqs.push_back(std::move(rr));
             }
             };
 
-        accumulate(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
-        accumulate(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
-        accumulate(params.unorderedAccessViews,ResourceAccessType::UNORDERED_ACCESS);
-		accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
+        append(params.shaderResources,    ResourceAccessType::SHADER_RESOURCE);
+        append(params.constantBuffers,    ResourceAccessType::CONSTANT_BUFFER);
+        append(params.unorderedAccessViews, ResourceAccessType::UNORDERED_ACCESS);
+        append(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
 
-        std::vector<ResourceRequirement> reqs;
-        reqs.reserve(accessMap.size());
-        for(auto & [raw, flags] : accessMap){
-            ResourceRequirement rr;
-            rr.resource = ptrMap[raw];
-            rr.access   = flags;
-            rr.layout   = AccessToLayout(flags, false);
-            rr.sync     = ComputeSyncFromAccess(flags);
-
-            if (rr.resource->HasLayout() && !ValidateResourceLayoutAndAccessType(rr.layout, rr.access)) {
-                throw std::runtime_error("Resource layout and state validation failed");
-            }
-
-            reqs.push_back(rr);
-        }
-        return reqs;
+        return allReqs;
     }
 
     // storage

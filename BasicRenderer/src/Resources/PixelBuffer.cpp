@@ -27,6 +27,9 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 	m_channels = desc.channels;
 	m_format = desc.format;
 
+	m_mipLevels = desc.generateMipMaps ? CalculateMipLevels(m_width, m_height) : 1;
+	m_arraySize = desc.arraySize;
+
 	D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -47,10 +50,14 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 	m_barrierGroups.textureBarriers = &m_barrierGroup;
 
     m_hasLayout = true;
+
+	m_subresourceAccessTypes.resize(m_mipLevels * m_arraySize, ResourceAccessType::COMMON);
+	m_subresourceLayouts.resize(m_mipLevels * m_arraySize, ResourceLayout::LAYOUT_COMMON);
+	m_subresourceSyncStates.resize(m_mipLevels * m_arraySize, ResourceSyncState::ALL);
 }
 
 
-BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
     //if (prevAccessType) {
     //    throw(std::runtime_error("Texture state mismatch"));
@@ -69,9 +76,15 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(ResourceAccessType prevAcces
 	m_textureBarrier.LayoutBefore = (D3D12_BARRIER_LAYOUT)prevLayout;
     m_textureBarrier.LayoutAfter = (D3D12_BARRIER_LAYOUT)newLayout;
 
-    m_currentAccessType = newAccessType;
-    m_currentLayout = newLayout;
-    m_prevSyncState = newSyncState;
+	auto resolvedRange = ResolveRangeSpec(range, m_mipLevels, m_arraySize);
+
+	unsigned int subresourceStart = resolvedRange.firstMip * m_arraySize + resolvedRange.firstSlice;
+	unsigned int subresourceEnd = resolvedRange.firstMip * m_arraySize + resolvedRange.firstSlice + resolvedRange.mipCount * m_arraySize + resolvedRange.sliceCount;
+	for (unsigned int i = subresourceStart; i < subresourceEnd; i++) {
+		m_subresourceAccessTypes[i] = newAccessType;
+		m_subresourceLayouts[i] = newLayout;
+		m_subresourceSyncStates[i] = newSyncState;
+	}
 
     return m_barrierGroups;
 }

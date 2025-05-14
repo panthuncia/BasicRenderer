@@ -16,9 +16,9 @@ public:
     DynamicBufferBase() {}
     std::shared_ptr<Buffer> m_dataBuffer = nullptr;
 
-    ResourceAccessType GetCurrentAccessType() const override { return m_dataBuffer->GetCurrentAccessType(); }
-    ResourceLayout GetCurrentLayout() const override { return m_dataBuffer->GetCurrentLayout(); }
-    ResourceSyncState GetPrevSyncState() const override { return m_dataBuffer->GetPrevSyncState(); }
+    ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override { return m_dataBuffer->GetSubresourceAccessType(subresourceIndex); }
+    ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override { return m_dataBuffer->GetSubresourceLayout(subresourceIndex); }
+    ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override { return m_dataBuffer->GetSubresourceSyncState(subresourceIndex); }
 protected:
 };
 

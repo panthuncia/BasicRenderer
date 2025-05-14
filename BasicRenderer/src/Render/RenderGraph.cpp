@@ -13,211 +13,43 @@
 #include "Managers/Singletons/StatisticsManager.h"
 
 // Factory for the transition lambda
-auto RenderGraph::MakeAddTransition(
-	std::unordered_map<uint64_t, ResourceAccessType>& finalResourceAccessTypes,
-	std::unordered_map<uint64_t, ResourceLayout>& finalResourceLayouts,
-	std::unordered_map<uint64_t, ResourceSyncState>& finalResourceSyncStates,
-	std::unordered_map<uint64_t, ResourceSyncState>& firstResourceSyncStates,
-	std::unordered_map<uint64_t,unsigned int>& transHistCompute,
-	std::unordered_map<uint64_t,unsigned int>& transHistRender,
-	unsigned int                                   batchIndex,
-	PassBatch&                                     currentBatch)
+void RenderGraph::AddTransition(
+	CompileContext& context,
+	unsigned int batchIndex,
+	PassBatch& currentBatch,
+	bool isComputePass, 
+	const ResourceRequirement& r)
 {
 
-	return [&, batchIndex](bool isComputePass, const std::shared_ptr<Resource>& r,
-		ResourceAccessType             newAccess,
-		ResourceLayout 			  newLayout,
-		ResourceSyncState         newSync)
-		{
+}
 
-			auto doAliasTransitionIfNecessary = [&, this](Resource* r, bool useComputeQueue, int batchIndex, bool addToBatchEnd, ResourceLayout newLayout) -> void {
-				// Check if this resource is part of an aliasing group
-				if (resourceToAliasGroup.contains(r->GetGlobalResourceID())) {
-					// We need to add a barrier here to transition the *previously* active resource in this aliasing group
-					// into the layout we need for this resource
-					auto aliasGroup = resourceToAliasGroup[r->GetGlobalResourceID()];
-					int prevID = lastActiveInAliasGroup[aliasGroup];
+void RenderGraph::ProcessResourceRequirements(
+	bool isCompute,
+	std::vector<ResourceRequirement>& resourceRequirements,
+	CompileContext& compileContext,
+	std::unordered_map<uint64_t, unsigned int>& producerHistory,
+	unsigned int batchIndex,
+	PassBatch& currentBatch) {
 
-					if (!(prevID == -1) && !(prevID == r->GetGlobalResourceID())) {
-						auto& prevResource = resourcesByID[prevID];
-						if (!prevResource->HasLayout()) {
-							spdlog::error("Not implemented");
-							throw(std::runtime_error("Aliased non-texture resources not implemented yet"));
-						}
-						if (prevResource) {
-							auto prevResourceLayout = prevResource->GetCurrentLayout();
-							auto prevResourceAccess = prevResource->GetCurrentAccessType();
-							auto prevResourceSync = prevResource->GetPrevSyncState();
+	for (auto& resourceRequirement : resourceRequirements) {
 
-							if (finalResourceAccessTypes.contains(prevID)) {
-								prevResourceAccess = finalResourceAccessTypes[prevID];
-							}
-							if (finalResourceLayouts.contains(prevID)) {
-								prevResourceLayout = finalResourceLayouts[prevID];
-							}
-							if (finalResourceSyncStates.contains(prevID)) {
-								prevResourceSync = finalResourceSyncStates[prevID];
-							}
+		if (resourceRequirement.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
+			spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
+		}
+		const auto& id = resourceRequirement.resource->GetGlobalResourceID();
 
-							if (prevResourceLayout == newLayout) return;
-							ResourceTransition prevT{ prevResource,
-								prevResourceAccess, prevResourceAccess,
-								prevResourceLayout, newLayout,
-								prevResourceSync, prevResourceSync };
+		AddTransition(compileContext, batchIndex, currentBatch, isCompute, resourceRequirement);
 
-							if (useComputeQueue) {
-								//if (initialTransitions.contains(prevResource->GetGlobalResourceID())) {
-								currentBatch.computeTransitions.push_back(prevT);
-								//} else {
-								//	initialTransitions[prevResource->GetGlobalResourceID()] = prevT;
-								//}
-								transHistCompute[prevResource->GetGlobalResourceID()] = batchIndex;
-							}
-							else {
-								//if (initialTransitions.contains(prevResource->GetGlobalResourceID())) {
-								if (addToBatchEnd) {
-									currentBatch.passEndTransitions.push_back(prevT);
-								}
-								else {
-									currentBatch.renderTransitions.push_back(prevT);
-								}
-								//} else {
-								//	initialTransitions[prevResource->GetGlobalResourceID()] = prevT;
-								//}
-								transHistRender[prevResource->GetGlobalResourceID()] = batchIndex;
-							}
-						}
-						else {
-							spdlog::error("Resource {} is part of an aliasing group, but the previous resource {} is not managed by this graph. This should not happen.", r->GetGlobalResourceID(), prevID);
-							throw(std::runtime_error("Resource is part of an aliasing group, but the previous resource is not managed by this graph"));
-						}
-					}
-					else {
-						lastActiveInAliasGroup[aliasGroup] = r->GetGlobalResourceID();
-					}
-				}
-				};
 
-			// Determine old state & sync
-			ResourceAccessType prevAccess = r->GetCurrentAccessType();
-			ResourceLayout prevLayout = r->GetCurrentLayout();
-			ResourceSyncState oldSync  = r->GetPrevSyncState();
-
-			// override if previously recorded
-			if (finalResourceAccessTypes.contains(r->GetGlobalResourceID())) {
-				prevAccess = finalResourceAccessTypes[r->GetGlobalResourceID()];
-			}
-			if (finalResourceLayouts.contains(r->GetGlobalResourceID())) {
-				prevLayout = finalResourceLayouts[r->GetGlobalResourceID()];
-			}
-			if (finalResourceSyncStates.contains(r->GetGlobalResourceID())) {
-				oldSync = finalResourceSyncStates[r->GetGlobalResourceID()];
-			}
-
-			// If the resource is already in the desired state, skip the transition
-			// Unless the resource will be accessed as a UAV, then we need a "UAV barrier"
-			if (prevAccess == newAccess && !(prevAccess & ResourceAccessType::UNORDERED_ACCESS) &&  prevLayout == newLayout) return;
-
-			ResourceTransition T{r,
-				prevAccess, newAccess,
-				prevLayout, newLayout,
-				oldSync,   newSync};
-			
-			// Check if this is a resource group
-			std::vector<ResourceTransition> independantlyManagedTransitions;
-			auto group = std::dynamic_pointer_cast<ResourceGroup>(r);
-			if (group) {
-				// If this group has children that are managed directly, we need to explicitly transition them
-				for (auto& childID : resourcesFromGroupToManageIndependantly[group->GetGlobalResourceID()]) {
-					auto& child = resourcesByID[childID];
-					if (child) {
-						//if (initialTransitions.contains(r->GetGlobalResourceID())) {
-							independantlyManagedTransitions.push_back(ResourceTransition{ child, prevAccess, newAccess, prevLayout, newLayout, oldSync, newSync });
-						//}
-						//else {
-						//	initialTransitions[child->GetGlobalResourceID()] = ResourceTransition{ child, prevAccess, newAccess, prevLayout, newLayout, oldSync, newSync };
-						//}
-					} else {
-						spdlog::error("Resource group {} has a child resource {} that is marked as independantly managed, but is not managed by this graph. This should not happen.", group->GetGlobalResourceID(), childID);
-						throw(std::runtime_error("Resource group has a child resource that is not managed by this graph"));
-					}
+		if (AccessTypeIsWriteType(resourceRequirement.access)) {
+			if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
+				for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
+					producerHistory[childID] = batchIndex;
 				}
 			}
-
-			bool oldSyncIsNotComputeSyncState = ResourceSyncStateIsNotComputeSyncState(oldSync);
-			if (isComputePass && oldSyncIsNotComputeSyncState) {
-				// bounce back to last graphics-queue batch
-				unsigned int gfxBatch = transHistRender[r->GetGlobalResourceID()];
-				doAliasTransitionIfNecessary(r.get(), isComputePass, gfxBatch, true, newLayout); // Alias transition for primary resource
-				//if (initialTransitions.contains(r->GetGlobalResourceID())) {
-					batches[gfxBatch].passEndTransitions.push_back(T);
-				//}
-				//else {
-				//	initialTransitions[r->GetGlobalResourceID()] = T;
-				//}
-				transHistRender[r->GetGlobalResourceID()] = gfxBatch;
-				for (auto& transition : independantlyManagedTransitions) {
-					doAliasTransitionIfNecessary(transition.pResource.get(), isComputePass, gfxBatch, true, newLayout); // Alias transition for independantly managed sub-resources
-					//if (initialTransitions.contains(r->GetGlobalResourceID())) {
-						batches[gfxBatch].passEndTransitions.push_back(transition);
-					//}
-					//else {
-					//	initialTransitions[r->GetGlobalResourceID()] = transition;
-					//}
-					transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
-					finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
-					finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
-					finalResourceSyncStates[transition.pResource->GetGlobalResourceID()] = transition.newSyncState;
-				}
-			}
-			else {
-				if (isComputePass) {
-					doAliasTransitionIfNecessary(r.get(), isComputePass, batchIndex, false, newLayout); // Alias transition for primary resource
-					//if (initialTransitions.contains(r->GetGlobalResourceID())) {
-						currentBatch.computeTransitions.push_back(T);
-					//}
-					//else {
-					//	initialTransitions[r->GetGlobalResourceID()] = T;
-					//}
-					transHistCompute[r->GetGlobalResourceID()] = batchIndex;
-					for (auto& transition : independantlyManagedTransitions) {
-						doAliasTransitionIfNecessary(transition.pResource.get(), isComputePass, batchIndex, false, newLayout); // Alias transition for independantly managed sub-resources
-						//if (initialTransitions.contains(r->GetGlobalResourceID())) {
-							currentBatch.computeTransitions.push_back(transition);
-						//}
-						//else {
-						//	initialTransitions[transition.pResource->GetGlobalResourceID()] = transition;
-						//}
-						transHistCompute[transition.pResource->GetGlobalResourceID()] = batchIndex;
-						finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
-						finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
-						finalResourceSyncStates[transition.pResource->GetGlobalResourceID()] = transition.newSyncState;
-					}
-				} else {
-					//if (initialTransitions.contains(r->GetGlobalResourceID())) {
-					doAliasTransitionIfNecessary(r.get(), isComputePass, batchIndex, false, newLayout); // Alias transition for primary resource
-						currentBatch.renderTransitions.push_back(T);
-					//}
-					//else {
-					//	initialTransitions[r->GetGlobalResourceID()] = T;
-					//}
-					transHistRender[r->GetGlobalResourceID()]  = batchIndex;
-					for (auto& transition : independantlyManagedTransitions) {
-						doAliasTransitionIfNecessary(transition.pResource.get(), isComputePass, batchIndex, false, newLayout); // Alias transition for independantly managed sub-resources
-						//if (initialTransitions.contains(r->GetGlobalResourceID())) {
-							currentBatch.renderTransitions.push_back(transition);
-						//}
-						//else {
-						//	initialTransitions[transition.pResource->GetGlobalResourceID()] = transition;
-						//}
-						transHistRender[transition.pResource->GetGlobalResourceID()] = batchIndex;
-						finalResourceAccessTypes[transition.pResource->GetGlobalResourceID()] = transition.newAccessType;
-						finalResourceLayouts[transition.pResource->GetGlobalResourceID()] = transition.newLayout;
-						finalResourceSyncStates[transition.pResource->GetGlobalResourceID()] = transition.newSyncState;
-					}
-				}
-			}
-		};
+			producerHistory[id] = batchIndex;
+		}
+	}
 }
 
 void RenderGraph::Compile() {
@@ -276,7 +108,8 @@ void RenderGraph::Compile() {
 		}
 	}
 
-	lastActiveInAliasGroup = std::vector<int>(aliasGroups.size(), -1);
+	lastActiveSubresourceInAliasGroup.clear();
+	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
 
     auto currentBatch = PassBatch();
     currentBatch.renderTransitionFenceValue = GetNextGraphicsQueueFenceValue();
@@ -338,17 +171,7 @@ void RenderGraph::Compile() {
 			}
 		}
 
-		// build the transition lambda
-		auto addT = MakeAddTransition(
-			finalResourceAccessTypes,
-			finalResourceLayouts,
-			finalResourceSyncStates,
-			firstResourceSyncStates,
-			batchOfLastComputeQueueTransition,
-			batchOfLastRenderQueueTransition,
-			currentBatchIndex,
-			currentBatch
-		);
+		CompileContext context;
 
 		// dispatch categories
 		if (isCompute) {
@@ -356,15 +179,10 @@ void RenderGraph::Compile() {
 			ProcessResourceRequirements(
 				isCompute,
 				pass.resources.resourceRequirements,
-				addT,
-				finalResourceAccessTypes,
-				finalResourceLayouts,
-				finalResourceSyncStates,
-				firstResourceAccessTypes,
-				firstResourceLayouts,
-				firstResourceSyncStates,
+				context,
 				batchOfLastComputeQueueTransition,
-				currentBatchIndex);
+				currentBatchIndex,
+				currentBatch);
 			currentBatch.computePasses.push_back(pass);
 			UpdateDesiredResourceStates(currentBatch, pass, computeUAVs);
 		} else {
@@ -372,15 +190,10 @@ void RenderGraph::Compile() {
 			ProcessResourceRequirements(
 				isCompute,
 				pass.resources.resourceRequirements,
-				addT,
-				finalResourceAccessTypes,
-				finalResourceLayouts,
-				finalResourceSyncStates,
-				firstResourceAccessTypes,
-				firstResourceLayouts,
-				firstResourceSyncStates,
+				context,
 				batchOfLastRenderQueueTransition,
-				currentBatchIndex);
+				currentBatchIndex,
+				currentBatch);
 			currentBatch.renderPasses.push_back(pass);
 			UpdateDesiredResourceStates(currentBatch, pass, renderUAVs);
 		}
@@ -444,7 +257,7 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
 {
 	int latestTransition = -1, latestProducer = -1;
 
-	auto processResource = [&](std::shared_ptr<Resource> const& res) {
+	auto processResource = [&](Resource* const& res) {
 		uint64_t id = res->GetGlobalResourceID();
 		// get this ID plus any aliases
 		auto ids = GetAllAliasIDs(id);
@@ -472,7 +285,7 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
 {
 	int latestTransition = -1, latestProducer = -1;
 
-	auto processResource = [&](std::shared_ptr<Resource> const& res) {
+	auto processResource = [&](Resource* const& res) {
 		uint64_t id = res->GetGlobalResourceID();
 		for (auto rid : GetAllAliasIDs(id)) {
 			auto itT = transitionHistory.find(rid);
@@ -582,8 +395,6 @@ void RenderGraph::Setup() {
 	//DeviceManager::GetInstance().GetGraphicsQueue()->Signal(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
 	//DeviceManager::GetInstance().GetComputeQueue()->Wait(m_initialTransitionFence.Get(), m_initialTransitionFenceValue);
  //   m_initialTransitionFenceValue++;
-
-	CreateBatchCommandLists();
 
 }
 
@@ -713,7 +524,7 @@ void RenderGraph::Execute(RenderContext& context) {
 		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
-			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			computeBarriers.reserve(computeBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			computeBarriers.insert(computeBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
 			computeBarriers.insert(computeBarriers.end(), transitions.textureBarriers, transitions.textureBarriers + transitions.numTextureBarrierGroups);
@@ -947,27 +758,4 @@ RenderPassBuilder RenderGraph::BuildRenderPass(std::string name) {
 }
 ComputePassBuilder RenderGraph::BuildComputePass(std::string name) {
 	return ComputePassBuilder(*this, name);
-}
-
-void RenderGraph::CreateBatchCommandLists() {
-	// For each batch, create numFramesInFlight command allocators and lists
-	//auto& device = DeviceManager::GetInstance().GetDevice();
-	//auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-	//for (auto& batch : batches) {
-	//	for (int i = 0; i < numFramesInFlight; i++) {
-	//		if (batch.computePasses.size() > 0) {
-	//			ComPtr<ID3D12GraphicsCommandList7> commandList;
-	//			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, m_computeCommandAllocators[i].Get(), nullptr, IID_PPV_ARGS(&commandList)));
-	//			commandList->Close();
-	//			batch.computeCommandLists.push_back(commandList);
-	//		}
-	//		if (batch.renderPasses.size() > 0) {
-	//			ComPtr<ID3D12GraphicsCommandList7> commandList;
-	//			ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_graphicsCommandAllocators[i].Get(), nullptr, IID_PPV_ARGS(&commandList)));
-	//			commandList->Close();
-	//			batch.renderCommandLists.push_back(commandList);
-	//		}
-	//	}
-	//}
-
 }

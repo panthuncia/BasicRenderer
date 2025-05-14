@@ -51,20 +51,6 @@ private:
 		int statisticsIndex = -1;
 	};
 
-	struct ResourceTransition {
-		ResourceTransition() = default;
-		ResourceTransition(std::shared_ptr<Resource> pResource, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState)
-			: pResource(pResource), prevAccessType(prevAccessType), newAccessType(newAccessType), prevLayout(prevLayout), newLayout(newLayout), prevSyncState(prevSyncState), newSyncState(newSyncState) {
-		}
-		std::shared_ptr<Resource> pResource;
-		ResourceAccessType prevAccessType = ResourceAccessType::NONE;
-		ResourceAccessType newAccessType = ResourceAccessType::NONE;
-		ResourceLayout prevLayout = ResourceLayout::LAYOUT_COMMON;
-		ResourceLayout newLayout = ResourceLayout::LAYOUT_COMMON;
-		ResourceSyncState prevSyncState = ResourceSyncState::NONE;
-		ResourceSyncState newSyncState = ResourceSyncState::NONE;
-	};
-
 	enum class CommandQueueType {
 		Graphics,
 		Compute
@@ -127,6 +113,11 @@ private:
 			: type(PassType::Compute), pass(cp) {}
 	};
 
+	struct CompileContext {
+		std::unordered_map<uint64_t, unsigned int> transHistCompute;
+		std::unordered_map<uint64_t, unsigned int> transHistRender;
+	};
+
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
@@ -138,7 +129,7 @@ private:
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
 	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
 	std::vector<std::vector<uint64_t>>   aliasGroups;
-	std::vector<int> lastActiveInAliasGroup;
+	std::vector<std::unordered_map<UINT,uint64_t>> lastActiveSubresourceInAliasGroup;
 
 	// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately
 	std::unordered_map<uint64_t, std::vector<uint64_t>> resourcesFromGroupToManageIndependantly;
@@ -175,69 +166,20 @@ private:
     void UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<uint64_t>& renderUAVs);
     void UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<uint64_t>& computeUAVs);
 
-	void ComputeResourceLoops(
-		std::unordered_map<uint64_t, ResourceAccessType>& finalResourceAccessTypes,
-		std::unordered_map<uint64_t, ResourceLayout>& finalResourceLayouts,
-		std::unordered_map<uint64_t, ResourceSyncState>& finalResourceSyncStates, 
-		std::unordered_map<uint64_t, ResourceAccessType>& firstAccessTypes,
-		std::unordered_map<uint64_t, ResourceLayout>& firstLayouts,
-		std::unordered_map<uint64_t, ResourceSyncState>& firstResourceSyncStates);
+	void ComputeResourceLoops(CompileContext& context);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<uint64_t>& computeUAVs);
 	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<uint64_t>& renderUAVs);
 
 	std::pair<int, int> GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);
     std::pair<int, int> GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);
 
-	template <typename AddTransitionFn>
 	void ProcessResourceRequirements(
 		bool isCompute,
 		std::vector<ResourceRequirement>& resourceRequirements,
-		AddTransitionFn&& addTransition,
-		std::unordered_map<uint64_t, ResourceAccessType>& finalAccessTypes,
-		std::unordered_map<uint64_t, ResourceLayout>& finalLayouts,
-		std::unordered_map<uint64_t, ResourceSyncState>& finalSyncs,
-		std::unordered_map<uint64_t, ResourceAccessType>& firstAccessTypes,
-		std::unordered_map<uint64_t, ResourceLayout>& firstLayouts,
-		std::unordered_map<uint64_t, ResourceSyncState>& firstSyncs,
+		CompileContext& compileContext,
 		std::unordered_map<uint64_t, unsigned int>& producerHistory,
-		unsigned int batchIndex) {
-	    
-		for (auto& resourceRequirement : resourceRequirements) {
-			if (resourceRequirement.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
-				spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
-			}
-			const auto& id = resourceRequirement.resource->GetGlobalResourceID();
-			addTransition(isCompute, resourceRequirement.resource, resourceRequirement.access, resourceRequirement.layout, resourceRequirement.sync);
-
-			finalAccessTypes[id] = resourceRequirement.access;
-			finalLayouts[id] = resourceRequirement.layout;
-			finalSyncs[id] = resourceRequirement.sync;
-
-			if (AccessTypeIsWriteType(resourceRequirement.access)) {
-				if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
-					for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
-						producerHistory[childID] = batchIndex;
-					}
-				}
-				producerHistory[id] = batchIndex;
-			}
-
-			// First tough access, layout, and sync state
-			if (!firstAccessTypes.contains(id)) {
-				if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
-					for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
-						firstAccessTypes[childID] = resourceRequirement.access;
-						firstLayouts[childID] = resourceRequirement.layout;
-						firstSyncs[childID] = resourceRequirement.sync;
-					}
-				}
-				firstAccessTypes[id] = resourceRequirement.access;
-				firstLayouts[id] = resourceRequirement.layout;
-				firstSyncs[id] = resourceRequirement.sync;
-			}
-		}
-	
-	}
+		unsigned int batchIndex,
+		PassBatch& currentBatch);
 
 	template<typename PassRes>
 	void applySynchronization(
@@ -309,17 +251,12 @@ private:
 		}
 	}
 
-	auto MakeAddTransition(
-		std::unordered_map<uint64_t,ResourceAccessType>& finalResourceAccessTypes,
-		std::unordered_map<uint64_t, ResourceLayout>& finalResourceLayouts,
-		std::unordered_map<uint64_t, ResourceSyncState>& finalResourceSyncStates,
-		std::unordered_map<uint64_t, ResourceSyncState>& firstResourceSyncStates,
-		std::unordered_map<uint64_t, unsigned int>& transHistCompute,
-		std::unordered_map<uint64_t, unsigned int>& transHistRender,
-		unsigned int                                   batchIndex,
-		PassBatch& currentBatch);
-
-	void CreateBatchCommandLists();
+	void AddTransition(
+		CompileContext& context,
+		unsigned int batchIndex,
+		PassBatch& currentBatch,
+		bool isComputePass,
+		const ResourceRequirement& r);
 
 	std::vector<uint64_t> GetAllAliasIDs(uint64_t id) const {
 		auto it = resourceToAliasGroup.find(id);

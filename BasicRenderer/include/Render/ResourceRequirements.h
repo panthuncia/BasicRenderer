@@ -1,8 +1,10 @@
 #pragma once
 
-// bundle everything you need per-resource
+class Resource;
+
 struct ResourceRequirement {
-    std::shared_ptr<Resource>   resource;
+    Resource*                   resource;
+    RangeSpec                   range;
     ResourceAccessType          access;    // bitmask
     ResourceLayout              layout;
     ResourceSyncState           sync;

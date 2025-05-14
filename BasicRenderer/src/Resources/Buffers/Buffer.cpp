@@ -64,9 +64,13 @@ Buffer::Buffer(
 	m_barrierGroups.bufferBarriers = &m_barrierGroup;
 
 	m_size = bufferSize;
+
+	m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
+	m_subresourceLayouts.push_back(ResourceLayout::LAYOUT_COMMON);
+	m_subresourceSyncStates.push_back(ResourceSyncState::ALL);
 }
 
-BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups& Buffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
 	//if (prevState != currentState) {
 	//	throw(std::runtime_error("Buffer state mismatch"));
@@ -84,9 +88,9 @@ BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType
 	m_bufferBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
 	m_bufferBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
 
-	m_currentAccessType = newAccessType;
-	m_currentLayout = newLayout;
-	m_prevSyncState = newSyncState;
+	m_subresourceAccessTypes[0] = newAccessType;
+	m_subresourceLayouts[0] = newLayout;
+	m_subresourceSyncStates[0] = newSyncState;
 
 	return m_barrierGroups;
 }

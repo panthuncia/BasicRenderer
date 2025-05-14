@@ -9,12 +9,13 @@
 #include "Resources/ResourceStates.h"
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
+#include "Resources/SubresourceView.h"
 
 struct ComputePassParameters {
-	std::vector<std::shared_ptr<Resource>> shaderResources;
-	std::vector<std::shared_ptr<Resource>> constantBuffers;
-	std::vector<std::shared_ptr<Resource>> unorderedAccessViews;
-	std::vector<std::shared_ptr<Resource>> indirectArgumentBuffers;
+	std::vector<SubresourceView> shaderResources;
+	std::vector<SubresourceView> constantBuffers;
+	std::vector<SubresourceView> unorderedAccessViews;
+	std::vector<SubresourceView> indirectArgumentBuffers;
 
 	std::vector<ResourceRequirement> resourceRequirements;
 };
