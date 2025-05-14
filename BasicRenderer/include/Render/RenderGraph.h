@@ -59,8 +59,8 @@ private:
 	struct PassBatch {
 		std::vector<RenderPassAndResources> renderPasses;
 		std::vector<ComputePassAndResources> computePasses;
-		std::unordered_map<uint64_t, ResourceAccessType> resourceAccessTypes; // Desired access types in this batch
-		std::unordered_map<uint64_t, ResourceLayout> resourceLayouts; // Desired layouts in this batch
+		//std::unordered_map<uint64_t, ResourceAccessType> resourceAccessTypes; // Desired access types in this batch
+		//std::unordered_map<uint64_t, ResourceLayout> resourceLayouts; // Desired layouts in this batch
 		std::unordered_map<uint64_t, CommandQueueType> transitionQueue; // Queue to transition resources on
 		std::vector<ResourceTransition> renderTransitions; // Transitions needed to reach desired states on the render queue
         std::vector<ResourceTransition> computeTransitions; // Transitions needed to reach desired states on the compute queue
@@ -137,6 +137,8 @@ private:
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
 
+	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
+
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
 	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsCommandLists;
 	//std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsBatchEndTransitionCommandLists;
@@ -162,13 +164,11 @@ private:
 		return m_computeQueueFenceValue++;
 	}
 
-	//void ComputeTransitionsForBatch(PassBatch& batch, const std::unordered_map<std::wstring, ResourceState>& previousStates);
-    void UpdateDesiredResourceStates(PassBatch& batch, RenderPassAndResources& passAndResources, std::unordered_set<uint64_t>& renderUAVs);
-    void UpdateDesiredResourceStates(PassBatch& batch, ComputePassAndResources& passAndResources, std::unordered_set<uint64_t>& computeUAVs);
-
-	void ComputeResourceLoops(CompileContext& context);
-	bool IsNewBatchNeeded(PassBatch& currentBatch, const RenderPassAndResources& passAndResources, const std::unordered_set<uint64_t>& computeUAVs);
-	bool IsNewBatchNeeded(PassBatch& currentBatch, const ComputePassAndResources& passAndResources, const std::unordered_set<uint64_t>& renderUAVs);
+	void ComputeResourceLoops();
+	bool IsNewBatchNeeded(
+		const std::vector<ResourceRequirement>& reqs,
+		const std::unordered_set<uint64_t>& otherQueueUAVs);
+	
 
 	std::pair<int, int> GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);
     std::pair<int, int> GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);

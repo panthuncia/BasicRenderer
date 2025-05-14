@@ -12,10 +12,10 @@
 #include "Resources/SubresourceView.h"
 
 struct ComputePassParameters {
-	std::vector<SubresourceView> shaderResources;
-	std::vector<SubresourceView> constantBuffers;
-	std::vector<SubresourceView> unorderedAccessViews;
-	std::vector<SubresourceView> indirectArgumentBuffers;
+	std::vector<ResourceAndRange> shaderResources;
+	std::vector<ResourceAndRange> constantBuffers;
+	std::vector<ResourceAndRange> unorderedAccessViews;
+	std::vector<ResourceAndRange> indirectArgumentBuffers;
 
 	std::vector<ResourceRequirement> resourceRequirements;
 };

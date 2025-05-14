@@ -13,7 +13,11 @@ struct ResourceState {
     ResourceAccessType access;
     ResourceLayout     layout;
     ResourceSyncState  sync;
-    bool operator==(ResourceState const& o) const = default;
+    bool operator==(ResourceState const& o) const {
+        return access == o.access
+            && layout == o.layout;
+			//&& sync == o.sync; // Sync is not important for equality
+    };
 };
 
 enum class BoundType {
@@ -37,6 +41,7 @@ struct Bound {
 };
 
 struct RangeSpec {
+    //std::shared_ptr<Resource> resource;
     Bound mipLower   = { BoundType::All, 0 };
     Bound mipUpper   = { BoundType::All, 0 };
     Bound sliceLower = { BoundType::All, 0 };
@@ -114,10 +119,10 @@ SubresourceRange ResolveRangeSpec(RangeSpec spec,
 
 struct ResourceTransition {
     ResourceTransition() = default;
-    ResourceTransition(std::shared_ptr<Resource> pResource, RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState)
+    ResourceTransition(Resource* pResource, RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState)
         : range(range), pResource(pResource), prevAccessType(prevAccessType), newAccessType(newAccessType), prevLayout(prevLayout), newLayout(newLayout), prevSyncState(prevSyncState), newSyncState(newSyncState) {
     }
-    std::shared_ptr<Resource> pResource;
+    Resource* pResource;
     RangeSpec range;
     ResourceAccessType prevAccessType = ResourceAccessType::NONE;
     ResourceAccessType newAccessType = ResourceAccessType::NONE;
@@ -302,16 +307,18 @@ static void mergeSymbolic(std::vector<Segment> &segs) {
     // sort by (sliceLower, sliceUpper, mipLower, mipUpper) numeric order
     std::sort(segs.begin(), segs.end(),
         [](auto const &L, auto const &R){
-            auto tL = std::tie(
+            auto tL = std::make_tuple(
                 boundLower(L.rangeSpec.sliceLower),
                 boundUpper(L.rangeSpec.sliceUpper),
                 boundLower(L.rangeSpec.mipLower),
-                boundUpper(L.rangeSpec.mipUpper));
-            auto tR = std::tie(
+                boundUpper(L.rangeSpec.mipUpper)
+            );
+            auto tR = std::make_tuple(
                 boundLower(R.rangeSpec.sliceLower),
                 boundUpper(R.rangeSpec.sliceUpper),
                 boundLower(R.rangeSpec.mipLower),
-                boundUpper(R.rangeSpec.mipUpper));
+                boundUpper(R.rangeSpec.mipUpper)
+            );
             return tL < tR;
         });
 
@@ -333,14 +340,23 @@ static void mergeSymbolic(std::vector<Segment> &segs) {
 class SymbolicTracker {
     std::vector<Segment> _segs;
 public:
+    SymbolicTracker() {
+		RangeSpec whole;
+		//whole.resource = nullptr;
+		whole.mipLower = { BoundType::All, 0 };
+		whole.mipUpper = { BoundType::All, 0 };
+		whole.sliceLower = { BoundType::All, 0 };
+		whole.sliceUpper = { BoundType::All, 0 };
+		_segs.push_back({ whole, ResourceState{ ResourceAccessType::COMMON, ResourceLayout::LAYOUT_COMMON, ResourceSyncState::ALL } });
+    }
     SymbolicTracker(RangeSpec whole, ResourceState init) {
         _segs.push_back({ whole, init });
     }
 
     // apply a new requirement and emit transitions
     void apply(RangeSpec want,
+		Resource* pRes,
         ResourceState newState,
-        std::shared_ptr<Resource> pRes,
         std::vector<ResourceTransition>& out)
     {
         std::vector<Segment> next;
@@ -376,5 +392,18 @@ public:
         // merge back any adjacent segments with identical state & identical RangeSpec
         mergeSymbolic(next);
         _segs.swap(next);
+    }
+
+    bool wouldModify(RangeSpec want, ResourceState newState) const {
+        for (auto const &seg : _segs) {
+            auto cut = intersect(seg.rangeSpec, want);
+            if (!isEmpty(cut) && !(seg.state == newState))
+                return true;
+        }
+        return false;
+    }
+
+    const std::vector<Segment>& getSegments() const noexcept {
+        return _segs;
     }
 };

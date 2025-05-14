@@ -12,15 +12,15 @@
 #include "Resources/SubresourceView.h"
 
 struct RenderPassParameters {
-    std::vector<RangeSpec> shaderResources;
-    std::vector<RangeSpec> renderTargets;
-    std::vector<RangeSpec> depthReadResources;
-	std::vector<RangeSpec> depthReadWriteResources;
-	std::vector<RangeSpec> constantBuffers;
-	std::vector<RangeSpec> unorderedAccessViews;
-	std::vector<RangeSpec> copyTargets;
-	std::vector<RangeSpec> copySources;
-	std::vector<RangeSpec> indirectArgumentBuffers;
+    std::vector<ResourceAndRange> shaderResources;
+    std::vector<ResourceAndRange> renderTargets;
+    std::vector<ResourceAndRange> depthReadResources;
+	std::vector<ResourceAndRange> depthReadWriteResources;
+	std::vector<ResourceAndRange> constantBuffers;
+	std::vector<ResourceAndRange> unorderedAccessViews;
+	std::vector<ResourceAndRange> copyTargets;
+	std::vector<ResourceAndRange> copySources;
+	std::vector<ResourceAndRange> indirectArgumentBuffers;
 
 	std::vector<ResourceRequirement> resourceRequirements;
 	bool isGeometryPass = false;

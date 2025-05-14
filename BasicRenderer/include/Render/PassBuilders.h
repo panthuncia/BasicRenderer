@@ -159,13 +159,13 @@ private:
         : graph(g), passName(std::move(name)) {}
 
     // Single resource overload
-    void addShaderResource(const SubresourceView& r) {
+    void addShaderResource(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.shaderResources.push_back(r);
     }
 
     // initializer list overload
-    void addShaderResource(std::initializer_list<SubresourceView> list) {
+    void addShaderResource(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.shaderResources.push_back(r);
@@ -173,12 +173,12 @@ private:
     }
 
     // Render target
-    void addRenderTarget(const SubresourceView& r) {
+    void addRenderTarget(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.renderTargets.push_back(r);
     }
 
-    void addRenderTarget(std::initializer_list<SubresourceView> list) {
+    void addRenderTarget(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.renderTargets.push_back(r);
@@ -186,24 +186,24 @@ private:
     }
 
     // Depth target
-    void addDepthReadWrite(const SubresourceView& r) {
+    void addDepthReadWrite(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.depthReadWriteResources.push_back(r);
     }
 
-    void addDepthReadWrite(std::initializer_list<SubresourceView> list) {
+    void addDepthReadWrite(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.depthReadWriteResources.push_back(r);
         }
     }
 
-    void addDepthRead(const SubresourceView& r) {
+    void addDepthRead(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.depthReadResources.push_back(r);
     }
 
-    void addDepthRead(std::initializer_list<SubresourceView> list) {
+    void addDepthRead(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.depthReadResources.push_back(r);
@@ -211,12 +211,12 @@ private:
     }
 
     // Constant buffer
-    void addConstantBuffer(const SubresourceView& r) {
+    void addConstantBuffer(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.constantBuffers.push_back(r);
     }
 
-    void addConstantBuffer(std::initializer_list<SubresourceView> list) {
+    void addConstantBuffer(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.constantBuffers.push_back(r);
@@ -224,12 +224,12 @@ private:
     }
 
     // Unordered access
-    void addUnorderedAccess(const SubresourceView& r) {
+    void addUnorderedAccess(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.unorderedAccessViews.push_back(r);
     }
 
-    void addUnorderedAccess(std::initializer_list<SubresourceView> list) {
+    void addUnorderedAccess(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.unorderedAccessViews.push_back(r);
@@ -237,12 +237,12 @@ private:
     }
 
     // Copy destination
-    void addCopyDest(const SubresourceView& r) {
+    void addCopyDest(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.copyTargets.push_back(r);
     }
 
-    void addCopyDest(std::initializer_list<SubresourceView> list) {
+    void addCopyDest(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.copyTargets.push_back(r);
@@ -250,12 +250,12 @@ private:
     }
 
     // Copy source
-    void addCopySource(const SubresourceView& r) {
+    void addCopySource(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.copySources.push_back(r);
     }
 
-    void addCopySource(std::initializer_list<SubresourceView> list) {
+    void addCopySource(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.copySources.push_back(r);
@@ -263,12 +263,12 @@ private:
     }
 
     // Indirect arguments
-    void addIndirectArguments(const SubresourceView& r) {
+    void addIndirectArguments(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.indirectArgumentBuffers.push_back(r);
     }
 
-    void addIndirectArguments(std::initializer_list<SubresourceView> list) {
+    void addIndirectArguments(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.indirectArgumentBuffers.push_back(r);
@@ -294,7 +294,7 @@ private:
 			params.indirectArgumentBuffers.size()
         );
 
-        auto append = [&](auto const& views, ResourceAccessType access){
+        auto append = [&](std::vector<ResourceAndRange> const& views, ResourceAccessType access){
             for (auto const& view : views) {
                 if (!view.resource) continue;
                 ResourceRequirement rr(view);
@@ -420,13 +420,13 @@ private:
         : graph(g), passName(std::move(name)) {}
 
     // Single resource overload
-    void addShaderResource(const SubresourceView& r) {
+    void addShaderResource(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.shaderResources.push_back(r);
     }
 
     // initializer list overload
-    void addShaderResource(std::initializer_list<SubresourceView> list) {
+    void addShaderResource(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.shaderResources.push_back(r);
@@ -434,12 +434,12 @@ private:
     }
 
     // Constant buffer
-    void addConstantBuffer(const SubresourceView& r) {
+    void addConstantBuffer(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.constantBuffers.push_back(r);
     }
 
-    void addConstantBuffer(std::initializer_list<SubresourceView> list) {
+    void addConstantBuffer(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.constantBuffers.push_back(r);
@@ -447,12 +447,12 @@ private:
     }
 
     // Unordered access
-    void addUnorderedAccess(const SubresourceView& r) {
+    void addUnorderedAccess(const ResourceAndRange& r) {
         if (!r.resource) return;
         params.unorderedAccessViews.push_back(r);
     }
 
-    void addUnorderedAccess(std::initializer_list<SubresourceView> list) {
+    void addUnorderedAccess(std::initializer_list<ResourceAndRange> list) {
         for (auto& r : list) {
             if (!r.resource) continue;
             params.unorderedAccessViews.push_back(r);
@@ -460,11 +460,11 @@ private:
     }
 
 	// Indirect arguments
-	void addIndirectArguments(const SubresourceView& r) {
+	void addIndirectArguments(const ResourceAndRange& r) {
 		if (!r.resource) return;
 		params.indirectArgumentBuffers.push_back(r);
 	}
-	void addIndirectArguments(std::initializer_list<SubresourceView> list) {
+	void addIndirectArguments(std::initializer_list<ResourceAndRange> list) {
 		for (auto& r : list) {
 			if (!r.resource) continue;
 			params.indirectArgumentBuffers.push_back(r);
@@ -484,7 +484,7 @@ private:
 			params.indirectArgumentBuffers.size()
         );
 
-        auto append = [&](auto const& views, ResourceAccessType access){
+        auto append = [&](std::vector<ResourceAndRange> const& views, ResourceAccessType access){
             for (auto const& view : views) {
                 if (!view.resource) continue;
                 ResourceRequirement rr(view);

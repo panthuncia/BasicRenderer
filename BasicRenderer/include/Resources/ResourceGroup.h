@@ -37,7 +37,7 @@ public:
 
 protected:
 
-	BarrierGroups& GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+	BarrierGroups& GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 		m_barrierGroups.numBufferBarrierGroups = 0;
 		m_barrierGroups.numTextureBarrierGroups = 0;
 		m_barrierGroups.numGlobalBarrierGroups = 0;
@@ -45,7 +45,7 @@ protected:
 		m_textureBarriers.clear();
 		m_globalBarriers.clear();
 		for (auto& resource : standardTransitionResources) {
-			auto& barrierGroup = resource->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
+			auto& barrierGroup = resource->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
 			if (barrierGroup.numBufferBarrierGroups > 0) {
 				m_bufferBarriers.insert(m_bufferBarriers.end(), barrierGroup.bufferBarriers, barrierGroup.bufferBarriers + barrierGroup.numBufferBarrierGroups);
 				m_barrierGroups.numBufferBarrierGroups += barrierGroup.numBufferBarrierGroups;

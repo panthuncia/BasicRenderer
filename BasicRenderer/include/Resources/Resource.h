@@ -50,6 +50,10 @@ public:
 		return std::make_pair(mip, slice);
 	}
 
+	SymbolicTracker* GetStateTracker() {
+		return &m_stateTracker;
+	}
+
 protected:
     virtual void OnSetName() {}
 
@@ -69,6 +73,7 @@ private:
     bool m_uploadInProgress = false;
     inline static std::atomic<uint64_t> globalResourceCount;
     uint64_t m_globalResourceID;
+	SymbolicTracker m_stateTracker;
 
     //friend class RenderGraph;
     friend class ResourceGroup;
