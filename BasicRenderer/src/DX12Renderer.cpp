@@ -1227,7 +1227,7 @@ void DX12Renderer::CreateRenderGraph() {
             .Build<ClearMeshletCullingCommandUAVsPass>();
 
 		newGraph->BuildComputePass("FrustrumCullingPass") // Performs frustrum and occlusion culling
-			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, m_depthMap.linearDepthMap, m_linearShadowMaps)
 			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup)
 			.Build<FrustrumCullingPass>();
 

@@ -174,10 +174,10 @@ void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const C
             depthBuffer.SampleLevel(g_pointClamp, float3(vUV.zw, camera.depthBufferArrayIndex), fMipLevel),
             depthBuffer.SampleLevel(g_pointClamp, float3(vUV.xw, camera.depthBufferArrayIndex), fMipLevel));
     }
-    occlusionDepth.x = unprojectDepth(occlusionDepth.x, camera.zNear, camera.zFar);
-    occlusionDepth.y = unprojectDepth(occlusionDepth.y, camera.zNear, camera.zFar);
-    occlusionDepth.z = unprojectDepth(occlusionDepth.z, camera.zNear, camera.zFar);
-    occlusionDepth.w = unprojectDepth(occlusionDepth.w, camera.zNear, camera.zFar);
+    //occlusionDepth.x = unprojectDepth(occlusionDepth.x, camera.zNear, camera.zFar);
+    //occlusionDepth.y = unprojectDepth(occlusionDepth.y, camera.zNear, camera.zFar);
+    //occlusionDepth.z = unprojectDepth(occlusionDepth.z, camera.zNear, camera.zFar);
+    //occlusionDepth.w = unprojectDepth(occlusionDepth.w, camera.zNear, camera.zFar);
     
     float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
     fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
@@ -231,7 +231,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
     RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
 
     
-    /*
+    
     bool occlusionCulled = false;
     bool partiallyOcclusionCulled = false;
     OcclusionCulling(occlusionCulled, partiallyOcclusionCulled, camera, worldSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
@@ -240,7 +240,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
         // Update bitfield
         ClearBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
         return; // reject whole object
-    }*/
+    }
     
 
     RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
