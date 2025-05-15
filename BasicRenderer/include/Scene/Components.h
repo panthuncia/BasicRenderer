@@ -134,11 +134,11 @@ namespace Components {
 	};
 	struct DepthMap {
 		DepthMap() = default;
-		DepthMap(std::shared_ptr<PixelBuffer> depthMap, std::shared_ptr<PixelBuffer> downsampledDepthMap)
-			: depthMap(depthMap), downsampledDepthMap(downsampledDepthMap) {
+		DepthMap(std::shared_ptr<PixelBuffer> depthMap, std::shared_ptr<PixelBuffer> linearDepthMap)
+			: depthMap(depthMap), linearDepthMap(linearDepthMap) {
 		}
 		std::shared_ptr<PixelBuffer> depthMap;
-		std::shared_ptr<PixelBuffer> downsampledDepthMap;
+		std::shared_ptr<PixelBuffer> linearDepthMap;
 	};
 	struct RenderView {
 		uint64_t viewID;
@@ -157,7 +157,7 @@ namespace Components {
 		uint64_t viewInfoBufferIndex;
 		Matrix projectionMatrix;
 		std::shared_ptr<PixelBuffer> depthMap;
-		std::shared_ptr<PixelBuffer> downsampledDepthMap;
+		std::shared_ptr<PixelBuffer> linearDepthMap;
 		uint32_t depthResX;
 		uint32_t depthResY;
 	};

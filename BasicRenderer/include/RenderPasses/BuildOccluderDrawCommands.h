@@ -82,7 +82,7 @@ public:
 
 			miscRootConstants[UintRootConstant0] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[UintRootConstant2] = primaryDepth->downsampledDepthMap->GetSRVInfo(0).index;
+			//miscRootConstants[UintRootConstant2] = primaryDepth->downsampledDepthMap->GetSRVInfo(0).index;
 			miscRootConstants[UintRootConstant3] = primaryView->meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
@@ -102,7 +102,7 @@ public:
 
 						miscRootConstants[UintRootConstant0] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant2] = lightDepth.downsampledDepthMap->GetSRVInfo(0).index;
+						//miscRootConstants[UintRootConstant2] = lightDepth.downsampledDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
@@ -130,7 +130,7 @@ public:
 
 			miscRootConstants[UintRootConstant0] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[UintRootConstant2] = primaryDepth->downsampledDepthMap->GetSRVInfo(0).index;
+			//miscRootConstants[UintRootConstant2] = primaryDepth->downsampledDepthMap->GetSRVInfo(0).index;
 			miscRootConstants[UintRootConstant3] = primaryView->meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
@@ -149,7 +149,7 @@ public:
 
 						miscRootConstants[UintRootConstant0] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant2] = lightDepth.downsampledDepthMap->GetSRVInfo(0).index;
+						//miscRootConstants[UintRootConstant2] = lightDepth.downsampledDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
@@ -178,7 +178,7 @@ public:
 
 			miscRootConstants[UintRootConstant0] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[UintRootConstant2] = primaryDepth->downsampledDepthMap->GetSRVInfo(0).index;
+			//miscRootConstants[UintRootConstant2] = primaryDepth->downsampledDepthMap->GetSRVInfo(0).index;
 			miscRootConstants[UintRootConstant3] = primaryView->meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
@@ -197,7 +197,7 @@ public:
 
 						miscRootConstants[UintRootConstant0] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant2] = lightDepth.downsampledDepthMap->GetSRVInfo(0).index;
+						//miscRootConstants[UintRootConstant2] = lightDepth.downsampledDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 

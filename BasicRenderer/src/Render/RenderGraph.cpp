@@ -582,9 +582,6 @@ void RenderGraph::Execute(RenderContext& context) {
 		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
-			if (transition.pResource->GetName() == L"DepthStencilBuffer") {
-				spdlog::info("ResourceGroup::GetEnhancedBarrierGroup() - resource name: {}");
-			}
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			computeBarriers.reserve(computeBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			computeBarriers.insert(computeBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
@@ -649,9 +646,6 @@ void RenderGraph::Execute(RenderContext& context) {
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
         for (auto& transition : batch.renderTransitions) {
-			if (transition.pResource->GetName() == L"DepthStencilBuffer") {
-				spdlog::info("ResourceGroup::GetEnhancedBarrierGroup() - resource name: {}");
-			}
             BarrierGroups& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			renderBarriers.reserve(renderBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			renderBarriers.insert(renderBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
@@ -703,9 +697,6 @@ void RenderGraph::Execute(RenderContext& context) {
 		// Handle special case: Transition resources which will be used on compute queue later, but are in graphic-queue exclusive states
 		std::vector<D3D12_BARRIER_GROUP> passEndBarriers;
 		for (auto& transition : batch.passEndTransitions) {
-			if (transition.pResource->GetName() == L"DepthStencilBuffer") {
-				spdlog::info("ResourceGroup::GetEnhancedBarrierGroup() - resource name: {}");
-			}
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			passEndBarriers.reserve(passEndBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			passEndBarriers.insert(passEndBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);

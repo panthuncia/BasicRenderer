@@ -8,6 +8,7 @@ class Resource;
 
 struct ResourceAndRange {
     ResourceAndRange(const std::shared_ptr<Resource>& resource);
+	ResourceAndRange(const std::shared_ptr<Resource>& resource, const RangeSpec& range);
     std::shared_ptr<Resource>                   resource;
     RangeSpec                   range;
 };

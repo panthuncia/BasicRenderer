@@ -181,9 +181,12 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT pso
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = psoFlags & PSOFlags::PSO_SHADOW ? 0 : 1;
+    psoDesc.NumRenderTargets = 1;
     if(!(psoFlags & PSOFlags::PSO_SHADOW)) {
         psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+    else {
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT; // Linear depth
     }
 
     psoDesc.SampleDesc.Count = 1;
@@ -226,15 +229,17 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     if (psoFlags & PSO_DEFERRED) {
-        psoDesc.NumRenderTargets = 4;
+        psoDesc.NumRenderTargets = 5;
         psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
-        psoDesc.RTVFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-        psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
+		psoDesc.RTVFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
+        psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+        psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
+		psoDesc.RTVFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
 	}
 	else {
-		psoDesc.NumRenderTargets = 1;
+		psoDesc.NumRenderTargets = 2;
 		psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+        psoDesc.RTVFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
 	}
 
     psoDesc.SampleDesc.Count = 1;
@@ -411,7 +416,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 
     // Set the render target format
-    DXGI_FORMAT rtvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    DXGI_FORMAT rtvFormat = DXGI_FORMAT_R32_FLOAT;
     DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     // Define the pipeline state stream subobjects
@@ -439,10 +444,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     pipelineStateStream.DepthStencilState = depthStencilState;
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    rtvFormats.NumRenderTargets = psoFlags & PSO_SHADOW ? 0 : 1;
-    if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-        rtvFormats.RTFormats[0] = rtvFormat;
-    }
+    rtvFormats.NumRenderTargets = 1;
+    rtvFormats.RTFormats[0] = rtvFormat;
+
     pipelineStateStream.RTVFormats = rtvFormats;
 
     pipelineStateStream.DSVFormat = dsvFormat;
@@ -521,15 +525,17 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
     if (psoFlags & PSO_DEFERRED) {
-        rtvFormats.NumRenderTargets = 4;
+        rtvFormats.NumRenderTargets = 5;
         rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
-        rtvFormats.RTFormats[1] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-        rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
+		rtvFormats.RTFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
+        rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+        rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
+		rtvFormats.RTFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
 	}
 	else {
-        rtvFormats.NumRenderTargets = 1;
+        rtvFormats.NumRenderTargets = 2;
         rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+		rtvFormats.RTFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
 	}
     pipelineStateStream.RTVFormats = rtvFormats;
 
@@ -790,11 +796,11 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     arguments.push_back(target.c_str());
 
     arguments.push_back(DXC_ARG_WARNINGS_ARE_ERRORS); //-WX
-#if defined(_DEBUG)
+//#if defined(_DEBUG)
     arguments.push_back(DXC_ARG_DEBUG); //-Zi
     arguments.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE); //-Zss
     arguments.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
-#endif
+//#endif
 
     for (const auto& define : defines)
     {
@@ -843,7 +849,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     }
 
     //PDB data
-#if defined(_DEBUG)
+//#if defined(_DEBUG)
     ComPtr<IDxcBlob> pDebugData;
     ComPtr<IDxcBlobUtf16> pDebugDataPath;
     result->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(pDebugData.GetAddressOf()), pDebugDataPath.GetAddressOf());
@@ -864,7 +870,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
 
     file.write(reinterpret_cast<const char*>(debugDataBuffer), debugDataSize);
     file.close();
-#endif
+//#endif
     result->GetResult(reinterpret_cast<IDxcBlob**>(shaderBlob.GetAddressOf()));
 }
 

@@ -24,12 +24,14 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
+    matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
             StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
             uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
+            viewMatrix = lightCamera.view;
             break;
         }
         case 1: { // Spot light
@@ -37,6 +39,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             uint lightCameraIndex = spotLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
+            viewMatrix = lightCamera.view;
             break;
         }
         case 2: { // Directional light
@@ -44,10 +47,12 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
+            viewMatrix = lightCamera.view;
             break;
         }
     }
     result.position = mul(worldPosition, lightMatrix);
+    result.positionViewSpace = mul(worldPosition, viewMatrix);
     return result;
 #endif // SHADOW
     

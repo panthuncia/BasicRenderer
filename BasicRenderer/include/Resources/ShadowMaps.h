@@ -72,14 +72,14 @@ private:
 	std::function<uint8_t()> getNumCascades;
 };
 
-class DownsampledShadowMaps : public ResourceGroup {
+class LinearShadowMaps : public ResourceGroup {
 public:
-	DownsampledShadowMaps(const std::wstring& name)
+	LinearShadowMaps(const std::wstring& name)
 		: ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
 
-	std::shared_ptr<PixelBuffer> AddMap(LightInfo* light, uint16_t shadowResolution, PixelBuffer* mapToAlias) {
+	std::shared_ptr<PixelBuffer> AddMap(LightInfo* light, uint16_t shadowResolution) {
 		std::shared_ptr<PixelBuffer> shadowMap;
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		TextureDescription desc;
@@ -95,28 +95,27 @@ public:
 		desc.hasUAV = true;
 		desc.uavFormat = DXGI_FORMAT_R32_FLOAT;
 		desc.generateMipMaps = true;
-		desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
+		desc.hasRTV = true;
+		desc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
-			shadowMap = PixelBuffer::Create(desc, mapToAlias);
-			shadowMap->SetName(L"DownsampledPointShadowMap");
+			shadowMap = PixelBuffer::Create(desc);
+			shadowMap->SetName(L"linearShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::Create(desc, mapToAlias);
-			shadowMap->SetName(L"DownsampledSpotShadowMap");
+			shadowMap = PixelBuffer::Create(desc);
+			shadowMap->SetName(L"linearShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
-			shadowMap = PixelBuffer::Create(desc, mapToAlias);
-			shadowMap->SetName(L"DownsampledDirectionalShadowMap");
+			shadowMap = PixelBuffer::Create(desc);
+			shadowMap->SetName(L"linearShadowMap");
 			break;
 
 		}
 		AddResource(shadowMap);
-		AddAliasedResource(mapToAlias);
-		mapToAlias->AddAliasedResource(shadowMap.get());
 		return shadowMap;
 	}
 

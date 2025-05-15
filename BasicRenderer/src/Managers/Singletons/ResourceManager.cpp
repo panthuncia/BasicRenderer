@@ -441,7 +441,12 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	else if (desc.hasRTV) {
 		colorClearValue.Format = desc.rtvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.rtvFormat;
 		if (desc.channels == 1) {
-			colorClearValue.Color[0] = 1.0f;
+			if (desc.hasDSV) {
+				colorClearValue.Color[0] = 1.0f;
+			}
+			else {
+				colorClearValue.Color[0] = 0.0f;
+			}
 		}
 		else if (desc.channels == 4) {
 			colorClearValue.Color[0] = 0.0f;

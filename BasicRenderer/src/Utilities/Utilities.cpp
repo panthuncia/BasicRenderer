@@ -1307,32 +1307,32 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::Create(desc);
 	depthBuffer->SetName(L"Depth Buffer");
 
-    TextureDescription downsampledDesc;
-	dims.height = yRes;
-	dims.width = xRes;
-	downsampledDesc.imageDimensions.push_back(dims);
-	downsampledDesc.format = DXGI_FORMAT_R32_FLOAT;
-	downsampledDesc.arraySize = arraySize;
-	downsampledDesc.isArray = arraySize > 1;
-	downsampledDesc.hasDSV = false;
-	downsampledDesc.hasSRV = true;
-	downsampledDesc.hasUAV = true;
-	downsampledDesc.isCubemap = isCubemap;
-	downsampledDesc.channels = 1;
-	downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-	downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
-	downsampledDesc.generateMipMaps = true;
-	downsampledDesc.allowAlias = true;
+ //   TextureDescription downsampledDesc;
+	//dims.height = yRes;
+	//dims.width = xRes;
+	//downsampledDesc.imageDimensions.push_back(dims);
+	//downsampledDesc.format = DXGI_FORMAT_R32_FLOAT;
+	//downsampledDesc.arraySize = arraySize;
+	//downsampledDesc.isArray = arraySize > 1;
+	//downsampledDesc.hasDSV = false;
+	//downsampledDesc.hasSRV = true;
+	//downsampledDesc.hasUAV = true;
+	//downsampledDesc.isCubemap = isCubemap;
+	//downsampledDesc.channels = 1;
+	//downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+	//downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+	//downsampledDesc.generateMipMaps = true;
+	//downsampledDesc.allowAlias = true;
 
-	std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc, depthBuffer.get());
-	downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
+	//std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc, depthBuffer.get());
+	//downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
 
-	depthBuffer->AddAliasedResource(downsampledDepthBuffer.get());
-	downsampledDepthBuffer->AddAliasedResource(depthBuffer.get());
+	//depthBuffer->AddAliasedResource(downsampledDepthBuffer.get());
+	//downsampledDepthBuffer->AddAliasedResource(depthBuffer.get());
 
 	Components::DepthMap depthMap;
 	depthMap.depthMap = depthBuffer;
-	depthMap.downsampledDepthMap = downsampledDepthBuffer;
+	//depthMap.downsampledDepthMap = downsampledDepthBuffer;
 
 	return depthMap;
 }

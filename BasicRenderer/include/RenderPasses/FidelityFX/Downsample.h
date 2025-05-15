@@ -28,7 +28,7 @@ int num = 0;
 class DownsamplePass : public ComputePass {
 public:
 
-    DownsamplePass(std::shared_ptr<GloballyIndexedResource> pDownsampleMips, std::shared_ptr<GloballyIndexedResource> pSrcDepths) : m_pDownsampleMips(pDownsampleMips), m_pSrcDepths(pSrcDepths) {}
+    DownsamplePass(std::shared_ptr<GloballyIndexedResource> pSrcDepths) : m_pSrcDepths(pSrcDepths) {}
     ~DownsamplePass() {
 		addObserver.destruct(); // Needed for clean shutdown
 		removeObserver.destruct();
@@ -174,7 +174,6 @@ private:
 
     unsigned int m_numDirectionalCascades = 0;
 
-    std::shared_ptr<GloballyIndexedResource> m_pDownsampleMips;
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
 	std::shared_ptr<GloballyIndexedResource> m_pDownsampleAtomicCounter;
 
@@ -231,9 +230,9 @@ private:
         spdConstants.workGroupOffset[0] = workGroupOffset[0];
         spdConstants.workGroupOffset[1] = workGroupOffset[1];
 
-		for (int i = 0; i < shadowMap.downsampledDepthMap->GetNumUAVMipLevels(); i++) {
-			spdConstants.mipUavDescriptorIndices[i] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo(i).index;
-		}
+		//for (int i = 0; i < shadowMap.downsampledDepthMap->GetNumUAVMipLevels(); i++) {
+		//	spdConstants.mipUavDescriptorIndices[i] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo(i).index;
+		//}
 
         auto view = m_pDownsampleConstants->Add();
         m_pDownsampleConstants->UpdateView(view.get(), &spdConstants);

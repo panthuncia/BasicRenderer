@@ -27,7 +27,7 @@ LightManager::LightManager() {
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	getCurrentShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<ShadowMaps*>("currentShadowMapsResourceGroup");
-	getCurrentDownsampledShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup");
+	getCurrentLinearShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
 
 	m_pLightViewInfoResourceGroup = std::make_shared<ResourceGroup>(L"LightViewInfo");
 	m_pLightViewInfoResourceGroup->AddResource(m_spotViewInfo->GetBuffer());
@@ -85,13 +85,13 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
         }
 
         auto shadowMaps = getCurrentShadowMapResourceGroup();
-		auto downsampledMaps = getCurrentDownsampledShadowMapResourceGroup();
+		auto linearMaps = getCurrentLinearShadowMapResourceGroup();
         if (shadowMaps != nullptr) {
             auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
-			auto downsampledMap = downsampledMaps->AddMap(lightInfo, getShadowResolution(), map.get());
-            shadowMapComponent = Components::DepthMap(map, downsampledMap);
+			auto linearMap = linearMaps->AddMap(lightInfo, getShadowResolution());
+            shadowMapComponent = Components::DepthMap(map, linearMap);
 			viewInfo.depthMap = map;
-			viewInfo.downsampledDepthMap = downsampledMap;
+			viewInfo.linearDepthMap = linearMap;
 			viewInfo.depthResX = map->GetWidth();
 			viewInfo.depthResY = map->GetHeight();
         }

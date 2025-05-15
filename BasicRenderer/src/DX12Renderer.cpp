@@ -256,12 +256,12 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
 void DX12Renderer::CreateGlobalResources() {
     m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
-	m_downsampledShadowMaps = std::make_shared<DownsampledShadowMaps>(L"DownsampledShadowMaps");
-    m_shadowMaps->AddAliasedResource(m_downsampledShadowMaps.get());
-	m_downsampledShadowMaps->AddAliasedResource(m_shadowMaps.get());
+	m_linearShadowMaps = std::make_shared<LinearShadowMaps>(L"linearShadowMaps");
+    //m_shadowMaps->AddAliasedResource(m_downsampledShadowMaps.get());
+	//m_downsampledShadowMaps->AddAliasedResource(m_shadowMaps.get());
 
     setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
-	setDownsampledShadowMaps(m_downsampledShadowMaps.get());
+	setLinearShadowMaps(m_linearShadowMaps.get());
 }
 
 void DX12Renderer::SetSettings() {
@@ -275,7 +275,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
-	settingsManager.registerSetting<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup", nullptr);
+	settingsManager.registerSetting<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
@@ -304,7 +304,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
 	settingsManager.registerSetting<bool>("enableGTAO", true);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
-	setDownsampledShadowMaps = settingsManager.getSettingSetter<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup");
+    setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");
@@ -622,34 +622,29 @@ void DX12Renderer::CreateTextures() {
     depthStencilDesc.generateMipMaps = false;
     depthStencilDesc.hasDSV = true;
 	depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
-    depthStencilDesc.allowAlias = true;
+    //depthStencilDesc.allowAlias = true;
 
     auto depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
     depthStencilBuffer->SetName(L"DepthStencilBuffer");
 
-    TextureDescription downsampledDesc;
-    dimensions.height = m_yRes / 2;
-    dimensions.width = m_xRes / 2;
-    downsampledDesc.imageDimensions.push_back(dimensions);
-    downsampledDesc.format = DXGI_FORMAT_R32_FLOAT;
-	downsampledDesc.arraySize = 1;
-    downsampledDesc.hasDSV = false;
-    downsampledDesc.hasSRV = true;
-    downsampledDesc.hasUAV = true;
-    downsampledDesc.channels = 1;
-    downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-    downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
-    downsampledDesc.generateMipMaps = true;
-	downsampledDesc.allowAlias = true;
+    TextureDescription linearDepthDesc;
+	linearDepthDesc.imageDimensions.push_back(dimensions);
+	linearDepthDesc.format = DXGI_FORMAT_R32_FLOAT;
+	linearDepthDesc.hasSRV = true;
+	linearDepthDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+	linearDepthDesc.arraySize = 1;
+	linearDepthDesc.channels = 1;
+	linearDepthDesc.generateMipMaps = true;
+	linearDepthDesc.hasUAV = true;
+	linearDepthDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+	linearDepthDesc.hasRTV = true;
+	linearDepthDesc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
 
-    std::shared_ptr<PixelBuffer> downsampledDepthBuffer = PixelBuffer::Create(downsampledDesc, depthStencilBuffer.get());
-    downsampledDepthBuffer->SetName(L"Downsampled Depth Buffer");
-
-	depthStencilBuffer->AddAliasedResource(downsampledDepthBuffer.get());
-	downsampledDepthBuffer->AddAliasedResource(depthStencilBuffer.get());
+	auto linearDepthBuffer = PixelBuffer::Create(linearDepthDesc);
+	linearDepthBuffer->SetName(L"LinearDepthBuffer");
 
 	m_depthMap.depthMap = depthStencilBuffer;
-	m_depthMap.downsampledDepthMap = downsampledDepthBuffer;
+	m_depthMap.linearDepthMap = linearDepthBuffer;
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
@@ -768,6 +763,7 @@ void DX12Renderer::Render() {
     m_context.rtvHeap = rtvHeap.Get();
     m_context.renderTargets = renderTargets.data();
 	m_context.pPrimaryDepthBuffer = m_depthMap.depthMap.get();
+	m_context.pLinearDepthBuffer = m_depthMap.linearDepthMap.get();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
@@ -1021,7 +1017,7 @@ void DX12Renderer::CreateRenderGraph() {
     auto newGraph = std::make_shared<RenderGraph>();
     std::shared_ptr<PixelBuffer> depthTexture = m_depthMap.depthMap;
 	newGraph->AddResource(depthTexture, false);
-    newGraph->AddResource(m_depthMap.downsampledDepthMap);
+    newGraph->AddResource(m_depthMap.linearDepthMap);
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
@@ -1068,7 +1064,7 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->AddResource(meshletCullingBitfieldBufferGroup);
     newGraph->AddResource(meshInstanceMeshletCullingBitfieldBufferGoup);
 	newGraph->AddResource(primaryCameraMeshletBitfieldBuffer);
-	newGraph->AddResource(m_downsampledShadowMaps);
+	newGraph->AddResource(m_linearShadowMaps);
 
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
@@ -1187,6 +1183,7 @@ void DX12Renderer::CreateRenderGraph() {
 
             auto shadowOccluderPassBuilder = newGraph->BuildRenderPass("OccluderShadowPrepass")
                 .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
+                .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0 }))
                 .WithDepthReadWrite(m_shadowMaps)
                 .IsGeometryPass();
 
@@ -1201,7 +1198,7 @@ void DX12Renderer::CreateRenderGraph() {
 
         auto occludersPrepassBuilder = newGraph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
             .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-            .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness, emissive)
+            .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0}), albedo, metallicRoughness, emissive)
             .WithDepthReadWrite(depthTexture)
             .IsGeometryPass();
 
@@ -1215,9 +1212,9 @@ void DX12Renderer::CreateRenderGraph() {
 
         // Single-pass downsample on all occluder-only depth maps
         //auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
-        //    .WithShaderResource(depthTexture)
-        //    .WithUnorderedAccess(m_depthMap.downsampledDepthMap, m_downsampledShadowMaps)
-        //    .Build<DownsamplePass>(m_depthMap.downsampledDepthMap, depthTexture);
+        //    .WithShaderResource(Subresources(depthTexture, Mip{ 0 }), Subresources(m_shadowMaps, Mip{ 0 }))
+        //    .WithUnorderedAccess(Subresources(depthTexture, FromMip{ 1 }), Subresources(m_shadowMaps, FromMip{ 1 }))
+        //    .Build<DownsamplePass>(depthTexture);
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
             .WithCopyDest(indirectCommandBufferResourceGroup)
@@ -1241,7 +1238,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto newObjectsPrepassBuilder = newGraph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace, albedo, metallicRoughness, emissive)
+        .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0}), albedo, metallicRoughness, emissive)
         .WithDepthReadWrite(depthTexture)
         .IsGeometryPass();
 
@@ -1438,8 +1435,9 @@ void DX12Renderer::CreateRenderGraph() {
     if (drawShadows) {
         newGraph->AddResource(m_shadowMaps);
 
-		auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
-			.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
+        auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
+            .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0 }))
 			.WithDepthReadWrite(m_shadowMaps)
             .IsGeometryPass();
 

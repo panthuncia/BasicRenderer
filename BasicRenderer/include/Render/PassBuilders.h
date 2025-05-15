@@ -4,6 +4,103 @@
 #include "ResourceRequirements.h"
 #include "Resources/ResourceStateTracker.h"
 
+// Tag for a contiguous mip-range [first..first+count)
+struct Mip {
+    uint32_t first, count;
+};
+
+// Tag for a half-open "from" mip-range [first..inf)
+struct FromMip {
+    uint32_t first;
+};
+
+// Tag for a half-open "up to" mip-range [0..last]
+struct UpToMip {
+    uint32_t last;
+};
+
+// Tag for a contiguous slice-range [first..first+count)
+struct Slice {
+    uint32_t first, count;
+};
+
+// Tag for a half-open "from" slice-range [first..inf)
+struct FromSlice {
+    uint32_t first;
+};
+
+// Tag for a half-open "up to" slice-range [0..last]
+struct UpToSlice {
+    uint32_t last;
+};
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r) {
+    // everything
+    return { r };
+}
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+    Mip m)
+{
+    RangeSpec spec;
+    spec.mipLower   = { BoundType::Exact, m.first      };
+    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
+    return { r, spec };
+}
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+    FromMip fm)
+{
+    RangeSpec spec;
+    spec.mipLower   = { BoundType::From, fm.first };
+    return { r, spec };
+}
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+    UpToMip um)
+{
+    RangeSpec spec;
+    spec.mipUpper   = { BoundType::UpTo, um.last };
+    return { r, spec };
+}
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+    Slice s)
+{
+    RangeSpec spec;
+    spec.sliceLower = { BoundType::Exact, s.first       };
+    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+    return { r, spec };
+}
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+    FromSlice fs)
+{
+    RangeSpec spec;
+    spec.sliceLower = { BoundType::From, fs.first };
+    return { r, spec };
+}
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+    UpToSlice us)
+{
+    RangeSpec spec;
+    spec.sliceUpper = { BoundType::UpTo, us.last };
+    return { r, spec };
+}
+
+inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+    Mip     m,
+    Slice   s)
+{
+    RangeSpec spec;
+    spec.mipLower   = { BoundType::Exact, m.first      };
+    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
+    spec.sliceLower = { BoundType::Exact, s.first       };
+    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+    return { r, spec };
+}
+
 class RenderPassBuilder {
 public:
     // Variadic entry points

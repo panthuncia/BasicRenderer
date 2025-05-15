@@ -61,6 +61,9 @@ public:
             auto& rtvHandle = m_pNormals->GetRTVInfo(0).cpuHandle;
             const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
             commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+			auto& rtvHandle1 = context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle;
+			const float clearColor1[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			commandList->ClearRenderTargetView(rtvHandle1, clearColor1, 0, nullptr);
 
             if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
                 auto& rtvHandle2 = m_pAlbedo->GetRTVInfo(0).cpuHandle;
@@ -115,12 +118,12 @@ private:
 		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
         if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[4] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pAlbedo->GetRTVInfo(0).cpuHandle, m_pMetallicRoughness->GetRTVInfo(0).cpuHandle, m_pEmissive->GetRTVInfo(0).cpuHandle};
-            commandList->OMSetRenderTargets(4, rtvHandles, FALSE, &dsvHandle);
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[5] = { m_pNormals->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle, m_pAlbedo->GetRTVInfo(0).cpuHandle, m_pMetallicRoughness->GetRTVInfo(0).cpuHandle, m_pEmissive->GetRTVInfo(0).cpuHandle};
+            commandList->OMSetRenderTargets(5, rtvHandles, FALSE, &dsvHandle);
         }
         else {
-			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[1] = { m_pNormals->GetRTVInfo(0).cpuHandle };
-			commandList->OMSetRenderTargets(1, rtvHandles, FALSE, &dsvHandle);
+			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[2] = { m_pNormals->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle };
+			commandList->OMSetRenderTargets(2, rtvHandles, FALSE, &dsvHandle);
         }
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
