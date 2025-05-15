@@ -120,7 +120,7 @@ public:
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			auto& mapInfo = m_perViewMapInfo[e.id()];
             
-            downsampleRootConstants[UintRootConstant1] = shadowMap.depthMap->GetSRVInfo(0).index;
+            downsampleRootConstants[UintRootConstant1] = shadowMap.linearDepthMap->GetSRVInfo(0).index;
 			downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
@@ -228,8 +228,8 @@ private:
         spdConstants.workGroupOffset[0] = workGroupOffset[0];
         spdConstants.workGroupOffset[1] = workGroupOffset[1];
 
-		for (int i = 0; i < shadowMap.linearDepthMap->GetNumUAVMipLevels(); i++) {
-			spdConstants.mipUavDescriptorIndices[i] = shadowMap.linearDepthMap->GetUAVShaderVisibleInfo(i).index;
+		for (int i = 0; i < (std::min)(11u, shadowMap.linearDepthMap->GetNumUAVMipLevels()-1); i++) {
+			spdConstants.mipUavDescriptorIndices[i] = shadowMap.linearDepthMap->GetUAVShaderVisibleInfo(i+1).index;
 		}
 
         auto view = m_pDownsampleConstants->Add();

@@ -62,8 +62,8 @@ public:
             const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
             commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 			auto& rtvHandle1 = context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle;
-			const float clearColor1[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-			commandList->ClearRenderTargetView(rtvHandle1, clearColor1, 0, nullptr);
+			auto& clearColor1 = context.pLinearDepthBuffer->GetClearColor();
+			commandList->ClearRenderTargetView(rtvHandle1, clearColor1.data(), 0, nullptr);
 
             if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
                 auto& rtvHandle2 = m_pAlbedo->GetRTVInfo(0).cpuHandle;

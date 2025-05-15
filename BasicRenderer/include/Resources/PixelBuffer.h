@@ -4,6 +4,7 @@
 #include "ThirdParty/stb/stb_image.h"
 #include "DirectX/d3dx12.h"
 #include <d3d12.h>
+#include <array>
 
 #include "Resources/ResourceStates.h"
 #include "Resources/ResourceHandles.h"
@@ -35,6 +36,10 @@ public:
 		return handle.placedResourceHeap.Get();
 	}
 
+	const std::array<float, 4>& GetClearColor() const {
+		return m_clearColor;
+	}
+
 private:
     PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {}, PixelBuffer* textureToAlias = nullptr);
 
@@ -43,6 +48,8 @@ private:
     unsigned int m_height;
 	unsigned int m_channels;
     DXGI_FORMAT m_format;
+	TextureDescription m_desc;
+	std::array<float, 4> m_clearColor;
 
 	// Old barriers
 	std::vector<D3D12_RESOURCE_BARRIER> m_transitions;

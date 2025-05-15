@@ -434,41 +434,16 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 	D3D12_CLEAR_VALUE colorClearValue = {};
 	if (desc.hasDSV) {
 		depthClearValue.Format = desc.dsvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.dsvFormat;
-		depthClearValue.DepthStencil.Depth = 1.0f;
+		depthClearValue.DepthStencil.Depth = desc.depthClearValue;
 		depthClearValue.DepthStencil.Stencil = 0;
 		clearValue = &depthClearValue;
 	}
 	else if (desc.hasRTV) {
 		colorClearValue.Format = desc.rtvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.rtvFormat;
-		if (desc.channels == 1) {
-			if (desc.hasDSV) {
-				colorClearValue.Color[0] = 1.0f;
-			}
-			else {
-				colorClearValue.Color[0] = 0.0f;
-			}
-		}
-		else if (desc.channels == 4) {
-			colorClearValue.Color[0] = 0.0f;
-			colorClearValue.Color[1] = 0.0f;
-			colorClearValue.Color[2] = 0.0f;
-			colorClearValue.Color[3] = 1.0f;
-		}
-		else if (desc.channels == 3){
-			colorClearValue.Color[0] = 0.0f;
-			colorClearValue.Color[1] = 0.0f;
-			colorClearValue.Color[2] = 0.0f;
-			colorClearValue.Color[3] = 1.0f;
-		}
-		else if (desc.channels == 2) {
-			colorClearValue.Color[0] = 0.0f;
-			colorClearValue.Color[1] = 0.0f;
-			colorClearValue.Color[2] = 0.0f;
-			colorClearValue.Color[3] = 1.0f;
-		}
-		else {
-			assert(false && "Unsupported number of channels for color clear value");
-		}
+		colorClearValue.Color[0] = desc.clearColor[0];
+		colorClearValue.Color[1] = desc.clearColor[1];
+		colorClearValue.Color[2] = desc.clearColor[2];
+		colorClearValue.Color[3] = desc.clearColor[3];
 		clearValue = &colorClearValue;
 	}
 

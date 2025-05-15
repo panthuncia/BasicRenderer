@@ -27,4 +27,6 @@ struct TextureDescription {
 	bool hasNonShaderVisibleUAV = false;
     bool generateMipMaps = false;
 	bool allowAlias = false;
+	float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f }; // default RGBA clear color
+	float depthClearValue = 1.0f; // default depth clear value
 };

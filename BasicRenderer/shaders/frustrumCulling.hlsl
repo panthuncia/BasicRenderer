@@ -266,7 +266,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
                 return; // reject whole object
             }
             // Update bitfield
-            //SetBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
+            SetBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
 
             // does it intersect this plane?
             if (abs(distance) < scaledBoundingRadius)

@@ -128,7 +128,7 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     
     PrePassPSOutput output;
     output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
-    output.linearDepth = input.positionViewSpace.z;
+    output.linearDepth = -input.positionViewSpace.z;
 #if defined(PSO_DEFERRED)
     output.albedo = float4(fragmentInfo.albedo.xyz, fragmentInfo.ambientOcclusion);
     output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);

@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <spdlog/spdlog.h>
+#include <limits>
 
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ResourceGroup.h"
@@ -97,6 +98,7 @@ public:
 		desc.generateMipMaps = true;
 		desc.hasRTV = true;
 		desc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.clearColor[0] = std::numeric_limits<float>().max();
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;

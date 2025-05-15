@@ -11,8 +11,9 @@
 
 PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData, PixelBuffer* textureToAlias) {
     ResourceManager& resourceManager = ResourceManager::GetInstance();
-
+    m_desc = desc;
     handle = resourceManager.CreateTexture(desc, initialData);
+    m_clearColor = { desc.clearColor[0], desc.clearColor[1], desc.clearColor[2], desc.clearColor[3] };
     SetSRVDescriptors(handle.srvUavHeap, handle.SRVInfo);
     if(desc.hasUAV)
         SetUAVGPUDescriptors(handle.srvUavHeap, handle.UAVInfo);
@@ -84,7 +85,11 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAcc
 	//	m_subresourceSyncStates[i] = newSyncState;
 	//}
 
-    m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
-
+    if (resolvedRange.mipCount == m_mipLevels) {
+        m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff);
+    }
+    else {
+        m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
+    }
     return m_barrierGroups;
 }

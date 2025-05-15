@@ -1321,6 +1321,8 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
 	downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
 	downsampledDesc.generateMipMaps = true;
+    downsampledDesc.clearColor[0] = std::numeric_limits<float>().max();
+
 
 	std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::Create(downsampledDesc, depthBuffer.get());
     linearDepthBuffer->SetName(L"linear Depth Buffer");

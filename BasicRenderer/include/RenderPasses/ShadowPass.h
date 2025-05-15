@@ -188,7 +188,7 @@ private:
                 commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                 if (m_clearDepths) {
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-					commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+					commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                 }
 
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
@@ -206,7 +206,7 @@ private:
                     commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                     if (m_clearDepths) {
                         commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                     }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
@@ -224,7 +224,7 @@ private:
                     commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                     if (m_clearDepths) {
                         commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                     }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
@@ -309,7 +309,7 @@ private:
                 commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                 if (m_clearDepths) {
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                    commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                 }
 
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
@@ -332,7 +332,7 @@ private:
                     commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                     if (m_clearDepths) {
                         commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                     }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
 
@@ -355,7 +355,7 @@ private:
                     commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                     if (m_clearDepths) {
                         commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                     }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
 
@@ -408,7 +408,7 @@ private:
                 commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                 if (m_clearDepths) {
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                    commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                 }
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
@@ -434,7 +434,7 @@ private:
                     commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                     if (m_clearDepths) {
                         commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                     }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
@@ -461,7 +461,7 @@ private:
                     commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
                     if (m_clearDepths) {
                         commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, clearRTV, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                     }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
@@ -492,7 +492,6 @@ private:
 	bool m_clearDepths;
 
     float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
-    float clearRTV[4] = { 0.0, 0.0, 0.0, 0.0 };
 
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<uint16_t()> getShadowResolution;
