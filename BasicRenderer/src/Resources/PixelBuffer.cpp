@@ -84,7 +84,7 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAcc
 	//	m_subresourceSyncStates[i] = newSyncState;
 	//}
 
-    //m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
+    m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
 
     return m_barrierGroups;
 }

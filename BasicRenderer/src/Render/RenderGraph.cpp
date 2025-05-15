@@ -25,6 +25,12 @@ void RenderGraph::AddTransition(
 	std::vector<ResourceTransition> transitions;
 	resource->GetStateTracker()->Apply(r.resourceAndRange.range, resource.get(), r.state, transitions);
 
+	for (auto& transition : transitions) {
+		if (transition.range.mipUpper.value > 10000) {
+			spdlog::info("What?");
+		}
+	}
+
 	if (currentBatch.passBatchTrackers.contains(resource->GetGlobalResourceID()) && transitions.size()>0) {
 		spdlog::info("How did this happen?");
 	}
@@ -551,13 +557,21 @@ void RenderGraph::Update() {
 void RenderGraph::Execute(RenderContext& context) {
 	auto& manager = DeviceManager::GetInstance();
 	auto graphicsQueue = manager.GetGraphicsQueue();
-	auto computeQueue = manager.GetComputeQueue();
 	auto& graphicsCommandList = m_graphicsCommandLists[context.frameIndex];
 	auto& graphicsCommandAllocator = m_graphicsCommandAllocators[context.frameIndex];
-	auto& computeCommandList = m_computeCommandLists[context.frameIndex];
-	auto& computeCommandAllocator = m_computeCommandAllocators[context.frameIndex];
 
-    UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue*context.frameFenceValue;
+	bool useAsyncCompute = false;
+	auto computeQueue = graphicsQueue;//manager.GetComputeQueue();
+	auto& computeCommandList = graphicsCommandList;//m_computeCommandLists[context.frameIndex];
+	auto& computeCommandAllocator = graphicsCommandAllocator;//m_computeCommandAllocators[context.frameIndex];
+
+	if (useAsyncCompute) {
+		computeQueue = manager.GetComputeQueue();
+		computeCommandList = m_computeCommandLists[context.frameIndex];
+		computeCommandAllocator = m_computeCommandAllocators[context.frameIndex];
+	}
+    
+	UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue*context.frameFenceValue;
 	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue*context.frameFenceValue;
 
     graphicsCommandAllocator->Reset();
@@ -582,6 +596,9 @@ void RenderGraph::Execute(RenderContext& context) {
 		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
+			//if (transition.pResource->GetName() == L"LinearDepthBuffer") {
+			//	spdlog::info("linearDepthBuffer");
+			//}
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			computeBarriers.reserve(computeBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			computeBarriers.insert(computeBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
@@ -646,6 +663,9 @@ void RenderGraph::Execute(RenderContext& context) {
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
         for (auto& transition : batch.renderTransitions) {
+			//if (transition.pResource->GetName() == L"LinearDepthBuffer") {
+			//	spdlog::info("linearDepthBuffer");
+			//}
             BarrierGroups& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			renderBarriers.reserve(renderBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			renderBarriers.insert(renderBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
@@ -697,6 +717,9 @@ void RenderGraph::Execute(RenderContext& context) {
 		// Handle special case: Transition resources which will be used on compute queue later, but are in graphic-queue exclusive states
 		std::vector<D3D12_BARRIER_GROUP> passEndBarriers;
 		for (auto& transition : batch.passEndTransitions) {
+			//if (transition.pResource->GetName() == L"LinearDepthBuffer") {
+			//	spdlog::info("linearDepthBuffer");
+			//}
 			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			passEndBarriers.reserve(passEndBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
 			passEndBarriers.insert(passEndBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);

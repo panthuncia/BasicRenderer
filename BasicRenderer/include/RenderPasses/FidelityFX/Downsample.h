@@ -28,7 +28,7 @@ int num = 0;
 class DownsamplePass : public ComputePass {
 public:
 
-    DownsamplePass(std::shared_ptr<GloballyIndexedResource> pSrcDepths) : m_pSrcDepths(pSrcDepths) {}
+    DownsamplePass() {}
     ~DownsamplePass() {
 		addObserver.destruct(); // Needed for clean shutdown
 		removeObserver.destruct();
@@ -107,7 +107,7 @@ public:
         if (!mapInfo.pConstantsBufferView) {
 			spdlog::error("Downsample pass: No constants buffer view for primary depth map");
         }
-        downsampleRootConstants[UintRootConstant1] = m_pSrcDepths->GetSRVInfo(0).index;
+        downsampleRootConstants[UintRootConstant1] = context.pLinearDepthBuffer->GetSRVInfo(0).index;
 		downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).index;
         downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
@@ -177,8 +177,6 @@ private:
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
 	std::shared_ptr<GloballyIndexedResource> m_pDownsampleAtomicCounter;
 
-    std::shared_ptr<GloballyIndexedResource> m_pSrcDepths;
-
     ComPtr<ID3D12PipelineState> downsamplePassPSO;
 	ComPtr<ID3D12PipelineState> downsampleArrayPSO;
 
@@ -230,9 +228,9 @@ private:
         spdConstants.workGroupOffset[0] = workGroupOffset[0];
         spdConstants.workGroupOffset[1] = workGroupOffset[1];
 
-		//for (int i = 0; i < shadowMap.downsampledDepthMap->GetNumUAVMipLevels(); i++) {
-		//	spdConstants.mipUavDescriptorIndices[i] = shadowMap.downsampledDepthMap->GetUAVShaderVisibleInfo(i).index;
-		//}
+		for (int i = 0; i < shadowMap.linearDepthMap->GetNumUAVMipLevels(); i++) {
+			spdConstants.mipUavDescriptorIndices[i] = shadowMap.linearDepthMap->GetUAVShaderVisibleInfo(i).index;
+		}
 
         auto view = m_pDownsampleConstants->Add();
         m_pDownsampleConstants->UpdateView(view.get(), &spdConstants);

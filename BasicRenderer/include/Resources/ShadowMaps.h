@@ -36,8 +36,8 @@ public:
 		desc.format = DXGI_FORMAT_R32_TYPELESS;
 		desc.hasSRV = true;
 		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-		desc.generateMipMaps = true; // Mips will only be used by aliased downsample maps
-		desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
+		//desc.generateMipMaps = true; // Mips will only be used by aliased downsample maps
+		//desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;

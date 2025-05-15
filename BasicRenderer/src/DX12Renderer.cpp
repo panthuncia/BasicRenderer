@@ -1183,7 +1183,7 @@ void DX12Renderer::CreateRenderGraph() {
 
             auto shadowOccluderPassBuilder = newGraph->BuildRenderPass("OccluderShadowPrepass")
                 .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-                .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0 }))
+                .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0, 1 }))
                 .WithDepthReadWrite(m_shadowMaps)
                 .IsGeometryPass();
 
@@ -1198,7 +1198,7 @@ void DX12Renderer::CreateRenderGraph() {
 
         auto occludersPrepassBuilder = newGraph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
             .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-            .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0}), albedo, metallicRoughness, emissive)
+            .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
             .WithDepthReadWrite(depthTexture)
             .IsGeometryPass();
 
@@ -1211,10 +1211,10 @@ void DX12Renderer::CreateRenderGraph() {
         occludersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, true);
 
         // Single-pass downsample on all occluder-only depth maps
-        //auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
-        //    .WithShaderResource(Subresources(depthTexture, Mip{ 0 }), Subresources(m_shadowMaps, Mip{ 0 }))
-        //    .WithUnorderedAccess(Subresources(depthTexture, FromMip{ 1 }), Subresources(m_shadowMaps, FromMip{ 1 }))
-        //    .Build<DownsamplePass>(depthTexture);
+        auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
+            .WithShaderResource(Subresources(m_depthMap.linearDepthMap, Mip{ 0, 1 }), Subresources(m_linearShadowMaps, Mip{ 0, 1 }))
+            .WithUnorderedAccess(Subresources(m_depthMap.linearDepthMap, FromMip{ 1 }), Subresources(m_linearShadowMaps, FromMip{ 1 }))
+            .Build<DownsamplePass>();
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
             .WithCopyDest(indirectCommandBufferResourceGroup)
@@ -1238,7 +1238,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto newObjectsPrepassBuilder = newGraph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0}), albedo, metallicRoughness, emissive)
+        .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
         .WithDepthReadWrite(depthTexture)
         .IsGeometryPass();
 
@@ -1437,11 +1437,12 @@ void DX12Renderer::CreateRenderGraph() {
 
         auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
             .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-            .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0 }))
+            .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0, 1 }))
 			.WithDepthReadWrite(m_shadowMaps)
             .IsGeometryPass();
 
 		if (useMeshShaders) {
+			shadowBuilder.WithShaderResource(meshResourceGroup);
 			shadowBuilder.WithShaderResource(meshResourceGroup);
 			if (indirect) {
 				shadowBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);

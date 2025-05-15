@@ -6,6 +6,7 @@
 
 // Tag for a contiguous mip-range [first..first+count)
 struct Mip {
+	Mip(uint32_t first, uint32_t count) : first(first), count(count) {}
     uint32_t first, count;
 };
 
@@ -21,6 +22,7 @@ struct UpToMip {
 
 // Tag for a contiguous slice-range [first..first+count)
 struct Slice {
+	Slice(uint32_t first, uint32_t count) : first(first), count(count) {}
     uint32_t first, count;
 };
 
@@ -537,9 +539,9 @@ private:
 
         // Build a tracker for each resource, applying each (range->state)
         constexpr ResourceState initialState{
-            ResourceAccessType::NONE,
+            ResourceAccessType::COMMON,
             ResourceLayout   ::LAYOUT_COMMON,
-            ResourceSyncState::NONE
+            ResourceSyncState::ALL
         };
 
         std::unordered_map<uint64_t,SymbolicTracker> trackers;
@@ -818,9 +820,9 @@ private:
 
         // Build a tracker for each resource, applying each (range->state)
         constexpr ResourceState initialState{
-            ResourceAccessType::NONE,
+            ResourceAccessType::COMMON,
             ResourceLayout   ::LAYOUT_COMMON,
-            ResourceSyncState::NONE
+            ResourceSyncState::ALL
         };
 
         std::unordered_map<uint64_t,SymbolicTracker> trackers;
