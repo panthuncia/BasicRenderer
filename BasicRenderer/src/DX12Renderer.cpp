@@ -1169,7 +1169,8 @@ void DX12Renderer::CreateRenderGraph() {
             .Build<ClearMeshletCullingCommandUAVsPass>();
 
 		newGraph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
-            .WithUnorderedAccess(indirectCommandBufferResourceGroup)
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            .WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup)
 			.Build<BuildOccluderDrawCommandsPass>();
 
         newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass

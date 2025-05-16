@@ -231,8 +231,6 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
    
     RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
 
-    
-    
     bool occlusionCulled = false;
     bool partiallyOcclusionCulled = false;
     OcclusionCulling(occlusionCulled, partiallyOcclusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
@@ -242,7 +240,6 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
         ClearBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
         return; // reject whole object
     }
-    
 
     RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
     bool wasPartiallyCulledLastFrame = GetBit(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
@@ -276,11 +273,6 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
             }
         }
 
-    }
-    
-    if (wasVisibleLastFrame)
-    {
-        return; // This will have been drawn by the occluders pass
     }
     
     indirectCommandOutputBuffer.Append(command);
