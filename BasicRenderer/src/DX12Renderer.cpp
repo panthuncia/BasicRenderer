@@ -29,7 +29,7 @@
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
-#include "RenderPasses/FrustrumCullingPass.h"
+#include "RenderPasses/ObjectCullingPass.h"
 #include "RenderPasses/MeshletFrustrumCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
 #include "RenderPasses/PPLLFillPass.h"
@@ -44,7 +44,6 @@
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "RenderPasses/DeferredRenderPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
-#include "RenderPasses/BuildOccluderDrawCommands.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1171,7 +1170,7 @@ void DX12Renderer::CreateRenderGraph() {
 		newGraph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
             .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
             .WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup)
-			.Build<BuildOccluderDrawCommandsPass>();
+			.Build<ObjectCullingPass>(true);
 
         newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass
             .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
@@ -1227,10 +1226,10 @@ void DX12Renderer::CreateRenderGraph() {
             .WithCopyDest(meshletCullingCommandBufferResourceGroup)
             .Build<ClearMeshletCullingCommandUAVsPass>();
 
-		newGraph->BuildComputePass("FrustrumCullingPass") // Performs frustrum and occlusion culling
+		newGraph->BuildComputePass("ObjectCullingPass") // Performs frustrum and occlusion culling
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, m_depthMap.linearDepthMap, m_linearShadowMaps)
 			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup)
-			.Build<FrustrumCullingPass>();
+			.Build<ObjectCullingPass>(false);
 
 		newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum culled are sent to the meshlet culling pass
             .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)

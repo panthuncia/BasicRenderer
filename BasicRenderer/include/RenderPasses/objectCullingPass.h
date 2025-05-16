@@ -9,14 +9,14 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 
-class FrustrumCullingPass : public ComputePass {
+class ObjectCullingPass : public ComputePass {
 public:
-	FrustrumCullingPass() {
+	ObjectCullingPass(bool isOccludersPass) : m_isOccludersPass(isOccludersPass) {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
 
-	~FrustrumCullingPass() {
+	~ObjectCullingPass() {
 	}
 
 	void Setup() override {
@@ -225,7 +225,13 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/frustrumCulling.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+
+		std::vector<DxcDefine> defines;
+		if (m_isOccludersPass) {
+			defines.push_back({ L"OCCLUDERS_PASS", L"1" });
+		}
+
+		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"ObjectCullingCSMain", L"cs_6_6", defines, computeShader);
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
@@ -253,4 +259,5 @@ private:
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<bool()> getShadowsEnabled;
 
+	bool m_isOccludersPass = false;
 };
