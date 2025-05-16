@@ -142,11 +142,12 @@ void BuildOccluderDrawCommandsCSMain(uint dispatchID : SV_DispatchThreadID)
     meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
 }
 
-void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const Camera camera, float3 worldSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection)
+void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const Camera camera, float3 viewSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection)
 {
     // Occlusion culling
     float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
-    float4 vLBRT = sphere_screen_extents(worldSpaceCenter.xyz, scaledBoundingRadius, camera.viewProjection);
+    viewSpaceCenter.y = -viewSpaceCenter.y; // Invert Y for HZB sampling
+    float4 vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
     float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
     float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
     float4 vAABB = vUV * vHZB.xyxy; // vHZB = [w, h, l]
@@ -234,7 +235,7 @@ void CSMain(uint dispatchID : SV_DispatchThreadID)
     
     bool occlusionCulled = false;
     bool partiallyOcclusionCulled = false;
-    OcclusionCulling(occlusionCulled, partiallyOcclusionCulled, camera, worldSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
+    OcclusionCulling(occlusionCulled, partiallyOcclusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
     if (occlusionCulled)
     {
         // Update bitfield
