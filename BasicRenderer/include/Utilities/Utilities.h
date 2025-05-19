@@ -22,7 +22,8 @@
 #ifndef NDEBUG
 #define DEBUG_ONLY(x)   x
 #else
-#define DEBUG_ONLY(x)   ((void)0)
+#define DEBUG_ONLY(x)   x
+//#define DEBUG_ONLY(x)   ((void)0)
 #endif
 
 class DescriptorHeap;

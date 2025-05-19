@@ -1152,10 +1152,12 @@ void DX12Renderer::CreateRenderGraph() {
 
     std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
 	std::shared_ptr<ResourceGroup> meshletCullingCommandBufferResourceGroup = nullptr;
+	std::shared_ptr<ResourceGroup> objectOcclusionCullingBitfieldGroup = nullptr;
     if (indirect) {
         // Clear UAVs
         indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
         meshletCullingCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetMeshletCullingCommandResourceGroup();
+        objectOcclusionCullingBitfieldGroup = m_pCameraManager->GetMeshInstanceOcclusionCullingBitfieldGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
 		newGraph->AddResource(meshletCullingCommandBufferResourceGroup);
 
@@ -1169,7 +1171,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 		newGraph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
             .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-            .WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup)
+            .WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
 			.Build<ObjectCullingPass>(true);
 
         newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass
@@ -1214,8 +1216,8 @@ void DX12Renderer::CreateRenderGraph() {
 
         // Single-pass downsample on all occluder-only depth maps
         auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
-            .WithShaderResource(/*Subresources(*/m_depthMap.linearDepthMap/*, Mip{0, 1})*/, /*Subresources(*/m_linearShadowMaps/*, Mip{0, 1})*/)
-            .WithUnorderedAccess(/*Subresources(*/m_depthMap.linearDepthMap/*, FromMip{ 1 })*/, /*Subresources(*/m_linearShadowMaps/*, FromMip{ 1 })*/)
+            .WithShaderResource(Subresources(m_depthMap.linearDepthMap, Mip{0, 1}), /*Subresources(*/m_linearShadowMaps/*, Mip{0, 1})*/)
+            //.WithUnorderedAccess(/*Subresources(*/m_depthMap.linearDepthMap/*, FromMip{ 1 })*/,/* Subresources(*/m_linearShadowMaps/*, FromMip{ 1 })*/)
             .Build<DownsamplePass>();
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
@@ -1228,7 +1230,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 		newGraph->BuildComputePass("ObjectCullingPass") // Performs frustrum and occlusion culling
 			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, m_depthMap.linearDepthMap, m_linearShadowMaps)
-			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup)
+			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
 			.Build<ObjectCullingPass>(false);
 
 		newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum culled are sent to the meshlet culling pass

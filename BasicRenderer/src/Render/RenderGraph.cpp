@@ -72,6 +72,9 @@ void RenderGraph::AddTransition(
 		unsigned int gfxBatch = context.transHistRender[resource->GetGlobalResourceID()];
 		for (auto& transition : transitions) {
 			context.transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
+			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
+				spdlog::info("linearDepthBuffer");
+			}
 			batches[gfxBatch].passEndTransitions.push_back(transition);
 		}
 	}
@@ -100,6 +103,10 @@ void RenderGraph::ProcessResourceRequirements(
 	PassBatch& currentBatch) {
 
 	for (auto& resourceRequirement : resourceRequirements) {
+
+		if (resourceRequirement.resourceAndRange.resource->GetName() == L"LinearDepthBuffer") {
+			spdlog::info("linearDepthBuffer");
+		}
 
 		if (resourceRequirement.state.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.state.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
 			spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
@@ -622,6 +629,8 @@ void RenderGraph::Execute(RenderContext& context) {
 		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
+			std::vector<ResourceTransition> dummy;
+			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
 				spdlog::info("linearDepthBuffer");
 			}
@@ -689,6 +698,8 @@ void RenderGraph::Execute(RenderContext& context) {
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
 		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
         for (auto& transition : batch.renderTransitions) {
+			std::vector<ResourceTransition> dummy;
+			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
 				spdlog::info("linearDepthBuffer");
 			}
@@ -743,6 +754,8 @@ void RenderGraph::Execute(RenderContext& context) {
 		// Handle special case: Transition resources which will be used on compute queue later, but are in graphic-queue exclusive states
 		std::vector<D3D12_BARRIER_GROUP> passEndBarriers;
 		for (auto& transition : batch.passEndTransitions) {
+			std::vector<ResourceTransition> dummy;
+			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
 				spdlog::info("linearDepthBuffer");
 			}
