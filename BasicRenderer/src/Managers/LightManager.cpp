@@ -232,6 +232,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.depthBufferArrayIndex = i;
 		cameraInfo.depthResX = getShadowResolution();
 		cameraInfo.depthResY = getShadowResolution();
+		cameraInfo.numDepthMips = CalculateMipLevels(cameraInfo.depthResX, cameraInfo.depthResY);
 		// TODO: Needs near and far for depth unprojection
 		auto renderView = m_pCameraManager->AddCamera(cameraInfo);
 		m_directionalViewInfo->Add(renderView.cameraBufferIndex);
@@ -268,6 +269,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.depthBufferArrayIndex = i;
 			info.depthResX = viewInfo->depthResX;
 			info.depthResY = viewInfo->depthResY;
+			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
@@ -288,6 +290,8 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		camera.depthBufferArrayIndex = 0;
 		camera.depthResX = viewInfo->depthResX;
 		camera.depthResY = viewInfo->depthResY;
+		camera.numDepthMips = CalculateMipLevels(camera.depthResX, camera.depthResY);
+
 		m_pCameraManager->UpdateCamera(renderViews[0], camera);
 		break;
 	}
@@ -317,6 +321,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.depthBufferArrayIndex = i;
 			info.depthResX = viewInfo->depthResX;
 			info.depthResY = viewInfo->depthResY;
+			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;

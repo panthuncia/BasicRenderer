@@ -231,7 +231,6 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 	newCameraInfo = *camera;
 	auto screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
 	auto depth = CreateDepthMapComponent(screenRes.x, screenRes.y, 1, false);
-	newCameraInfo.info.depthBufferArrayIndex = 0; // TODO: This is kinda boilerplate, should probably restructure view creation
 	newCameraInfo.info.numDepthMips = NumMips(screenRes.x, screenRes.y);
 	newCameraInfo.info.depthResX = screenRes.x;
 	newCameraInfo.info.depthResY = screenRes.y;

@@ -70,6 +70,7 @@ void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const C
 // UintRootConstant0 is a bitfield that marks meshes that will be culled per-meshlet
 // UintRootConstant1 is the meshlet frustrum culling reset command buffer
 // UintRootConstant2 is the downsampled depth SRV index
+// UintRootConstant3 is the mesh instance visibility bitfield
 
 // Object culling, one thread per object
 [numthreads(64, 1, 1)]

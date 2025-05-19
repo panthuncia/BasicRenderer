@@ -51,9 +51,6 @@ void RenderGraph::AddTransition(
 	}
 	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to palce transitions on render queue
 		unsigned int gfxBatch = context.transHistRender[resource->GetGlobalResourceID()];
-		if (resource->GetName() == L"LinearDepthBuffer") {
-			spdlog::info("Resource {} has a non-compute sync state");
-		}
 		for (auto& transition : transitions) {
 			context.transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
 			batches[gfxBatch].passEndTransitions.push_back(transition);
