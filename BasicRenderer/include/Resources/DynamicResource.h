@@ -36,7 +36,7 @@ public:
     ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override { return resource->GetSubresourceLayout(subresourceIndex); }
     ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override { return resource->GetSubresourceSyncState(subresourceIndex); }*/
 
-    virtual BarrierGroups& GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
         if (resource) {
             //m_currentAccessType = newAccessType;
             //m_currentLayout = newLayout;
@@ -87,7 +87,7 @@ public:
         return m_resource;
     }
 
-    virtual BarrierGroups& GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 		if (m_resource) {
 			//SetState(newState); // Keep the wrapper's state in sync
 			return m_resource->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);

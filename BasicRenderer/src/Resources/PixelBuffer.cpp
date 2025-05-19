@@ -31,24 +31,23 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 	m_mipLevels = desc.generateMipMaps ? CalculateMipLevels(m_width, m_height) : 1;
 	m_arraySize = desc.arraySize;
 
-	D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    barrier.Transition.pResource = handle.texture.Get();
-    
-	m_transitions.push_back(barrier);
+	//D3D12_RESOURCE_BARRIER barrier = {};
+ //   barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+ //   barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+ //   barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+ //   barrier.Transition.pResource = handle.texture.Get();
+ //   
+	//m_transitions.push_back(barrier);
 
-    m_barrierGroup.NumBarriers = 1;
-    m_barrierGroup.Type = D3D12_BARRIER_TYPE_TEXTURE;
-    m_barrierGroup.pTextureBarriers = &m_textureBarrier;
+ //   m_barrierGroup.NumBarriers = 1;
+ //   m_barrierGroup.Type = D3D12_BARRIER_TYPE_TEXTURE;
+ //   m_barrierGroup.pTextureBarriers = &m_textureBarrier;
 
-    m_textureBarrier.pResource = handle.texture.Get();
-	m_textureBarrier.Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE;
-	m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff); // TODO: would more fine-grained transitions be better?
+ //   m_textureBarrier.pResource = handle.texture.Get();
+	//m_textureBarrier.Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE;
+	//m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff); // TODO: would more fine-grained transitions be better?
 
-	m_barrierGroups.numTextureBarrierGroups = 1;
-	m_barrierGroups.textureBarriers = &m_barrierGroup;
+	//m_barrierGroups.textureBarriers.push_back(m_barrierGroup);
 
     m_hasLayout = true;
 
@@ -58,7 +57,7 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 }
 
 
-BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
     //if (prevAccessType) {
     //    throw(std::runtime_error("Texture state mismatch"));
@@ -70,26 +69,33 @@ BarrierGroups& PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAcc
     //    throw(std::runtime_error("Useless transition"));
     //}
 #endif
-    m_textureBarrier.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
-    m_textureBarrier.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
-    m_textureBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
-    m_textureBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
-	m_textureBarrier.LayoutBefore = (D3D12_BARRIER_LAYOUT)prevLayout;
-    m_textureBarrier.LayoutAfter = (D3D12_BARRIER_LAYOUT)newLayout;
+    BarrierGroups barrierGroups = {};
+
+    barrierGroups.textureBarrierDescs.push_back({});
+    auto& textureBarrierDesc = barrierGroups.textureBarrierDescs[0];
+    textureBarrierDesc.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
+    textureBarrierDesc.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
+    textureBarrierDesc.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
+    textureBarrierDesc.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
+    textureBarrierDesc.LayoutBefore = (D3D12_BARRIER_LAYOUT)prevLayout;
+    textureBarrierDesc.LayoutAfter = (D3D12_BARRIER_LAYOUT)newLayout;
+	textureBarrierDesc.Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE;
+    textureBarrierDesc.pResource = handle.texture.Get();
 
 	auto resolvedRange = ResolveRangeSpec(range, m_mipLevels, m_arraySize);
 
-	//for (unsigned int i = subresourceStart; i < subresourceEnd; i++) {
-	//	m_subresourceAccessTypes[i] = newAccessType;
-	//	m_subresourceLayouts[i] = newLayout;
-	//	m_subresourceSyncStates[i] = newSyncState;
-	//}
-
     if (resolvedRange.mipCount == m_mipLevels) {
-        m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff);
+        textureBarrierDesc.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff);
     }
     else {
-        m_textureBarrier.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
+        textureBarrierDesc.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
     }
-    return m_barrierGroups;
+
+    D3D12_BARRIER_GROUP group;
+	group.NumBarriers = 1;
+	group.Type = D3D12_BARRIER_TYPE_TEXTURE;
+	group.pTextureBarriers = barrierGroups.textureBarrierDescs.data();
+	barrierGroups.textureBarriers.push_back(group);
+
+    return barrierGroups;
 }

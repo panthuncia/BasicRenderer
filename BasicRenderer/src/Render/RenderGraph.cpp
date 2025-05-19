@@ -25,16 +25,6 @@ void RenderGraph::AddTransition(
 	std::vector<ResourceTransition> transitions;
 	resource->GetStateTracker()->Apply(r.resourceAndRange.range, resource.get(), r.state, transitions);
 
-	for (auto& transition : transitions) {
-		if (transition.range.mipUpper.value > 10000) {
-			spdlog::info("What?");
-		}
-	}
-
-	if (currentBatch.passBatchTrackers.contains(resource->GetGlobalResourceID()) && transitions.size()>0) {
-		spdlog::info("How did this happen?");
-	}
-
 	currentBatch.passBatchTrackers[resource->GetGlobalResourceID()] = resource->GetStateTracker(); // We will need to chack subsequent passes against this
 
 	// Check if this is a resource group
@@ -53,28 +43,19 @@ void RenderGraph::AddTransition(
 		}
 	}
 
-	bool isDebug = false;
-	if (resource->GetName() == L"DepthStencilBuffer") {
-		spdlog::info("transitions:");
-		isDebug = true;
-	}
-
 	bool oldSyncHasNonComputeSyncState = false;
 	for (auto& transition : transitions) {
 		if (ResourceSyncStateIsNotComputeSyncState(transition.prevSyncState)) {
 			oldSyncHasNonComputeSyncState = true;
-			if (isDebug) {
-				spdlog::info("Resource {} has non compute sync state");
-			}
 		}
 	}
 	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to palce transitions on render queue
 		unsigned int gfxBatch = context.transHistRender[resource->GetGlobalResourceID()];
+		if (resource->GetName() == L"LinearDepthBuffer") {
+			spdlog::info("Resource {} has a non-compute sync state");
+		}
 		for (auto& transition : transitions) {
 			context.transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
-			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
-				spdlog::info("linearDepthBuffer");
-			}
 			batches[gfxBatch].passEndTransitions.push_back(transition);
 		}
 	}
@@ -103,10 +84,6 @@ void RenderGraph::ProcessResourceRequirements(
 	PassBatch& currentBatch) {
 
 	for (auto& resourceRequirement : resourceRequirements) {
-
-		if (resourceRequirement.resourceAndRange.resource->GetName() == L"LinearDepthBuffer") {
-			spdlog::info("linearDepthBuffer");
-		}
 
 		if (resourceRequirement.state.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.state.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
 			spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
@@ -215,9 +192,6 @@ void RenderGraph::Compile() {
 
 
 		bool isCompute = (pr.type == PassType::Compute);
-		if (pr.name == "Environment Prefilter Pass") {
-			spdlog::info("currentBatchIndex = 11");
-		}
 
 		if (isCompute) {
 			auto& pass = std::get<ComputePassAndResources>(pr.pass);
@@ -309,31 +283,6 @@ void RenderGraph::Compile() {
 
     // Insert transitions to loop resources back to their initial states
 	ComputeResourceLoops();
-	
-	std::vector<std::vector<ResourceTransition>> debug;
-	int i = 0;
-	for (auto& batch : batches) {
-		debug.push_back({});
-		for (ResourceTransition& transition : batch.computeTransitions) {
-			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
-				debug[i].push_back(transition);
-			}
-		}
-
-		for (ResourceTransition& transition : batch.renderTransitions) {
-			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
-				debug[i].push_back(transition);
-			}
-		}
-
-		for (ResourceTransition& transition : batch.passEndTransitions) {
-			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
-				debug[i].push_back(transition);
-			}
-		}
-
-		i++;
-	}
 
 	// Readback pass in its own batch
 	auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
@@ -526,6 +475,7 @@ void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassP
 
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transition) {
 	auto& name = resource->GetName();
+
 #ifdef _DEBUG
 	//if (name == L"") {
 	//	throw std::runtime_error("Resource name cannot be empty");
@@ -626,20 +576,22 @@ void RenderGraph::Execute(RenderContext& context) {
 		}
 
 		// Perform resource transitions
+		std::vector<BarrierGroups> computeBarrierGroups;
 		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
-		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
 		for (auto& transition : batch.computeTransitions) {
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
-			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
-				spdlog::info("linearDepthBuffer");
-			}
-			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			computeBarriers.reserve(computeBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
-			computeBarriers.insert(computeBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
-			computeBarriers.insert(computeBarriers.end(), transitions.textureBarriers, transitions.textureBarriers + transitions.numTextureBarrierGroups);
-			computeBarriers.insert(computeBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
+			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			computeBarrierGroups.push_back(std::move(transitions));
 		}
+		std::vector<D3D12_BARRIER_GROUP> computeBarriers;
+		for (auto& transition : computeBarrierGroups) {
+			computeBarriers.reserve(computeBarriers.size() + transition.bufferBarriers.size() + transition.textureBarriers.size() + transition.globalBarriers.size());
+			computeBarriers.insert(computeBarriers.end(), transition.bufferBarriers.begin(), transition.bufferBarriers.end());
+			computeBarriers.insert(computeBarriers.end(), transition.textureBarriers.begin(), transition.textureBarriers.end());
+			computeBarriers.insert(computeBarriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
+		}
+
 		if (computeBarriers.size() > 0) {
 			computeCommandList->Barrier(static_cast<UINT>(computeBarriers.size()), computeBarriers.data());
 		}
@@ -696,19 +648,21 @@ void RenderGraph::Execute(RenderContext& context) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
-		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
+		std::vector<BarrierGroups> renderBarrierGroups;
         for (auto& transition : batch.renderTransitions) {
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
-			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
-				spdlog::info("linearDepthBuffer");
-			}
-            BarrierGroups& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			renderBarriers.reserve(renderBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
-			renderBarriers.insert(renderBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
-			renderBarriers.insert(renderBarriers.end(), transitions.textureBarriers, transitions.textureBarriers + transitions.numTextureBarrierGroups);
-			renderBarriers.insert(renderBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
+			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			renderBarrierGroups.push_back(std::move(transitions));
         }
+		std::vector<D3D12_BARRIER_GROUP> renderBarriers;
+		for (auto& transition : renderBarrierGroups) {
+			renderBarriers.reserve(renderBarriers.size() + transition.bufferBarriers.size() + transition.textureBarriers.size() + transition.globalBarriers.size());
+			renderBarriers.insert(renderBarriers.end(), transition.bufferBarriers.begin(), transition.bufferBarriers.end());
+			renderBarriers.insert(renderBarriers.end(), transition.textureBarriers.begin(), transition.textureBarriers.end());
+			renderBarriers.insert(renderBarriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
+		}
+
         if (renderBarriers.size() > 0) {
             graphicsCommandList->Barrier(static_cast<UINT>(renderBarriers.size()), renderBarriers.data());
         }
@@ -752,18 +706,19 @@ void RenderGraph::Execute(RenderContext& context) {
 		}
 
 		// Handle special case: Transition resources which will be used on compute queue later, but are in graphic-queue exclusive states
-		std::vector<D3D12_BARRIER_GROUP> passEndBarriers;
+		std::vector<BarrierGroups> passEndTransitions;
 		for (auto& transition : batch.passEndTransitions) {
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
-			if (transition.pResource->GetName() == L"LinearDepthBuffer") {
-				spdlog::info("linearDepthBuffer");
-			}
-			auto& transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			passEndBarriers.reserve(passEndBarriers.size() + transitions.numBufferBarrierGroups + transitions.numTextureBarrierGroups + transitions.numGlobalBarrierGroups);
-			passEndBarriers.insert(passEndBarriers.end(), transitions.bufferBarriers, transitions.bufferBarriers + transitions.numBufferBarrierGroups);
-			passEndBarriers.insert(passEndBarriers.end(), transitions.textureBarriers, transitions.textureBarriers + transitions.numTextureBarrierGroups);
-			passEndBarriers.insert(passEndBarriers.end(), transitions.globalBarriers, transitions.globalBarriers + transitions.numGlobalBarrierGroups);
+			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			passEndTransitions.push_back(std::move(transitions));
+		}
+		std::vector<D3D12_BARRIER_GROUP> passEndBarriers;
+		for (auto& transition : passEndTransitions) {
+			passEndBarriers.reserve(passEndBarriers.size() + transition.bufferBarriers.size() + transition.textureBarriers.size() + transition.globalBarriers.size());
+			passEndBarriers.insert(passEndBarriers.end(), transition.bufferBarriers.begin(), transition.bufferBarriers.end());
+			passEndBarriers.insert(passEndBarriers.end(), transition.textureBarriers.begin(), transition.textureBarriers.end());
+			passEndBarriers.insert(passEndBarriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
 		}
 
 		graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
@@ -789,10 +744,6 @@ bool RenderGraph::IsNewBatchNeeded(
 {
 	// For each subresource requirement in this pass:
 	for (auto const &r : reqs) {
-
-		if (r.resourceAndRange.resource->GetName() == L"LinearDepthBuffer") {
-			spdlog::info("llll");
-		}
 
 		uint64_t id = r.resourceAndRange.resource->GetGlobalResourceID();
 		ResourceState wantState{ r.state.access, r.state.layout, r.state.sync };

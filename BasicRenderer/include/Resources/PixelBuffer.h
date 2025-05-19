@@ -26,7 +26,7 @@ public:
     ComPtr<ID3D12Resource> GetTexture() const {
 		return handle.texture;
     }
-    BarrierGroups& GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+    BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 
     virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
 
@@ -56,7 +56,7 @@ private:
 	std::vector<D3D12_RESOURCE_BARRIER> m_emptyTransitions = {};
 
     // Enhanced barriers
-    D3D12_TEXTURE_BARRIER m_textureBarrier;
+    //D3D12_TEXTURE_BARRIER m_textureBarrier;
     D3D12_BARRIER_GROUP m_barrierGroup = {};
-	BarrierGroups m_barrierGroups;
+	//BarrierGroups m_barrierGroups;
 };

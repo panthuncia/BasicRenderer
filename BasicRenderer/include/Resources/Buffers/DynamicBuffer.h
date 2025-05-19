@@ -52,7 +52,7 @@ public:
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
 
 protected:
-    BarrierGroups& GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
         m_subresourceAccessTypes[0] = newAccessType;
         m_subresourceLayouts[0] = newLayout;
         m_subresourceSyncStates[0] = newSyncState;

@@ -9,12 +9,19 @@
 class RenderContext;
 
 struct BarrierGroups {
-	unsigned int numBufferBarrierGroups = 0;
-	unsigned int numTextureBarrierGroups = 0;
-	unsigned int numGlobalBarrierGroups = 0;
-    D3D12_BARRIER_GROUP* bufferBarriers = nullptr;
-    D3D12_BARRIER_GROUP* textureBarriers = nullptr;
-    D3D12_BARRIER_GROUP* globalBarriers = nullptr;
+	std::vector<D3D12_TEXTURE_BARRIER>   textureBarrierDescs;
+	std::vector<D3D12_BUFFER_BARRIER>    bufferBarrierDescs;
+	std::vector<D3D12_GLOBAL_BARRIER>    globalBarrierDescs;
+
+    std::vector<D3D12_BARRIER_GROUP> bufferBarriers;
+    std::vector<D3D12_BARRIER_GROUP> textureBarriers;
+    std::vector<D3D12_BARRIER_GROUP> globalBarriers;
+
+	BarrierGroups() = default; // Default constructor
+	BarrierGroups(const BarrierGroups&) = delete;            // no copy, since the ptrs in D3D12_BARRIER_GROUP will be invalid
+	BarrierGroups& operator=(const BarrierGroups&) = delete;
+	BarrierGroups(BarrierGroups&&) = default;                // allow move
+	BarrierGroups& operator=(BarrierGroups&&) = default;
 };
 
 class Resource {
@@ -31,7 +38,7 @@ public:
 	virtual ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_subresourceAccessTypes[subresourceIndex] ; }
 	virtual ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const { return m_subresourceLayouts[subresourceIndex]; }
 	virtual ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_subresourceSyncStates[subresourceIndex]; }
-    virtual BarrierGroups& GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
+    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
 	bool HasLayout() const { return m_hasLayout; }
 	void AddAliasedResource(Resource* resource) {
 		m_aliasedResources.push_back(resource);
