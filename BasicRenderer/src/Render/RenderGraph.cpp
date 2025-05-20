@@ -82,6 +82,11 @@ void RenderGraph::ProcessResourceRequirements(
 
 	for (auto& resourceRequirement : resourceRequirements) {
 
+		if (!resourcesByID.contains(resourceRequirement.resourceAndRange.resource->GetGlobalResourceID())) {
+			spdlog::error("Resource referenced by pass is not managed by this graph");
+			throw(std::runtime_error("Resource referenced is not managed by this graph"));
+		}
+
 		if (resourceRequirement.state.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.state.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
 			spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
 		}
@@ -739,6 +744,7 @@ bool RenderGraph::IsNewBatchNeeded(
 	const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
 	const std::unordered_set<uint64_t>& otherQueueUAVs)
 {
+	return true;
 	// For each subresource requirement in this pass:
 	for (auto const &r : reqs) {
 

@@ -114,12 +114,12 @@ private:
         debugRootParameters[1].InitAsConstants(16, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX); // Vertex shader will use the constant buffer
 
         D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
-        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
         samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         samplerDesc.MipLODBias = 0.0f;
-        samplerDesc.MaxAnisotropy = 1;
+        samplerDesc.MaxAnisotropy = 0;
         samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
         samplerDesc.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
         samplerDesc.MinLOD = 0.0f;

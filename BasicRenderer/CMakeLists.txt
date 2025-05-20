@@ -183,7 +183,9 @@ add_compile_definitions(NOMINMAX)
 add_compile_options("/wd4267")
 
 if (MSVC)
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
+
 #  # Tell the compiler to generate Program Database debug info
 #  set(CMAKE_CXX_FLAGS_RELEASE
 #      "${CMAKE_CXX_FLAGS_RELEASE} /Zi")

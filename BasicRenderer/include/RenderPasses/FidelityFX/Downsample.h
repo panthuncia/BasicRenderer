@@ -209,6 +209,11 @@ private:
     }
 
     void AddMapInfo(flecs::entity e, const Components::DepthMap& shadowMap) {
+
+		if (m_perViewMapInfo.contains(e.id())) {
+			RemoveMapInfo(e);
+		}
+
         auto& shadowMapResource = shadowMap.depthMap;
         unsigned int workGroupOffset[2];
         unsigned int numWorkGroupsAndMips[2];

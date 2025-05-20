@@ -30,6 +30,8 @@ void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const C
     float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
     viewSpaceCenter.y = -viewSpaceCenter.y; // Invert Y for HZB sampling
     float4 vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+    vLBRT.x = -vLBRT.x;
+    vLBRT.z = -vLBRT.z;
     float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
     float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
     float4 vAABB = vUV * vHZB.xyxy; // vHZB = [w, h, l]

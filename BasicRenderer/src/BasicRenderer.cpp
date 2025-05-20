@@ -225,11 +225,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Aftermath
 
+#ifndef NDEBUG
     HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
     if (!pixLoaded) {
         // Print the error code for debugging purposes
         spdlog::warn("Could not load PIX! Error: ", GetLastError());
     }
+#endif
 
     SetDllDirectoryA(".\\D3D\\");
 
@@ -332,19 +334,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //mountainScene->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 1000; i++) {
+	for (int i = 0; i < 100; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
 	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
-		auto point = randomPointInSphere(10.0);
+		auto point = randomPointInSphere(20.0);
         cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
@@ -421,7 +425,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light"+std::to_wstring(i), XMFLOAT3(point.x, point.y, point.z), color, 3.0, 0.0, 0.0, 1.0, false);
     }
 
-    renderer.SetDebugTexture(light.get<Components::DepthMap>()->depthMap);
+    //renderer.SetDebugTexture(renderer.GetCurrentScene()->GetPrimaryCamera().get<Components::DepthMap>()->linearDepthMap);
 
     MSG msg = {};
     unsigned int frameIndex = 0;

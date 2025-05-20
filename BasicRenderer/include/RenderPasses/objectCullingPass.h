@@ -62,7 +62,7 @@ public:
 		auto primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
 		unsigned int cameraIndex = primaryView->cameraBufferIndex;
 
-		bool shadows = getShadowsEnabled();
+		bool shadows = false;//getShadowsEnabled();
 		// opaque buffer
 		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {

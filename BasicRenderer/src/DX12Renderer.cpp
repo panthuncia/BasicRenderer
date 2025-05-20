@@ -608,44 +608,44 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 }
 
 void DX12Renderer::CreateTextures() {
-    TextureDescription depthStencilDesc;
-    ImageDimensions dimensions;
-    dimensions.width = m_xRes;
-    dimensions.height = m_yRes;
-    depthStencilDesc.imageDimensions.push_back(dimensions);
-    depthStencilDesc.format = DXGI_FORMAT_R32_TYPELESS;
-    depthStencilDesc.hasSRV = true;
-    depthStencilDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-    depthStencilDesc.arraySize = 1;
-    depthStencilDesc.channels = 1;
-    depthStencilDesc.generateMipMaps = false;
-    depthStencilDesc.hasDSV = true;
-	depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
-    //depthStencilDesc.allowAlias = true;
+ //   TextureDescription depthStencilDesc;
+ //   ImageDimensions dimensions;
+ //   dimensions.width = m_xRes;
+ //   dimensions.height = m_yRes;
+ //   depthStencilDesc.imageDimensions.push_back(dimensions);
+ //   depthStencilDesc.format = DXGI_FORMAT_R32_TYPELESS;
+ //   depthStencilDesc.hasSRV = true;
+ //   depthStencilDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+ //   depthStencilDesc.arraySize = 1;
+ //   depthStencilDesc.channels = 1;
+ //   depthStencilDesc.generateMipMaps = false;
+ //   depthStencilDesc.hasDSV = true;
+	//depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
+ //   //depthStencilDesc.allowAlias = true;
 
-    auto depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
-    depthStencilBuffer->SetName(L"DepthStencilBuffer");
+ //   auto depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
+ //   depthStencilBuffer->SetName(L"DepthStencilBuffer");
 
-    TextureDescription linearDepthDesc;
-	linearDepthDesc.imageDimensions.push_back(dimensions);
-	linearDepthDesc.format = DXGI_FORMAT_R32_FLOAT;
-	linearDepthDesc.hasSRV = true;
-	linearDepthDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-	linearDepthDesc.arraySize = 1;
-	linearDepthDesc.channels = 1;
-	linearDepthDesc.generateMipMaps = true;
-	linearDepthDesc.hasUAV = true;
-	linearDepthDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
-	linearDepthDesc.hasRTV = true;
-	linearDepthDesc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
-    linearDepthDesc.clearColor[0] = std::numeric_limits<float>().max();
+ //   TextureDescription linearDepthDesc;
+	//linearDepthDesc.imageDimensions.push_back(dimensions);
+	//linearDepthDesc.format = DXGI_FORMAT_R32_FLOAT;
+	//linearDepthDesc.hasSRV = true;
+	//linearDepthDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+	//linearDepthDesc.arraySize = 1;
+	//linearDepthDesc.channels = 1;
+	//linearDepthDesc.generateMipMaps = true;
+	//linearDepthDesc.hasUAV = true;
+	//linearDepthDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+	//linearDepthDesc.hasRTV = true;
+	//linearDepthDesc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
+ //   linearDepthDesc.clearColor[0] = std::numeric_limits<float>().max();
 
 
-	auto linearDepthBuffer = PixelBuffer::Create(linearDepthDesc);
-	linearDepthBuffer->SetName(L"LinearDepthBuffer");
+	//auto linearDepthBuffer = PixelBuffer::Create(linearDepthDesc);
+	//linearDepthBuffer->SetName(L"LinearDepthBuffer");
 
-	m_depthMap.depthMap = depthStencilBuffer;
-	m_depthMap.linearDepthMap = linearDepthBuffer;
+	//m_depthMap.depthMap = depthStencilBuffer;
+	//m_depthMap.linearDepthMap = linearDepthBuffer;
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
@@ -763,8 +763,9 @@ void DX12Renderer::Render() {
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
     m_context.renderTargets = renderTargets.data();
-	m_context.pPrimaryDepthBuffer = m_depthMap.depthMap.get();
-	m_context.pLinearDepthBuffer = m_depthMap.linearDepthMap.get();
+    auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
+	m_context.pPrimaryDepthBuffer = depth->depthMap.get();
+	m_context.pLinearDepthBuffer = depth->linearDepthMap.get();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
@@ -930,7 +931,7 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	auto& ecs_world = ECSManager::GetInstance().GetWorld();
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
-    currentScene->SetDepthMap(m_depthMap);
+    //currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;
 }
@@ -1016,9 +1017,10 @@ void DX12Renderer::CreateRenderGraph() {
     //StallPipeline();
 
     auto newGraph = std::make_shared<RenderGraph>();
-    std::shared_ptr<PixelBuffer> depthTexture = m_depthMap.depthMap;
+	auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
+    std::shared_ptr<PixelBuffer> depthTexture = depth->depthMap;
 	newGraph->AddResource(depthTexture, false);
-    newGraph->AddResource(m_depthMap.linearDepthMap);
+    newGraph->AddResource(depth->linearDepthMap);
     auto& meshManager = m_pMeshManager;
     auto& objectManager = m_pObjectManager;
 	auto meshResourceGroup = meshManager->GetResourceGroup();
@@ -1160,6 +1162,7 @@ void DX12Renderer::CreateRenderGraph() {
         objectOcclusionCullingBitfieldGroup = m_pCameraManager->GetMeshInstanceOcclusionCullingBitfieldGroup();
         newGraph->AddResource(indirectCommandBufferResourceGroup);
 		newGraph->AddResource(meshletCullingCommandBufferResourceGroup);
+		newGraph->AddResource(objectOcclusionCullingBitfieldGroup);
 
 		newGraph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
             .WithCopyDest(indirectCommandBufferResourceGroup)
@@ -1202,7 +1205,7 @@ void DX12Renderer::CreateRenderGraph() {
 
         auto occludersPrepassBuilder = newGraph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
             .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-            .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
+            .WithRenderTarget(normalsWorldSpace, Subresources(depth->linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
             .WithDepthReadWrite(depthTexture)
             .IsGeometryPass();
 
@@ -1216,8 +1219,8 @@ void DX12Renderer::CreateRenderGraph() {
 
         // Single-pass downsample on all occluder-only depth maps
         auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
-            .WithShaderResource(Subresources(m_depthMap.linearDepthMap, Mip{0, 1}), Subresources(m_linearShadowMaps, Mip{0, 1}))
-            .WithUnorderedAccess(Subresources(m_depthMap.linearDepthMap, FromMip{ 1 }), Subresources(m_linearShadowMaps, FromMip{ 1 }))
+            .WithShaderResource(Subresources(depth->linearDepthMap, Mip{0, 1}), Subresources(m_linearShadowMaps, Mip{0, 1}))
+            .WithUnorderedAccess(Subresources(depth->linearDepthMap, FromMip{ 1 }), Subresources(m_linearShadowMaps, FromMip{ 1 }))
             .Build<DownsamplePass>();
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
@@ -1229,7 +1232,7 @@ void DX12Renderer::CreateRenderGraph() {
             .Build<ClearMeshletCullingCommandUAVsPass>();
 
 		newGraph->BuildComputePass("ObjectCullingPass") // Performs frustrum and occlusion culling
-			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, m_depthMap.linearDepthMap, m_linearShadowMaps)
+			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, depth->linearDepthMap, m_linearShadowMaps)
 			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
 			.Build<ObjectCullingPass>(false);
 
@@ -1242,7 +1245,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     auto newObjectsPrepassBuilder = newGraph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
         .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace, Subresources(m_depthMap.linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
+        .WithRenderTarget(normalsWorldSpace, Subresources(depth->linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
         .WithDepthReadWrite(depthTexture)
         .IsGeometryPass();
 
@@ -1349,7 +1352,7 @@ void DX12Renderer::CreateRenderGraph() {
         UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
 
         newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
-            .WithShaderResource(normalsWorldSpace, m_depthMap.depthMap)
+            .WithShaderResource(normalsWorldSpace, depth->depthMap)
             .WithUnorderedAccess(workingDepths)
             .Build<GTAOFilterPass>(GTAOConstantBuffer);
 
@@ -1455,7 +1458,7 @@ void DX12Renderer::CreateRenderGraph() {
 		bool clear = indirect ? false : true;
 		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, clear);
 
-        debugPassBuilder.WithShaderResource(m_shadowMaps);
+        debugPassBuilder.WithShaderResource(depth->linearDepthMap);
     }
 
     if (m_currentEnvironment != nullptr) {
