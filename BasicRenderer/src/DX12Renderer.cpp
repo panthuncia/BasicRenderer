@@ -30,7 +30,7 @@
 #include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/ObjectCullingPass.h"
-#include "RenderPasses/MeshletFrustrumCullingPass.h"
+#include "RenderPasses/MeshletCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
 #include "RenderPasses/PPLLFillPass.h"
 #include "RenderPasses/PPLLResolvePass.h"
@@ -1181,7 +1181,7 @@ void DX12Renderer::CreateRenderGraph() {
             .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
             .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
             .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-            .Build<MeshletFrustrumCullingPass>();
+            .Build<MeshletCullingPass>(true);
 
         // We need to draw occluder shadows early
         auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
@@ -1218,6 +1218,7 @@ void DX12Renderer::CreateRenderGraph() {
         occludersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, true);
 
         // Single-pass downsample on all occluder-only depth maps
+        // TODO: Unhandled edge case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped)
         auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
             .WithShaderResource(Subresources(depth->linearDepthMap, Mip{0, 1}), Subresources(m_linearShadowMaps, Mip{0, 1}))
             .WithUnorderedAccess(Subresources(depth->linearDepthMap, FromMip{ 1 }), Subresources(m_linearShadowMaps, FromMip{ 1 }))
@@ -1236,11 +1237,11 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
 			.Build<ObjectCullingPass>(false);
 
-		newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum culled are sent to the meshlet culling pass
-            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+		newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum *or* occlusion culled are sent to the meshlet culling pass
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, depth->linearDepthMap, m_linearShadowMaps)
             .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
             .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-			.Build<MeshletFrustrumCullingPass>();
+			.Build<MeshletCullingPass>(false);
     }
 
     auto newObjectsPrepassBuilder = newGraph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded

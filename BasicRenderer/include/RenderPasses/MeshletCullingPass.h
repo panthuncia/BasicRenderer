@@ -11,19 +11,19 @@
 #include "Managers/MeshManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 
-class MeshletFrustrumCullingPass : public ComputePass {
+class MeshletCullingPass : public ComputePass {
 public:
-	MeshletFrustrumCullingPass() {
+	MeshletCullingPass(bool isOccludersPass) : m_isOccludersPass(isOccludersPass) {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
 
-	~MeshletFrustrumCullingPass() {
+	~MeshletCullingPass() {
 	}
 
 	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
+		lightQuery = ecsWorld.query_builder<Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
 	}
@@ -43,7 +43,7 @@ public:
 		commandList->SetComputeRootSignature(rootSignature.Get());
 
 		// Set the compute pipeline state
-		commandList->SetPipelineState(m_PSO.Get());
+		commandList->SetPipelineState(m_frustrumCullingPSO.Get());
 
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
@@ -60,6 +60,8 @@ public:
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
 		miscRootConstants[UintRootConstant0] = context.meshManager->GetMeshletBoundsBufferSRVIndex();
 		miscRootConstants[UintRootConstant1] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetUAVShaderVisibleInfo(0).index;
+		auto primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
+		miscRootConstants[UintRootConstant2] = primaryDepth->linearDepthMap->GetSRVInfo(0).index;
 
 		commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
 
@@ -69,6 +71,7 @@ public:
 		// Culling for main camera
 		unsigned int numDraws = context.drawStats.numOpaqueDraws + context.drawStats.numAlphaTestDraws + context.drawStats.numBlendDraws;
 
+		// Frustrum culling
 		auto meshletCullingBuffer = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer();
 		
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchCommandSignature();
@@ -81,7 +84,27 @@ public:
 			meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
 		);
 
-		auto meshletCullingClearBuffer = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingResetIndirectCommandBuffer();
+		// Occlusion culling
+		//if (!m_isOccludersPass) { // Occluders pass builds HZB, and it is used in the later culling pass
+		//	auto meshletOcclusionCullingBuffer = context.currentScene->GetPrimaryCameraMeshletOcclusionCullingIndirectCommandBuffer();
+		//	commandList->SetPipelineState(m_occlusionCullingPSO.Get());
+
+		//	auto primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
+		//	miscRootConstants[UintRootConstant2] = primaryDepth->linearDepthMap->GetSRVInfo(0).index;
+		//	commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+
+		//	commandList->ExecuteIndirect(
+		//		commandSignature,
+		//		numDraws,
+		//		meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
+		//		0,
+		//		meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
+		//		meshletOcclusionCullingBuffer->GetResource()->GetUAVCounterOffset()
+		//	);
+		//}
+
+		// Reset necessary meshlets
+		auto meshletCullingClearBuffer = context.currentScene->GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer();
 		commandList->SetPipelineState(m_clearPSO.Get());
 
 		commandList->ExecuteIndirect(
@@ -94,8 +117,10 @@ public:
 		);
 
 		if (getShadowsEnabled()) {
-			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				commandList->SetPipelineState(m_PSO.Get());
+
+			// Frustrum culling
+			commandList->SetPipelineState(m_frustrumCullingPSO.Get());
+			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
 				for (auto& view : lightViewInfo.renderViews) {
 
@@ -103,6 +128,7 @@ public:
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 					miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+					miscRootConstants[UintRootConstant2] = lightDepth.linearDepthMap->GetSRVInfo(0).index;
 					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
 					meshletCullingBuffer = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
 					commandList->ExecuteIndirect(
@@ -116,8 +142,31 @@ public:
 				}
 				});
 
-			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo) {
-				commandList->SetPipelineState(m_clearPSO.Get());
+			// Occlusion culling
+			//if (!m_isOccludersPass) { // Occluders pass builds HZB, and it is used in the later culling pass
+			//	commandList->SetPipelineState(m_occlusionCullingPSO.Get());
+			//	lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
+			//		for (auto& view : lightViewInfo.renderViews) {
+			//			cameraIndex = view.cameraBufferIndex;
+			//			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+			//			miscRootConstants[UintRootConstant2] = lightDepth.linearDepthMap->GetSRVInfo(0).index;
+			//			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+			//			auto meshletOcclusionCullingBuffer = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer;
+			//			commandList->ExecuteIndirect(
+			//				commandSignature,
+			//				numDraws,
+			//				meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
+			//				0,
+			//				meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
+			//				meshletOcclusionCullingBuffer->GetResource()->GetUAVCounterOffset()
+			//			);
+			//		}
+			//		});
+			//}
+
+			// Reset necessary meshlets
+			commandList->SetPipelineState(m_clearPSO.Get());
+			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
 				for (auto& view : lightViewInfo.renderViews) {
 
@@ -126,7 +175,7 @@ public:
 
 					miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
-					meshletCullingClearBuffer = view.indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer;
+					meshletCullingClearBuffer = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
 					commandList->ExecuteIndirect(
 						commandSignature,
 						numDraws,
@@ -151,7 +200,14 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6", {}, computeShader);
+		DxcDefine define;
+		define.Name = L"OCCLUDERS_PASS";
+		define.Value = L"1";
+		std::vector<DxcDefine> defines;
+		if (m_isOccludersPass) {
+			defines.push_back(define);
+		}
+		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6", defines, computeShader);
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
@@ -169,7 +225,12 @@ private:
 		auto& device = DeviceManager::GetInstance().GetDevice();
 		ID3D12Device2* device2 = nullptr;
 		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
+		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_frustrumCullingPSO)));
+
+		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletOcclusionCullingCSMain", L"cs_6_6", {}, computeShader);
+
+		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
+		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_occlusionCullingPSO)));
 
 		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6", {}, computeShader);
 
@@ -177,10 +238,13 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_clearPSO)));
 	}
 
-	flecs::query<Components::LightViewInfo> lightQuery;
+	flecs::query<Components::LightViewInfo, Components::DepthMap> lightQuery;
 
-	ComPtr<ID3D12PipelineState> m_PSO;
+	ComPtr<ID3D12PipelineState> m_frustrumCullingPSO;
+	ComPtr<ID3D12PipelineState> m_occlusionCullingPSO;
 	ComPtr<ID3D12PipelineState> m_clearPSO;
+
+	bool m_isOccludersPass = false;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<bool()> getShadowsEnabled;
