@@ -545,10 +545,10 @@ void RenderGraph::Execute(RenderContext& context) {
 	auto& graphicsCommandList = m_graphicsCommandLists[context.frameIndex];
 	auto& graphicsCommandAllocator = m_graphicsCommandAllocators[context.frameIndex];
 
-	bool useAsyncCompute = false;
+	bool useAsyncCompute = true;
 	auto computeQueue = graphicsQueue;//manager.GetComputeQueue();
-	auto& computeCommandList = graphicsCommandList;//m_computeCommandLists[context.frameIndex];
-	auto& computeCommandAllocator = graphicsCommandAllocator;//m_computeCommandAllocators[context.frameIndex];
+	auto computeCommandList = graphicsCommandList;//m_computeCommandLists[context.frameIndex];
+	auto computeCommandAllocator = graphicsCommandAllocator;//m_computeCommandAllocators[context.frameIndex];
 
 	if (useAsyncCompute) {
 		computeQueue = manager.GetComputeQueue();
@@ -615,11 +615,11 @@ void RenderGraph::Execute(RenderContext& context) {
 		std::vector<PassReturn> computeFencesToSignal;
 		for (auto& passAndResources : batch.computePasses) {
 			if (passAndResources.pass->IsInvalidated()) {
-				DEBUG_ONLY(PIXBeginEvent(computeCommandList.Get(), 0, passAndResources.name.c_str()));
+				PIXBeginEvent(computeCommandList.Get(), 0, passAndResources.name.c_str());
 				statisticsManager.BeginQuery(passAndResources.statisticsIndex, context.frameIndex, computeQueue, computeCommandList.Get());
 				auto passReturn = passAndResources.pass->Execute(context);
 				statisticsManager.EndQuery(passAndResources.statisticsIndex, context.frameIndex, computeQueue, computeCommandList.Get());
-				DEBUG_ONLY(PIXEndEvent(computeCommandList.Get()));
+				PIXEndEvent(computeCommandList.Get());
 				if (passReturn.fence != nullptr) {
 					computeFencesToSignal.push_back(passReturn);
 				}
@@ -650,6 +650,9 @@ void RenderGraph::Execute(RenderContext& context) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
+		if (batch.renderPasses.size() > 0 && batch.renderPasses[0].name == "Environment Prefilter Pass") {
+			spdlog::info("Environment Prefilter Pass");
+		}
 		std::vector<BarrierGroups> renderBarrierGroups;
         for (auto& transition : batch.renderTransitions) {
 			std::vector<ResourceTransition> dummy;
@@ -687,11 +690,11 @@ void RenderGraph::Execute(RenderContext& context) {
 		std::vector<PassReturn> graphicsFencesToSignal;
         for (auto& passAndResources : batch.renderPasses) {
 			if (passAndResources.pass->IsInvalidated()) {
-				DEBUG_ONLY(PIXBeginEvent(graphicsCommandList.Get(), 0, passAndResources.name.c_str()));
+				PIXBeginEvent(graphicsCommandList.Get(), 0, passAndResources.name.c_str());
 				statisticsManager.BeginQuery(passAndResources.statisticsIndex, context.frameIndex, graphicsQueue, graphicsCommandList.Get());
                 auto passReturn = passAndResources.pass->Execute(context);
 				statisticsManager.EndQuery(passAndResources.statisticsIndex, context.frameIndex, graphicsQueue, graphicsCommandList.Get());
-				DEBUG_ONLY(PIXEndEvent(graphicsCommandList.Get()));
+				PIXEndEvent(graphicsCommandList.Get());
                 if (passReturn.fence != nullptr) {
 					graphicsFencesToSignal.push_back(passReturn);
                 }

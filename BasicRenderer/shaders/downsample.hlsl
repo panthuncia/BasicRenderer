@@ -53,11 +53,11 @@ AF4 SpdLoad(ASU2 tex, AU1 slice)
 {
     StructuredBuffer<spdConstants> constants = ResourceDescriptorHeap[UintRootConstant2];
     #if defined (DOWNSAMPLE_ARRAY)
-    globallycoherent RWTexture2DArray<float4> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
-    return imgDst5[float3(tex, slice)];
+    globallycoherent RWTexture2DArray<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
+    return imgDst5[float3(tex, slice)].rrrr;
     #else
-    globallycoherent RWTexture2D<float4> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
-    return imgDst5[tex];
+    globallycoherent RWTexture2D<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
+    return imgDst5[tex].rrrr;
     #endif
 }
 void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
@@ -66,20 +66,20 @@ void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
     if (index == 5)
     {
         #if defined (DOWNSAMPLE_ARRAY)
-        globallycoherent RWTexture2DArray<float4> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
-        imgDst5[float3(pix, slice)] = outValue;
+        globallycoherent RWTexture2DArray<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
+        imgDst5[float3(pix, slice)] = outValue.r;
         #else
-        globallycoherent RWTexture2D<float4> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
-        imgDst5[pix] = outValue;
+        globallycoherent RWTexture2D<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
+        imgDst5[pix] = outValue.r;
         #endif
         return;
     }
     #if defined (DOWNSAMPLE_ARRAY)
-    RWTexture2DArray<float4> imgDst = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[index]];
-    imgDst[float3(pix, slice)] = outValue;
+    RWTexture2DArray<float> imgDst = ResourceDescriptorHeap[NonUniformResourceIndex(constants[UintRootConstant3].mipUavDescriptorIndices[index])];
+    imgDst[float3(pix, slice)] = outValue.r;
     #else
-    RWTexture2D<float4> imgDst = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[index]];
-    imgDst[pix] = outValue;
+    RWTexture2D<float> imgDst = ResourceDescriptorHeap[NonUniformResourceIndex(constants[UintRootConstant3].mipUavDescriptorIndices[index])];
+    imgDst[pix] = outValue.r;
     #endif
 }
 

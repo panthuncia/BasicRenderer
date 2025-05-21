@@ -29,7 +29,7 @@ PixelBuffer::PixelBuffer(const TextureDescription& desc, const std::vector<const
 	m_format = desc.format;
 
 	m_mipLevels = desc.generateMipMaps ? CalculateMipLevels(m_width, m_height) : 1;
-	m_arraySize = desc.arraySize;
+	m_arraySize = desc.isCubemap ? 6 : desc.arraySize;
 
 	//D3D12_RESOURCE_BARRIER barrier = {};
  //   barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -84,12 +84,7 @@ BarrierGroups PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAcce
 
 	auto resolvedRange = ResolveRangeSpec(range, m_mipLevels, m_arraySize);
 
-    if (resolvedRange.mipCount == m_mipLevels) {
-        textureBarrierDesc.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff);
-    }
-    else {
-        textureBarrierDesc.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
-    }
+    textureBarrierDesc.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
 
     D3D12_BARRIER_GROUP group;
 	group.NumBarriers = 1;

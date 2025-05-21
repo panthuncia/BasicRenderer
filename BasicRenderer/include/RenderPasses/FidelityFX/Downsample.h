@@ -56,8 +56,6 @@ public:
         auto primaryViewConstants = m_pDownsampleConstants->Add();
 		m_pDownsampleConstants->UpdateView(primaryViewConstants.get(), &m_spdConstants);
 
-		m_pDownsampleAtomicCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, false, true); // 6 ints per slice, up to 6 slices
-
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
 		depthQuery = ecsWorld.query_builder<Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -102,11 +100,11 @@ public:
         // UintRootConstant2 is the index of the spdConstants structured buffer
 		// UintRootConstant3 is the index of the current constants
         unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
-        downsampleRootConstants[UintRootConstant0] = m_pDownsampleAtomicCounter->GetUAVShaderVisibleInfo(0).index;
         auto& mapInfo = m_perViewMapInfo[context.currentScene->GetPrimaryCamera().id()];
         if (!mapInfo.pConstantsBufferView) {
 			spdlog::error("Downsample pass: No constants buffer view for primary depth map");
         }
+        downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).index;
         downsampleRootConstants[UintRootConstant1] = context.pLinearDepthBuffer->GetSRVInfo(0).index;
 		downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).index;
         downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
@@ -119,7 +117,7 @@ public:
 		// Process each shadow map
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			auto& mapInfo = m_perViewMapInfo[e.id()];
-            
+			downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).index;
             downsampleRootConstants[UintRootConstant1] = shadowMap.linearDepthMap->GetSRVInfo(0).index;
 			downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
@@ -166,6 +164,7 @@ private:
         unsigned int constantsIndex;
 		std::shared_ptr<BufferView> pConstantsBufferView;
 		unsigned int dispatchThreadGroupCountXY[2];
+        std::shared_ptr<GloballyIndexedResource> pCounterResource;
     };
 	std::unordered_map<uint64_t, PerMapInfo> m_perViewMapInfo;
 
@@ -175,7 +174,6 @@ private:
     unsigned int m_numDirectionalCascades = 0;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
-	std::shared_ptr<GloballyIndexedResource> m_pDownsampleAtomicCounter;
 
     ComPtr<ID3D12PipelineState> downsamplePassPSO;
 	ComPtr<ID3D12PipelineState> downsampleArrayPSO;
@@ -245,6 +243,7 @@ private:
         mapInfo.pConstantsBufferView = view;
         mapInfo.dispatchThreadGroupCountXY[0] = threadGroupCountXY[0];
         mapInfo.dispatchThreadGroupCountXY[1] = threadGroupCountXY[1];
+        mapInfo.pCounterResource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, false, true); // 6 ints per slice, up to 6 slices
         m_perViewMapInfo[e.id()] = mapInfo;
     }
 
