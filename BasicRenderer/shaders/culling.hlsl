@@ -37,7 +37,7 @@ void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const C
     float4 vAABB = vUV * vHZB.xyxy; // vHZB = [w, h, l]
     float2 vExtents = vAABB.zw - vAABB.xy; // In pixels
     
-    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y))) + 1; // TODO: Is this +1 correct? I get flickering without it
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y))); // TODO: Is this +1 correct? I get flickering without it
     fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
     
     float4 occlusionDepth;
@@ -306,6 +306,14 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     if (!(perMesh.vertexFlags & VERTEX_SKINNED))
     { // TODO: Implement skinned mesh culling
     
+#if defined (REMAINDERS_PASS) // In the remainders pass, we want to invert the bitfield, and frustrum+occlusion cull the remaining meshlets
+        bool alreadyCulled = GetBit(meshletBitfieldBuffer, meshletBitfieldIndex);
+        if (!alreadyCulled)
+        {
+            SetBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex); // Mark as culled
+            return; // If the occluders pass will already render this, we don't need to render it in the remainders pass
+        }
+#endif
         bool bCulled = false;
     
         for (uint i = 0; i < 6; i++)
@@ -335,7 +343,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
 }
 
 // Meshlet culling, one thread per meshlet, one dispatch per mesh, similar to mesh shader
-[numthreads(64, 1, 1)]
+/*[numthreads(64, 1, 1)]
 void MeshletOcclusionCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
 {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
@@ -397,7 +405,7 @@ void MeshletOcclusionCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchTh
     {
         ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
     }
-}
+}*/
 
 
 [numthreads(64, 1, 1)]

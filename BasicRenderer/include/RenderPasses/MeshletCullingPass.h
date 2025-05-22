@@ -13,7 +13,10 @@
 
 class MeshletCullingPass : public ComputePass {
 public:
-	MeshletCullingPass(bool isOccludersPass, bool isRemaindersPass = false) : m_isOccludersPass(isOccludersPass),  {
+	MeshletCullingPass(bool isOccludersPass, bool isRemaindersPass = false, bool doResets = true) :
+		m_isOccludersPass(isOccludersPass), 
+		m_isRemaindersPass(isRemaindersPass),
+		m_doResets(doResets){
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
@@ -104,17 +107,19 @@ public:
 		//}
 
 		// Reset necessary meshlets
-		auto meshletCullingClearBuffer = context.currentScene->GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer();
-		commandList->SetPipelineState(m_clearPSO.Get());
+		if (m_doResets) {
+			auto meshletCullingClearBuffer = context.currentScene->GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer();
+			commandList->SetPipelineState(m_clearPSO.Get());
 
-		commandList->ExecuteIndirect(
-			commandSignature,
-			numDraws,
-			meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-			0,
-			meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-			meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
-		);
+			commandList->ExecuteIndirect(
+				commandSignature,
+				numDraws,
+				meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+				0,
+				meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+				meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
+			);
+		}
 
 		if (getShadowsEnabled()) {
 
@@ -165,27 +170,29 @@ public:
 			//}
 
 			// Reset necessary meshlets
-			commandList->SetPipelineState(m_clearPSO.Get());
-			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
+			if (m_doResets) {
+				commandList->SetPipelineState(m_clearPSO.Get());
+				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
-				for (auto& view : lightViewInfo.renderViews) {
+					for (auto& view : lightViewInfo.renderViews) {
 
-					cameraIndex = view.cameraBufferIndex;
-					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+						cameraIndex = view.cameraBufferIndex;
+						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
-					miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
-					meshletCullingClearBuffer = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
-					commandList->ExecuteIndirect(
-						commandSignature,
-						numDraws,
-						meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-						0,
-						meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-						meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
-					);
-				}
-				});
+						miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+						auto meshletCullingClearBuffer = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
+						commandList->ExecuteIndirect(
+							commandSignature,
+							numDraws,
+							meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+							0,
+							meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+							meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
+						);
+					}
+					});
+			}
 		}
 
 		return {};
@@ -252,6 +259,7 @@ private:
 
 	bool m_isOccludersPass = false;
 	bool m_isRemaindersPass = false;
+	bool m_doResets = true;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<bool()> getShadowsEnabled;

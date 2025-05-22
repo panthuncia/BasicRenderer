@@ -1177,7 +1177,7 @@ void DX12Renderer::CreateRenderGraph() {
             .WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
 			.Build<ObjectCullingPass>(true);
 
-        newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass
+        newGraph->BuildComputePass("MeshletCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass
             .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
             .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
             .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
@@ -1223,6 +1223,47 @@ void DX12Renderer::CreateRenderGraph() {
             .WithShaderResource(Subresources(depth->linearDepthMap, Mip{0, 1}), Subresources(m_linearShadowMaps, Mip{0, 1}))
             .WithUnorderedAccess(Subresources(depth->linearDepthMap, FromMip{ 1 }), Subresources(m_linearShadowMaps, FromMip{ 1 }))
             .Build<DownsamplePass>();
+
+        // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
+        // Using occluder meshlet culling command buffer, cull meshlets again, but invert the bitfield and use occlusion culling
+        newGraph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+            .Build<MeshletCullingPass>(false, true, false);
+
+        // Now, render the occluder remainders (prepass & shadows)
+        if (drawShadows) {
+
+            auto shadowOccluderRemainderPassBuilder = newGraph->BuildRenderPass("OccluderRemaindersShadowPass")
+                .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
+                .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{0, 1}))
+                .WithDepthReadWrite(m_shadowMaps)
+                .IsGeometryPass();
+
+            if (useMeshShaders) {
+                shadowOccluderRemainderPassBuilder.WithShaderResource(meshResourceGroup);
+                if (indirect) {
+                    shadowOccluderRemainderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+                }
+            }
+            shadowOccluderRemainderPassBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, false);
+        }
+
+        auto occludersRemaindersPrepassBuilder = newGraph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
+            .WithRenderTarget(normalsWorldSpace, Subresources(depth->linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
+            .WithDepthReadWrite(depthTexture)
+            .IsGeometryPass();
+
+        if (useMeshShaders) {
+            occludersRemaindersPrepassBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
+            if (indirect) {
+                occludersRemaindersPrepassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+            }
+        }
+        occludersRemaindersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, false);
+
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
             .WithCopyDest(indirectCommandBufferResourceGroup)
