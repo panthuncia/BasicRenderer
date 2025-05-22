@@ -13,7 +13,7 @@
 
 class MeshletCullingPass : public ComputePass {
 public:
-	MeshletCullingPass(bool isOccludersPass) : m_isOccludersPass(isOccludersPass) {
+	MeshletCullingPass(bool isOccludersPass, bool isRemaindersPass = false) : m_isOccludersPass(isOccludersPass),  {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
@@ -200,12 +200,18 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		DxcDefine define;
-		define.Name = L"OCCLUDERS_PASS";
-		define.Value = L"1";
+		DxcDefine occludersDefine;
+		occludersDefine.Name = L"OCCLUDERS_PASS";
+		occludersDefine.Value = L"1";
 		std::vector<DxcDefine> defines;
 		if (m_isOccludersPass) {
-			defines.push_back(define);
+			defines.push_back(occludersDefine);
+		}
+		if (m_isRemaindersPass) {
+			DxcDefine remainderDefine;
+			remainderDefine.Name = L"REMAINDERS_PASS";
+			remainderDefine.Value = L"1";
+			defines.push_back(remainderDefine);
 		}
 		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6", defines, computeShader);
 
@@ -245,6 +251,7 @@ private:
 	ComPtr<ID3D12PipelineState> m_clearPSO;
 
 	bool m_isOccludersPass = false;
+	bool m_isRemaindersPass = false;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<bool()> getShadowsEnabled;
