@@ -238,7 +238,9 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
             ClearBitAtomic(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
         }
         // If the object is fully inside the frustrum, we can skip the meshlet culling
+#if !defined (OCCLUDERS_PASS) // Except for occluders pass, where we will run a (cheaper) meshlet culling on all occluders
         return;
+#endif
     }
     
     if (alreadyAddedForCulling)
@@ -305,8 +307,8 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     // Disable culling for skinned meshes for now, as the bounding sphere is not updated
     if (!(perMesh.vertexFlags & VERTEX_SKINNED))
     { // TODO: Implement skinned mesh culling
-    
 #if defined (REMAINDERS_PASS) // In the remainders pass, we want to invert the bitfield, and frustrum+occlusion cull the remaining meshlets
+        
         bool alreadyCulled = GetBit(meshletBitfieldBuffer, meshletBitfieldIndex);
         if (!alreadyCulled)
         {

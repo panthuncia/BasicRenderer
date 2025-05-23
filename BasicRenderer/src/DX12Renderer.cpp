@@ -1177,11 +1177,12 @@ void DX12Renderer::CreateRenderGraph() {
             .WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
 			.Build<ObjectCullingPass>(true);
 
-        newGraph->BuildComputePass("MeshletCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass
-            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-            .Build<MeshletCullingPass>(true);
+        //Remove occluder meshlet culling
+        //newGraph->BuildComputePass("MeshletCullingPass") // Any occluders that are partially frustrum culled are sent to the meshlet culling pass
+        //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+        //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+        //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+        //    .Build<MeshletCullingPass>(true);
 
         // We need to draw occluder shadows early
         auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
@@ -1233,22 +1234,22 @@ void DX12Renderer::CreateRenderGraph() {
             .Build<MeshletCullingPass>(false, true, false);
 
         // Now, render the occluder remainders (prepass & shadows)
-        if (drawShadows) {
+        //if (drawShadows) {
 
-            auto shadowOccluderRemainderPassBuilder = newGraph->BuildRenderPass("OccluderRemaindersShadowPass")
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-                .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{0, 1}))
-                .WithDepthReadWrite(m_shadowMaps)
-                .IsGeometryPass();
+        //    auto shadowOccluderRemainderPassBuilder = newGraph->BuildRenderPass("OccluderRemaindersShadowPass")
+        //        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
+        //        .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{0, 1}))
+        //        .WithDepthReadWrite(m_shadowMaps)
+        //        .IsGeometryPass();
 
-            if (useMeshShaders) {
-                shadowOccluderRemainderPassBuilder.WithShaderResource(meshResourceGroup);
-                if (indirect) {
-                    shadowOccluderRemainderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-                }
-            }
-            shadowOccluderRemainderPassBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, false);
-        }
+        //    if (useMeshShaders) {
+        //        shadowOccluderRemainderPassBuilder.WithShaderResource(meshResourceGroup);
+        //        if (indirect) {
+        //            shadowOccluderRemainderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
+        //        }
+        //    }
+        //    shadowOccluderRemainderPassBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, false);
+        //}
 
         auto occludersRemaindersPrepassBuilder = newGraph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
             .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
