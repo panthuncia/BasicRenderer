@@ -336,19 +336,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(*tigerScene);
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 10000; i++) {
+	for (int i = 0; i < 00; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
 	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
-		auto point = randomPointInSphere(20.0);
+		auto point = randomPointInSphere(10.0);
         cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
