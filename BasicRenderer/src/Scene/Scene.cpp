@@ -56,11 +56,11 @@ flecs::entity Scene::CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XM
 
 flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 attenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, bool shadowCasting) {
 	auto& world = ECSManager::GetInstance().GetWorld();
-	float maxRange = 20.0f;
+	//float maxRange = 20.0f;
 	XMVECTOR normalizedAttenuationVec = XMVector3Normalize(XMLoadFloat3(&attenuation));
 	XMFLOAT3 normalizedAttenuation;
 	XMStoreFloat3(&normalizedAttenuation, normalizedAttenuationVec);
-	maxRange = (std::min)(maxRange, CalculateLightRadius(intensity, normalizedAttenuation.x, normalizedAttenuation.y, normalizedAttenuation.z));
+	auto maxRange = CalculateLightRadius(intensity, normalizedAttenuation.x, normalizedAttenuation.y, normalizedAttenuation.z);
 
 	LightInfo lightInfo;
 	lightInfo.type = type;

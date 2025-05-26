@@ -266,6 +266,7 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 [numthreads(64, 1, 1)]
 void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
 {
+    //return;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     
     if (perMeshBuffer[perMeshBufferIndex].numMeshlets <= vDispatchThreadID.x)

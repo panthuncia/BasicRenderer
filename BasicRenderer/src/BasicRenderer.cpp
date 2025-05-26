@@ -337,12 +337,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 00; i++) {
+	for (int i = 0; i < 3; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
@@ -415,9 +415,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
-	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 10.0, XMFLOAT3(0, -1, -1));
-    //auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 2, 3), XMFLOAT3(1, 1, 1), 10.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
-    //auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 1.0, 0.0, 0.0, 1.0);
+	//auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 10.0, XMFLOAT3(0, -1, -1));
+    //auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 10, 3), XMFLOAT3(1, 1, 1), 2000.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
+    auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 20, 3), XMFLOAT3(1, 1, 1), 2000.0, 0.0, 0.0, 1.0);
     
     for (int i = 0; i < 0; i++) {
 		auto point = getRandomPointInVolume(-20, 20, -2, 0, -20, 20);
