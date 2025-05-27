@@ -117,7 +117,7 @@ public:
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			auto& mapInfo = m_perViewMapInfo[e.id()];
 			downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).index;
-            downsampleRootConstants[UintRootConstant1] = shadowMap.linearDepthMap->GetSRVInfo(0).index;
+            downsampleRootConstants[UintRootConstant1] = light.type == Components::LightType::Point ? shadowMap.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : shadowMap.linearDepthMap->GetSRVInfo(0).index;
 			downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);

@@ -21,7 +21,7 @@ public:
 
 	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		lightQuery = ecsWorld.query_builder<Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
+		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
 	}
@@ -92,7 +92,7 @@ public:
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			if (shadows) {
-				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
+				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 					int i = 0;
 					for (auto& view : lightViewInfo.renderViews) {
 						auto& buffer = view.indirectCommandBuffers.opaqueIndirectCommandBuffer;
@@ -105,7 +105,7 @@ public:
 
 						miscRootConstants[UintRootConstant0] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant2] = lightDepth.linearDepthMap->GetSRVInfo(0).index;
+						miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
@@ -144,7 +144,7 @@ public:
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			if (shadows) {
-				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
+				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 					int i = 0;
 					for (auto& view : lightViewInfo.renderViews) {
 						auto& buffer = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer;
@@ -156,7 +156,7 @@ public:
 
 						miscRootConstants[UintRootConstant0] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant2] = lightDepth.linearDepthMap->GetSRVInfo(0).index;
+						miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
@@ -196,7 +196,7 @@ public:
 			commandList->Dispatch(numThreadGroups, 1, 1);
 
 			if (shadows) {
-				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
+				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 					int i = 0;
 					for (auto& view : lightViewInfo.renderViews) {
 						auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
@@ -208,7 +208,7 @@ public:
 
 						miscRootConstants[UintRootConstant0] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant2] = lightDepth.linearDepthMap->GetSRVInfo(0).index;
+						miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
@@ -258,7 +258,7 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 	
-	flecs::query<Components::LightViewInfo, Components::DepthMap> lightQuery;
+	flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
 
 	ComPtr<ID3D12PipelineState> m_PSO;
 

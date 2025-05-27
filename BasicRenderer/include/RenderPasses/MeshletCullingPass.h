@@ -26,7 +26,7 @@ public:
 
 	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		lightQuery = ecsWorld.query_builder<Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
+		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
 	}
@@ -125,7 +125,7 @@ public:
 
 			// Frustrum culling
 			commandList->SetPipelineState(m_frustrumCullingPSO.Get());
-			lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
+			lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
 				for (auto& view : lightViewInfo.renderViews) {
 
@@ -133,7 +133,7 @@ public:
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 					miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-					miscRootConstants[UintRootConstant2] = lightDepth.linearDepthMap->GetSRVInfo(0).index;
+					miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
 					meshletCullingBuffer = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
 					commandList->ExecuteIndirect(
@@ -172,7 +172,7 @@ public:
 			// Reset necessary meshlets
 			if (m_doResets) {
 				commandList->SetPipelineState(m_clearPSO.Get());
-				lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
+				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
 					for (auto& view : lightViewInfo.renderViews) {
 
@@ -251,7 +251,7 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_clearPSO)));
 	}
 
-	flecs::query<Components::LightViewInfo, Components::DepthMap> lightQuery;
+	flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
 
 	ComPtr<ID3D12PipelineState> m_frustrumCullingPSO;
 	ComPtr<ID3D12PipelineState> m_occlusionCullingPSO;
