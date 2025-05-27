@@ -12,7 +12,6 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Resources/TextureDescription.h"
-#include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/ObjectManager.h"
 

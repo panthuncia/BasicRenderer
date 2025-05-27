@@ -7,7 +7,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "Resources/ResourceHandles.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ReadbackManager.h"

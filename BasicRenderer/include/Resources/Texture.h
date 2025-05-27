@@ -1,7 +1,6 @@
 #pragma once
 #include <memory>
 
-#include "Resources/ResourceHandles.h"
 #include "Resources/ResourceStates.h"
 #include "Resources/Resource.h"
 #include "Import/Filetypes.h"

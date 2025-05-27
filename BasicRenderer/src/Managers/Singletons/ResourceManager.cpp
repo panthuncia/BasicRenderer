@@ -332,7 +332,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
 
-	pDynamicBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { { srvInfo } });
+	pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
 	if (UAV) {
 		D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
@@ -351,7 +351,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		ShaderVisibleIndexInfo uavInfo;
 		uavInfo.index = uavShaderVisibleIndex;
 		uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
-		pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, 0);
+		pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
 	}
 
 	return pDynamicBuffer;
@@ -394,14 +394,13 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	srvInfo.index = index;
 	srvInfo.gpuHandle = gpuHandle;
 
-	pBuffer->SetSRVDescriptors(m_cbvSrvUavHeap, { { srvInfo } });
+	pBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
 	return pBuffer;
 }
 
-TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
+std::pair<ComPtr<ID3D12Resource>,ComPtr<ID3D12Heap>> ResourceManager::CreateTextureResource(
 	const TextureDescription& desc,
-	const std::vector<const stbi_uc*>& initialData, 
 	ComPtr<ID3D12Heap> placedResourceHeap) {
 
 	auto& device = DeviceManager::GetInstance().GetDevice();
@@ -467,86 +466,20 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 			clearValue
 		);
 	}
-	// Create SRV
-	auto srvInfo = CreateShaderResourceViewsPerMip(
-		device.Get(),
-		textureResource.Get(),
-		desc.srvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.srvFormat,
-		m_cbvSrvUavHeap.get(),
-		mipLevels,
-		desc.isCubemap,
-		desc.isArray,
-		arraySize
-	);
 
-	// UAV
-	std::vector<std::vector<ShaderVisibleIndexInfo>> uavInfo;
-	if (desc.hasUAV) {
-		uavInfo = CreateUnorderedAccessViewsPerMip(
-			device.Get(),
-			textureResource.Get(),
-			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
-			m_cbvSrvUavHeap.get(),
-			mipLevels,
-			desc.isArray,
-			arraySize,
-			0
-		);
-	}
+	return std::make_pair(textureResource, placedResourceHeap);
+}
 
-	// Non-shader visible UAV
-	std::vector<std::vector<NonShaderVisibleIndexInfo>> nonShaderUavInfo;
-	if (desc.hasNonShaderVisibleUAV) {
-		nonShaderUavInfo = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
-			device.Get(),
-			textureResource.Get(),
-			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
-			m_nonShaderVisibleHeap.get(),
-			mipLevels,
-			desc.isArray,
-			arraySize,
-			0
-		);
-	}
-
-	// Create RTVs if needed
-	std::vector<std::vector<NonShaderVisibleIndexInfo>> rtvInfos;
-	if (desc.hasRTV) {
-		rtvInfos = CreateRenderTargetViews(
-			device.Get(),
-			textureResource.Get(),
-			desc.rtvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.rtvFormat,
-			m_rtvHeap.get(),
-			desc.isCubemap,
-			desc.isArray,
-			arraySize,
-			mipLevels
-		);
-	}
-
-	// Create DSVs if needed
-	std::vector<std::vector<NonShaderVisibleIndexInfo>> dsvInfos;
-	if (desc.hasDSV) {
-		dsvInfos = CreateDepthStencilViews(
-			device.Get(),
-			textureResource.Get(),
-			m_dsvHeap.get(),
-			desc.dsvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.dsvFormat,
-			desc.isCubemap,
-			desc.isArray,
-			arraySize,
-			mipLevels
-		);
-	}
-
+void ResourceManager::UploadTextureData(ID3D12Resource* pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels) {
 	// Handle initial data upload if provided
 	if (!initialData.empty()) {
+		auto& device = DeviceManager::GetInstance().GetDevice();
 		// Ensure initialData has the correct size
 		size_t numTextures = arraySize * desc.isCubemap ? 6 : 1;
 		size_t numSubresources = numTextures * mipLevels;
 
 		// Create an upload heap
-		UINT64 uploadBufferSize = GetRequiredIntermediateSize(textureResource.Get(), 0, numSubresources);
+		UINT64 uploadBufferSize = GetRequiredIntermediateSize(pResource, 0, numSubresources);
 		CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
 		D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 		ComPtr<ID3D12Resource> textureUploadHeap;
@@ -626,7 +559,7 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 		if (!validSubresourceData.empty()) {
 			UpdateSubresources(
 				commandList.Get(),
-				textureResource.Get(),
+				pResource,
 				textureUploadHeap.Get(),
 				0,
 				firstValidSubresource,
@@ -636,34 +569,12 @@ TextureHandle<PixelBuffer> ResourceManager::CreateTextureInternal(
 		}
 
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			textureResource.Get(),
+			pResource,
 			D3D12_RESOURCE_STATE_COPY_DEST,
 			D3D12_RESOURCE_STATE_COMMON
 		);
 		commandList->ResourceBarrier(1, &barrier);
 
-		ExecuteAndWaitForCommandList(commandList, commandAllocator); // TODO - This is a blocking call. We could upload all textures and only wait once before they are used
+		ExecuteAndWaitForCommandList(commandList, commandAllocator); // TODO - Replace this by using UploadManager
 	}
-
-	// Build and return the texture handle
-	TextureHandle<PixelBuffer> handle;
-	handle.texture = textureResource;
-	handle.SRVInfo = srvInfo;
-	handle.srvUavHeap = m_cbvSrvUavHeap;
-	handle.placedResourceHeap = placedResourceHeap;
-	if (desc.hasUAV) {
-		handle.UAVInfo = uavInfo;
-		handle.NSVUAVInfo = nonShaderUavInfo;
-		handle.uavCPUHeap = m_nonShaderVisibleHeap;
-	}
-	if (desc.hasRTV) {
-		handle.rtvHeap = m_rtvHeap;
-		handle.RTVInfo = rtvInfos;
-	}
-	if (desc.hasDSV) {
-		handle.dsvHeap = m_dsvHeap;
-		handle.DSVInfo = dsvInfos;
-	}
-
-	return handle;
 }

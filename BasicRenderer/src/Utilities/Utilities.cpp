@@ -1326,7 +1326,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
     downsampledDesc.clearColor[0] = std::numeric_limits<float>().max();
 
 
-	std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::Create(downsampledDesc, depthBuffer.get());
+    std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::Create(downsampledDesc, {}, nullptr/* depthBuffer.get()*/);
     linearDepthBuffer->SetName(L"linear Depth Buffer");
 
 

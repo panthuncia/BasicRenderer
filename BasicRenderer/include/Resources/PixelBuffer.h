@@ -7,33 +7,31 @@
 #include <array>
 
 #include "Resources/ResourceStates.h"
-#include "Resources/ResourceHandles.h"
 #include "Resources/GloballyIndexedResource.h"
 #include "Resources/TextureDescription.h"
 using Microsoft::WRL::ComPtr;
 
 class PixelBuffer : public GloballyIndexedResource {
 public:
-    static std::shared_ptr<PixelBuffer> Create(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {}, PixelBuffer* textureToAlias = nullptr) {
-		return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData, textureToAlias));
-    }
-    static std::shared_ptr<PixelBuffer> Create(const TextureDescription& desc, PixelBuffer* textureToAlias) {
-        return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, {}, textureToAlias));
-    }
+    static std::shared_ptr<PixelBuffer>
+        Create(const TextureDescription& desc,
+            const std::vector<const stbi_uc*>& initialData = {},
+            PixelBuffer* aliasTarget = nullptr);
+
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
     ComPtr<ID3D12Resource> GetTexture() const {
-		return handle.texture;
+		return m_texture;
     }
     BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 
-    virtual void SetName(const std::wstring& name) { this->name = name; handle.texture->SetName(name.c_str()); }
+    virtual void SetName(const std::wstring& name) { this->name = name; m_texture->SetName(name.c_str()); }
 
-	ID3D12Resource* GetAPIResource() const override { return handle.texture.Get(); }
+	ID3D12Resource* GetAPIResource() const override { return m_texture.Get(); }
 
 	ID3D12Heap* GetPlacedResourceHeap() const {
-		return handle.placedResourceHeap.Get();
+		return m_placedResourceHeap.Get();
 	}
 
 	const std::array<float, 4>& GetClearColor() const {
@@ -41,15 +39,20 @@ public:
 	}
 
 private:
-    PixelBuffer(const TextureDescription& desc, const std::vector<const stbi_uc*> initialData = {}, PixelBuffer* textureToAlias = nullptr);
+    PixelBuffer() = default;
+    void initialize(const TextureDescription& desc,
+        const std::vector<const stbi_uc*>& initialData,
+        PixelBuffer* aliasTarget);
 
-    TextureHandle<PixelBuffer> handle;
     unsigned int m_width;
     unsigned int m_height;
 	unsigned int m_channels;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_texture;
     DXGI_FORMAT m_format;
 	TextureDescription m_desc;
 	std::array<float, 4> m_clearColor;
+
+    Microsoft::WRL::ComPtr<ID3D12Heap> m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
 
 	// Old barriers
 	std::vector<D3D12_RESOURCE_BARRIER> m_transitions;

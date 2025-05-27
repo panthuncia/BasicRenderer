@@ -655,6 +655,9 @@ void RenderGraph::Execute(RenderContext& context) {
 		}
 		std::vector<BarrierGroups> renderBarrierGroups;
         for (auto& transition : batch.renderTransitions) {
+			if (transition.pResource->GetName() == L"ShadowMaps") {
+				spdlog::info("Shadow maps");
+			}
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);

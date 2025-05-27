@@ -1,6 +1,5 @@
 #include "Managers/LightManager.h"
 
-#include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"

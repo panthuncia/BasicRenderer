@@ -11,6 +11,16 @@ public:
 protected:
 };
 
+enum class SRVViewType : int {
+	Invalid = -1,
+	Buffer,
+	Texture2D,
+	Texture2DArray,
+	TextureCube,
+	TextureCubeArray,
+	NumSRVViewTypes
+};
+
 class GloballyIndexedResource : public GloballyIndexedResourceBase
 {
 public:
@@ -19,11 +29,18 @@ public:
 		if (name != L"") {
 			SetName(name);
 		}
+		m_SRVViews.resize(static_cast<unsigned int>(SRVViewType::NumSRVViewTypes));
 	};
 
-	void SetSRVDescriptors(std::shared_ptr<DescriptorHeap> pSRVHeap, const std::vector<std::vector<ShaderVisibleIndexInfo>>& srvInfos) {
-		m_pSRVHeap = pSRVHeap;
-		m_SRVInfos = srvInfos;
+	void SetSRVView(
+		SRVViewType type,
+		std::shared_ptr<DescriptorHeap> heap,
+		std::vector<std::vector<ShaderVisibleIndexInfo>> const & infos
+	) {
+		if (type == SRVViewType::Buffer) {
+			m_primaryViewType = SRVViewType::Buffer;
+		}
+		m_SRVViews[static_cast<unsigned int>(type)] = {heap, infos};
 	}
 
 	void SetUAVGPUDescriptors(std::shared_ptr<DescriptorHeap> pUAVHeap, const std::vector<std::vector<ShaderVisibleIndexInfo>>& uavInfos, unsigned int counterOffset = 0) {
@@ -52,9 +69,34 @@ public:
 		m_DSVInfos = dsvInfos;
 	}
 
-	const ShaderVisibleIndexInfo& GetSRVInfo(unsigned int mip, unsigned int slice = 0) { return m_SRVInfos[slice][mip]; }
-	unsigned int GetNumSRVMipLevels() { return static_cast<unsigned int>(m_SRVInfos[0].size()); }
-	unsigned int GetNumSRSlices() { return static_cast<unsigned int>(m_SRVInfos.size()); }
+
+	const ShaderVisibleIndexInfo& GetSRVInfo(unsigned int mip, unsigned int slice = 0) { 
+		auto& info = GetDefaultSRVInfo();
+		return info[slice][mip]; 
+	}
+
+	const ShaderVisibleIndexInfo& GetSRVInfo(SRVViewType type, unsigned int mip, unsigned int slice = 0) {
+		return m_SRVViews[static_cast<unsigned int>(type)].infos[slice][mip];
+	}
+
+	unsigned int GetNumSRVMipLevels() {
+		auto& info = GetDefaultSRVInfo();
+		return static_cast<unsigned int>(info[0].size());
+	}
+
+	unsigned int GetNumSRVSlices() { 
+		auto& info = GetDefaultSRVInfo();
+		return static_cast<unsigned int>(info.size()); 
+	}
+
+	unsigned int GetNumSRVSlices(SRVViewType type) {
+		return static_cast<unsigned int>(m_SRVViews[static_cast<unsigned int>(type)].infos.size());
+	}
+
+	unsigned int GetNumSRVMipLevels(SRVViewType type) {
+		return static_cast<unsigned int>(m_SRVViews[static_cast<unsigned int>(type)].infos[0].size());
+	}
+
 	const ShaderVisibleIndexInfo& GetUAVShaderVisibleInfo(unsigned int mip, unsigned int slice = 0) { return m_UAVShaderVisibleInfos[slice][mip]; }
 	unsigned int GetUAVCounterOffset() { return m_counterOffset; }
 	unsigned int GetNumUAVMipLevels() { return static_cast<unsigned int>(m_UAVShaderVisibleInfos[0].size()); }
@@ -67,12 +109,26 @@ public:
 	NonShaderVisibleIndexInfo& GetDSVInfo(unsigned int mip, unsigned int slice = 0) { return m_DSVInfos[slice][mip]; }
 	unsigned int GetNumDSVMipLevels() { return static_cast<unsigned int>(m_DSVInfos[0].size()); }
 	unsigned int GetNumDSVSlices() { return static_cast<unsigned int>(m_DSVInfos.size()); }
+
+	void SetDefaultSRVViewType(SRVViewType type) {
+		if (static_cast<unsigned int>(type) < 0 || type >= SRVViewType::NumSRVViewTypes) {
+			spdlog::error("Invalid SRV view type specified.");
+			return;
+		}
+		m_primaryViewType = type;
+	}
+
 	~GloballyIndexedResource() {
 		// Release SRV, UAV, and CBV
 		if (m_pSRVHeap) {
-			for (auto& srvInfo : m_SRVInfos) {
-				for (auto& srvInfo : srvInfo) {
-					m_pSRVHeap->ReleaseDescriptor(srvInfo.index);
+			for (int i = 0; i < m_SRVViews.size(); i++) {
+				if (m_SRVViews[i].heap == nullptr) {
+					continue;
+				}
+				for (auto& srvInfo : m_SRVViews[i].infos) {
+					for (auto& srvInfo : srvInfo) {
+						m_pSRVHeap->ReleaseDescriptor(srvInfo.index);
+					}
 				}
 			}
 		}
@@ -115,7 +171,11 @@ public:
 protected:
 	virtual void OnSetName() override {}
 private:
-	std::vector<std::vector<ShaderVisibleIndexInfo>> m_SRVInfos;
+	struct SRVView {
+		std::shared_ptr<DescriptorHeap> heap = nullptr;
+		std::vector<std::vector<ShaderVisibleIndexInfo>> infos;
+	};
+	std::vector<SRVView> m_SRVViews;
 	std::shared_ptr<DescriptorHeap> m_pSRVHeap = nullptr;
 	std::vector<std::vector<ShaderVisibleIndexInfo>> m_UAVShaderVisibleInfos;
 	std::vector<std::vector<NonShaderVisibleIndexInfo>> m_UAVNonShaderVisibleInfos;
@@ -128,6 +188,16 @@ private:
 	std::vector<std::vector<NonShaderVisibleIndexInfo>> m_DSVInfos;
 	std::shared_ptr<DescriptorHeap> m_pDSVHeap = nullptr;
 	unsigned int m_counterOffset = 0;
+
+	SRVViewType m_primaryViewType = SRVViewType::Invalid;
+
+	const std::vector<std::vector<ShaderVisibleIndexInfo>>& GetDefaultSRVInfo() {
+		if (m_primaryViewType == SRVViewType::Invalid) {
+			spdlog::error("Primary SRV view type is not set. Please set it before accessing a default SRV info.");
+			throw std::runtime_error("Primary SRV view type is not set.");
+		}
+		return m_SRVViews[static_cast<unsigned int>(m_primaryViewType)].infos;
+	}
 
 	friend class DynamicGloballyIndexedResource;
 };
