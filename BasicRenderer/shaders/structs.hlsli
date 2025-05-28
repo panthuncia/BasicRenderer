@@ -34,6 +34,9 @@ struct Camera {
     uint depthResX;
     uint depthResY;
     uint numDepthMips;
+    
+    bool isOrtho;
+    uint pad[3];
 };
 
 struct PerFrameBuffer {

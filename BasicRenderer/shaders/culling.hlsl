@@ -29,15 +29,23 @@ void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const C
     // Occlusion culling
     float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
     viewSpaceCenter.y = -viewSpaceCenter.y; // Invert Y for HZB sampling
-    float4 vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
-    vLBRT.x = -vLBRT.x;
-    vLBRT.z = -vLBRT.z;
+    float4 vLBRT;
+
+    if (camera.isOrtho) {
+        viewSpaceCenter.y = -viewSpaceCenter.y;
+        vLBRT = sphere_screen_extents_ortho(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+    } else {
+        vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+        vLBRT.x = -vLBRT.x; // TODO: Fix this in sphere_screen_extents
+        vLBRT.z = -vLBRT.z;
+    }
+
     float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
     float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
     float4 vAABB = vUV * vHZB.xyxy; // vHZB = [w, h, l]
     float2 vExtents = vAABB.zw - vAABB.xy; // In pixels
     
-    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y))); // TODO: Is this +1 correct? I get flickering without it
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
     fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
     
     float4 occlusionDepth;
@@ -59,24 +67,12 @@ void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const C
             depthBuffer.SampleLevel(g_pointClamp, float3(vUV.zw, camera.depthBufferArrayIndex), fMipLevel),
             depthBuffer.SampleLevel(g_pointClamp, float3(vUV.xw, camera.depthBufferArrayIndex), fMipLevel));
     }
-    //occlusionDepth.x = unprojectDepth(occlusionDepth.x, camera.zNear, camera.zFar);
-    //occlusionDepth.y = unprojectDepth(occlusionDepth.y, camera.zNear, camera.zFar);
-    //occlusionDepth.z = unprojectDepth(occlusionDepth.z, camera.zNear, camera.zFar);
-    //occlusionDepth.w = unprojectDepth(occlusionDepth.w, camera.zNear, camera.zFar);
     
     float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
     fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
-    partiallyCulled = !fullyCulled && (fMaxOcclusionDepth > boundingSphereDepth - scaledBoundingRadius);
+    partiallyCulled = !fullyCulled && (fMaxOcclusionDepth > boundingSphereDepth - scaledBoundingRadius) && (fMaxOcclusionDepth < boundingSphereDepth + scaledBoundingRadius);
 }
 
-// UintRootConstant0 is a bitfield that marks meshes that will be frustrum-culled per-meshlet
-// UintRootConstant1 is the meshlet culling reset command buffer
-// UintRootConstant2 is the downsampled depth SRV index
-// UintRootConstant3 is the mesh instance visibility bitfield
-// UintRootConstant4 is a bitfield that marks meshes that will be occlusion-culled per-meshlet
-// UintRootConstant5 is the meshlet occlusion culling indirect command buffer
-
-// Object culling, one thread per object
 [numthreads(64, 1, 1)]
 void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 {
@@ -172,9 +168,6 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
         alreadyAddedForCulling = true;
     }
 #endif
-
-    RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
-    bool wasPartiallyFrustrumCulledLastFrame = GetBit(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
     
     bool wasVisibleLastFrame = GetBit(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
     
@@ -218,9 +211,11 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     
     indirectCommandOutputBuffer.Append(command);
     
+    RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
     // Meshlet frustrum culling
     if (fullyInside)
     {
+        bool wasPartiallyFrustrumCulledLastFrame = GetBit(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
         if (wasPartiallyFrustrumCulledLastFrame)
         { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
             AppendStructuredBuffer<DispatchIndirectCommand> meshletCullingResetCommandBuffer = ResourceDescriptorHeap[UintRootConstant1];
@@ -266,7 +261,6 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 [numthreads(64, 1, 1)]
 void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
 {
-    //return;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     
     if (perMeshBuffer[perMeshBufferIndex].numMeshlets <= vDispatchThreadID.x)

@@ -23,6 +23,9 @@ struct CameraInfo {
     unsigned int depthResX;
 	unsigned int depthResY;
     unsigned int numDepthMips;
+
+    unsigned int isOrtho = 0; // bool
+    unsigned int pad[3];
 };
 
 struct PerFrameCB {

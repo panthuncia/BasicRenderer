@@ -232,6 +232,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.depthResX = getShadowResolution();
 		cameraInfo.depthResY = getShadowResolution();
 		cameraInfo.numDepthMips = CalculateMipLevels(cameraInfo.depthResX, cameraInfo.depthResY);
+		cameraInfo.isOrtho = true; // Directional lights use orthographic projection for shadows.
 		// TODO: Needs near and far for depth unprojection
 		auto renderView = m_pCameraManager->AddCamera(cameraInfo);
 		m_directionalViewInfo->Add(renderView.cameraBufferIndex);
@@ -321,6 +322,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.depthResX = viewInfo->depthResX;
 			info.depthResY = viewInfo->depthResY;
 			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
+			info.isOrtho = true; // Directional lights use orthographic projection for shadows.
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
