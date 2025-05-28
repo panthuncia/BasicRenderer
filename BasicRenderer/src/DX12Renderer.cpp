@@ -459,14 +459,14 @@ void EnableShaderBasedValidation() {
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
-#if defined(_DEBUG)
+//#if defined(_DEBUG)
     ComPtr<ID3D12Debug> debugController;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
         debugController->EnableDebugLayer();
         dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
     }
-    EnableShaderBasedValidation();
-#endif
+    //EnableShaderBasedValidation();
+//#endif
 
     // Create DXGI factory
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
@@ -1014,7 +1014,7 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 }
 
 void DX12Renderer::CreateRenderGraph() {
-    //StallPipeline();
+    StallPipeline();
 
     auto newGraph = std::make_shared<RenderGraph>();
 	auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
@@ -1189,7 +1189,7 @@ void DX12Renderer::CreateRenderGraph() {
                 .IsGeometryPass();
 
             if (useMeshShaders) {
-                shadowOccluderPassBuilder.WithShaderResource(meshResourceGroup);
+                shadowOccluderPassBuilder.WithShaderResource(meshResourceGroup, meshletCullingBitfieldBufferGroup);
                 if (indirect) {
                     shadowOccluderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
                 }
@@ -1219,7 +1219,7 @@ void DX12Renderer::CreateRenderGraph() {
             .Build<DownsamplePass>();
 
         // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
-        // Using occluder meshlet culling command buffer, cull meshlets again, but invert the bitfield and use occlusion culling
+        // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
         newGraph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
             .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
             .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
@@ -1236,7 +1236,7 @@ void DX12Renderer::CreateRenderGraph() {
                 .IsGeometryPass();
 
             if (useMeshShaders) {
-                shadowOccluderRemainderPassBuilder.WithShaderResource(meshResourceGroup);
+                shadowOccluderRemainderPassBuilder.WithShaderResource(meshResourceGroup, meshletCullingBitfieldBufferGroup);
                 if (indirect) {
                     shadowOccluderRemainderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
                 }
@@ -1258,6 +1258,12 @@ void DX12Renderer::CreateRenderGraph() {
         }
         occludersRemaindersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, false);
 
+        // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
+        //newGraph->BuildComputePass("OccludersMeshletCullingPass")
+        //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+        //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+        //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+        //    .Build<MeshletCullingPass>(true, false, false);
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
             .WithCopyDest(indirectCommandBufferResourceGroup)
@@ -1485,8 +1491,7 @@ void DX12Renderer::CreateRenderGraph() {
             .IsGeometryPass();
 
 		if (useMeshShaders) {
-			shadowBuilder.WithShaderResource(meshResourceGroup);
-			shadowBuilder.WithShaderResource(meshResourceGroup);
+			shadowBuilder.WithShaderResource(meshResourceGroup, meshletCullingBitfieldBufferGroup);
 			if (indirect) {
 				shadowBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 			}

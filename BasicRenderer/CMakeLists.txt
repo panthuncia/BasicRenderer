@@ -187,13 +187,13 @@ if (MSVC)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
 
 #  # Tell the compiler to generate Program Database debug info
-#  set(CMAKE_CXX_FLAGS_RELEASE
-#      "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
-#  # Tell the linker to embed or emit the .pdb file
-#  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE
-#      "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG")
-#  set(CMAKE_EXE_LINKER_FLAGS_RELEASE
-#      "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG")
+  set(CMAKE_CXX_FLAGS_RELEASE
+      "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
+  # Tell the linker to embed or emit the .pdb file
+  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE
+      "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG")
+  set(CMAKE_EXE_LINKER_FLAGS_RELEASE
+      "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG")
 endif()
 
 # Find and link DirectX 12

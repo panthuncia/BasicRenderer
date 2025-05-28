@@ -240,10 +240,10 @@ private:
 		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_frustrumCullingPSO)));
 
-		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletOcclusionCullingCSMain", L"cs_6_6", {}, computeShader);
+		//PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletOcclusionCullingCSMain", L"cs_6_6", {}, computeShader);
 
-		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_occlusionCullingPSO)));
+		//pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
+		//ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_occlusionCullingPSO)));
 
 		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6", {}, computeShader);
 
@@ -254,7 +254,7 @@ private:
 	flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
 
 	ComPtr<ID3D12PipelineState> m_frustrumCullingPSO;
-	ComPtr<ID3D12PipelineState> m_occlusionCullingPSO;
+	//ComPtr<ID3D12PipelineState> m_occlusionCullingPSO;
 	ComPtr<ID3D12PipelineState> m_clearPSO;
 
 	bool m_isOccludersPass = false;

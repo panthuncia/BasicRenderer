@@ -80,17 +80,30 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     {
         return;
     }
+
     StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
-    StructuredBuffer<DispatchMeshIndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];
+    StructuredBuffer<DispatchMeshIndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[drawSetCommandBufferDescriptorIndex];    
+    uint index = activeDrawSetIndicesBuffer[dispatchID];
+    DispatchMeshIndirectCommand command = indirectCommandBuffer[index];
+    
+    RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
+    bool wasVisibleLastFrame = GetBit(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
+    
+#if defined (OCCLUDERS_PASS)
+    if (!wasVisibleLastFrame)
+#else
+    if (wasVisibleLastFrame)
+#endif
+    {
+        return;
+    }
+    
     // Per-drawset indirect command buffer
     AppendStructuredBuffer<DispatchMeshIndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
     // Meshlets from all drawsets are culled together
     AppendStructuredBuffer<DispatchIndirectCommand> meshletFrustrumCullingIndirectCommandOutputBuffer = ResourceDescriptorHeap[meshletFrustrumCullingIndirectCommandBufferDescriptorIndex];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
-    
-    uint index = activeDrawSetIndicesBuffer[dispatchID];
-    DispatchMeshIndirectCommand command = indirectCommandBuffer[index];
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
     Camera camera = cameras[lightViewIndex]; // In compute root signature, this directly indexes the camera buffer instead of using indirection through light view index buffers
@@ -111,9 +124,7 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 );
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
     float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * maxScale;
-   
-    RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
-
+    
     bool alreadyAddedForCulling = false;
 #if !defined (OCCLUDERS_PASS)
     bool occlusionCulled = false;
@@ -168,17 +179,6 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
         alreadyAddedForCulling = true;
     }
 #endif
-    
-    bool wasVisibleLastFrame = GetBit(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
-    
-#if defined (OCCLUDERS_PASS)
-    if (!wasVisibleLastFrame)
-#else
-    if (wasVisibleLastFrame)
-#endif
-    {
-        return;
-    }
     
     bool fullyInside = true;
     
@@ -311,6 +311,12 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
             return; // If the occluders pass will already render this, we don't need to render it in the remainders pass
         }
 #endif
+#if defined (OCCLUDERS_PASS)
+        bool culledInRemainderPass = GetBit(meshletBitfieldBuffer, meshletBitfieldIndex);
+        if (!culledInRemainderPass){ // If the remainder pass drew this, we don't need to cull it again
+            return;
+        }
+#endif
         bool bCulled = false;
     
         for (uint i = 0; i < 6; i++)
@@ -321,22 +327,24 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
             bCulled |= distance < -scaledBoundingRadius;
         }
         
-#if !defined (OCCLUDERS_PASS)
         bool occlusionCulled = false;
         bool _;
         OcclusionCulling(occlusionCulled, _, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
         
         bCulled |= occlusionCulled;
-#endif
         
-            if (bCulled)
-            {
-            // TODO: Could avoid the atomic if we use eight ExecuteIndirect calls, one for each bit of a byte
-                SetBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
-                return;
-            }
+        if (bCulled)
+        {
+        // TODO: Could avoid the atomic if we use eight ExecuteIndirect calls, one for each bit of a byte
+//#if !defined (OCCLUDERS_PASS)
+            SetBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
+            //#endif
+            return;
+        }
     }
+//#if !defined (OCCLUDERS_PASS)
     ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
+    //#endif
 }
 
 // Meshlet culling, one thread per meshlet, one dispatch per mesh, similar to mesh shader

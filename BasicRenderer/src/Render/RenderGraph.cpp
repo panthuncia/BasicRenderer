@@ -650,14 +650,8 @@ void RenderGraph::Execute(RenderContext& context) {
         // Perform resource transitions
 		//TODO: If a pass is cached, we can skip the transitions, but we may need a new set
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
-		if (batch.renderPasses.size() > 0 && batch.renderPasses[0].name == "Environment Prefilter Pass") {
-			spdlog::info("Environment Prefilter Pass");
-		}
 		std::vector<BarrierGroups> renderBarrierGroups;
         for (auto& transition : batch.renderTransitions) {
-			if (transition.pResource->GetName() == L"ShadowMaps") {
-				spdlog::info("Shadow maps");
-			}
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
@@ -742,7 +736,6 @@ void RenderGraph::Execute(RenderContext& context) {
             graphicsQueue->Signal(m_graphicsQueueFence.Get(), currentGraphicsQueueFenceOffset+batch.renderCompletionFenceValue);
         }
     }
-	spdlog::info("Done");
 }
 
 bool RenderGraph::IsNewBatchNeeded(
