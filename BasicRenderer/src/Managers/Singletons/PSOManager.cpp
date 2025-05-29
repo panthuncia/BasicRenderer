@@ -796,11 +796,11 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     arguments.push_back(target.c_str());
 
     arguments.push_back(DXC_ARG_WARNINGS_ARE_ERRORS); //-WX
-//#if defined(_DEBUG)
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
     arguments.push_back(DXC_ARG_DEBUG); //-Zi
     arguments.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE); //-Zss
     arguments.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
-//#endif
+#endif
 
     for (const auto& define : defines)
     {
@@ -855,6 +855,8 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
         nullptr);
     ThrowIfFailed(hr);
 
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+
     // Retrieve the separate PDB debug info
 
     ComPtr<IDxcBlob> pdbBlob;
@@ -908,6 +910,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
             //spdlog::info("Wrote shader PDB: {}", pdbPath.string());
         }
     }
+#endif
 
     // hand back the runtime blob for PSO creation
     ThrowIfFailed(result->GetResult(

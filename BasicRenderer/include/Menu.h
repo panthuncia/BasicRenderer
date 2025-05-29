@@ -108,9 +108,9 @@ private:
 	std::function<bool()> getOcclusionCullingEnabled;
 	std::function<void(bool)> setOcclusionCullingEnabled;
 
-	bool meshletFrustrumCulling = true;
-	std::function<bool()> getMeshletFrustrumCullingEnabled;
-	std::function<void(bool)> setMeshletFrustrumCullingEnabled;
+	bool meshletCulling = true;
+	std::function<bool()> getMeshletCullingEnabled;
+	std::function<void(bool)> setMeshletCullingEnabled;
 
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
@@ -233,9 +233,9 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setOcclusionCullingEnabled = settingsManager.getSettingSetter<bool>("enableOcclusionCulling");
 	occlusionCulling = getOcclusionCullingEnabled();
 
-	getMeshletFrustrumCullingEnabled = settingsManager.getSettingGetter<bool>("enableMeshletFrustrumCulling");
-	setMeshletFrustrumCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletFrustrumCulling");
-	meshletFrustrumCulling = getMeshletFrustrumCullingEnabled();
+	getMeshletCullingEnabled = settingsManager.getSettingGetter<bool>("enableMeshletCulling");
+	setMeshletCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletCulling");
+	meshletCulling = getMeshletCullingEnabled();
 
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
@@ -317,9 +317,15 @@ inline void Menu::Render(const RenderContext& context) {
         }
 		if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling)) {
 			setOcclusionCullingEnabled(occlusionCulling);
+            if (occlusionCulling) {
+				if (!deferredRendering) { // Occlusion culling requires deferred rendering
+					setDeferredRenderingEnabled(true);
+					deferredRendering = true;
+                }
+            }
 		}
-		if (ImGui::Checkbox("Meshlet Frustrum Culling", &meshletFrustrumCulling)) {
-			setMeshletFrustrumCullingEnabled(meshletFrustrumCulling);
+		if (ImGui::Checkbox("Meshlet Frustrum Culling", &meshletCulling)) {
+			setMeshletCullingEnabled(meshletCulling);
 		}
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
@@ -333,9 +339,14 @@ inline void Menu::Render(const RenderContext& context) {
         if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
 			setClusteredLightingEnabled(clusteredLighting);
         }
-		if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
-			setDeferredRenderingEnabled(deferredRendering);
-		}
+        if (occlusionCulling) {
+            ImGui::Text("Deferred rendering cannot be disabled if occlusion culling is on");
+        }
+        else {
+            if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
+                setDeferredRenderingEnabled(deferredRendering);
+            }
+        }
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
 		}

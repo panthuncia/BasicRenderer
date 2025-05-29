@@ -31,7 +31,7 @@ using namespace DirectX;
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
-
+#if defined(ENABLE_NSIGHT_AFTERMATH)
         auto tdrTerminationTimeout = std::chrono::seconds(3);
         auto tStart = std::chrono::steady_clock::now();
         auto tElapsed = std::chrono::milliseconds::zero();
@@ -57,7 +57,7 @@ void ThrowIfFailed(HRESULT hr) {
             err_msg << "Unexpected crash dump status: " << status;
             MessageBoxA(NULL, err_msg.str().c_str(), "Aftermath Error", MB_OK);
         }
-
+#endif
 
         // Print the error code for debugging purposes
         std::cerr << "HRESULT failed with error code: " << std::hex << hr << std::endl;

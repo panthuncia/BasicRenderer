@@ -160,7 +160,7 @@ private:
 	bool m_gtaoEnabled = true;
 	bool m_deferredRendering = true;
 	bool m_occlusionCulling = true;
-	bool m_meshletFrustrumCulling = true;
+	bool m_meshletCulling = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<void(LinearShadowMaps*)> setLinearShadowMaps;

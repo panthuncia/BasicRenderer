@@ -303,7 +303,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
 	settingsManager.registerSetting<bool>("enableGTAO", true);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
-	settingsManager.registerSetting<bool>("enableMeshletFrustrumCulling", m_meshletFrustrumCulling);
+	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -371,8 +371,8 @@ void DX12Renderer::SetSettings() {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
 		});
-	settingsManager.addObserver<bool>("enableMeshletFrustrumCulling", [this](const bool& newValue) {
-		m_meshletFrustrumCulling = newValue;
+	settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
+		m_meshletCulling = newValue;
 		rebuildRenderGraph = true;
 		});
 	settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
@@ -484,13 +484,16 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Create device
     ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
 
+#if defined(ENABLE_NSIGHT_AFTERMATH)
     m_gpuCrashTracker.Initialize();
+#endif
 
     ThrowIfFailed(D3D12CreateDevice(
         bestAdapter.Get(),
         D3D_FEATURE_LEVEL_12_0,
         IID_PPV_ARGS(&device)));
 
+#if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
         GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.
         GFSDK_Aftermath_FeatureFlags_EnableResourceTracking |    // Enable tracking of resources.
@@ -501,6 +504,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         GFSDK_Aftermath_Version_API,
         aftermathFlags,
         device.Get()));
+#endif
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue1> infoQueue;
@@ -1293,11 +1297,13 @@ void DX12Renderer::CreateRenderGraph() {
 			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
 			.Build<ObjectCullingPass>(false, m_occlusionCulling);
 
-		newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum *or* occlusion culled are sent to the meshlet culling pass
-            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, depth->linearDepthMap, m_linearShadowMaps)
-            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-			.Build<MeshletCullingPass>(false);
+        if (m_meshletCulling || m_occlusionCulling) {
+            newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum *or* occlusion culled are sent to the meshlet culling pass
+                .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, depth->linearDepthMap, m_linearShadowMaps)
+                .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+                .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+                .Build<MeshletCullingPass>(false);
+        }
     }
 
     auto newObjectsPrepassBuilder = newGraph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
@@ -1312,7 +1318,10 @@ void DX12Renderer::CreateRenderGraph() {
             newObjectsPrepassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
         }
     }
-	bool clearRTVs = indirect ? false : true;
+    bool clearRTVs = false;
+	if (!m_occlusionCulling || !indirect) {
+		clearRTVs = true; // We will not run an earlier pass
+	}
     newObjectsPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, clearRTVs);
 
     // GTAO pass
@@ -1511,8 +1520,7 @@ void DX12Renderer::CreateRenderGraph() {
 				shadowBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
 			}
 		}
-		bool clear = indirect ? false : true;
-		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, clear);
+		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, clearRTVs);
 
         debugPassBuilder.WithShaderResource(depth->linearDepthMap);
     }

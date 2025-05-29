@@ -182,19 +182,34 @@ add_compile_definitions(NOMINMAX)
 # Disable warnings for signed/unsigned mismatch
 add_compile_options("/wd4267")
 
-if (MSVC)
-
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
 
-#  # Tell the compiler to generate Program Database debug info
-  set(CMAKE_CXX_FLAGS_RELEASE
-      "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
-  # Tell the linker to embed or emit the .pdb file
-  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE
-      "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG")
-  set(CMAKE_EXE_LINKER_FLAGS_RELEASE
-      "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG")
+# Compile‐only: /Zi on RelWithDebInfo
+target_compile_options(${PROJECT_NAME} PRIVATE
+  $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Zi>
+)
+
+# Link‐only: /DEBUG on RelWithDebInfo
+target_link_options(${PROJECT_NAME} PRIVATE
+  $<$<AND:$<CONFIG:RelWithDebInfo>>:/DEBUG>
+)
+
+if (ENABLE_NSIGHT_AFTERMATH)
+  # This will pass -DENABLE_NSIGHT_AFTERMATH to the compiler
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_NSIGHT_AFTERMATH)
 endif()
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+  # first, define integer codes for each build flavor
+  BUILD_TYPE_DEBUG=0
+  BUILD_TYPE_RELEASE=1
+  BUILD_TYPE_RELEASE_DEBUG=2
+
+  # then set BUILD_TYPE to one of those codes based on CMAKE_BUILD_TYPE:
+  $<$<CONFIG:Debug>:BUILD_TYPE=BUILD_TYPE_DEBUG>
+  $<$<CONFIG:Release>:BUILD_TYPE=BUILD_TYPE_RELEASE>
+  $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
+)
 
 # Find and link DirectX 12
 target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib")
