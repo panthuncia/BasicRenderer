@@ -11,7 +11,7 @@
 
 class ObjectCullingPass : public ComputePass {
 public:
-	ObjectCullingPass(bool isOccludersPass) : m_isOccludersPass(isOccludersPass) {
+	ObjectCullingPass(bool isOccludersPass, bool enableOcclusion) : m_isOccludersPass(isOccludersPass), m_enableOcclusion(enableOcclusion) {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
@@ -236,6 +236,9 @@ private:
 		if (m_isOccludersPass) {
 			defines.push_back({ L"OCCLUDERS_PASS", L"1" });
 		}
+		if (m_enableOcclusion) {
+			defines.push_back({ L"OCCLUSION_CULLING", L"1" });
+		}
 
 		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"ObjectCullingCSMain", L"cs_6_6", defines, computeShader);
 
@@ -266,4 +269,5 @@ private:
 	std::function<bool()> getShadowsEnabled;
 
 	bool m_isOccludersPass = false;
+	bool m_enableOcclusion = false;
 };

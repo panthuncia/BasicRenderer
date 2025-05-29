@@ -159,6 +159,8 @@ private:
     bool m_imageBasedLighting = true;
 	bool m_gtaoEnabled = true;
 	bool m_deferredRendering = true;
+	bool m_occlusionCulling = true;
+	bool m_meshletFrustrumCulling = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<void(LinearShadowMaps*)> setLinearShadowMaps;

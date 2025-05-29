@@ -104,6 +104,14 @@ private:
 	std::function<bool()> getIndirectDrawsEnabled;
 	std::function<void(bool)> setIndirectDrawsEnabled;
 
+	bool occlusionCulling = true;
+	std::function<bool()> getOcclusionCullingEnabled;
+	std::function<void(bool)> setOcclusionCullingEnabled;
+
+	bool meshletFrustrumCulling = true;
+	std::function<bool()> getMeshletFrustrumCullingEnabled;
+	std::function<void(bool)> setMeshletFrustrumCullingEnabled;
+
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
 	std::function<void(bool)> setWireframeEnabled;
@@ -221,6 +229,14 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	indirectDrawsEnabled = getIndirectDrawsEnabled();
 
+	getOcclusionCullingEnabled = settingsManager.getSettingGetter<bool>("enableOcclusionCulling");
+	setOcclusionCullingEnabled = settingsManager.getSettingSetter<bool>("enableOcclusionCulling");
+	occlusionCulling = getOcclusionCullingEnabled();
+
+	getMeshletFrustrumCullingEnabled = settingsManager.getSettingGetter<bool>("enableMeshletFrustrumCulling");
+	setMeshletFrustrumCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletFrustrumCulling");
+	meshletFrustrumCulling = getMeshletFrustrumCullingEnabled();
+
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
@@ -299,6 +315,12 @@ inline void Menu::Render(const RenderContext& context) {
                 setIndirectDrawsEnabled(indirectDrawsEnabled);
             }
         }
+		if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling)) {
+			setOcclusionCullingEnabled(occlusionCulling);
+		}
+		if (ImGui::Checkbox("Meshlet Frustrum Culling", &meshletFrustrumCulling)) {
+			setMeshletFrustrumCullingEnabled(meshletFrustrumCulling);
+		}
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
 		}

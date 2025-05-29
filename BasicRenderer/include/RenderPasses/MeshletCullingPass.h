@@ -19,6 +19,7 @@ public:
 		m_doResets(doResets){
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
+		m_occlusionCullingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
 	}
 
 	~MeshletCullingPass() {
@@ -220,6 +221,12 @@ private:
 			remainderDefine.Value = L"1";
 			defines.push_back(remainderDefine);
 		}
+		if (m_occlusionCullingEnabled) {
+			DxcDefine occlusionDefine;
+			occlusionDefine.Name = L"OCCLUSION_CULLING";
+			occlusionDefine.Value = L"1";
+			defines.push_back(occlusionDefine);
+		}
 		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6", defines, computeShader);
 
 		struct PipelineStateStream {
@@ -260,6 +267,7 @@ private:
 	bool m_isOccludersPass = false;
 	bool m_isRemaindersPass = false;
 	bool m_doResets = true;
+	bool m_occlusionCullingEnabled = false;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<bool()> getShadowsEnabled;

@@ -123,7 +123,7 @@ void MSMain(
     ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
     unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + vGroupID.x;
     
-    bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
+    bool bCulled = false;// GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
     
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex]; // Base vertex buffer
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferDescriptorIndex]; // Meshlets, containing vertex & primitive offset & num

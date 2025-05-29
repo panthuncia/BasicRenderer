@@ -890,8 +890,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
             binFile.write(
                 reinterpret_cast<const char*>(objectBlob->GetBufferPointer()),
                 objectBlob->GetBufferSize());
-            spdlog::info("Wrote shader binary: {}", 
-                binPath.string());
+            //spdlog::info("Wrote shader binary: {}", binPath.string());
         }
     }
 
@@ -906,8 +905,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
             pdbFile.write(
                 reinterpret_cast<const char*>(pdbBlob->GetBufferPointer()),
                 pdbBlob->GetBufferSize());
-            spdlog::info("Wrote shader PDB: {}", 
-                pdbPath.string());
+            //spdlog::info("Wrote shader PDB: {}", pdbPath.string());
         }
     }
 
