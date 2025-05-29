@@ -348,7 +348,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
 	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
-		auto point = randomPointInSphere(10.0);
+		auto point = randomPointInSphere(8.0);
         cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 

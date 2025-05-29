@@ -1236,13 +1236,12 @@ void DX12Renderer::CreateRenderGraph() {
 
             // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
             // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
-            //newGraph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-            //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-            //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-            //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-            //    .Build<MeshletCullingPass>(false, true, false);
+            newGraph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
+                .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+                .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+                .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+                .Build<MeshletCullingPass>(false, true, true);
             
-            /*
             // Now, render the occluder remainders (prepass & shadows)
             if (drawShadows) {
 
@@ -1276,12 +1275,11 @@ void DX12Renderer::CreateRenderGraph() {
             occludersRemaindersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, false);
 
             // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
-            newGraph->BuildComputePass("OccludersMeshletCullingPass")
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-                .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-                .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-                .Build<MeshletCullingPass>(true, false, false);
-                */
+            //newGraph->BuildComputePass("OccludersMeshletCullingPass")
+            //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+            //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+            //    .Build<MeshletCullingPass>(true, false, false);
         }
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
@@ -1302,7 +1300,7 @@ void DX12Renderer::CreateRenderGraph() {
                 .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, depth->linearDepthMap, m_linearShadowMaps)
                 .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
                 .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-                .Build<MeshletCullingPass>(false);
+                .Build<MeshletCullingPass>(false, false, true);
         }
     }
 

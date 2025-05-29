@@ -24,7 +24,7 @@ struct DispatchIndirectCommand
     uint dispatchZ;
 };
 
-void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const Camera camera, float3 viewSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection)
+void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection)
 {
     // Occlusion culling
     float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
@@ -70,7 +70,6 @@ void OcclusionCulling(out bool fullyCulled, out bool partiallyCulled, in const C
     
     float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
     fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
-    partiallyCulled = !fullyCulled && (fMaxOcclusionDepth > boundingSphereDepth - scaledBoundingRadius) && (fMaxOcclusionDepth < boundingSphereDepth + scaledBoundingRadius);
 }
 
 [numthreads(64, 1, 1)]
@@ -124,60 +123,15 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * maxScale;
     
 #if defined (OCCLUSION_CULLING)
-    bool alreadyAddedForCulling = false;
-#if !defined (OCCLUDERS_PASS)
+
     bool occlusionCulled = false;
-    bool partiallyOcclusionCulled = false;
-    OcclusionCulling(occlusionCulled, partiallyOcclusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
+    OcclusionCulling(occlusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
     if (occlusionCulled)
     {
         // Update bitfield
         ClearBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
         return; // reject whole object
     }
-//#endif // !defined (OCCLUDERS_PASS)
-//#if !defined (OCCLUDERS_PASS)
-    // Meshlet occlusion culling
-    RWByteAddressBuffer meshInstanceIsOcclusionCulledBitfield = ResourceDescriptorHeap[UintRootConstant4];
-    if (!partiallyOcclusionCulled) // If we are not partially occlusion culled
-    {
-        bool wasPartiallyOcclusionCulledLastFrame = GetBit(meshInstanceIsOcclusionCulledBitfield, command.perMeshInstanceBufferIndex);
-        if (wasPartiallyOcclusionCulledLastFrame)
-        { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
-            AppendStructuredBuffer<DispatchIndirectCommand> meshletCullingResetCommandBuffer = ResourceDescriptorHeap[UintRootConstant1];
-            DispatchIndirectCommand meshletOcclusionCullingResetCommand;
-            meshletOcclusionCullingResetCommand.dispatchX = command.dispatchMeshX;
-            meshletOcclusionCullingResetCommand.dispatchY = command.dispatchMeshY;
-            meshletOcclusionCullingResetCommand.dispatchZ = command.dispatchMeshZ;
-            meshletOcclusionCullingResetCommand.perMeshBufferIndex = command.perMeshBufferIndex;
-            meshletOcclusionCullingResetCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
-            meshletOcclusionCullingResetCommand.perObjectBufferIndex = command.perObjectBufferIndex;
-            
-            meshletCullingResetCommandBuffer.Append(meshletOcclusionCullingResetCommand);
-            
-            // Mark as not occluded
-            ClearBitAtomic(meshInstanceIsOcclusionCulledBitfield, command.perMeshInstanceBufferIndex);
-            
-        }
-    }
-    else
-    {
-        // Mark the per-mesh occlusion-culling bitfield, since we'll need to reset the meshlet bitfield when this is fully unoccluded later
-        SetBitAtomic(meshInstanceIsOcclusionCulledBitfield, command.perMeshInstanceBufferIndex);
-        
-        DispatchIndirectCommand meshletOcclusionCullingCommand;
-        meshletOcclusionCullingCommand.dispatchX = command.dispatchMeshX;
-        meshletOcclusionCullingCommand.dispatchY = command.dispatchMeshY;
-        meshletOcclusionCullingCommand.dispatchZ = command.dispatchMeshZ;
-        meshletOcclusionCullingCommand.perMeshBufferIndex = command.perMeshBufferIndex;
-        meshletOcclusionCullingCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
-        meshletOcclusionCullingCommand.perObjectBufferIndex = command.perObjectBufferIndex;
-        
-        meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletOcclusionCullingCommand);
-        
-        alreadyAddedForCulling = true;
-    }
-#endif // !defined (OCCLUDERS_PASS)
 #endif // defined (OCCLUSION_CULLING)
     
     bool fullyInside = true;
@@ -210,16 +164,41 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     }
 
 #if defined (OCCLUSION_CULLING)
+    bool alreadyAddedForCulling = false;
 #if !defined(OCCLUDERS_PASS)
     if (!wasVisibleLastFrame) { // Don't render occluders in the new objects pass
+            indirectCommandOutputBuffer.Append(command);
+    } else { // All occluders should be meshlet occlusion culled    
+        DispatchIndirectCommand meshletFrustrumCullingCommand;
+        meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
+        meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;
+        meshletFrustrumCullingCommand.dispatchZ = command.dispatchMeshZ;
+        meshletFrustrumCullingCommand.perMeshBufferIndex = command.perMeshBufferIndex;
+        meshletFrustrumCullingCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
+        meshletFrustrumCullingCommand.perObjectBufferIndex = command.perObjectBufferIndex;
+        
+        meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
+        alreadyAddedForCulling = true;
+    }
 #else
-    if (wasVisibleLastFrame) {
-#endif
-#endif
+    if (wasVisibleLastFrame) { // For occluder pass, we want to draw and (remainder) cull this
         indirectCommandOutputBuffer.Append(command);
-#if defined (OCCLUSION_CULLING)
+    
+        DispatchIndirectCommand meshletFrustrumCullingCommand;
+        meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
+        meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;
+        meshletFrustrumCullingCommand.dispatchZ = command.dispatchMeshZ;
+        meshletFrustrumCullingCommand.perMeshBufferIndex = command.perMeshBufferIndex;
+        meshletFrustrumCullingCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
+        meshletFrustrumCullingCommand.perObjectBufferIndex = command.perObjectBufferIndex;
+        
+        meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
+        alreadyAddedForCulling = true;
     }
 #endif
+#endif
+    
+    
     
         RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
     // Meshlet frustrum culling
@@ -245,7 +224,7 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
         // If the object is fully inside the frustrum, we can skip the meshlet culling
 #if defined (OCCLUSION_CULLING)
 //#if !defined (OCCLUDERS_PASS) // Except for occluders pass, where we will run a (cheaper) meshlet culling on all occluders
-//        return;
+            return;
 //#endif // !defined (OCCLUDERS_PASS)
     }
     
@@ -343,8 +322,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
         
 #if defined (OCCLUSION_CULLING)
         bool occlusionCulled = false;
-        bool _;
-        OcclusionCulling(occlusionCulled, _, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
+        OcclusionCulling(occlusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
         
         bCulled |= occlusionCulled;
 #endif
