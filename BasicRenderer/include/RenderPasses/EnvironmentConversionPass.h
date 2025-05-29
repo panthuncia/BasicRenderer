@@ -60,7 +60,7 @@ public:
             for (int i = 0; i < 6; i++) {
 
                 CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandles[1];
-                rtvHandles[0] = env->GetEnvironmentCubemap()->GetBuffer()->GetRTVInfo(i).cpuHandle;
+                rtvHandles[0] = env->GetEnvironmentCubemap()->GetBuffer()->GetRTVInfo(0, i).cpuHandle;
 
                 commandList->OMSetRenderTargets(1, rtvHandles, FALSE, nullptr);
 

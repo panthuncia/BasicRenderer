@@ -459,14 +459,14 @@ void EnableShaderBasedValidation() {
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
-//#if defined(_DEBUG)
+#if defined(_DEBUG)
     ComPtr<ID3D12Debug> debugController;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
         debugController->EnableDebugLayer();
         dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
     }
-    //EnableShaderBasedValidation();
-//#endif
+    EnableShaderBasedValidation();
+#endif
 
     // Create DXGI factory
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
@@ -474,23 +474,23 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Create device
     ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
 
-    //m_gpuCrashTracker.Initialize();
+    m_gpuCrashTracker.Initialize();
 
     ThrowIfFailed(D3D12CreateDevice(
         bestAdapter.Get(),
         D3D_FEATURE_LEVEL_12_0,
         IID_PPV_ARGS(&device)));
 
-    //const uint32_t aftermathFlags =
-    //    GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.
-    //    GFSDK_Aftermath_FeatureFlags_EnableResourceTracking |    // Enable tracking of resources.
-    //    GFSDK_Aftermath_FeatureFlags_CallStackCapturing |        // Capture call stacks for all draw calls, compute dispatches, and resource copies.
-    //    GFSDK_Aftermath_FeatureFlags_GenerateShaderDebugInfo;    // Generate debug information for shaders.
+    const uint32_t aftermathFlags =
+        GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.
+        GFSDK_Aftermath_FeatureFlags_EnableResourceTracking |    // Enable tracking of resources.
+        GFSDK_Aftermath_FeatureFlags_CallStackCapturing |        // Capture call stacks for all draw calls, compute dispatches, and resource copies.
+        GFSDK_Aftermath_FeatureFlags_GenerateShaderDebugInfo;    // Generate debug information for shaders.
 
-    //AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_DX12_Initialize(
-    //    GFSDK_Aftermath_Version_API,
-    //    aftermathFlags,
-    //    device.Get()));
+    AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_DX12_Initialize(
+        GFSDK_Aftermath_Version_API,
+        aftermathFlags,
+        device.Get()));
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue1> infoQueue;
@@ -1259,11 +1259,11 @@ void DX12Renderer::CreateRenderGraph() {
         occludersRemaindersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, false);
 
         // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
-        //newGraph->BuildComputePass("OccludersMeshletCullingPass")
-        //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-        //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-        //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-        //    .Build<MeshletCullingPass>(true, false, false);
+        newGraph->BuildComputePass("OccludersMeshletCullingPass")
+            .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+            .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+            .Build<MeshletCullingPass>(true, false, false);
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
             .WithCopyDest(indirectCommandBufferResourceGroup)

@@ -25,11 +25,40 @@
 #include "Materials/MaterialFlags.h"
 #include "Mesh/Mesh.h"
 #include "Scene/Components.h"
+#include "NsightAftermathHelpers.h"
 
 using namespace DirectX;
 
 void ThrowIfFailed(HRESULT hr) {
     if (FAILED(hr)) {
+
+        auto tdrTerminationTimeout = std::chrono::seconds(3);
+        auto tStart = std::chrono::steady_clock::now();
+        auto tElapsed = std::chrono::milliseconds::zero();
+
+        GFSDK_Aftermath_CrashDump_Status status = GFSDK_Aftermath_CrashDump_Status_Unknown;
+        AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_GetCrashDumpStatus(&status));
+
+        while (status != GFSDK_Aftermath_CrashDump_Status_CollectingDataFailed &&
+            status != GFSDK_Aftermath_CrashDump_Status_Finished &&
+            tElapsed < tdrTerminationTimeout)
+        {
+            // Sleep 50ms and poll the status again until timeout or Aftermath finished processing the crash dump.
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_GetCrashDumpStatus(&status));
+
+            auto tEnd = std::chrono::steady_clock::now();
+            tElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(tEnd - tStart);
+        }
+
+        if (status != GFSDK_Aftermath_CrashDump_Status_Finished)
+        {
+            std::stringstream err_msg;
+            err_msg << "Unexpected crash dump status: " << status;
+            MessageBoxA(NULL, err_msg.str().c_str(), "Aftermath Error", MB_OK);
+        }
+
+
         // Print the error code for debugging purposes
         std::cerr << "HRESULT failed with error code: " << std::hex << hr << std::endl;
         throw std::runtime_error("HRESULT failed");

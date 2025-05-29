@@ -67,6 +67,7 @@ void CameraManager::SetMeshletBitfieldSize(unsigned int numMeshlets) {
 	m_currentMeshletBitfieldSize = numMeshlets;
 	for (auto& pair : m_meshletBitfieldBuffers) {
 		auto& buffer = pair.second;
+		DeletionManager::GetInstance().MarkForDelete(buffer->GetResource());
 		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshletBitfieldSize, sizeof(unsigned int), false, true, false));
 	}
 }
@@ -79,11 +80,13 @@ void CameraManager::SetNumMeshInstances(unsigned int numMeshInstances) {
 	m_currentMeshInstanceBitfieldSize = numMeshInstances;
 	for (auto& pair : m_meshInstanceMeshletCullingBitfieldBuffers) {
 		auto& buffer = pair.second;
+		DeletionManager::GetInstance().MarkForDelete(buffer->GetResource());
 		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false));
 	}
 
 	for (auto& pair : m_meshInstanceOcclusionCullingBitfieldBuffers) {
 		auto& buffer = pair.second;
+		DeletionManager::GetInstance().MarkForDelete(buffer->GetResource());
 		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false));
 	}
 }

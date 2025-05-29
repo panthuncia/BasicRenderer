@@ -545,7 +545,7 @@ void RenderGraph::Execute(RenderContext& context) {
 	auto& graphicsCommandList = m_graphicsCommandLists[context.frameIndex];
 	auto& graphicsCommandAllocator = m_graphicsCommandAllocators[context.frameIndex];
 
-	bool useAsyncCompute = true;
+	bool useAsyncCompute = false;
 	auto computeQueue = graphicsQueue;//manager.GetComputeQueue();
 	auto computeCommandList = graphicsCommandList;//m_computeCommandLists[context.frameIndex];
 	auto computeCommandAllocator = graphicsCommandAllocator;//m_computeCommandAllocators[context.frameIndex];
@@ -581,6 +581,9 @@ void RenderGraph::Execute(RenderContext& context) {
 		std::vector<BarrierGroups> computeBarrierGroups;
 		computeCommandList->Reset(computeCommandAllocator.Get(), NULL);
 		for (auto& transition : batch.computeTransitions) {
+			if (transition.pResource->GetName() == L"MeshletCullingBitfieldGroup") {
+				spdlog::info("l");
+			}
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
@@ -652,6 +655,9 @@ void RenderGraph::Execute(RenderContext& context) {
         graphicsCommandList->Reset(graphicsCommandAllocator.Get(), NULL);
 		std::vector<BarrierGroups> renderBarrierGroups;
         for (auto& transition : batch.renderTransitions) {
+			if (transition.pResource->GetName() == L"MeshletCullingBitfieldGroup") {
+				spdlog::info("l");
+			}
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
@@ -710,6 +716,9 @@ void RenderGraph::Execute(RenderContext& context) {
 		// Handle special case: Transition resources which will be used on compute queue later, but are in graphic-queue exclusive states
 		std::vector<BarrierGroups> passEndTransitions;
 		for (auto& transition : batch.passEndTransitions) {
+			if (transition.pResource->GetName() == L"MeshletCullingBitfieldGroup") {
+				spdlog::info("l");
+			}
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(transition.range, transition.pResource, { transition.newAccessType, transition.newLayout, transition.newSyncState }, dummy);
 			auto transitions = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
@@ -743,7 +752,6 @@ bool RenderGraph::IsNewBatchNeeded(
 	const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
 	const std::unordered_set<uint64_t>& otherQueueUAVs)
 {
-	return true;
 	// For each subresource requirement in this pass:
 	for (auto const &r : reqs) {
 

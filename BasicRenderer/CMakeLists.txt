@@ -22,7 +22,7 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (BasicRenderer WIN32  ${SOURCES})
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET BasicRenderer PROPERTY CXX_STANDARD 20)
+  set_property(TARGET BasicRenderer PROPERTY CXX_STANDARD 23)
 endif()
 
 #set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi") # For MSVC

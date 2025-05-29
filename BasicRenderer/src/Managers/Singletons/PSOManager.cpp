@@ -848,30 +848,72 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
         }
     }
 
-    //PDB data
-//#if defined(_DEBUG)
-    ComPtr<IDxcBlob> pDebugData;
-    ComPtr<IDxcBlobUtf16> pDebugDataPath;
-    result->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(pDebugData.GetAddressOf()), pDebugDataPath.GetAddressOf());
-    // Get the debug data path
-    const wchar_t* debugDataPath = reinterpret_cast<const wchar_t*>(pDebugDataPath->GetStringPointer());
-    std::wcout << "Suggested pdb path:" << debugDataPath << std::endl;
+    ComPtr<IDxcBlob> objectBlob;
+    hr = result->GetOutput(
+        DXC_OUT_OBJECT,
+        IID_PPV_ARGS(objectBlob.GetAddressOf()),
+        nullptr);
+    ThrowIfFailed(hr);
 
-    // Get the debug data buffer
-    const void* debugDataBuffer = pDebugData->GetBufferPointer();
-    size_t debugDataSize = pDebugData->GetBufferSize();
+    // Retrieve the separate PDB debug info
 
-    // Open a file stream to write the debug data
-    std::ofstream file(debugDataPath, std::ios::binary);
-    if (!file.is_open()) {
-        // Error
-        return;
+    ComPtr<IDxcBlob> pdbBlob;
+	ComPtr<IDxcBlobUtf16> pdbPathBlob;
+    hr = result->GetOutput(
+        DXC_OUT_PDB,
+        IID_PPV_ARGS(pdbBlob.GetAddressOf()),
+        pdbPathBlob.GetAddressOf());
+    ThrowIfFailed(hr);
+
+    const wchar_t* suggestedPdbPath = pdbPathBlob->GetStringPointer();
+    std::filesystem::path pdbFs(suggestedPdbPath);
+
+    auto hashedFileName = pdbFs.filename();    
+
+    // Derive a base name and ensure output folder exists
+    namespace fs = std::filesystem;
+    fs::path exePath(GetExePath());
+    fs::path outDir = exePath / L"CompiledShaders";
+    fs::create_directories(outDir);
+
+    fs::path shaderPath(filename);
+    std::wstring baseName = hashedFileName;
+
+    // Write out the full shader binary
+    fs::path binPath = outDir / (baseName + L".bin");
+    {
+        std::ofstream binFile(binPath, std::ios::binary);
+        if (!binFile) {
+            spdlog::error("Failed to open {} for writing shader binary", 
+                binPath.string());
+        } else {
+            binFile.write(
+                reinterpret_cast<const char*>(objectBlob->GetBufferPointer()),
+                objectBlob->GetBufferSize());
+            spdlog::info("Wrote shader binary: {}", 
+                binPath.string());
+        }
     }
 
-    file.write(reinterpret_cast<const char*>(debugDataBuffer), debugDataSize);
-    file.close();
-//#endif
-    result->GetResult(reinterpret_cast<IDxcBlob**>(shaderBlob.GetAddressOf()));
+    // Write out the separate PDB
+    fs::path pdbPath = outDir / (baseName + L".pdb");
+    {
+        std::ofstream pdbFile(pdbPath, std::ios::binary);
+        if (!pdbFile) {
+            spdlog::error("Failed to open {} for writing shader PDB", 
+                pdbPath.string());
+        } else {
+            pdbFile.write(
+                reinterpret_cast<const char*>(pdbBlob->GetBufferPointer()),
+                pdbBlob->GetBufferSize());
+            spdlog::info("Wrote shader PDB: {}", 
+                pdbPath.string());
+        }
+    }
+
+    // hand back the runtime blob for PSO creation
+    ThrowIfFailed(result->GetResult(
+        reinterpret_cast<IDxcBlob**>(shaderBlob.GetAddressOf())));
 }
 
 void PSOManager::createRootSignature() {
