@@ -89,12 +89,8 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
     bool wasVisibleLastFrame = GetBit(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
     
-#if defined (OCCLUSION_CULLING)
-#if defined (OCCLUDERS_PASS)
+#if defined (OCCLUDERS_PASS) && defined(OCCLUSION_CULLING)
     if (!wasVisibleLastFrame)
-#else
-    if (wasVisibleLastFrame)
-#endif
     {
         return;
     }
@@ -212,35 +208,45 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
         }
 
     }
+
+#if defined (OCCLUSION_CULLING)
+#if !defined(OCCLUDERS_PASS)
+    if (!wasVisibleLastFrame) { // Don't render occluders in the new objects pass
+#else
+    if (wasVisibleLastFrame) {
+#endif
+#endif
+        indirectCommandOutputBuffer.Append(command);
+#if defined (OCCLUSION_CULLING)
+    }
+#endif
     
-    indirectCommandOutputBuffer.Append(command);
-    
-    RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
+        RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
     // Meshlet frustrum culling
-    if (fullyInside)
-    {
-        bool wasPartiallyFrustrumCulledLastFrame = GetBit(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
-        if (wasPartiallyFrustrumCulledLastFrame)
-        { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
-            AppendStructuredBuffer<DispatchIndirectCommand> meshletCullingResetCommandBuffer = ResourceDescriptorHeap[UintRootConstant1];
-            DispatchIndirectCommand meshletFrustrumCullingResetCommand;
-            meshletFrustrumCullingResetCommand.dispatchX = command.dispatchMeshX;
-            meshletFrustrumCullingResetCommand.dispatchY = command.dispatchMeshY;
-            meshletFrustrumCullingResetCommand.dispatchZ = command.dispatchMeshZ;
-            meshletFrustrumCullingResetCommand.perMeshBufferIndex = command.perMeshBufferIndex;
-            meshletFrustrumCullingResetCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
-            meshletFrustrumCullingResetCommand.perObjectBufferIndex = command.perObjectBufferIndex;
+        if (fullyInside)
+        {
+            bool wasPartiallyFrustrumCulledLastFrame = GetBit(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
+            if (wasPartiallyFrustrumCulledLastFrame)
+            { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
+                AppendStructuredBuffer<DispatchIndirectCommand> meshletCullingResetCommandBuffer = ResourceDescriptorHeap[UintRootConstant1];
+                DispatchIndirectCommand meshletFrustrumCullingResetCommand;
+                meshletFrustrumCullingResetCommand.dispatchX = command.dispatchMeshX;
+                meshletFrustrumCullingResetCommand.dispatchY = command.dispatchMeshY;
+                meshletFrustrumCullingResetCommand.dispatchZ = command.dispatchMeshZ;
+                meshletFrustrumCullingResetCommand.perMeshBufferIndex = command.perMeshBufferIndex;
+                meshletFrustrumCullingResetCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
+                meshletFrustrumCullingResetCommand.perObjectBufferIndex = command.perObjectBufferIndex;
             
-            meshletCullingResetCommandBuffer.Append(meshletFrustrumCullingResetCommand);
+                meshletCullingResetCommandBuffer.Append(meshletFrustrumCullingResetCommand);
             
             // Mark as not meshlet culled
-            ClearBitAtomic(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
-        }
+                ClearBitAtomic(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
+            }
         // If the object is fully inside the frustrum, we can skip the meshlet culling
 #if defined (OCCLUSION_CULLING)
-#if !defined (OCCLUDERS_PASS) // Except for occluders pass, where we will run a (cheaper) meshlet culling on all occluders
-        return;
-#endif // !defined (OCCLUDERS_PASS)
+//#if !defined (OCCLUDERS_PASS) // Except for occluders pass, where we will run a (cheaper) meshlet culling on all occluders
+//        return;
+//#endif // !defined (OCCLUDERS_PASS)
     }
     
     if (alreadyAddedForCulling)
@@ -248,22 +254,22 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
         return; // Already added for culling
     }
 #else
-    }
+        }
 #endif // defined (OCCLUSION_CULLING)
     
     // Mark the per-mesh meshlet-culling bitfield, since we'll need to reset the meshlet bitfield when this is fully inside later
-    SetBitAtomic(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
+        SetBitAtomic(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
     
-    DispatchIndirectCommand meshletFrustrumCullingCommand;
-    meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
-    meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;
-    meshletFrustrumCullingCommand.dispatchZ = command.dispatchMeshZ;
-    meshletFrustrumCullingCommand.perMeshBufferIndex = command.perMeshBufferIndex;
-    meshletFrustrumCullingCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
-    meshletFrustrumCullingCommand.perObjectBufferIndex = command.perObjectBufferIndex;
+        DispatchIndirectCommand meshletFrustrumCullingCommand;
+        meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
+        meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;
+        meshletFrustrumCullingCommand.dispatchZ = command.dispatchMeshZ;
+        meshletFrustrumCullingCommand.perMeshBufferIndex = command.perMeshBufferIndex;
+        meshletFrustrumCullingCommand.perMeshInstanceBufferIndex = command.perMeshInstanceBufferIndex;
+        meshletFrustrumCullingCommand.perObjectBufferIndex = command.perObjectBufferIndex;
         
-    meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
-}
+        meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
+    }
 
 // Meshlet culling, one thread per meshlet, one dispatch per mesh, similar to mesh shader
 [numthreads(64, 1, 1)]
@@ -319,7 +325,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
             return; // If the occluders pass will already render this, we don't need to render it in the remainders pass
         }
 #endif
-#if defined (OCCLUDERS_PASS)
+#if defined (OCCLUDERS_PASS1)
         bool culledInRemainderPass = GetBit(meshletBitfieldBuffer, meshletBitfieldIndex);
         if (!culledInRemainderPass){ // If the remainder pass drew this, we don't need to cull it again
             return;

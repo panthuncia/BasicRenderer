@@ -1234,15 +1234,15 @@ void DX12Renderer::CreateRenderGraph() {
                 .WithUnorderedAccess(Subresources(depth->linearDepthMap, FromMip{ 1 }), Subresources(m_linearShadowMaps, FromMip{ 1 }))
                 .Build<DownsamplePass>();
 
-
             // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
             // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
-            newGraph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-                .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-                .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-                .Build<MeshletCullingPass>(false, true, false);
-
+            //newGraph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
+            //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+            //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
+            //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
+            //    .Build<MeshletCullingPass>(false, true, false);
+            
+            /*
             // Now, render the occluder remainders (prepass & shadows)
             if (drawShadows) {
 
@@ -1281,7 +1281,7 @@ void DX12Renderer::CreateRenderGraph() {
                 .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
                 .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
                 .Build<MeshletCullingPass>(true, false, false);
-
+                */
         }
 
         newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn

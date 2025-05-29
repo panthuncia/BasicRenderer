@@ -324,13 +324,13 @@ inline void Menu::Render(const RenderContext& context) {
                 }
             }
 		}
-		if (ImGui::Checkbox("Meshlet Frustrum Culling", &meshletCulling)) {
+		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
 		}
-        if (ImGui::Checkbox("Uncap framerate", &allowTearing)) {
+        if (ImGui::Checkbox("Uncap Framerate", &allowTearing)) {
 			setAllowTearing(allowTearing);
         }
 		if (ImGui::Checkbox("Draw Bounding Spheres", &drawBoundingSpheres)) {
