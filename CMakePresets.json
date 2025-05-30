@@ -30,6 +30,23 @@
             }
         },
         {
+            "name": "debug with address sanitizer",
+            "displayName": "DebugAddressSanitizer",
+            "inherits": "windows-base",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ENABLE_ADDRESS_SANITIZER":  "ON"
+            },
+            "environment": {
+                "CFLAGS": "/fsanitize=address",
+                "CXXFLAGS": "/fsanitize=address"
+            }
+        },
+        {
             "name": "release",
             "displayName": "Release",
             "inherits": "debug",

@@ -195,9 +195,10 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
         meshletFrustrumCullingIndirectCommandOutputBuffer.Append(meshletFrustrumCullingCommand);
         alreadyAddedForCulling = true;
     }
-#endif
-#endif
-    
+#endif // OCCLUDERS_PASS
+#else // If not using occlusion culling, just output to command buffer
+    indirectCommandOutputBuffer.Append(command);
+#endif // OCCLUSION_CULLING
     
     
         RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
