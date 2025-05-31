@@ -63,7 +63,8 @@ public:
             commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 			auto& rtvHandle1 = context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle;
 			auto& clearColor1 = context.pLinearDepthBuffer->GetClearColor();
-			commandList->ClearRenderTargetView(rtvHandle1, clearColor1.data(), 0, nullptr);
+			D3D12_RECT clearRect = { 0, 0, static_cast<LONG>(context.xRes), static_cast<LONG>(context.yRes) };
+			commandList->ClearRenderTargetView(rtvHandle1, clearColor1.data(), 1, &clearRect);
 
             if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
                 auto& rtvHandle2 = m_pAlbedo->GetRTVInfo(0).cpuHandle;

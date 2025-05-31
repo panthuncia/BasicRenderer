@@ -36,7 +36,8 @@ struct Camera {
     uint numDepthMips;
     
     bool isOrtho;
-    uint pad[3];
+    float2 UVScaleToNextPowerOf2;
+    uint pad[1];
 };
 
 struct PerFrameBuffer {

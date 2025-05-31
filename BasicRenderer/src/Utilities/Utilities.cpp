@@ -1336,6 +1336,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	depthBuffer->SetName(L"Depth Buffer");
 
     TextureDescription downsampledDesc;
+    // Pad yres and xres to power of two
 	dims.height = yRes;
 	dims.width = xRes;
 	downsampledDesc.imageDimensions.push_back(dims);
@@ -1353,7 +1354,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
     downsampledDesc.hasRTV = true;
 	downsampledDesc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
     downsampledDesc.clearColor[0] = std::numeric_limits<float>().max();
-
+	downsampledDesc.padInternalResolution = true;
 
     std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::Create(downsampledDesc, {}, nullptr/* depthBuffer.get()*/);
     linearDepthBuffer->SetName(L"linear Depth Buffer");

@@ -234,6 +234,11 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 	newCameraInfo.info.numDepthMips = NumMips(screenRes.x, screenRes.y);
 	newCameraInfo.info.depthResX = screenRes.x;
 	newCameraInfo.info.depthResY = screenRes.y;
+	unsigned int linearDepthX = screenRes.x;
+	unsigned int linearDepthY = screenRes.y;
+	unsigned int paddedLinearDepthX = depth.linearDepthMap->GetInternalWidth();
+	unsigned int paddedLinearDepthY = depth.linearDepthMap->GetInternalHeight();
+	newCameraInfo.info.uvScaleToNextPowerOfTwo = { static_cast<float>(linearDepthX) / paddedLinearDepthX, static_cast<float>(linearDepthY) / paddedLinearDepthY };
 
 	entity.set<Components::Camera> (newCameraInfo);
 

@@ -48,6 +48,8 @@ void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewS
     float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
     fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
     
+    vUV *= camera.UVScaleToNextPowerOf2.xyxy; // Scale to next power of two, because it was padded for downsampling
+    
     float4 occlusionDepth;
     if (camera.depthBufferArrayIndex < 0)
     { // Not a texture array

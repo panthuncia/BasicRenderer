@@ -25,7 +25,8 @@ struct CameraInfo {
     unsigned int numDepthMips;
 
     unsigned int isOrtho = 0; // bool
-    unsigned int pad[3];
+	DirectX::XMFLOAT2 uvScaleToNextPowerOfTwo = { 1.0f, 1.0f }; // Scale to next power of two, for linear depth buffer
+    unsigned int pad[1];
 };
 
 struct PerFrameCB {

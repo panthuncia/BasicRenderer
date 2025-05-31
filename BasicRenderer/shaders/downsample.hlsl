@@ -21,12 +21,15 @@ groupshared AF1 spdIntermediateA[16][16];
 
 struct spdConstants
 {
+    uint2 srcSize;
     uint mips;
     uint numWorkGroups;
+    
     uint2 workGroupOffset;
     float2 invInputSize;
+    
     unsigned int mipUavDescriptorIndices[11];
-    uint pad[3];
+    uint pad[1];
 };
 
 // UintRootConstant0 is the index of the global atomic buffer
@@ -40,47 +43,47 @@ AF4 SpdLoadSourceImage(ASU2 p, AU1 slice)
     float2 invInputSize = constants[UintRootConstant3].invInputSize;
     AF2 textureCoord = p * invInputSize + invInputSize;
     
-    #if defined (DOWNSAMPLE_ARRAY)
+#if defined (DOWNSAMPLE_ARRAY)
     Texture2DArray<float> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
     float result = imgSrc.SampleLevel(g_linearClamp, float3(textureCoord, slice), 0);
-    #else
+#else
     Texture2D<float> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
     float result = imgSrc.SampleLevel(g_linearClamp, textureCoord, 0);
-    #endif
+#endif
     return AF4(result, result, result, result);
 }
 AF4 SpdLoad(ASU2 tex, AU1 slice)
 {
     StructuredBuffer<spdConstants> constants = ResourceDescriptorHeap[UintRootConstant2];
-    #if defined (DOWNSAMPLE_ARRAY)
+#if defined (DOWNSAMPLE_ARRAY)
     globallycoherent RWTexture2DArray<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
     return imgDst5[float3(tex, slice)].rrrr;
-    #else
+#else
     globallycoherent RWTexture2D<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
     return imgDst5[tex].rrrr;
-    #endif
+#endif
 }
 void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
 {
     StructuredBuffer<spdConstants> constants = ResourceDescriptorHeap[UintRootConstant2];
     if (index == 5)
     {
-        #if defined (DOWNSAMPLE_ARRAY)
+#if defined (DOWNSAMPLE_ARRAY)
         globallycoherent RWTexture2DArray<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
         imgDst5[float3(pix, slice)] = outValue.r;
-        #else
+#else
         globallycoherent RWTexture2D<float> imgDst5 = ResourceDescriptorHeap[constants[UintRootConstant3].mipUavDescriptorIndices[5]];
         imgDst5[pix] = outValue.r;
-        #endif
+#endif
         return;
     }
-    #if defined (DOWNSAMPLE_ARRAY)
+#if defined (DOWNSAMPLE_ARRAY)
     RWTexture2DArray<float> imgDst = ResourceDescriptorHeap[NonUniformResourceIndex(constants[UintRootConstant3].mipUavDescriptorIndices[index])];
     imgDst[float3(pix, slice)] = outValue.r;
-    #else
+#else
     RWTexture2D<float> imgDst = ResourceDescriptorHeap[NonUniformResourceIndex(constants[UintRootConstant3].mipUavDescriptorIndices[index])];
     imgDst[pix] = outValue.r;
-    #endif
+#endif
 }
 
 AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)

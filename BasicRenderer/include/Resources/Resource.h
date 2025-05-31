@@ -76,6 +76,7 @@ protected:
 
     unsigned int m_mipLevels = 1;
 	unsigned int m_arraySize = 1;
+
 private:
     bool m_uploadInProgress = false;
     inline static std::atomic<uint64_t> globalResourceCount;

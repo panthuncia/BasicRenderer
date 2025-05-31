@@ -38,6 +38,13 @@ public:
 		return m_clearColor;
 	}
 
+	unsigned int GetInternalWidth() const {
+		return m_internalWidth;
+	}
+	unsigned int GetInternalHeight() const {
+		return m_internalHeight;
+	}
+
 private:
     PixelBuffer() = default;
     void initialize(const TextureDescription& desc,
@@ -62,4 +69,7 @@ private:
     //D3D12_TEXTURE_BARRIER m_textureBarrier;
     D3D12_BARRIER_GROUP m_barrierGroup = {};
 	//BarrierGroups m_barrierGroups;
+
+	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two
+	unsigned int m_internalHeight = 0; // Internal height, used for padding textures to power of two
 };

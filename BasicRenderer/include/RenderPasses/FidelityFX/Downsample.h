@@ -23,7 +23,7 @@ outAU2 numWorkGroupsAndMips, // GPU side: pass in as constant
 inAU4 rectInfo, // left, top, width, height
 ASU1 mips
 */
-int num = 0;
+
 class DownsamplePass : public ComputePass {
 public:
 
@@ -33,27 +33,7 @@ public:
 		removeObserver.destruct();
     }
     void Setup() override {
-        num++;
-		DirectX::XMUINT2 screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
-		unsigned int workGroupOffset[2];
-		unsigned int numWorkGroupsAndMips[2];
-		unsigned int rectInfo[4];
-		rectInfo[0] = 0;
-		rectInfo[1] = 0;
-		rectInfo[2] = screenRes.x;
-		rectInfo[3] = screenRes.y;
-        SpdSetup(m_dispatchThreadGroupCountXY, workGroupOffset, numWorkGroupsAndMips, rectInfo);
-
-		m_spdConstants.invInputSize[0] = 1.0f / static_cast<float>(screenRes.x);
-        m_spdConstants.invInputSize[1] = 1.0f / static_cast<float>(screenRes.y);
-        m_spdConstants.mips = numWorkGroupsAndMips[1];
-        m_spdConstants.numWorkGroups = numWorkGroupsAndMips[0];
-        m_spdConstants.workGroupOffset[0] = workGroupOffset[0];
-        m_spdConstants.workGroupOffset[1] = workGroupOffset[1];
-        
         m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<spdConstants>(1, L"Downsample constants");
-        auto primaryViewConstants = m_pDownsampleConstants->Add();
-		m_pDownsampleConstants->UpdateView(primaryViewConstants.get(), &m_spdConstants);
 
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -111,7 +91,7 @@ public:
         commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
 
 		// Dispatch the compute shader for primary depth
-		commandList->Dispatch(m_dispatchThreadGroupCountXY[0], m_dispatchThreadGroupCountXY[1], 1);
+		commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 1);
 
 		// Process each shadow map
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
@@ -151,12 +131,15 @@ private:
 
     struct spdConstants
     {
+        uint srcSize[2];
         uint mips;
         uint numWorkGroups;
+        
         uint workGroupOffset[2];
         float invInputSize[2];
+        
         unsigned int mipUavDescriptorIndices[11];
-        uint pad[3];
+        uint pad[1];
     };
 
     struct PerMapInfo {
@@ -167,8 +150,8 @@ private:
     };
 	std::unordered_map<uint64_t, PerMapInfo> m_perViewMapInfo;
 
-	spdConstants m_spdConstants;
-    unsigned int m_dispatchThreadGroupCountXY[2];
+	//spdConstants m_spdConstants;
+    //unsigned int m_dispatchThreadGroupCountXY[2];
 
     unsigned int m_numDirectionalCascades = 0;
 
@@ -210,21 +193,28 @@ private:
 		if (m_perViewMapInfo.contains(e.id())) {
 			RemoveMapInfo(e);
 		}
+		// Hack to allow 2x2 downsampling of arbitrary texture sizes. out-of-bounds loads will be clamped.
+        unsigned int paddedWidth = shadowMap.linearDepthMap->GetInternalWidth();
+		unsigned int paddedHeight = shadowMap.linearDepthMap->GetInternalHeight();
 
-        auto& shadowMapResource = shadowMap.depthMap;
+        auto& shadowMapResource = shadowMap.linearDepthMap;
         unsigned int workGroupOffset[2];
         unsigned int numWorkGroupsAndMips[2];
         unsigned int rectInfo[4];
         rectInfo[0] = 0;
         rectInfo[1] = 0;
-        rectInfo[2] = shadowMapResource->GetWidth();
-        rectInfo[3] = shadowMapResource->GetHeight();
+        rectInfo[2] = paddedWidth;
+        rectInfo[3] = paddedHeight;
         unsigned int threadGroupCountXY[2];
         SpdSetup(threadGroupCountXY, workGroupOffset, numWorkGroupsAndMips, rectInfo);
 
+		numWorkGroupsAndMips[1] = shadowMapResource->GetNumUAVMipLevels() - 1; // Mips start at 1, so we subtract 1
+
         spdConstants spdConstants;
-        spdConstants.invInputSize[0] = 1.0f / static_cast<float>(shadowMapResource->GetWidth());
-        spdConstants.invInputSize[1] = 1.0f / static_cast<float>(shadowMapResource->GetHeight());
+		spdConstants.srcSize[0] = shadowMap.linearDepthMap->GetInternalWidth();
+		spdConstants.srcSize[1] = shadowMap.linearDepthMap->GetInternalHeight();
+        spdConstants.invInputSize[0] = 1.0f / static_cast<float>(paddedWidth);
+        spdConstants.invInputSize[1] = 1.0f / static_cast<float>(paddedHeight);
         spdConstants.mips = numWorkGroupsAndMips[1];
         spdConstants.numWorkGroups = numWorkGroupsAndMips[0];
         spdConstants.workGroupOffset[0] = workGroupOffset[0];

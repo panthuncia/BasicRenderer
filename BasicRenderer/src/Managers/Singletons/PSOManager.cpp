@@ -870,7 +870,7 @@ void PSOManager::CompileShader(const std::wstring& filename, const std::wstring&
     const wchar_t* suggestedPdbPath = pdbPathBlob->GetStringPointer();
     std::filesystem::path pdbFs(suggestedPdbPath);
 
-    auto hashedFileName = pdbFs.filename();    
+    auto hashedFileName = pdbFs.stem();    
 
     // Derive a base name and ensure output folder exists
     namespace fs = std::filesystem;

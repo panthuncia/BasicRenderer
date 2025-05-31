@@ -37,6 +37,15 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	m_mipLevels   = desc.generateMipMaps ? CalculateMipLevels(m_width, m_height) : 1;
 	m_arraySize   = desc.isCubemap ? 6 * desc.arraySize : (desc.isArray ? desc.arraySize : 1);
 
+	if (desc.padInternalResolution) {
+		m_internalWidth = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].width)))));
+		m_internalHeight = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].height)))));
+	}
+	else {
+		m_internalHeight = desc.imageDimensions[0].height;
+		m_internalWidth = desc.imageDimensions[0].width;
+	}
+
     // Upload initial data if any
     if (!initialData.empty())
         rm.UploadTextureData(m_texture.Get(), desc, initialData, m_arraySize, m_mipLevels);

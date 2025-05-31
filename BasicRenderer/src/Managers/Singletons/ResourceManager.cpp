@@ -415,10 +415,16 @@ std::pair<ComPtr<ID3D12Resource>,ComPtr<ID3D12Heap>> ResourceManager::CreateText
 	}
 
 	// Create the texture resource description
+	auto width = desc.imageDimensions[0].width;
+	auto height = desc.imageDimensions[0].height;
+	if (desc.padInternalResolution) { // Pad the width and height to the next power of two
+		width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(width)))));
+		height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(height)))));
+	}
 	auto textureDesc = CreateTextureResourceDesc(
 		desc.format,
-		desc.imageDimensions[0].width,
-		desc.imageDimensions[0].height,
+		width,
+		height,
 		arraySize,
 		mipLevels,
 		desc.isCubemap,
