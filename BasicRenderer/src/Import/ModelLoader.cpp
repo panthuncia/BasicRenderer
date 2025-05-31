@@ -129,7 +129,14 @@ static std::shared_ptr<Texture> loadAiTexture(
     else
     {
         // EXTERNAL file: load from (directory + texPath)
-        std::string fullPath = ws2s(GetExePath()) + "\\" + directory + "\\" + texPath;
+
+		//Check if directory is absolute or relative
+        bool isRelative = true;
+		if (directory.find("://") != std::string::npos || directory.find(":/") != std::string::npos || directory.find(":\\\\") != std::string::npos || directory.find(":\\") != std::string::npos) {
+			isRelative = false; // Absolute path
+		}
+
+        std::string fullPath = (isRelative ? ws2s(GetExePath()) + "\\" : "") + directory + "\\" + texPath;
         auto fileExtension = GetFileExtension(fullPath);
         ImageFiletype format = extensionToFiletype[fileExtension];
 		ImageLoader loader = imageFiletypeToLoader[format];
@@ -746,8 +753,8 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
 
 	auto scene = std::make_shared<Scene>();
 
-	// Directory of the model file
-	std::string directory = filePath.substr(0, filePath.find_last_of('/'));
+	// Directory of the model file, allowing both / and \\ as separators
+	std::string directory = GetDirectoryFromPath(filePath);
 
     auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
 	auto [meshes, meshSkinIndices] = parseAiMeshes(pScene, materials);

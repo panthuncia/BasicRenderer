@@ -520,6 +520,18 @@ inline void Menu::DrawLoadModelButton() {
         std::wstring customFilter = L"GLB Files\0*.glb\0All Files\0*.*\0";
         if (OpenFileDialog(selectedFile, customFilter))
         {
+			//auto exePath = GetExePath();
+			//// Strip EXE path from selectedFile
+			//if (selectedFile.find(exePath) == 0) {
+			//	selectedFile.erase(0, exePath.length());
+			//}
+			//// Strip filename from selectedFile
+   //         auto pathCopy = selectedFile;
+			//auto lastSlash = selectedFile.find_last_of(L"\\/");
+			//if (lastSlash != std::wstring::npos) {
+			//	selectedFile.erase(lastSlash, selectedFile.size()-1);
+			//}
+
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 			auto scene = LoadModel(ws2s(selectedFile));
 			scene->GetRoot().set<Components::Name>(ws2s(getFileNameFromPath(selectedFile)));

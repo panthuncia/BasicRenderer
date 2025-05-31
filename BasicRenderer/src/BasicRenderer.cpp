@@ -269,6 +269,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto baseScene = std::make_shared<Scene>();
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
+    /*
     auto dragonScene = LoadModel("models/dragon.glb");
     dragonScene->GetRoot().set<Components::Scale>({5, 5, 5});
     dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
@@ -293,16 +294,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
-    //auto bistro = LoadModel("models/BistroExterior.fbx");
-    //auto bistro = LoadModel("models/bistro.glb");
-    //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
-
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
 
     auto cubeScene = LoadModel("models/sphere.glb");
     cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
     cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
+    */
+
+    auto bistro = LoadModel("models/BistroExterior.fbx");
+    //auto bistro = LoadModel("models/bistro.glb");
+    bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+
 	//cubeScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
     //cubeScene->DisableShadows();
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
@@ -328,7 +331,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//sanMiguel->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     renderer.SetCurrentScene(baseScene);
-
+    
     //renderer.GetCurrentScene()->AppendScene(sanMiguel->Clone());
 
     //mountainScene->AppendScene(dragonScene->Clone());
@@ -347,16 +350,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+	    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 		auto point = randomPointInSphere(8.0);
-        cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
+        //cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
     //auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
-	//renderer.GetCurrentScene()->AppendScene(bistro);
+	renderer.GetCurrentScene()->AppendScene(bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);
 
     //renderer.GetCurrentScene()->AppendScene(*street);

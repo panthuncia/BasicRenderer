@@ -1371,3 +1371,11 @@ uint32_t NumMips(uint32_t width, uint32_t height) {
     uint32_t maxSize = std::max(width, height);
     return 1 + static_cast<uint32_t>(std::floor(std::log2(float(maxSize))));
 }
+
+std::string GetDirectoryFromPath(const std::string& path) {
+	size_t lastSlash = path.find_last_of("/\\");
+	if (lastSlash == std::string::npos) {
+		return ""; // No directory found
+	}
+	return path.substr(0, lastSlash);
+}

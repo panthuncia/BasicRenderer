@@ -33,6 +33,13 @@ public:
 	}
 
 	PassReturn Execute(RenderContext& context) override {
+
+		unsigned int numDraws = context.drawStats.numOpaqueDraws + context.drawStats.numAlphaTestDraws + context.drawStats.numBlendDraws;
+
+		if (numDraws == 0) {
+			return {};
+		}
+
 		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
@@ -73,7 +80,6 @@ public:
 		commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 		// Culling for main camera
-		unsigned int numDraws = context.drawStats.numOpaqueDraws + context.drawStats.numAlphaTestDraws + context.drawStats.numBlendDraws;
 
 		// Frustrum culling
 		auto meshletCullingBuffer = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer();
