@@ -192,7 +192,7 @@ private:
                 }
 
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 drawObjects();
                 break;
             }
@@ -313,7 +313,7 @@ private:
                 }
 
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
 
                 unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
                 variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
