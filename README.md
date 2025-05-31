@@ -18,12 +18,13 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ## Technical features
 
+- GPU-driven rendering with frustrum culling & ExecuteIndirect
+- Per-meshlet frustrum culling
 - Forward+ and Deferred rendering
 - Clustered lighting with a paged linked-list
 - A render graph for automatic resource transitions and queue synchronization
 - Async-compute
 - Compute-based skinning
-- GPU-driven rendering with frustrum culling & ExecuteIndirect
 - Meshlets & mesh shaders
 - Flecs ECS for scene management
 - A basic UI for feature toggles, importing new asset files, debug view selection, and scene graph introspection & modification
@@ -33,9 +34,9 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ![Bistro example](images/Bistro.png)
 
-![Color example](images/color.png)
-
 ![Meshlets example](images/meshlets.png)
+
+![Meshlet culling example](images/culling.png)
 
 ## Supported file formats
 - Partial assimp loader implemented, https://github.com/assimp/assimp/blob/master/doc/Fileformats.md
