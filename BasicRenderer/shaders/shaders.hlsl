@@ -43,12 +43,14 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
+    matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
             StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
             uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
+            viewMatrix = lightCamera.view;
             break;
         }
         case 1: { // Spot light
@@ -56,6 +58,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
             uint lightCameraIndex = spotLightMatrixIndexBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
+            viewMatrix = lightCamera.view;
             break;
         }
         case 2: { // Directional light
@@ -63,10 +66,12 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
             uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
+            viewMatrix = lightCamera.view;
             break;
         }
     }
     output.position = mul(worldPosition, lightMatrix);
+    output.positionViewSpace = mul(worldPosition, viewMatrix);
     return output;
 #endif // SHADOW
     
@@ -99,6 +104,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
 struct PrePassPSOutput
 {
     float4 signedOctEncodedNormal;
+    float linearDepth;
 #if defined(PSO_DEFERRED)
     float4 albedo;
     float2 metallicRoughness;
@@ -122,6 +128,7 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     
     PrePassPSOutput output;
     output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
+    output.linearDepth = -input.positionViewSpace.z;
 #if defined(PSO_DEFERRED)
     output.albedo = float4(fragmentInfo.albedo.xyz, fragmentInfo.ambientOcclusion);
     output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);
@@ -131,7 +138,7 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
 }
 
 #if defined(PSO_SHADOW)
-void
+float
 #else
 [earlydepthstencil]
 float4 
@@ -160,6 +167,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     if (materialInfo.baseColorFactor.a < 0.5){
         discard;
     }
+    return -input.positionViewSpace.z; // Shadow outputs linear depth
 #endif // PSO_SHADOW
 #if !defined(PSO_SHADOW)
 

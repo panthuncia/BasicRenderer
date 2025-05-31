@@ -82,11 +82,11 @@ public:
 
 protected:
 
-    BarrierGroups&  GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-        m_currentAccessType = newAccessType;
-        m_currentLayout = newLayout;
-        m_prevSyncState = newSyncState;
-        return m_dataBuffer->GetEnhancedBarrierGroup(prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
+    BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+        m_subresourceAccessTypes[0] = newAccessType;
+        m_subresourceLayouts[0] = newLayout;
+        m_subresourceSyncStates[0] = newSyncState;
+        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
     }
 
 private:
@@ -99,6 +99,9 @@ private:
         else {
             m_dataBuffer->SetName(m_name.c_str());
         }
+        m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
+        m_subresourceLayouts.push_back(ResourceLayout::LAYOUT_COMMON);
+        m_subresourceSyncStates.push_back(ResourceSyncState::ALL);
     }
 
     void OnSetName() override {

@@ -8,6 +8,7 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 #include <functional>
+#include <spdlog/spdlog.h>
 #define NOMINMAX
 #include <windows.h>
 #include <filesystem>
@@ -104,6 +105,14 @@ private:
 	std::function<bool()> getIndirectDrawsEnabled;
 	std::function<void(bool)> setIndirectDrawsEnabled;
 
+	bool occlusionCulling = true;
+	std::function<bool()> getOcclusionCullingEnabled;
+	std::function<void(bool)> setOcclusionCullingEnabled;
+
+	bool meshletCulling = true;
+	std::function<bool()> getMeshletCullingEnabled;
+	std::function<void(bool)> setMeshletCullingEnabled;
+
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
 	std::function<void(bool)> setWireframeEnabled;
@@ -133,6 +142,8 @@ private:
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
+
+	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -221,6 +232,14 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	indirectDrawsEnabled = getIndirectDrawsEnabled();
 
+	getOcclusionCullingEnabled = settingsManager.getSettingGetter<bool>("enableOcclusionCulling");
+	setOcclusionCullingEnabled = settingsManager.getSettingSetter<bool>("enableOcclusionCulling");
+	occlusionCulling = getOcclusionCullingEnabled();
+
+	getMeshletCullingEnabled = settingsManager.getSettingGetter<bool>("enableMeshletCulling");
+	setMeshletCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletCulling");
+	meshletCulling = getMeshletCullingEnabled();
+
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
@@ -248,6 +267,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
 	m_collectPipelineStatistics = getCollectPipelineStatistics();
+
+	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 }
@@ -299,10 +320,22 @@ inline void Menu::Render(const RenderContext& context) {
                 setIndirectDrawsEnabled(indirectDrawsEnabled);
             }
         }
+		if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling)) {
+			setOcclusionCullingEnabled(occlusionCulling);
+            if (occlusionCulling) {
+				if (!deferredRendering) { // Occlusion culling requires deferred rendering
+					setDeferredRenderingEnabled(true);
+					deferredRendering = true;
+                }
+            }
+		}
+		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
+			setMeshletCullingEnabled(meshletCulling);
+		}
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
 		}
-        if (ImGui::Checkbox("Uncap framerate", &allowTearing)) {
+        if (ImGui::Checkbox("Uncap Framerate", &allowTearing)) {
 			setAllowTearing(allowTearing);
         }
 		if (ImGui::Checkbox("Draw Bounding Spheres", &drawBoundingSpheres)) {
@@ -311,9 +344,14 @@ inline void Menu::Render(const RenderContext& context) {
         if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
 			setClusteredLightingEnabled(clusteredLighting);
         }
-		if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
-			setDeferredRenderingEnabled(deferredRendering);
-		}
+        if (occlusionCulling) {
+            ImGui::Text("Deferred rendering cannot be disabled if occlusion culling is on");
+        }
+        else {
+            if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
+                setDeferredRenderingEnabled(deferredRendering);
+            }
+        }
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
 		}
@@ -350,7 +388,7 @@ inline void Menu::Render(const RenderContext& context) {
     m_commandList->Reset(frameCtx->CommandAllocator, nullptr);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-	auto dsvHandle = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>()->depthMap->GetDSVInfos()[0].cpuHandle;
+	auto dsvHandle = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>()->depthMap->GetDSVInfo(0).cpuHandle;
     m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	auto heap = g_pd3dSrvDescHeap.Get();
     m_commandList->SetDescriptorHeaps(1, &heap);
@@ -482,10 +520,22 @@ inline void Menu::DrawLoadModelButton() {
         std::wstring customFilter = L"GLB Files\0*.glb\0All Files\0*.*\0";
         if (OpenFileDialog(selectedFile, customFilter))
         {
+			//auto exePath = GetExePath();
+			//// Strip EXE path from selectedFile
+			//if (selectedFile.find(exePath) == 0) {
+			//	selectedFile.erase(0, exePath.length());
+			//}
+			//// Strip filename from selectedFile
+   //         auto pathCopy = selectedFile;
+			//auto lastSlash = selectedFile.find_last_of(L"\\/");
+			//if (lastSlash != std::wstring::npos) {
+			//	selectedFile.erase(lastSlash, selectedFile.size()-1);
+			//}
+
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 			auto scene = LoadModel(ws2s(selectedFile));
-			//scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
-			//appendScene(*scene);
+			scene->GetRoot().set<Components::Name>(ws2s(getFileNameFromPath(selectedFile)));
+			appendScene(scene->Clone());
         }
         else
         {

@@ -1,6 +1,5 @@
 #include "Managers/LightManager.h"
 
-#include "Resources/ResourceHandles.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
@@ -19,15 +18,15 @@ LightManager::LightManager() {
 
 	m_activeLightIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeLightIndices");
     m_lightBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<LightInfo>(10, L"lightBuffer<LightInfo>");
-    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"spotViewInfo<matrix>");
-    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"pointViewInfo<matrix>");
-    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"direcitonalViewInfo<matrix>");
+    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"spotViewInfo<uint>");
+    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"pointViewInfo<uint>");
+    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"direcitonalViewInfo<uint>");
 
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	getCurrentShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<ShadowMaps*>("currentShadowMapsResourceGroup");
-	getCurrentDownsampledShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<DownsampledShadowMaps*>("currentDownsampledShadowMapsResourceGroup");
+	getCurrentLinearShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
 
 	m_pLightViewInfoResourceGroup = std::make_shared<ResourceGroup>(L"LightViewInfo");
 	m_pLightViewInfoResourceGroup->AddResource(m_spotViewInfo->GetBuffer());
@@ -85,11 +84,15 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
         }
 
         auto shadowMaps = getCurrentShadowMapResourceGroup();
-		auto downsampledMaps = getCurrentDownsampledShadowMapResourceGroup();
+		auto linearMaps = getCurrentLinearShadowMapResourceGroup();
         if (shadowMaps != nullptr) {
             auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
-			auto downsampledMap = downsampledMaps->AddMap(lightInfo, getShadowResolution());
-            shadowMapComponent = Components::DepthMap(map, downsampledMap);
+			auto linearMap = linearMaps->AddMap(lightInfo, getShadowResolution());
+            shadowMapComponent = Components::DepthMap(map, linearMap);
+			viewInfo.depthMap = map;
+			viewInfo.linearDepthMap = linearMap;
+			viewInfo.depthResX = map->GetWidth();
+			viewInfo.depthResY = map->GetHeight();
         }
     }
 
@@ -105,23 +108,23 @@ void LightManager::RemoveLight(LightInfo* light) {
 }
 
 unsigned int LightManager::GetLightBufferDescriptorIndex() {
-    return m_lightBuffer->GetSRVInfo()[0].index;
+    return m_lightBuffer->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetActiveLightIndicesBufferDescriptorIndex() {
-	return m_activeLightIndices->GetSRVInfo()[0].index;
+	return m_activeLightIndices->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
-	return m_pointViewInfo->GetSRVInfo()[0].index;
+	return m_pointViewInfo->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
-	return m_spotViewInfo->GetSRVInfo()[0].index;
+	return m_spotViewInfo->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return m_directionalViewInfo->GetSRVInfo()[0].index;
+	return m_directionalViewInfo->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetNumLights() {
@@ -218,7 +221,23 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.view = cascades[i].viewMatrix;
 		cameraInfo.projection = cascades[i].orthoMatrix;
 		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
-
+		cameraInfo.aspectRatio = camera->aspect;
+		cameraInfo.clippingPlanes[0] = cascades[i].frustumPlanes[0];
+		cameraInfo.clippingPlanes[1] = cascades[i].frustumPlanes[1];
+		cameraInfo.clippingPlanes[2] = cascades[i].frustumPlanes[2];
+		cameraInfo.clippingPlanes[3] = cascades[i].frustumPlanes[3];
+		cameraInfo.clippingPlanes[4] = cascades[i].frustumPlanes[4];
+		cameraInfo.clippingPlanes[5] = cascades[i].frustumPlanes[5];
+		cameraInfo.depthBufferArrayIndex = i;
+		cameraInfo.depthResX = getShadowResolution();
+		cameraInfo.depthResY = getShadowResolution();
+		cameraInfo.uvScaleToNextPowerOfTwo = {
+			static_cast<float>(cameraInfo.depthResX) / static_cast<float>(GetNextPowerOfTwo(cameraInfo.depthResX)),
+			static_cast<float>(cameraInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(cameraInfo.depthResY))
+		};
+		cameraInfo.numDepthMips = CalculateMipLevels(cameraInfo.depthResX, cameraInfo.depthResY);
+		cameraInfo.isOrtho = true; // Directional lights use orthographic projection for shadows.
+		// TODO: Needs near and far for depth unprojection
 		auto renderView = m_pCameraManager->AddCamera(cameraInfo);
 		m_directionalViewInfo->Add(renderView.cameraBufferIndex);
 		viewInfo.renderViews.push_back(renderView);
@@ -239,6 +258,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	case Components::LightType::Point: {
 		auto cubemapMatrices = GetCubemapViewMatrices(globalPos);
 		for (int i = 0; i < 6; i++) {
+			//const CameraInfo* oldInfo = light.get<CameraInfo>();
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cubemapMatrices[i];
@@ -250,6 +270,14 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[3] = planes[i][3];
 			info.clippingPlanes[4] = planes[i][4];
 			info.clippingPlanes[5] = planes[i][5];
+			info.depthBufferArrayIndex = i;
+			info.depthResX = viewInfo->depthResX;
+			info.depthResY = viewInfo->depthResY;
+			info.uvScaleToNextPowerOfTwo = {
+				static_cast<float>(viewInfo->depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResX)),
+				static_cast<float>(viewInfo->depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResY))
+			};
+			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
@@ -267,6 +295,15 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		camera.clippingPlanes[3] = planes[0][3];
 		camera.clippingPlanes[4] = planes[0][4];
 		camera.clippingPlanes[5] = planes[0][5];
+		camera.depthBufferArrayIndex = 0;
+		camera.depthResX = viewInfo->depthResX;
+		camera.depthResY = viewInfo->depthResY;
+		camera.uvScaleToNextPowerOfTwo = {
+			static_cast<float>(viewInfo->depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResX)),
+			static_cast<float>(viewInfo->depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResY))
+		};
+		camera.numDepthMips = CalculateMipLevels(camera.depthResX, camera.depthResY);
+
 		m_pCameraManager->UpdateCamera(renderViews[0], camera);
 		break;
 	}
@@ -293,6 +330,17 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[3] = cascades[i].frustumPlanes[3];
 			info.clippingPlanes[4] = cascades[i].frustumPlanes[4];
 			info.clippingPlanes[5] = cascades[i].frustumPlanes[5];
+			info.depthBufferArrayIndex = i;
+			info.depthResX = viewInfo->depthResX;
+			info.depthResY = viewInfo->depthResY;
+			unsigned int nextPowerOfTwoX = GetNextPowerOfTwo(viewInfo->depthResX);
+			unsigned int nextPowerOfTwoY = GetNextPowerOfTwo(viewInfo->depthResY);
+			info.uvScaleToNextPowerOfTwo = {
+				static_cast<float>(viewInfo->depthResX) / static_cast<float>(nextPowerOfTwoX),
+				static_cast<float>(viewInfo->depthResY) / static_cast<float>(nextPowerOfTwoY)
+			};
+			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
+			info.isOrtho = true; // Directional lights use orthographic projection for shadows.
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
@@ -348,6 +396,7 @@ void LightManager::UpdateLightBufferView(BufferView* view, LightInfo& data) {
 std::shared_ptr<ResourceGroup>& LightManager::GetLightViewInfoResourceGroup() {
 	return m_pLightViewInfoResourceGroup;
 }
+
 std::shared_ptr<ResourceGroup>& LightManager::GetLightBufferResourceGroup() {
 	return m_pLightBufferResourceGroup;
 }

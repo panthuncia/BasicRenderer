@@ -71,3 +71,14 @@ BoundingSphere ComputeConeBoundingSphere(const XMVECTOR& origin, const XMVECTOR&
 
 	return sphere;
 }
+
+unsigned int GetNextPowerOfTwo(unsigned int value) {
+	if (value == 0) return 1; // Handle zero case
+	value -= 1; // Decrement to handle exact powers of two
+	value |= value >> 1;
+	value |= value >> 2;
+	value |= value >> 4;
+	value |= value >> 8;
+	value |= value >> 16;
+	return value + 1; // Increment to get the next power of two
+}

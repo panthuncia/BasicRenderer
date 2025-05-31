@@ -26,4 +26,8 @@ struct TextureDescription {
 	DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
 	bool hasNonShaderVisibleUAV = false;
     bool generateMipMaps = false;
+	bool allowAlias = false;
+	float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f }; // default RGBA clear color
+	float depthClearValue = 1.0f; // default depth clear value
+    bool padInternalResolution = false; // If true, the texture will be padded to the next power of two resolution
 };

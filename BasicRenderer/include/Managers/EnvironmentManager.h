@@ -60,11 +60,11 @@ public:
 	}
 
 	unsigned int GetEnvironmentBufferSRVDescriptorIndex() const {
-		return m_environmentInfoBuffer->GetSRVInfo()[0].index;
+		return m_environmentInfoBuffer->GetSRVInfo(0).index;
 	}
 
 	unsigned int GetEnvironmentBufferUAVDescriptorIndex() const {
-		return m_environmentInfoBuffer->GetUAVShaderVisibleInfo()[0].index;
+		return m_environmentInfoBuffer->GetUAVShaderVisibleInfo(0).index;
 	}
 
 	std::shared_ptr<ResourceGroup>& GetWorkingEnvironmentCubemapGroup() {

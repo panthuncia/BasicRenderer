@@ -130,15 +130,16 @@ namespace Components {
 		std::shared_ptr<DynamicGloballyIndexedResource> alphaTestIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> blendIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletFrustrumCullingIndirectCommandBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshletFrustrumCullingResetIndirectCommandBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshletOcclusionCullingIndirectCommandBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshletCullingResetIndirectCommandBuffer;
 	};
 	struct DepthMap {
 		DepthMap() = default;
-		DepthMap(std::shared_ptr<PixelBuffer> depthMap, std::shared_ptr<PixelBuffer> downsampledDepthMap)
-			: depthMap(depthMap), downsampledDepthMap(downsampledDepthMap) {
+		DepthMap(std::shared_ptr<PixelBuffer> depthMap, std::shared_ptr<PixelBuffer> linearDepthMap)
+			: depthMap(depthMap), linearDepthMap(linearDepthMap) {
 		}
 		std::shared_ptr<PixelBuffer> depthMap;
-		std::shared_ptr<PixelBuffer> downsampledDepthMap;
+		std::shared_ptr<PixelBuffer> linearDepthMap;
 	};
 	struct RenderView {
 		uint64_t viewID;
@@ -146,8 +147,9 @@ namespace Components {
 		uint64_t cameraBufferIndex;
 		IndirectCommandBuffers indirectCommandBuffers;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceBitfieldBuffer;
-		DepthMap depthMap;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
+		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
+		//DepthMap depthMap;
 	};
 	struct LightViewInfo {
 		std::vector<RenderView> renderViews;
@@ -155,6 +157,10 @@ namespace Components {
 		uint64_t lightBufferIndex;
 		uint64_t viewInfoBufferIndex;
 		Matrix projectionMatrix;
+		std::shared_ptr<PixelBuffer> depthMap;
+		std::shared_ptr<PixelBuffer> linearDepthMap;
+		uint32_t depthResX;
+		uint32_t depthResY;
 	};
 
 	struct SceneNode {}; // Represents a generic node in the scene graph

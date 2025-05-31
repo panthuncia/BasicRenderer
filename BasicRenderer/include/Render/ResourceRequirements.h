@@ -1,9 +1,22 @@
 #pragma once
 
-// bundle everything you need per-resource
+#include <memory>
+
+#include "Resources/ResourceStateTracker.h"
+
+class Resource;
+
+struct ResourceAndRange {
+    ResourceAndRange(const std::shared_ptr<Resource>& resource);
+	ResourceAndRange(const std::shared_ptr<Resource>& resource, const RangeSpec& range);
+    std::shared_ptr<Resource>                   resource;
+    RangeSpec                   range;
+};
+
 struct ResourceRequirement {
-    std::shared_ptr<Resource>   resource;
-    ResourceAccessType          access;    // bitmask
-    ResourceLayout              layout;
-    ResourceSyncState           sync;
+	ResourceRequirement(const ResourceAndRange& resourceAndRange)
+		: resourceAndRange(resourceAndRange) {
+	}
+	ResourceAndRange		  resourceAndRange;    // resource and range
+    ResourceState state;
 };

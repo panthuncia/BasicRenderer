@@ -13,10 +13,20 @@ struct CameraInfo {
     DirectX::XMMATRIX projectionInverse;
 	DirectX::XMMATRIX viewProjection;
 	ClippingPlane clippingPlanes[6];
+
 	float fov;
 	float aspectRatio;
 	float zNear;
 	float zFar;
+
+    int depthBufferArrayIndex = -1;
+    unsigned int depthResX;
+	unsigned int depthResY;
+    unsigned int numDepthMips;
+
+    unsigned int isOrtho = 0; // bool
+	DirectX::XMFLOAT2 uvScaleToNextPowerOfTwo = { 1.0f, 1.0f }; // Scale to next power of two, for linear depth buffer
+    unsigned int pad[1];
 };
 
 struct PerFrameCB {
@@ -316,6 +326,7 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant2,
     UintRootConstant3,
 	UintRootConstant4,
+	UintRootConstant5,
 	NumMiscUintRootConstants
 };
 

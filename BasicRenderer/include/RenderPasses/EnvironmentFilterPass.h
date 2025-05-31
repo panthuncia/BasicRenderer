@@ -7,7 +7,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "Resources/ResourceHandles.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ReadbackManager.h"
@@ -47,12 +46,12 @@ public:
 			auto& texture = env->GetEnvironmentCubemap();
             auto& prefilteredEnvironment = env->GetEnvironmentPrefilteredCubemap();
 
-            commandList->SetGraphicsRootDescriptorTable(0, texture->GetBuffer()->GetSRVInfo()[0].gpuHandle);
+            commandList->SetGraphicsRootDescriptorTable(0, texture->GetBuffer()->GetSRVInfo(0).gpuHandle);
 
             commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
             commandList->SetPipelineState(PSO.Get());
-            auto& rtvs = prefilteredEnvironment->GetBuffer()->GetRTVInfos();
-            unsigned int maxMipLevels = rtvs.size() / 6;
+            //auto& rtvs = prefilteredEnvironment->GetBuffer()->GetRTVInfos();
+            unsigned int maxMipLevels = prefilteredEnvironment->GetBuffer()->GetNumRTVMipLevels();
             for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
             {
                 unsigned int mipWidth = prefilteredRes * std::pow(0.5, mip);
@@ -66,7 +65,7 @@ public:
                 commandList->SetGraphicsRoot32BitConstants(2, 1, &roughness, 0);
                 for (int i = 0; i < 6; i++) {
 
-                    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvs[6 * mip + i].cpuHandle;
+                    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = prefilteredEnvironment->GetBuffer()->GetRTVInfo(mip, i).cpuHandle;
 
                     commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 

@@ -11,7 +11,7 @@ float calculatePointShadow(float3 fragPosWorldSpace, float3 normal, LightInfo li
 
     TextureCube<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float depthSample = shadowMap.Sample(shadowSampler, worldDir);
+    float depthSample = shadowMap.SampleLevel(shadowSampler, worldDir, 0);
     //depthSample = unprojectDepth(depthSample, light.nearPlane, light.farPlane);
     if (depthSample == 1.0) {
         return 0.0;
@@ -80,7 +80,7 @@ float calculateCascadedShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace,
     
     Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.Sample(shadowSampler, float3(uv.xy, cascadeIndex)).r;
+    float closestDepth = shadowMap.SampleLevel(shadowSampler, float3(uv.xy, cascadeIndex), 0).r;
 
     float currentDepth = uv.z;
     
@@ -98,7 +98,7 @@ float calculateSpotShadow(float3 fragPosWorldSpace, float3 normal, LightInfo lig
         
     Texture2D<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
     SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = unprojectDepth(shadowMap.Sample(shadowSampler, uv.xy).r, near, far);
+    float closestDepth = unprojectDepth(shadowMap.SampleLevel(shadowSampler, uv.xy, 0).r, near, far);
     float currentDepth = fragPosLightProjection.z;
     
     // Scale bias with difference between light direction and normal

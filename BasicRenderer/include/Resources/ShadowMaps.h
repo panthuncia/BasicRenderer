@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <spdlog/spdlog.h>
+#include <limits>
 
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ResourceGroup.h"
@@ -36,6 +37,8 @@ public:
 		desc.format = DXGI_FORMAT_R32_TYPELESS;
 		desc.hasSRV = true;
 		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+		//desc.generateMipMaps = true; // Mips will only be used by aliased downsample maps
+		//desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
@@ -70,9 +73,9 @@ private:
 	std::function<uint8_t()> getNumCascades;
 };
 
-class DownsampledShadowMaps : public ResourceGroup {
+class LinearShadowMaps : public ResourceGroup {
 public:
-	DownsampledShadowMaps(const std::wstring& name)
+	LinearShadowMaps(const std::wstring& name)
 		: ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
@@ -82,7 +85,7 @@ public:
 		auto shadowSampler = Sampler::GetDefaultShadowSampler();
 		TextureDescription desc;
 		ImageDimensions dims;
-		unsigned int res = shadowResolution / 2;
+		unsigned int res = shadowResolution;
 		dims.height = res;
 		dims.width = res;
 		desc.imageDimensions.push_back(dims);
@@ -93,21 +96,24 @@ public:
 		desc.hasUAV = true;
 		desc.uavFormat = DXGI_FORMAT_R32_FLOAT;
 		desc.generateMipMaps = true;
+		desc.hasRTV = true;
+		desc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.clearColor[0] = std::numeric_limits<float>().max();
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
 			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"DownsampledPointShadowMap");
+			shadowMap->SetName(L"linearShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
 			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"DownsampledSpotShadowMap");
+			shadowMap->SetName(L"linearShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
 			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"DownsampledDirectionalShadowMap");
+			shadowMap->SetName(L"linearShadowMap");
 			break;
 
 		}

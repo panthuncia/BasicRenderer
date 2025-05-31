@@ -56,11 +56,11 @@ flecs::entity Scene::CreateSpotLightECS(std::wstring name, XMFLOAT3 position, XM
 
 flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType type, XMFLOAT3 position, XMFLOAT3 color, float intensity, XMFLOAT3 attenuation, XMFLOAT3 direction, float innerConeAngle, float outerConeAngle, bool shadowCasting) {
 	auto& world = ECSManager::GetInstance().GetWorld();
-	float maxRange = 20.0f;
+	//float maxRange = 20.0f;
 	XMVECTOR normalizedAttenuationVec = XMVector3Normalize(XMLoadFloat3(&attenuation));
 	XMFLOAT3 normalizedAttenuation;
 	XMStoreFloat3(&normalizedAttenuation, normalizedAttenuationVec);
-	maxRange = (std::min)(maxRange, CalculateLightRadius(intensity, normalizedAttenuation.x, normalizedAttenuation.y, normalizedAttenuation.z));
+	auto maxRange = CalculateLightRadius(intensity, normalizedAttenuation.x, normalizedAttenuation.y, normalizedAttenuation.z);
 
 	LightInfo lightInfo;
 	lightInfo.type = type;
@@ -213,7 +213,7 @@ void Scene::ActivateLight(flecs::entity& entity) {
 	entity.set<Components::LightViewInfo>({ addInfo.lightViewInfo });
 	if (addInfo.shadowMap.has_value()) {
 		entity.set<Components::DepthMap>({ addInfo.shadowMap.value() });
-		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().depthMap->GetSRVInfo()[0].index;
+		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().depthMap->GetSRVInfo(0).index;
 		newInfo.lightInfo.shadowSamplerIndex = Sampler::GetDefaultShadowSampler()->GetDescriptorIndex();
 		newInfo.lightInfo.shadowViewInfoIndex = addInfo.lightViewInfo.viewInfoBufferIndex;
 		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), newInfo.lightInfo);
@@ -225,10 +225,24 @@ void Scene::ActivateLight(flecs::entity& entity) {
 }
 
 void Scene::ActivateCamera(flecs::entity& entity) {
-	auto cameraInfo = entity.get_mut<Components::Camera>()->info;
-	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(cameraInfo);
+	auto camera = entity.get<Components::Camera>();
+
+	Components::Camera newCameraInfo = {};
+	newCameraInfo = *camera;
 	auto screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
 	auto depth = CreateDepthMapComponent(screenRes.x, screenRes.y, 1, false);
+	newCameraInfo.info.numDepthMips = NumMips(screenRes.x, screenRes.y);
+	newCameraInfo.info.depthResX = screenRes.x;
+	newCameraInfo.info.depthResY = screenRes.y;
+	unsigned int linearDepthX = screenRes.x;
+	unsigned int linearDepthY = screenRes.y;
+	unsigned int paddedLinearDepthX = depth.linearDepthMap->GetInternalWidth();
+	unsigned int paddedLinearDepthY = depth.linearDepthMap->GetInternalHeight();
+	newCameraInfo.info.uvScaleToNextPowerOfTwo = { static_cast<float>(linearDepthX) / paddedLinearDepthX, static_cast<float>(linearDepthY) / paddedLinearDepthY };
+
+	entity.set<Components::Camera> (newCameraInfo);
+
+	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(newCameraInfo.info);
 	entity.set<Components::RenderView>(renderView);
 	entity.set<Components::DepthMap>(depth);
 }
@@ -639,9 +653,14 @@ const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMe
 	return view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
 }
 
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingResetIndirectCommandBuffer() const {
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletOcclusionCullingIndirectCommandBuffer() const {
 	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.meshletFrustrumCullingResetIndirectCommandBuffer;
+	return view->indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer;
+}
+
+const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer() const {
+	auto view = m_primaryCamera.get<Components::RenderView>();
+	return view->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
 }
 
 const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const {

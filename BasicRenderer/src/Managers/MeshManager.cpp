@@ -145,7 +145,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 
 	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
-		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()); // All render views must be updated
+		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
 	}
 	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
 
@@ -181,28 +181,28 @@ void MeshManager::UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view,
 }
 
 unsigned int  MeshManager::GetPreSkinningVertexBufferSRVIndex() const {
-	return m_preSkinningVertices->GetSRVInfo()[0].index;
+	return m_preSkinningVertices->GetSRVInfo(0).index;
 }
 unsigned int  MeshManager::GetPostSkinningVertexBufferSRVIndex() const {
-	return m_postSkinningVertices->GetSRVInfo()[0].index;
+	return m_postSkinningVertices->GetSRVInfo(0).index;
 }
 unsigned int  MeshManager::GetPostSkinningVertexBufferUAVIndex() const {
-	return m_postSkinningVertices->GetUAVShaderVisibleInfo()[0].index;
+	return m_postSkinningVertices->GetUAVShaderVisibleInfo(0).index;
 }
 unsigned int  MeshManager::GetMeshletOffsetBufferSRVIndex() const {
-	return m_meshletOffsets->GetSRVInfo()[0].index;
+	return m_meshletOffsets->GetSRVInfo(0).index;
 }
 unsigned int  MeshManager::GetMeshletIndexBufferSRVIndex() const {
-	return m_meshletIndices->GetSRVInfo()[0].index;
+	return m_meshletIndices->GetSRVInfo(0).index;
 }
 unsigned int  MeshManager::GetMeshletTriangleBufferSRVIndex() const {
-	return m_meshletTriangles->GetSRVInfo()[0].index;
+	return m_meshletTriangles->GetSRVInfo(0).index;
 }
 std::shared_ptr<ResourceGroup>  MeshManager::GetResourceGroup() {
 	return m_resourceGroup;
 }
 unsigned int  MeshManager::GetPerMeshBufferSRVIndex() const {
-	return m_perMeshBuffers->GetSRVInfo()[0].index;
+	return m_perMeshBuffers->GetSRVInfo(0).index;
 }
 std::shared_ptr<DynamicBuffer>&  MeshManager::GetPerMeshBuffers() {
 	return m_perMeshBuffers;
@@ -214,9 +214,9 @@ std::shared_ptr<DynamicBuffer>&  MeshManager::GetPostSkinningVertices() {
 	return m_postSkinningVertices;
 }
 unsigned int  MeshManager::GetPerMeshInstanceBufferSRVIndex() const {
-	return m_perMeshInstanceBuffers->GetSRVInfo()[0].index;
+	return m_perMeshInstanceBuffers->GetSRVInfo(0).index;
 }
 unsigned int MeshManager::GetMeshletBoundsBufferSRVIndex() const {
-	return m_meshletBoundsBuffer->GetSRVInfo()[0].index;
+	return m_meshletBoundsBuffer->GetSRVInfo(0).index;
 }
 

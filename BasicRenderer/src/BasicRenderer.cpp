@@ -217,19 +217,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
 
-    //HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
+    HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
 
-    //if (!hGetPixDLL) {
-    //    spdlog::warn("could not load the PIX library");
-    //}
+    if (!hGetPixDLL) {
+        spdlog::warn("could not load the PIX library");
+    }
 
     // Aftermath
 
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
     HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
     if (!pixLoaded) {
         // Print the error code for debugging purposes
         spdlog::warn("Could not load PIX! Error: ", GetLastError());
     }
+#endif
 
     SetDllDirectoryA(".\\D3D\\");
 
@@ -267,6 +269,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto baseScene = std::make_shared<Scene>();
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
+    /*
     auto dragonScene = LoadModel("models/dragon.glb");
     dragonScene->GetRoot().set<Components::Scale>({5, 5, 5});
     dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
@@ -291,18 +294,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
-    //auto bistro = LoadModel("models/BistroExterior.fbx");
-    //auto bistro = LoadModel("models/bistro.glb");
-    //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
-
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
 
     auto cubeScene = LoadModel("models/sphere.glb");
     cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
     cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
+    */
+
+    auto bistro = LoadModel("models/BistroExterior.fbx");
+    //auto bistro = LoadModel("models/bistro.glb");
+    bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+
 	//cubeScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
-    cubeScene->DisableShadows();
+    //cubeScene->DisableShadows();
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
     //auto heightMap = loadTextureFromFileSTBI("textures/height.jpg");
     //for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
@@ -326,33 +331,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//sanMiguel->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     renderer.SetCurrentScene(baseScene);
-
+    
     //renderer.GetCurrentScene()->AppendScene(sanMiguel->Clone());
 
     //mountainScene->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(*tigerScene);
+    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+
+    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
     
-	for (int i = 0; i < 10000; i++) {
+	for (int i = 0; i < 0000; i++) {
 		float animationSpeed = randomFloat(0.5, 2.0);
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
-		auto point = randomPointInSphere(20.0);
-        cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
+	    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+		auto point = randomPointInSphere(8.0);
+        //cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
     //auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
-	//renderer.GetCurrentScene()->AppendScene(bistro);
+	renderer.GetCurrentScene()->AppendScene(bistro);
 	//renderer.GetCurrentScene()->AppendScene(*sponza);
 
     //renderer.GetCurrentScene()->AppendScene(*street);
@@ -412,7 +419,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
 	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 10.0, XMFLOAT3(0, -1, -1));
- //   auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 10.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
+    auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 10, 3), XMFLOAT3(1, 1, 1), 2000.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
     //auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 1.0, 0.0, 0.0, 1.0);
     
     for (int i = 0; i < 0; i++) {
@@ -421,7 +428,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light"+std::to_wstring(i), XMFLOAT3(point.x, point.y, point.z), color, 3.0, 0.0, 0.0, 1.0, false);
     }
 
-    //renderer.SetDebugTexture(light1.get<Components::ShadowMap>()->shadowMap);
+    //renderer.SetDebugTexture(renderer.GetCurrentScene()->GetPrimaryCamera().get<Components::DepthMap>()->linearDepthMap);
 
     MSG msg = {};
     unsigned int frameIndex = 0;

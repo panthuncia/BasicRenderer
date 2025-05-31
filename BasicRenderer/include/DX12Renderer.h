@@ -64,17 +64,18 @@ public:
     void Update(double elapsedSeconds);
     void Render();
     void Cleanup();
-    ComPtr<ID3D12Device>& GetDevice();
+    ComPtr<ID3D12Device10>& GetDevice();
     std::shared_ptr<Scene>& GetCurrentScene();
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
     void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
+    std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 
 private:
     ComPtr<IDXGIFactory7> factory;
-    ComPtr<ID3D12Device> device;
+    ComPtr<ID3D12Device10> device;
     ComPtr<IDXGISwapChain4> swapChain;
     ComPtr<ID3D12CommandQueue> graphicsQueue;
 	ComPtr<ID3D12CommandQueue> computeQueue;
@@ -82,7 +83,7 @@ private:
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
-	Components::DepthMap m_depthMap;
+	//Components::DepthMap m_depthMap;
     std::vector<ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
     std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
     UINT rtvDescriptorSize;
@@ -115,7 +116,7 @@ private:
 	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
 
     std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
-	std::shared_ptr<DownsampledShadowMaps> m_downsampledShadowMaps = nullptr;
+	std::shared_ptr<LinearShadowMaps> m_linearShadowMaps = nullptr;
 	std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 
     // GPU resource managers
@@ -159,9 +160,11 @@ private:
     bool m_imageBasedLighting = true;
 	bool m_gtaoEnabled = true;
 	bool m_deferredRendering = true;
+	bool m_occlusionCulling = true;
+	bool m_meshletCulling = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
-    std::function<void(DownsampledShadowMaps*)> setDownsampledShadowMaps;
+    std::function<void(LinearShadowMaps*)> setLinearShadowMaps;
     std::function<uint16_t()> getShadowResolution;
 	std::function<void(float)> setCameraSpeed;
 	std::function<float()> getCameraSpeed;

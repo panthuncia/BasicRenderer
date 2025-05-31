@@ -45,28 +45,32 @@ Buffer::Buffer(
 		spdlog::error("HRESULT failed with error code: {}", hr);
 		throw std::runtime_error("HRESULT failed");
 	}
-	D3D12_RESOURCE_BARRIER barrier;
-	barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	barrier.Transition.pResource = m_buffer.Get();
-	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-	m_transitions.push_back(barrier);
+	//D3D12_RESOURCE_BARRIER barrier;
+	//barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	//barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	//barrier.Transition.pResource = m_buffer.Get();
+	//barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	//m_transitions.push_back(barrier);
 
-	m_barrierGroup.NumBarriers = 1;
-	m_barrierGroup.Type = D3D12_BARRIER_TYPE_BUFFER;
-	m_barrierGroup.pBufferBarriers = &m_bufferBarrier;
+	//m_barrierGroup.NumBarriers = 1;
+	//m_barrierGroup.Type = D3D12_BARRIER_TYPE_BUFFER;
+	//m_barrierGroup.pBufferBarriers = &m_bufferBarrier;
 
-	m_bufferBarrier.pResource = m_buffer.Get();
-	m_bufferBarrier.Offset = 0;
-	m_bufferBarrier.Size = UINT64_MAX;
+	//m_bufferBarrier.pResource = m_buffer.Get();
+	//m_bufferBarrier.Offset = 0;
+	//m_bufferBarrier.Size = UINT64_MAX;
 
-	m_barrierGroups.numBufferBarrierGroups = 1;
-	m_barrierGroups.bufferBarriers = &m_barrierGroup;
+	//m_barrierGroups.numBufferBarrierGroups = 1;
+	//m_barrierGroups.bufferBarriers = &m_barrierGroup;
 
 	m_size = bufferSize;
+
+	m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
+	m_subresourceLayouts.push_back(ResourceLayout::LAYOUT_COMMON);
+	m_subresourceSyncStates.push_back(ResourceSyncState::ALL);
 }
 
-BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups Buffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
 	//if (prevState != currentState) {
 	//	throw(std::runtime_error("Buffer state mismatch"));
@@ -78,15 +82,29 @@ BarrierGroups& Buffer::GetEnhancedBarrierGroup(ResourceAccessType prevAccessType
 	//	throw(std::runtime_error("Useless transition"));
 	//}
 #endif
+
+	BarrierGroups barrierGroups = {};
 	
-	m_bufferBarrier.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
-	m_bufferBarrier.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
-	m_bufferBarrier.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
-	m_bufferBarrier.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
+	barrierGroups.bufferBarrierDescs.push_back({});
 
-	m_currentAccessType = newAccessType;
-	m_currentLayout = newLayout;
-	m_prevSyncState = newSyncState;
+	auto& bufferBarrierDesc = barrierGroups.bufferBarrierDescs[0];
+	bufferBarrierDesc.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
+	bufferBarrierDesc.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
+	bufferBarrierDesc.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
+	bufferBarrierDesc.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
+	bufferBarrierDesc.Offset = 0;
+	bufferBarrierDesc.Size = UINT64_MAX;
+	bufferBarrierDesc.pResource = m_buffer.Get();
 
-	return m_barrierGroups;
+	D3D12_BARRIER_GROUP group;
+	group.NumBarriers = 1;
+	group.Type = D3D12_BARRIER_TYPE_BUFFER;
+	group.pBufferBarriers = barrierGroups.bufferBarrierDescs.data();
+	barrierGroups.bufferBarriers.push_back(group);
+
+	m_subresourceAccessTypes[0] = newAccessType;
+	m_subresourceLayouts[0] = newLayout;
+	m_subresourceSyncStates[0] = newSyncState;
+
+	return barrierGroups;
 }

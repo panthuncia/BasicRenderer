@@ -51,7 +51,7 @@ cbuffer StaticBufferInfo : register(b5) {
 cbuffer variableBufferInfo : register(b6) {
     uint activeDrawSetIndicesBufferDescriptorIndex;
     uint indirectCommandBufferDescriptorIndex;
-    uint meshletCullingIndirectCommandBufferDescriptorIndex;
+    uint meshletFrustrumCullingIndirectCommandBufferDescriptorIndex;
     uint meshletCullingBitfieldBufferDescriptorIndex;
     uint maxDrawIndex;
 }
@@ -76,6 +76,7 @@ cbuffer MiscUintRootConstants : register(b9) { // Used for pass-specific one-off
     uint UintRootConstant2;
     uint UintRootConstant3;
     uint UintRootConstant4;
+    uint UintRootConstant5;
 }
 
 cbuffer MiscFloatRootConstants : register(b10) { // Used for pass-specific one-off constants

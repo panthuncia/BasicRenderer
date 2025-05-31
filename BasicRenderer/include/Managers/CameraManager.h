@@ -19,7 +19,7 @@ public:
 	}
 
 	unsigned int GetCameraBufferSRVIndex() const {
-		return m_pCameraBuffer->GetSRVInfo()[0].index;
+		return m_pCameraBuffer->GetSRVInfo(0).index;
 	}
 
 	Components::RenderView AddCamera(CameraInfo& camera);
@@ -45,11 +45,17 @@ public:
 		return m_meshletCullingBitfieldGroup;
 	}
 
-	const std::shared_ptr<ResourceGroup>& GetMeshInstanceCullingBitfieldGroup() const {
-		return m_meshInstanceCullingBitfieldGroup;
+	const std::shared_ptr<ResourceGroup>& GetMeshInstanceMeshletCullingBitfieldGroup() const {
+		return m_meshInstanceMeshletCullingBitfieldGroup;
+	}
+
+	const std::shared_ptr<ResourceGroup>& GetMeshInstanceOcclusionCullingBitfieldGroup() const {
+		return m_meshInstanceOcclusionCullingBitfieldGroup;
 	}
 
 	void SetNumMeshInstances(unsigned int numMeshInstances);
+
+	void SetDepthBufferForCamera(Components::RenderView view, Components::DepthMap, bool isArray = false, unsigned int arrayIndex = 0);
 
 private:
 	CameraManager();
@@ -57,11 +63,13 @@ private:
 	std::mutex m_cameraUpdateMutex;
 	std::atomic<uint64_t> m_viewIDCounter = 0;
 	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshletBitfieldBuffers;
-	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshInstanceBitfieldBuffers;
+	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshInstanceMeshletCullingBitfieldBuffers;
+	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshInstanceOcclusionCullingBitfieldBuffers;
 
 	IndirectCommandBufferManager* m_pCommandBufferManager = nullptr;
 	std::shared_ptr<ResourceGroup> m_meshletCullingBitfieldGroup;
-	std::shared_ptr<ResourceGroup> m_meshInstanceCullingBitfieldGroup;
+	std::shared_ptr<ResourceGroup> m_meshInstanceMeshletCullingBitfieldGroup;
+	std::shared_ptr<ResourceGroup> m_meshInstanceOcclusionCullingBitfieldGroup;
 
 	unsigned int m_currentMeshletBitfieldSize = 1;
 	unsigned int m_currentMeshInstanceBitfieldSize = 1;

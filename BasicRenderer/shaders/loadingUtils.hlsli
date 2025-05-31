@@ -38,65 +38,54 @@ float4 LoadFloat4(uint offset, ByteAddressBuffer buffer) {
     return result;
 }
 
+#define GET_BIT(bits, idx)((bits.Load( ((idx) >> 5) << 2 ) >> ( (idx) & 31 ) ) & 1u)
+
 uint GetBit(ByteAddressBuffer bits, uint bitIndex)
 {
-    // which 32-bit word, and byte offset in the buffer
-    uint wordIdx = bitIndex >> 5; // divide by 32
-    uint byteOff = wordIdx * 4; // 4 bytes per 32-bit word
-    uint bitInWord = bitIndex & 31; // mod 32
-
-    uint word = bits.Load(byteOff);
-    return (word >> bitInWord) & 1u;
+    uint wordOff = (bitIndex >> 5) << 2;
+    uint word = bits.Load(wordOff);
+    return (word >> (bitIndex & 31)) & 1u;
 }
 
 uint GetBit(RWByteAddressBuffer bits, uint bitIndex)
 {
-    // which 32-bit word, and byte offset in the buffer
-    uint wordIdx = bitIndex >> 5; // divide by 32
-    uint byteOff = wordIdx * 4; // 4 bytes per 32-bit word
-    uint bitInWord = bitIndex & 31; // mod 32
-
-    uint word = bits.Load(byteOff);
-    return (word >> bitInWord) & 1u;
+    uint wordOff = (bitIndex >> 5) << 2;
+    uint word = bits.Load(wordOff);
+    return (word >> (bitIndex & 31)) & 1u;
 }
 
 void WriteBit(RWByteAddressBuffer bits, uint bitIndex, uint value)
 {
-    uint wordIdx = bitIndex >> 5;
-    uint byteOff = wordIdx * 4;
+    uint wordOff = (bitIndex >> 5) << 2; // word index * 4
     uint bitInWord = bitIndex & 31;
     uint mask = 1u << bitInWord;
 
     // load-modify-store
-    uint word = bits.Load(byteOff);
-    word = (word & ~mask) // clear that bit
-         | ((value & 1u) << bitInWord); // set it to (value & 1)
-    bits.Store(byteOff, word);
+    uint word = bits.Load(wordOff);
+    word = (word & ~mask)
+         | ((value & 1u) << bitInWord);
+    bits.Store(wordOff, word);
 }
 
 
 void SetBitAtomic(RWByteAddressBuffer bits, uint bitIndex)
 {
-    uint wordIdx = bitIndex >> 5;
-    uint byteOff = wordIdx * 4;
+    uint wordOff = (bitIndex >> 5) << 2;
     uint bitInWord = bitIndex & 31;
     uint mask = 1u << bitInWord;
 
-    // atomically OR in the mask
     uint old;
-    bits.InterlockedOr(byteOff, mask, old);
+    bits.InterlockedOr(wordOff, mask, old);
 }
 
 void ClearBitAtomic(RWByteAddressBuffer bits, uint bitIndex)
 {
-    uint wordIdx = bitIndex >> 5;
-    uint byteOff = wordIdx * 4;
+    uint wordOff = (bitIndex >> 5) << 2;
     uint bitInWord = bitIndex & 31;
     uint mask = ~(1u << bitInWord);
 
-    // atomically AND with the inverse mask
     uint old;
-    bits.InterlockedAnd(byteOff, mask, old);
+    bits.InterlockedAnd(wordOff, mask, old);
 }
 
 #endif // __LOADING_UTILITY_HLSL__

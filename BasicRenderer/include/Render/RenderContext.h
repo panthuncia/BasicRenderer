@@ -31,6 +31,7 @@ public:
     ID3D12DescriptorHeap* rtvHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> *renderTargets;
     PixelBuffer* pPrimaryDepthBuffer;
+    PixelBuffer* pLinearDepthBuffer;
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;
     UINT frameIndex;

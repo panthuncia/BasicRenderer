@@ -20,8 +20,8 @@
 
 class ShadowPass : public RenderPass {
 public:
-    ShadowPass(bool wireframe, bool meshShaders, bool indirect)
-        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+    ShadowPass(bool wireframe, bool meshShaders, bool indirect, bool clearDepths)
+        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect), m_clearDepths(clearDepths) {
         auto& settingsManager = SettingsManager::GetInstance();
         getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
         getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
@@ -181,15 +181,18 @@ private:
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
-            float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
             switch (light.type) {
             case Components::LightType::Spot: {
-                auto& dsvHandle = shadowMap.depthMap->GetDSVInfos()[0].cpuHandle;
-                commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0).cpuHandle;
+				auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0).cpuHandle;
+                commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                if (m_clearDepths) {
+                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+					commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                }
 
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 drawObjects();
                 break;
             }
@@ -198,9 +201,13 @@ private:
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < 6; i++) {
-                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfos()[i].cpuHandle;
-                    commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
+					auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
+                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                    if (m_clearDepths) {
+                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                    }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
                     drawObjects();
@@ -212,9 +219,13 @@ private:
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfos()[i].cpuHandle;
-                    commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
+					auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
+                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                    if (m_clearDepths) {
+                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                    }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
                     drawObjects();
@@ -293,15 +304,19 @@ private:
             float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
             switch (light.type) {
             case Components::LightType::Spot: {
-                auto& dsvHandle = shadowMap.depthMap->GetDSVInfos()[0].cpuHandle;
-                commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0).cpuHandle;
+				auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0).cpuHandle;
+                commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                if (m_clearDepths) {
+                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                }
 
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
 
                 unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-                variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+                variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
 				commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
 
                 drawObjects();
@@ -312,13 +327,17 @@ private:
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < 6; i++) {
-                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfos()[i].cpuHandle;
-                    commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
+					auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
+                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                    if (m_clearDepths) {
+                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                    }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
 
                     unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-					variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+					variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
 					commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
 
                     lightViewIndex += 1;
@@ -331,13 +350,17 @@ private:
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfos()[i].cpuHandle;
-                    commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
+					auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
+                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                    if (m_clearDepths) {
+                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                    }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
 
                     unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-					variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+					variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
 					commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
 
                     lightViewIndex += 1;
@@ -380,18 +403,22 @@ private:
             float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
             switch (light.type) {
             case Components::LightType::Spot: {
-                auto& dsvHandle = shadowMap.depthMap->GetDSVInfos()[0].cpuHandle;
-                commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0).cpuHandle;
+				auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0).cpuHandle;
+                commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                if (m_clearDepths) {
+                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                }
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 auto& views = lightViewInfo.renderViews;
                 auto& opaque = views[0].indirectCommandBuffers.opaqueIndirectCommandBuffer;
 				auto& alphaTest = views[0].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 				auto& blend = views[0].indirectCommandBuffers.blendIndirectCommandBuffer;
 
                 unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-                variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+                variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
                 commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
 
                 drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
@@ -400,11 +427,15 @@ private:
             case Components::LightType::Point: {
                 int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 for (int i = 0; i < 6; i++) {
-                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfos()[i].cpuHandle;
-                    commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
+					auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
+                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                    if (m_clearDepths) {
+                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                    }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
 					auto& views = lightViewInfo.renderViews;
@@ -413,7 +444,7 @@ private:
 					auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
 
                     unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-                    variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+                    variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
                     commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
 
                     drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
@@ -425,9 +456,13 @@ private:
                 int lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfos()[i].cpuHandle;
-                    commandList->OMSetRenderTargets(0, nullptr, TRUE, &dsvHandle);
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
+					auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
+                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+                    if (m_clearDepths) {
+                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
+                    }
                     commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
                     lightViewIndex += 1;
 					auto& views = lightViewInfo.renderViews;
@@ -436,7 +471,7 @@ private:
 					auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
 
                     unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-                    variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo()[0].index;
+                    variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
                     commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
 
                     drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
@@ -454,6 +489,9 @@ private:
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
+	bool m_clearDepths;
+
+    float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
 
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<uint16_t()> getShadowResolution;

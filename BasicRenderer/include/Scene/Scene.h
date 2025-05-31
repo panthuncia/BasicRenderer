@@ -38,7 +38,8 @@ public:
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraAlphaTestIndirectCommandBuffer() const;
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraBlendIndirectCommandBuffer() const;
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() const;
-    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingResetIndirectCommandBuffer() const;
+	const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletOcclusionCullingIndirectCommandBuffer() const;
+    const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer() const;
     const std::shared_ptr<DynamicGloballyIndexedResource>& GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const;
 
     void ProcessEntitySkins(bool overrideExistingSkins = false);
