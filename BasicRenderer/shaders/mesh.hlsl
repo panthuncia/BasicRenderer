@@ -35,8 +35,8 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             break;
         }
         case 1: { // Spot light
-            StructuredBuffer<unsigned int> spotLightCubemapIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
-            uint lightCameraIndex = spotLightCubemapIndicesBuffer[lightViewIndex];
+            StructuredBuffer<unsigned int> spotLightMapIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
+            uint lightCameraIndex = spotLightMapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
             viewMatrix = lightCamera.view;

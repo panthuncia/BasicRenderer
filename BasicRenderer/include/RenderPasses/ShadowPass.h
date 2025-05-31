@@ -411,7 +411,7 @@ private:
                     commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                 }
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 auto& views = lightViewInfo.renderViews;
                 auto& opaque = views[0].indirectCommandBuffers.opaqueIndirectCommandBuffer;
 				auto& alphaTest = views[0].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
@@ -427,7 +427,7 @@ private:
             case Components::LightType::Point: {
                 int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
                 int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 for (int i = 0; i < 6; i++) {
                     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
 					auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;

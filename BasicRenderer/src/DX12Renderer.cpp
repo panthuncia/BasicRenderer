@@ -469,7 +469,7 @@ void EnableShaderBasedValidation() {
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
-#if defined(_DEBUG)
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
     ComPtr<ID3D12Debug> debugController;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
         debugController->EnableDebugLayer();
