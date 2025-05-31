@@ -523,7 +523,7 @@ inline void Menu::DrawLoadModelButton() {
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 			auto scene = LoadModel(ws2s(selectedFile));
 			scene->GetRoot().set<Components::Name>(ws2s(getFileNameFromPath(selectedFile)));
-			appendScene(scene);
+			appendScene(scene->Clone());
         }
         else
         {

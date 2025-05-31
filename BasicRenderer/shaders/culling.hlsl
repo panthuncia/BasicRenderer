@@ -171,6 +171,11 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     if (!wasVisibleLastFrame) { // Don't render occluders in the new objects pass
             indirectCommandOutputBuffer.Append(command);
     } else { // All occluders should be meshlet occlusion culled    
+    
+#if defined(BLEND_OBJECTS) // Transparent objects cannot be occluders, so we need to draw them here
+        indirectCommandOutputBuffer.Append(command);
+#endif
+    
         DispatchIndirectCommand meshletFrustrumCullingCommand;
         meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;
         meshletFrustrumCullingCommand.dispatchY = command.dispatchMeshY;
