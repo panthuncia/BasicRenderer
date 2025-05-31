@@ -71,6 +71,7 @@ public:
     void SetInputMode(InputMode mode);
     void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
+    std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 
 private:
     ComPtr<IDXGIFactory7> factory;

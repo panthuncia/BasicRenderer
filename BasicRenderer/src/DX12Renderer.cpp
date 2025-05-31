@@ -304,6 +304,9 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableGTAO", true);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
+    settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
+        return AppendScene(scene);
+        });
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -948,6 +951,10 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
     //currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;
+}
+
+std::shared_ptr<Scene> DX12Renderer::AppendScene(std::shared_ptr<Scene> scene) {
+	return GetCurrentScene()->AppendScene(scene);
 }
 
 InputManager& DX12Renderer::GetInputManager() {

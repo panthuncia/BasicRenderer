@@ -8,6 +8,7 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 #include <functional>
+#include <spdlog/spdlog.h>
 #define NOMINMAX
 #include <windows.h>
 #include <filesystem>
@@ -141,6 +142,8 @@ private:
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
+
+	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -264,6 +267,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
 	m_collectPipelineStatistics = getCollectPipelineStatistics();
+
+	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 }
@@ -517,8 +522,8 @@ inline void Menu::DrawLoadModelButton() {
         {
             spdlog::info("Selected file: {}", ws2s(selectedFile));
 			auto scene = LoadModel(ws2s(selectedFile));
-			//scene->GetRoot().m_name = getFileNameFromPath(selectedFile);
-			//appendScene(*scene);
+			scene->GetRoot().set<Components::Name>(ws2s(getFileNameFromPath(selectedFile)));
+			appendScene(scene);
         }
         else
         {
