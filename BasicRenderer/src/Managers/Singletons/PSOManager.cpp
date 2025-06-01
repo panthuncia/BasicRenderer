@@ -307,9 +307,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     auto defines = GetShaderDefines(psoFlags);
 
     // Compile shaders
+	Microsoft::WRL::ComPtr<ID3D10Blob> amplificationShader;
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
+	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
     CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
     //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
         CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
@@ -340,6 +342,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
         CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
+		CD3DX12_PIPELINE_STATE_STREAM_AS AS;
         CD3DX12_PIPELINE_STATE_STREAM_MS MS;
         CD3DX12_PIPELINE_STATE_STREAM_PS PS;
         CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
@@ -351,11 +354,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
 
     PipelineStateStream pipelineStateStream = {};
     pipelineStateStream.RootSignature = rootSignature.Get();
+	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
     pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-
-    if (pixelShader) {
-        pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    }
+    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
 
     pipelineStateStream.RasterizerState = rasterizerState;
     pipelineStateStream.BlendState = blendDesc;
@@ -391,9 +392,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     auto defines = GetShaderDefines(psoFlags);
 
     // Compile shaders
+	Microsoft::WRL::ComPtr<ID3D10Blob> amplificationShader;
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
+	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
     CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
     //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
     CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
@@ -422,6 +425,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
         CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
+		CD3DX12_PIPELINE_STATE_STREAM_AS AS;
         CD3DX12_PIPELINE_STATE_STREAM_MS MS;
         CD3DX12_PIPELINE_STATE_STREAM_PS PS;
         CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
@@ -433,11 +437,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
 
     PipelineStateStream pipelineStateStream = {};
     pipelineStateStream.RootSignature = rootSignature.Get();
+	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
     pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-
-    if (pixelShader) {
-        pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    }
+    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
 
     pipelineStateStream.RasterizerState = rasterizerState;
     pipelineStateStream.BlendState = blendDesc;
@@ -472,9 +474,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
     // Compile shaders
+    Microsoft::WRL::ComPtr<ID3DBlob> amplificationShader;
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
+	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
     CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
     //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
     CompileShader(L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6", defines, pixelShader);
@@ -502,6 +506,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
         CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
+        CD3DX12_PIPELINE_STATE_STREAM_AS AS;
         CD3DX12_PIPELINE_STATE_STREAM_MS MS;
         CD3DX12_PIPELINE_STATE_STREAM_PS PS;
         CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
@@ -513,11 +518,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 
     PipelineStateStream pipelineStateStream = {};
     pipelineStateStream.RootSignature = rootSignature.Get();
+	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
     pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-
-    if (pixelShader) {
-        pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    }
+    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
 
     pipelineStateStream.RasterizerState = rasterizerState;
     pipelineStateStream.BlendState = blendDesc;
@@ -562,9 +565,11 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
     auto defines = GetShaderDefines(psoFlags);
 
     // Compile shaders
+	Microsoft::WRL::ComPtr<ID3DBlob> amplificationShader;
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-
+    
+	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
     CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
     //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
     CompileShader(L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6", defines, pixelShader);
@@ -593,6 +598,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
     // Define the pipeline state stream subobjects
     struct PipelineStateStream {
         CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
+		CD3DX12_PIPELINE_STATE_STREAM_AS AS;
         CD3DX12_PIPELINE_STATE_STREAM_MS MS;
         CD3DX12_PIPELINE_STATE_STREAM_PS PS;
         CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
@@ -603,11 +609,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
 
     PipelineStateStream pipelineStateStream = {};
     pipelineStateStream.RootSignature = rootSignature.Get();
+	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
     pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-
-    if (pixelShader) {
-        pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    }
+    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
 
     pipelineStateStream.RasterizerState = rasterizerState;
     pipelineStateStream.BlendState = blendDesc;

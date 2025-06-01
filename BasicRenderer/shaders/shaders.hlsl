@@ -153,7 +153,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     uint materialFlags = materialInfo.materialFlags;
 #if defined(PSO_SHADOW)
 #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
-        return;
+        return -input.positionViewSpace.z;
 #endif // DOUBLE_SIDED
     if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE) {
         Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];

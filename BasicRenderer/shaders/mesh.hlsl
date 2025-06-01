@@ -3,6 +3,7 @@
 #include "cbuffers.hlsli"
 #include "structs.hlsli"
 #include "loadingUtils.hlsli"
+#include "Common/defines.h"
 
 PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
@@ -109,43 +110,78 @@ uint LoadByte(ByteAddressBuffer buffer, uint byteIndex) {
     return byteValue;
 }
 
+struct Payload
+{
+    uint MeshletIndices[AS_GROUP_SIZE];
+};
+groupshared Payload s_Payload;
+[NumThreads(AS_GROUP_SIZE, 1, 1)]
+void ASMain(uint uGroupThreadID : SV_GroupThreadID, uint uDispatchThreadID : SV_DispatchThreadID, uint uGroupID : SV_GroupID)
+{
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+    
+    ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
+    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + uDispatchThreadID;
+ 
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    // Culling handled in compute shader
+    bool visible = uDispatchThreadID < meshBuffer.numMeshlets && !GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
+
+    if (visible) {
+        uint index = WavePrefixCountBits(visible);
+        s_Payload.MeshletIndices[index] = uDispatchThreadID;
+    }
+    
+    uint visibleCount = WaveActiveCountBits(visible);
+    DispatchMesh(visibleCount, 1, 1, s_Payload);
+}
+
 [outputtopology("triangle")]
 [numthreads(64, 1, 1)]
 void MSMain(
     const uint uGroupThreadID : SV_GroupThreadID,
-    const uint3 vGroupID : SV_GroupID,
+    const uint vGroupID : SV_GroupID,
+    in payload Payload payload,
     out vertices PSInput outputVertices[64],
     out indices uint3 outputTriangles[64]) {
 
+    uint meshletIndex = payload.MeshletIndices[vGroupID];
+    
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
+    if (meshletIndex >= meshBuffer.numMeshlets) // Can this happen?
+    {
+        return;
+    }
+    
     // Test if this meshlet is culled
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
-    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + vGroupID.x;
+    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + meshletIndex;
     
-    bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
+    //bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
     
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex]; // Base vertex buffer
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferDescriptorIndex]; // Meshlets, containing vertex & primitive offset & num
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferDescriptorIndex]; // Meshlet vertices, as indices into base vertex buffer
     ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferDescriptorIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
     
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
-    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
-    
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
     
     uint meshletOffset = meshBuffer.meshletBufferOffset;
-    Meshlet meshlet = meshletBuffer[meshletOffset+vGroupID.x];
+    Meshlet meshlet = meshletBuffer[meshletOffset + meshletIndex];
     
     uint vertCount = 0;
     uint triCount = 0;
-    if (!bCulled)
-    {
+    //if (!bCulled)
+    //{
         vertCount = meshlet.VertCount;
         triCount = meshlet.TriCount;
-    }
+    //}
     SetMeshOutputCounts(vertCount, triCount);
     //if (bCulled) // Early out works in debug mode, but compiler returns a null shader without error in release mode
     //{
@@ -192,7 +228,7 @@ void MSMain(
     
     if (uGroupThreadID < meshlet.VertCount) {
         //uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshInstanceBuffer.postSkinningVertexBufferOffset, vertOffset + uGroupThreadID, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, vGroupID, objectBuffer);
+        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshInstanceBuffer.postSkinningVertexBufferOffset, vertOffset + uGroupThreadID, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, meshletIndex, objectBuffer);
     }
     if (uGroupThreadID < meshlet.TriCount) {
         outputTriangles[uGroupThreadID] = meshletIndices;

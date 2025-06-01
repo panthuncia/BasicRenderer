@@ -7,6 +7,8 @@
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Mesh/MeshInstance.h"
+#include "Utilities/MathUtils.h"
+#include "../shaders/Common/defines.h"
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -35,7 +37,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			command.perObjectBufferIndex = perObjectCBview->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 			command.perMeshInstanceBufferIndex = meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
-			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
+			command.dispatchMeshArguments.ThreadGroupCountX = DivRoundUp(mesh->GetMeshletCount(), AS_GROUP_SIZE);
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			std::shared_ptr<BufferView> view = m_masterIndirectCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
@@ -60,7 +62,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			command.perObjectBufferIndex = perObjectCBview->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 			command.perMeshInstanceBufferIndex = meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
-			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
+			command.dispatchMeshArguments.ThreadGroupCountX = DivRoundUp(mesh->GetMeshletCount(), AS_GROUP_SIZE);
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			std::shared_ptr<BufferView> view = m_masterIndirectCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));
@@ -84,7 +86,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			command.perObjectBufferIndex = perObjectCBview->GetOffset() / sizeof(PerObjectCB);
 			command.perMeshBufferIndex = mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
 			command.perMeshInstanceBufferIndex = meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
-			command.dispatchMeshArguments.ThreadGroupCountX = mesh->GetMeshletCount();
+			command.dispatchMeshArguments.ThreadGroupCountX = DivRoundUp(mesh->GetMeshletCount(), AS_GROUP_SIZE);
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			std::shared_ptr<BufferView> view = m_masterIndirectCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));

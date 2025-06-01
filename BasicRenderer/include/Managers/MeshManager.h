@@ -29,7 +29,7 @@ public:
 	unsigned int GetPostSkinningVertexBufferSRVIndex() const;
 	unsigned int GetPostSkinningVertexBufferUAVIndex() const;
 	unsigned int GetMeshletOffsetBufferSRVIndex() const;
-	unsigned int GetMeshletIndexBufferSRVIndex() const;
+	unsigned int GetMeshletVertexIndexBufferSRVIndex() const;
 	unsigned int GetMeshletTriangleBufferSRVIndex() const;
 	unsigned int GetMeshletBoundsBufferSRVIndex() const;
 	std::shared_ptr<ResourceGroup> GetResourceGroup();
@@ -47,7 +47,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_preSkinningVertices;
 	std::shared_ptr<DynamicBuffer> m_postSkinningVertices;
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets;
-	std::shared_ptr<DynamicBuffer> m_meshletIndices;
+	std::shared_ptr<DynamicBuffer> m_meshletVertexIndices;
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
 	std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
 	std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;

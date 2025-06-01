@@ -14,13 +14,13 @@ MeshManager::MeshManager() {
 	m_preSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"preSkinnedVertices", true);
 	m_postSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"PostSkinnedvertices", true, true);
 	m_meshletOffsets = resourceManager.CreateIndexedDynamicBuffer(sizeof(meshopt_Meshlet), 1, L"meshletOffsets");
-	m_meshletIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"meshletIndices");
+	m_meshletVertexIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"meshletVertexIndices");
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
 	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
 	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
 	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
 	m_resourceGroup->AddResource(m_meshletOffsets);
-	m_resourceGroup->AddResource(m_meshletIndices);
+	m_resourceGroup->AddResource(m_meshletVertexIndices);
 	m_resourceGroup->AddResource(m_meshletTriangles);
 
 	m_perMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"PerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
@@ -58,7 +58,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, b
 	auto meshletOffsetsView = m_meshletOffsets->AddData(meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
 
 	auto& meshletVertices = mesh->GetMeshletVertices();
-	auto meshletIndicesView = m_meshletIndices->AddData(meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int), sizeof(unsigned int));
+	auto meshletVertexIndicesView = m_meshletVertexIndices->AddData(meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int), sizeof(unsigned int));
 
 	auto& meshletTriangles = mesh->GetMeshletTriangles();
 	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), sizeof(unsigned char));
@@ -67,7 +67,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, b
 	auto perMeshBufferView = m_perMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 
-	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletIndicesView), std::move(meshletTrianglesView), std::move(meshletBoundsView));
+	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletVertexIndicesView), std::move(meshletTrianglesView), std::move(meshletBoundsView));
 	mesh->UpdateVertexCount(useMeshletReorderedVertices);
 }
 
@@ -86,8 +86,8 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 		m_meshletOffsets->Deallocate(meshletOffsetsView);
 	}
 	auto meshletVerticesView = mesh->GetMeshletVerticesBufferView();
-	if (meshletVerticesView != nullptr) {
-		m_meshletIndices->Deallocate(meshletVerticesView);
+	if (meshletVerticesView != nullptr) { // TODO: I think this is a mistake
+		m_meshletVertexIndices->Deallocate(meshletVerticesView);
 	}
 	auto meshletTrianglesView = mesh->GetMeshletTrianglesBufferView();
 	if (meshletTrianglesView != nullptr) {
@@ -148,7 +148,6 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
 	}
 	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
-
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
@@ -192,8 +191,8 @@ unsigned int  MeshManager::GetPostSkinningVertexBufferUAVIndex() const {
 unsigned int  MeshManager::GetMeshletOffsetBufferSRVIndex() const {
 	return m_meshletOffsets->GetSRVInfo(0).index;
 }
-unsigned int  MeshManager::GetMeshletIndexBufferSRVIndex() const {
-	return m_meshletIndices->GetSRVInfo(0).index;
+unsigned int  MeshManager::GetMeshletVertexIndexBufferSRVIndex() const {
+	return m_meshletVertexIndices->GetSRVInfo(0).index;
 }
 unsigned int  MeshManager::GetMeshletTriangleBufferSRVIndex() const {
 	return m_meshletTriangles->GetSRVInfo(0).index;

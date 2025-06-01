@@ -12,3 +12,4 @@ DirectX::XMVECTOR GetUpFromMatrix(const DirectX::XMMATRIX& matrix);
 float CalculateLightRadius(float intensity, float constant, float linear, float quadratic, float threshold = 0.3f);
 BoundingSphere ComputeConeBoundingSphere(const DirectX::XMVECTOR& origin, const DirectX::XMVECTOR& direction, float height, float halfAngle);
 unsigned int GetNextPowerOfTwo(unsigned int value);
+inline uint32_t DivRoundUp(uint32_t num, uint32_t den) { return (num + den - 1) / den; }

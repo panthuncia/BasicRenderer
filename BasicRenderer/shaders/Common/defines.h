@@ -1,0 +1,4 @@
+#pragma once
+
+#define AS_THREADS_PER_WAVE 32
+#define AS_GROUP_SIZE AS_THREADS_PER_WAVE

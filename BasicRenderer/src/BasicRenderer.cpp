@@ -269,7 +269,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto baseScene = std::make_shared<Scene>();
     //auto dragonScene1 = loadGLB("models/dragon.glb");
 
-    /*
+    
     auto dragonScene = LoadModel("models/dragon.glb");
     dragonScene->GetRoot().set<Components::Scale>({5, 5, 5});
     dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
@@ -300,7 +300,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto cubeScene = LoadModel("models/sphere.glb");
     cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
     cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
-    */
+    
 
     auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto bistro = LoadModel("models/bistro.glb");
@@ -350,9 +350,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-	    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
-		auto point = randomPointInSphere(8.0);
-        //cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
+	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+		auto point = randomPointInSphere(80.0);
+        cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
