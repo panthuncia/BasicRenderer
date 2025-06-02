@@ -8,6 +8,24 @@ std::shared_ptr<Resource> RenderGraphBuilder::RequestResource(ResourceIdentifier
     if (it != _registry.end()) 
         return it->second;
 
+	auto providerIt = _providerMap.find(rid);
+	if (providerIt != _providerMap.end()) {
+		// If we have a provider for this key, use it to provide the resource
+		auto provider = providerIt->second;
+		if (provider) {
+			auto resource = provider->ProvideResource(rid);
+			if (resource) {
+				// Register the resource in our registry
+				_registry[rid] = resource;
+				_graph->AddResource(resource);
+				return resource;
+			}
+			else {
+				throw std::runtime_error("Provider returned null for key: " + rid.ToString());
+			}
+		}
+	}
+
 	// No provider registered for this key
 	std::string_view name = rid.IsBuiltin() ? BuiltinResourceToString(rid.AsBuiltin()) : rid.AsCustom();
 	throw std::runtime_error("No resource provider registered for key: " + std::string(name));

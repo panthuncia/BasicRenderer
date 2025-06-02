@@ -93,6 +93,8 @@ void CameraManager::SetNumMeshInstances(unsigned int numMeshInstances) {
 
 std::shared_ptr<Resource> CameraManager::ProvideResource(ResourceIdentifier const& key) {
 	switch (key.AsBuiltin()) {
+	case BuiltinResource::CameraBuffer:
+		return m_pCameraBuffer;
 	case BuiltinResource::MeshletCullingBitfieldGroup:
 		return m_meshletCullingBitfieldGroup;
 	case BuiltinResource::MeshInstanceMeshletCullingBitfieldGroup:
@@ -107,6 +109,7 @@ std::shared_ptr<Resource> CameraManager::ProvideResource(ResourceIdentifier cons
 
 std::vector<ResourceIdentifier> CameraManager::GetSupportedKeys() {
 	return {
+		BuiltinResource::CameraBuffer,
 		BuiltinResource::MeshletCullingBitfieldGroup,
 		BuiltinResource::MeshInstanceMeshletCullingBitfieldGroup,
 		BuiltinResource::MeshInstanceOcclusionCullingBitfieldGroup

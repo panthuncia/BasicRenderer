@@ -227,7 +227,7 @@ inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
 
 // If we already have a ResourceAndRange, just return it in a vector:
 inline std::vector<ResourceAndRange>
-expandToRanges(ResourceAndRange const & rar)
+expandToRanges(ResourceAndRange const & rar, RenderGraphBuilder* builder)
 {
     if (!rar.resource) return {};
     return { rar };
@@ -235,7 +235,7 @@ expandToRanges(ResourceAndRange const & rar)
 
 // If we have a list of ResourceAndRange, return a vector copy of it:
 inline std::vector<ResourceAndRange>
-expandToRanges(std::initializer_list<ResourceAndRange> list)
+expandToRanges(std::initializer_list<ResourceAndRange> list, RenderGraphBuilder* builder)
 {
     std::vector<ResourceAndRange> out;
     out.reserve(list.size());
@@ -247,16 +247,19 @@ expandToRanges(std::initializer_list<ResourceAndRange> list)
 }
 
 // If we have a shared_ptr<Resource>, wrap it in a ResourceAndRange:
-inline std::vector<ResourceAndRange>
-expandToRanges(std::shared_ptr<Resource> const & r)
+template<typename U>
+inline std::enable_if_t<std::is_base_of_v<Resource, U>,
+    std::vector<ResourceAndRange>>
+    expandToRanges(std::shared_ptr<U> const& r, RenderGraphBuilder* builder)
 {
     if (!r) return {};
-    return { ResourceAndRange{ r } };
+    std::shared_ptr<Resource> basePtr = r;
+    return { ResourceAndRange{ basePtr } };
 }
 
 // If we have an initializer_list of shared_ptr<Resource>:
 inline std::vector<ResourceAndRange>
-expandToRanges(std::initializer_list<std::shared_ptr<Resource>> list)
+expandToRanges(std::initializer_list<std::shared_ptr<Resource>> list, RenderGraphBuilder* builder)
 {
     std::vector<ResourceAndRange> out;
     out.reserve(list.size());
@@ -286,84 +289,77 @@ expandToRanges(std::initializer_list<ResourceIdentifierAndRange> list,
     return out;
 }
 
+template<typename> 
+constexpr bool is_shared_ptr_v = false;
+
+template<typename U> 
+constexpr bool is_shared_ptr_v<std::shared_ptr<U>> = true;
+
 inline std::vector<ResourceAndRange>
-processResourceArguments(std::initializer_list<ResourceIdentifier> list, RenderGraphBuilder* builderPtr)
+processResourceArguments(const ResourceAndRange& rar,
+    RenderGraphBuilder* builderPtr)
 {
-    std::vector<ResourceAndRange> out;
-    out.reserve(list.size());
-    for (auto const & rid : list) {
-        ResourceIdentifierAndRange rir{ rid };
-        if (auto vec = expandToRanges(rir, builderPtr); !vec.empty()) {
-            out.push_back(std::move(vec.front()));
-        }
-    }
-    return out;
+    if (!rar.resource) return {};
+    return { rar };
+}
+
+template<typename U>
+inline std::enable_if_t<
+    std::is_base_of_v<Resource, U>,
+    std::vector<ResourceAndRange>
+>
+processResourceArguments(const std::shared_ptr<U>& childPtr,
+    RenderGraphBuilder* builderPtr)
+{
+    if (!childPtr) return {};
+
+    std::shared_ptr<Resource> basePtr = childPtr;
+    return expandToRanges(basePtr, builderPtr);
 }
 
 inline std::vector<ResourceAndRange>
-processResourceArguments(std::initializer_list<BuiltinResource> list, RenderGraphBuilder* builderPtr)
+processResourceArguments(const ResourceIdentifierAndRange& rir,
+    RenderGraphBuilder* builderPtr)
 {
-    std::vector<ResourceAndRange> out;
-    out.reserve(list.size());
-    for (auto const & bir : list) {
-		ResourceIdentifier rid{ bir };
-        ResourceIdentifierAndRange rir{ rid };
-        if (auto vec = expandToRanges(rir, builderPtr); !vec.empty()) {
-            out.push_back(std::move(vec.front()));
-        }
-    }
-    return out;
+    return expandToRanges(rir, builderPtr);
+}
+
+inline std::vector<ResourceAndRange>
+processResourceArguments(const ResourceIdentifier& rid,
+    RenderGraphBuilder* builderPtr)
+{
+    return processResourceArguments(
+        ResourceIdentifierAndRange{ rid },
+        builderPtr
+    );
+}
+
+inline std::vector<ResourceAndRange>
+processResourceArguments(const BuiltinResource& br,
+    RenderGraphBuilder* builderPtr)
+{
+    return processResourceArguments(
+        ResourceIdentifierAndRange{ ResourceIdentifier{ br } },
+        builderPtr
+    );
 }
 
 template<typename T>
-inline std::vector<ResourceAndRange> processResourceArguments(T&& x, RenderGraphBuilder* builderPtr) {
-    if constexpr(std::is_same_v<std::decay_t<T>, ResourceAndRange> ||
-        std::is_same_v<std::decay_t<T>, std::shared_ptr<Resource>> ||
-        std::is_same_v<std::decay_t<T>, std::initializer_list<ResourceAndRange>> ||
-        std::is_same_v<std::decay_t<T>, std::initializer_list<std::shared_ptr<Resource>>>)
-    {
-		std::vector<ResourceAndRange> out;
-        for (auto const& rar : expandToRanges(std::forward<T>(x))) {
-            if (!rar.resource) continue;
-            out.push_back(rar);
-        }
-		return out;
+inline std::enable_if_t<
+    std::is_same_v<std::decay_t<T>, std::initializer_list<typename std::decay_t<T>::value_type>>,
+    std::vector<ResourceAndRange>
+>
+processResourceArguments(T&& list, RenderGraphBuilder* builderPtr)
+{
+    std::vector<ResourceAndRange> out;
+    out.reserve(list.size());
+
+    for (auto const & elem : list) {
+        auto vec = processResourceArguments(elem, builderPtr);
+        if (!vec.empty()) 
+            out.push_back(std::move(vec.front()));
     }
-    else if constexpr(std::is_same_v<std::decay_t<T>, ResourceIdentifierAndRange>)
-    {
-        std::vector<ResourceAndRange> out;
-        for (auto const& rar : expandToRanges(std::forward<T>(x), *builderPtr)) {
-            if (!rar.resource) continue;
-            out.push_back(rar);
-        }
-        return out;
-    }
-    else if constexpr(std::is_same_v<std::decay_t<T>, std::initializer_list<ResourceIdentifierAndRange>>)
-    {
-        std::vector<ResourceAndRange> out;
-        for (auto const& rar : expandToRanges(std::forward<T>(x), *builderPtr)) {
-            if (!rar.resource) continue;
-            out.push_back(rar);
-        }
-        return out;
-    }
-    else if constexpr (std::is_same_v<std::decay_t<T>, ResourceIdentifier> ||
-        std::is_same_v<std::decay_t<T>, std::initializer_list<ResourceIdentifier>>)
-    {
-        return processResourceArguments(std::forward<T>(x), builderPtr);
-    }
-    else if constexpr (std::is_same_v<std::decay_t<T>, BuiltinResource> ||
-        std::is_same_v<std::decay_t<T>, std::initializer_list<BuiltinResource>>)
-    {
-        return processResourceArguments(std::forward<T>(x), builderPtr);
-    }
-    else {
-        static_assert(
-            sizeof(T) == 0,
-            "add*(...) does not accept this argument type"
-            );
-    }
-    return {};
+    return out;
 }
 
 class RenderPassBuilder {

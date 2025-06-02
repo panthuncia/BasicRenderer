@@ -60,7 +60,10 @@ void StatisticsManager::RegisterQueue(ID3D12CommandQueue* queue) {
 
 void StatisticsManager::SetupQueryHeap() {
     auto device = DeviceManager::GetInstance().GetDevice();
-
+    if (m_numPasses == 0) {
+		spdlog::warn("No passes registered for StatisticsManager, skipping query heap setup.");
+		return;
+    }
     // Timestamp heap: 2 queries/pass/frame
     D3D12_QUERY_HEAP_DESC th = { D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
         m_numPasses * 2 * m_numFramesInFlight };

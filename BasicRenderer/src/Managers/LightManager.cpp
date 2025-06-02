@@ -411,6 +411,8 @@ std::shared_ptr<Buffer>& LightManager::GetLightPagesBuffer() {
 
 std::shared_ptr<Resource> LightManager::ProvideResource(ResourceIdentifier const& key) {
 	switch (key.AsBuiltin()) {
+	case BuiltinResource::LightViewResourceGroup:
+		return m_pLightViewInfoResourceGroup;
 	case BuiltinResource::LightBufferGroup:
 		return m_pLightBufferResourceGroup;
 	case BuiltinResource::LightClusterBuffer:
@@ -425,6 +427,7 @@ std::shared_ptr<Resource> LightManager::ProvideResource(ResourceIdentifier const
 
 std::vector<ResourceIdentifier> LightManager::GetSupportedKeys() {
 	return {
+		BuiltinResource::LightViewResourceGroup,
 		BuiltinResource::LightBufferGroup,
 		BuiltinResource::LightClusterBuffer,
 		BuiltinResource::LightPagesBuffer

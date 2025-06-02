@@ -31,6 +31,7 @@ public:
 			throw std::runtime_error("Resource already registered: " + id.ToString());
 		}
 		_registry[id] = resource;
+		_graph->AddResource(resource);
 		if (provider) {
 			_providerMap[id] = provider;
 		}

@@ -1056,9 +1056,12 @@ void DX12Renderer::CreateRenderGraph() {
     builder.RegisterProvider(m_pIndirectCommandBufferManager.get());
     builder.RegisterProvider(&m_coreResourceProvider);
 
-
 	auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth->depthMap;
+
+    builder.RegisterResource(BuiltinResource::PrimaryCameraDepthTexture, depthTexture);
+	builder.RegisterResource(BuiltinResource::PrimaryCameraLinearDepthMap, depth->linearDepthMap);
+
 	//newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
@@ -1446,7 +1449,7 @@ void DX12Renderer::CreateRenderGraph() {
 		builder.BuildComputePass("LightCullingPass")
 			.WithShaderResource(BuiltinResource::CameraBuffer, BuiltinResource::LightBufferGroup)
 			.WithUnorderedAccess(BuiltinResource::LightClusterBuffer, BuiltinResource::LightPagesBuffer, lightPagesCounter)
-			.Build<LightCullingPass>(m_pLightManager->GetClusterBuffer(), BuiltinResource::LightPagesBuffer, lightPagesCounter);
+			.Build<LightCullingPass>(m_pLightManager->GetClusterBuffer(), m_pLightManager->GetLightPagesBuffer(), lightPagesCounter);
     }
 	std::string primaryPassName = m_deferredRendering ? "Deferred Pass" : "Forward Pass";
     auto primaryPassBuilder = builder.BuildRenderPass(primaryPassName)
@@ -1477,17 +1480,17 @@ void DX12Renderer::CreateRenderGraph() {
 	}
 
 	builder.BuildRenderPass("Environment Conversion Pass")
-		.WithShaderResource(m_pEnvironmentManager->GetWorkingHDRIGroup())
-		.WithRenderTarget(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+		.WithShaderResource(BuiltinResource::WorkingEnvironmentHDRIGroup)
+		.WithRenderTarget(BuiltinResource::WorkingEnvironmentCubemapGroup)
 		.Build<EnvironmentConversionPass>();
         
     builder.BuildComputePass("Environment Spherical Harmonics Pass")
-        .WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+        .WithShaderResource(BuiltinResource::WorkingEnvironmentCubemapGroup)
         .WithUnorderedAccess(BuiltinResource::EnvironmentsInfoBuffer)
 		.Build<EnvironmentSHPass>();
 
 	builder.BuildRenderPass("Environment Prefilter Pass")
-		.WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
+		.WithShaderResource(BuiltinResource::WorkingEnvironmentCubemapGroup)
 		.WithRenderTarget(BuiltinResource::EnvironmentPrefilteredCubemapsGroup)
 		.Build<EnvironmentFilterPass>();
 
