@@ -10,11 +10,12 @@
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Render/IndirectCommand.h"
 #include "Scene/Components.h"
+#include "Interfaces/IResourceProvider.h"
 
 class BufferView;
 class DynamicBuffer;
 
-class ObjectManager {
+class ObjectManager : public IResourceProvider {
 public:
 	static std::unique_ptr<ObjectManager> CreateUnique() {
 		return std::unique_ptr<ObjectManager>(new ObjectManager());
@@ -55,6 +56,8 @@ public:
 		return m_normalMatrixBuffer;
 	}
 
+	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
 	ObjectManager();

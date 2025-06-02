@@ -115,10 +115,6 @@ private:
 	std::string m_environmentName;
 	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
 
-    std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
-	std::shared_ptr<LinearShadowMaps> m_linearShadowMaps = nullptr;
-	std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
-
     // GPU resource managers
     std::unique_ptr<LightManager> m_pLightManager = nullptr;
     std::unique_ptr<MeshManager> m_pMeshManager = nullptr;
@@ -187,6 +183,41 @@ private:
     GpuCrashTracker m_gpuCrashTracker;
 
 	DeferredFunctions m_preFrameDeferredFunctions;
+
+    class CoreResourceProvider : public IResourceProvider {
+	public:
+        std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
+        std::shared_ptr<LinearShadowMaps> m_linearShadowMaps = nullptr;
+        std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
+		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
+
+        std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
+            switch (key.AsBuiltin()) {
+            case BuiltinResource::ShadowMaps:
+				return m_shadowMaps;
+			case BuiltinResource::LinearShadowMaps:
+				return m_linearShadowMaps;
+			case BuiltinResource::DebugTexture:
+				return m_currentDebugTexture;
+			case BuiltinResource::PrimaryCameraMeshletBitfield:
+				return m_primaryCameraMeshletBitfield;
+			default:
+				spdlog::error("CoreResourceProvider: ProvideResource called with unknown key: {}", key.ToString());
+				return nullptr;
+            }
+        }
+
+        std::vector<ResourceIdentifier> GetSupportedKeys() override {
+			return {
+				ResourceIdentifier(BuiltinResource::ShadowMaps),
+				ResourceIdentifier(BuiltinResource::LinearShadowMaps),
+				ResourceIdentifier(BuiltinResource::DebugTexture),
+                ResourceIdentifier(BuiltinResource::PrimaryCameraMeshletBitfield),
+			};
+        }
+
+    };
+	CoreResourceProvider m_coreResourceProvider;
 };
 
 #endif //DX12RENDERER_H

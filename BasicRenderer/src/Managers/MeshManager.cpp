@@ -219,3 +219,28 @@ unsigned int MeshManager::GetMeshletBoundsBufferSRVIndex() const {
 	return m_meshletBoundsBuffer->GetSRVInfo(0).index;
 }
 
+std::shared_ptr<Resource> MeshManager::ProvideResource(ResourceIdentifier const& key) {
+	switch (key.AsBuiltin()) {
+	case BuiltinResource::PreSkinningVertices:
+		return m_preSkinningVertices;
+	case BuiltinResource::PostSkinningVertices:
+		return m_postSkinningVertices;
+	case BuiltinResource::MeshResourceGroup:
+		return m_resourceGroup;
+	case BuiltinResource::PerMeshBuffer:
+		return m_perMeshBuffers;
+	default:
+		spdlog::warn("MeshManager: ProvideResource called with unknown key: {}", key.ToString());
+		return nullptr;
+	}
+}
+
+std::vector<ResourceIdentifier> MeshManager::GetSupportedKeys() {
+	return {
+		BuiltinResource::PreSkinningVertices,
+		BuiltinResource::PostSkinningVertices,
+		BuiltinResource::MeshResourceGroup,
+		BuiltinResource::PerMeshBuffer
+	};
+}
+

@@ -1,8 +1,13 @@
 #pragma once
 
+#include <type_traits>
+
 #include "RenderGraph.h"
 #include "ResourceRequirements.h"
 #include "Resources/ResourceStateTracker.h"
+#include "Resources/ResourceIdentifier.h"
+
+class RenderGraphBuilder;
 
 // Tag for a contiguous mip-range [first..first+count)
 struct Mip {
@@ -36,6 +41,7 @@ struct UpToSlice {
     uint32_t last;
 };
 
+// shared_ptr
 inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r) {
     // everything
     return { r };
@@ -101,6 +107,263 @@ inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
     spec.sliceLower = { BoundType::Exact, s.first       };
     spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
     return { r, spec };
+}
+
+
+// ResourceIdentifier
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r) {
+    // everything
+    return { r };
+}
+
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
+    Mip m)
+{
+    RangeSpec spec;
+    spec.mipLower   = { BoundType::Exact, m.first      };
+    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
+    return { r, spec };
+}
+
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
+    FromMip fm)
+{
+    RangeSpec spec;
+    spec.mipLower   = { BoundType::From, fm.first };
+    return { r, spec };
+}
+
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
+    UpToMip um)
+{
+    RangeSpec spec;
+    spec.mipUpper   = { BoundType::UpTo, um.last };
+    return { r, spec };
+}
+
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
+    Slice s)
+{
+    RangeSpec spec;
+    spec.sliceLower = { BoundType::Exact, s.first       };
+    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+    return { r, spec };
+}
+
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
+    FromSlice fs)
+{
+    RangeSpec spec;
+    spec.sliceLower = { BoundType::From, fs.first };
+    return { r, spec };
+}
+
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
+    UpToSlice us)
+{
+    RangeSpec spec;
+    spec.sliceUpper = { BoundType::UpTo, us.last };
+    return { r, spec };
+}
+
+inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
+    Mip     m,
+    Slice   s)
+{
+    RangeSpec spec;
+    spec.mipLower   = { BoundType::Exact, m.first      };
+    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
+    spec.sliceLower = { BoundType::Exact, s.first       };
+    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+    return { r, spec };
+}
+
+// BuiltinResource
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r) {
+	return Subresources(ResourceIdentifier{ r });
+}
+
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+    Mip m) {
+	return Subresources(ResourceIdentifier{ r }, m);
+}
+
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+    FromMip fm) {
+	return Subresources(ResourceIdentifier{ r }, fm);
+}
+
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+    UpToMip um) {
+	return Subresources(ResourceIdentifier{ r }, um);
+}
+
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+    Slice s) {
+	return Subresources(ResourceIdentifier{ r }, s);
+}
+
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+    FromSlice fs) {
+	return Subresources(ResourceIdentifier{ r }, fs);
+}
+
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+    UpToSlice us) {
+	return Subresources(ResourceIdentifier{ r }, us);
+}
+
+inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+    Mip     m,
+    Slice   s) {
+	return Subresources(ResourceIdentifier{ r }, m, s);
+}
+
+//
+//  expandToRanges(...) is a set of overloads that take one of six
+//  input types and return a std::vector<ResourceAndRange> so that we can
+//  unify all the add*() calls into a single template.
+//
+
+// If we already have a ResourceAndRange, just return it in a vector:
+inline std::vector<ResourceAndRange>
+expandToRanges(ResourceAndRange const & rar)
+{
+    if (!rar.resource) return {};
+    return { rar };
+}
+
+// If we have a list of ResourceAndRange, return a vector copy of it:
+inline std::vector<ResourceAndRange>
+expandToRanges(std::initializer_list<ResourceAndRange> list)
+{
+    std::vector<ResourceAndRange> out;
+    out.reserve(list.size());
+    for (auto const & r : list) {
+        if (!r.resource) continue;
+        out.push_back(r);
+    }
+    return out;
+}
+
+// If we have a shared_ptr<Resource>, wrap it in a ResourceAndRange:
+inline std::vector<ResourceAndRange>
+expandToRanges(std::shared_ptr<Resource> const & r)
+{
+    if (!r) return {};
+    return { ResourceAndRange{ r } };
+}
+
+// If we have an initializer_list of shared_ptr<Resource>:
+inline std::vector<ResourceAndRange>
+expandToRanges(std::initializer_list<std::shared_ptr<Resource>> list)
+{
+    std::vector<ResourceAndRange> out;
+    out.reserve(list.size());
+    for (auto const & r : list) {
+        if (!r) continue;
+        out.push_back(ResourceAndRange{ r });
+    }
+    return out;
+}
+
+// If we have a ResourceIdentifierAndRange, ask the builder to resolve it into an actual ResourceAndRange:
+std::vector<ResourceAndRange> expandToRanges(ResourceIdentifierAndRange const& rir, RenderGraphBuilder* builder);
+
+// If we have an initializer_list of ResourceIdentifierAndRange,
+inline std::vector<ResourceAndRange>
+expandToRanges(std::initializer_list<ResourceIdentifierAndRange> list,
+    RenderGraphBuilder* builder)
+{
+    std::vector<ResourceAndRange> out;
+    out.reserve(list.size());
+    for (auto const & rir : list) {
+        if (auto vec = expandToRanges(rir, builder); !vec.empty()) {
+            // vec always has exactly one element, but we push it.
+            out.push_back(std::move(vec.front()));
+        }
+    }
+    return out;
+}
+
+inline std::vector<ResourceAndRange>
+processResourceArguments(std::initializer_list<ResourceIdentifier> list, RenderGraphBuilder* builderPtr)
+{
+    std::vector<ResourceAndRange> out;
+    out.reserve(list.size());
+    for (auto const & rid : list) {
+        ResourceIdentifierAndRange rir{ rid };
+        if (auto vec = expandToRanges(rir, builderPtr); !vec.empty()) {
+            out.push_back(std::move(vec.front()));
+        }
+    }
+    return out;
+}
+
+inline std::vector<ResourceAndRange>
+processResourceArguments(std::initializer_list<BuiltinResource> list, RenderGraphBuilder* builderPtr)
+{
+    std::vector<ResourceAndRange> out;
+    out.reserve(list.size());
+    for (auto const & bir : list) {
+		ResourceIdentifier rid{ bir };
+        ResourceIdentifierAndRange rir{ rid };
+        if (auto vec = expandToRanges(rir, builderPtr); !vec.empty()) {
+            out.push_back(std::move(vec.front()));
+        }
+    }
+    return out;
+}
+
+template<typename T>
+inline std::vector<ResourceAndRange> processResourceArguments(T&& x, RenderGraphBuilder* builderPtr) {
+    if constexpr(std::is_same_v<std::decay_t<T>, ResourceAndRange> ||
+        std::is_same_v<std::decay_t<T>, std::shared_ptr<Resource>> ||
+        std::is_same_v<std::decay_t<T>, std::initializer_list<ResourceAndRange>> ||
+        std::is_same_v<std::decay_t<T>, std::initializer_list<std::shared_ptr<Resource>>>)
+    {
+		std::vector<ResourceAndRange> out;
+        for (auto const& rar : expandToRanges(std::forward<T>(x))) {
+            if (!rar.resource) continue;
+            out.push_back(rar);
+        }
+		return out;
+    }
+    else if constexpr(std::is_same_v<std::decay_t<T>, ResourceIdentifierAndRange>)
+    {
+        std::vector<ResourceAndRange> out;
+        for (auto const& rar : expandToRanges(std::forward<T>(x), *builderPtr)) {
+            if (!rar.resource) continue;
+            out.push_back(rar);
+        }
+        return out;
+    }
+    else if constexpr(std::is_same_v<std::decay_t<T>, std::initializer_list<ResourceIdentifierAndRange>>)
+    {
+        std::vector<ResourceAndRange> out;
+        for (auto const& rar : expandToRanges(std::forward<T>(x), *builderPtr)) {
+            if (!rar.resource) continue;
+            out.push_back(rar);
+        }
+        return out;
+    }
+    else if constexpr (std::is_same_v<std::decay_t<T>, ResourceIdentifier> ||
+        std::is_same_v<std::decay_t<T>, std::initializer_list<ResourceIdentifier>>)
+    {
+        return processResourceArguments(std::forward<T>(x), builderPtr);
+    }
+    else if constexpr (std::is_same_v<std::decay_t<T>, BuiltinResource> ||
+        std::is_same_v<std::decay_t<T>, std::initializer_list<BuiltinResource>>)
+    {
+        return processResourceArguments(std::forward<T>(x), builderPtr);
+    }
+    else {
+        static_assert(
+            sizeof(T) == 0,
+            "add*(...) does not accept this argument type"
+            );
+    }
+    return {};
 }
 
 class RenderPassBuilder {
@@ -235,7 +498,7 @@ public:
 
         params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        graph.AddRenderPass(pass, params, passName);
+        graph->AddRenderPass(pass, params, passName);
 
         return *this;
     }
@@ -248,257 +511,112 @@ public:
 
 		params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        graph.AddRenderPass(pass, params, passName);
+        graph->AddRenderPass(pass, params, passName);
 
         return std::move(*this);
     }
 
 private:
-    RenderPassBuilder(RenderGraph& g, std::string name)
-        : graph(g), passName(std::move(name)) {}
+    RenderPassBuilder(RenderGraph* g, RenderGraphBuilder* builder, std::string name)
+        : graph(g), graphBuilder(builder), passName(std::move(name)) {}
 
-    // Single resource overload
-    void addShaderResource(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.shaderResources.push_back(r);
-    }
-
-    // initializer list overload
-    void addShaderResource(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.shaderResources.push_back(r);
-        }
-    }
-
-    void addShaderResource(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.shaderResources.push_back(resourceAndRange);
-    }
-
-    void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.shaderResources.push_back(resourceAndRange);
-        }
-    }
+    // Shader Resource
+	template<typename T>
+	RenderPassBuilder& addShaderResource(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.shaderResources.push_back(r);
+		}
+		return *this;
+	}
 
     // Render target
-    void addRenderTarget(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.renderTargets.push_back(r);
-    }
-
-    void addRenderTarget(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.renderTargets.push_back(r);
-        }
-    }
-
-    void addRenderTarget(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.renderTargets.push_back(resourceAndRange);
-    }
-
-    void addRenderTarget(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.renderTargets.push_back(resourceAndRange);
-        }
+    template<typename T>
+    RenderPassBuilder& addRenderTarget(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.renderTargets.push_back(r);
+		}
+		return *this;
     }
 
     // Depth target
-    void addDepthReadWrite(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.depthReadWriteResources.push_back(r);
-    }
+	template<typename T>
+	RenderPassBuilder& addDepthReadWrite(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.depthReadWriteResources.push_back(r);
+		}
+		return *this;
+	}
 
-    void addDepthReadWrite(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.depthReadWriteResources.push_back(r);
-        }
-    }
-
-    void addDepthReadWrite(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.depthReadWriteResources.push_back(resourceAndRange);
-    }
-
-    void addDepthReadWrite(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.depthReadWriteResources.push_back(resourceAndRange);
-        }
-    }
-
-    void addDepthRead(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.depthReadResources.push_back(r);
-    }
-
-    void addDepthRead(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.depthReadResources.push_back(r);
-        }
-    }
-
-    void addDepthRead(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.depthReadResources.push_back(resourceAndRange);
-    }
-
-    void addDepthRead(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.depthReadResources.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	RenderPassBuilder& addDepthRead(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.depthReadResources.push_back(r);
+		}
+		return *this;
+	}
 
     // Constant buffer
-    void addConstantBuffer(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.constantBuffers.push_back(r);
-    }
-
-    void addConstantBuffer(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.constantBuffers.push_back(r);
-        }
-    }
-
-    void addConstantBuffer(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.constantBuffers.push_back(resourceAndRange);
-    }
-
-    void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.constantBuffers.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	RenderPassBuilder& addConstantBuffer(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.constantBuffers.push_back(r);
+		}
+		return *this;
+	}
 
     // Unordered access
-    void addUnorderedAccess(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.unorderedAccessViews.push_back(r);
-    }
-
-    void addUnorderedAccess(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.unorderedAccessViews.push_back(r);
-        }
-    }
-
-    void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.unorderedAccessViews.push_back(resourceAndRange);
-    }
-
-    void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.unorderedAccessViews.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	RenderPassBuilder& addUnorderedAccess(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.unorderedAccessViews.push_back(r);
+		}
+		return *this;
+	}
 
     // Copy destination
-    void addCopyDest(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.copyTargets.push_back(r);
-    }
-
-    void addCopyDest(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.copyTargets.push_back(r);
-        }
-    }
-
-    void addCopyDest(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.copyTargets.push_back(resourceAndRange);
-    }
-
-    void addCopyDest(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.copyTargets.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	RenderPassBuilder& addCopyDest(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.copyTargets.push_back(r);
+		}
+		return *this;
+	}
 
     // Copy source
-    void addCopySource(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.copySources.push_back(r);
-    }
-
-    void addCopySource(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.copySources.push_back(r);
-        }
-    }
-
-    void addCopySource(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.copySources.push_back(resourceAndRange);
-    }
-
-    void addCopySource(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.copySources.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	RenderPassBuilder& addCopySource(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.copySources.push_back(r);
+		}
+		return *this;
+	}
 
     // Indirect arguments
-    void addIndirectArguments(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.indirectArgumentBuffers.push_back(r);
-    }
-
-    void addIndirectArguments(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.indirectArgumentBuffers.push_back(r);
-        }
-    }
-
-    void addIndirectArguments(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.indirectArgumentBuffers.push_back(resourceAndRange);
-    }
-
-    void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.indirectArgumentBuffers.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	RenderPassBuilder& addIndirectArguments(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.indirectArgumentBuffers.push_back(r);
+		}
+		return *this;
+	}
 
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("RenderPassBuilder::Build() may only be called once");
@@ -595,12 +713,13 @@ private:
     }
 
     // storage
-    RenderGraph&             graph;
+    RenderGraph*             graph;
+	RenderGraphBuilder* graphBuilder;
     std::string              passName;
     RenderPassParameters     params;
     bool built_ = false;
 
-    friend class RenderGraph;
+    friend class RenderGraphBuilder;
 };
 
 class ComputePassBuilder {
@@ -665,7 +784,7 @@ public:
 
         params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        graph.AddComputePass(pass, params, passName);
+        graph->AddComputePass(pass, params, passName);
 
         return *this;
     }
@@ -678,122 +797,58 @@ public:
 
         params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        graph.AddComputePass(pass, params, passName);
+        graph->AddComputePass(pass, params, passName);
 
         return std::move(*this);
     }
 
 private:
-    ComputePassBuilder(RenderGraph& g, std::string name)
-        : graph(g), passName(std::move(name)) {}
+    ComputePassBuilder(RenderGraph* g, RenderGraphBuilder* builder, std::string name)
+        : graph(g), graphBuilder(builder), passName(std::move(name)) {}
 
-    // Single resource overload
-    void addShaderResource(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.shaderResources.push_back(r);
-    }
-
-    // initializer list overload
-    void addShaderResource(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.shaderResources.push_back(r);
-        }
-    }
-
-    void addShaderResource(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.shaderResources.push_back(resourceAndRange);
-    }
-
-    void addShaderResource(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.shaderResources.push_back(resourceAndRange);
-        }
-    }
+    // Shader resource
+	template<typename T>
+	ComputePassBuilder& addShaderResource(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.shaderResources.push_back(r);
+		}
+		return *this;
+	}
 
     // Constant buffer
-    void addConstantBuffer(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.constantBuffers.push_back(r);
-    }
-
-    void addConstantBuffer(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.constantBuffers.push_back(r);
-        }
-    }
-
-    void addConstantBuffer(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.constantBuffers.push_back(resourceAndRange);
-    }
-
-    void addConstantBuffer(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.constantBuffers.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	ComputePassBuilder& addConstantBuffer(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.constantBuffers.push_back(r);
+		}
+		return *this;
+	}
 
     // Unordered access
-    void addUnorderedAccess(const ResourceAndRange& r) {
-        if (!r.resource) return;
-        params.unorderedAccessViews.push_back(r);
-    }
-
-    void addUnorderedAccess(std::initializer_list<ResourceAndRange> list) {
-        for (auto& r : list) {
-            if (!r.resource) continue;
-            params.unorderedAccessViews.push_back(r);
-        }
-    }
-
-    void addUnorderedAccess(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.unorderedAccessViews.push_back(resourceAndRange);
-    }
-
-    void addUnorderedAccess(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.unorderedAccessViews.push_back(resourceAndRange);
-        }
-    }
+	template<typename T>
+	ComputePassBuilder& addUnorderedAccess(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
+			if (!r.resource) continue;
+			params.unorderedAccessViews.push_back(r);
+		}
+		return *this;
+	}
 
 	// Indirect arguments
-	void addIndirectArguments(const ResourceAndRange& r) {
-		if (!r.resource) return;
-		params.indirectArgumentBuffers.push_back(r);
-	}
-	void addIndirectArguments(std::initializer_list<ResourceAndRange> list) {
-		for (auto& r : list) {
+	template<typename T>
+	ComputePassBuilder& addIndirectArguments(T&& x) {
+		auto ranges = processResourceArguments(std::forward<T>(x), graphBuilder);
+		for (auto& r : ranges) {
 			if (!r.resource) continue;
 			params.indirectArgumentBuffers.push_back(r);
 		}
+		return *this;
 	}
-
-    void addIndirectArguments(const std::shared_ptr<Resource>& r) {
-        if (!r) return;
-        ResourceAndRange resourceAndRange(r);
-        params.indirectArgumentBuffers.push_back(resourceAndRange);
-    }
-
-    void addIndirectArguments(std::initializer_list<std::shared_ptr<Resource>> list) {
-        for (auto& r : list) {
-            if (!r) continue;
-            ResourceAndRange resourceAndRange(r);
-            params.indirectArgumentBuffers.push_back(resourceAndRange);
-        }
-    }
 
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");
@@ -879,10 +934,11 @@ private:
     }
 
     // storage
-    RenderGraph&             graph;
+    RenderGraph*             graph;
+	RenderGraphBuilder* graphBuilder;
     std::string              passName;
     ComputePassParameters     params;
     bool built_ = false;
 
-    friend class RenderGraph;
+    friend class RenderGraphBuilder;
 };

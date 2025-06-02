@@ -13,6 +13,7 @@
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Scene/Components.h"
+#include "Interfaces/IResourceProvider.h"
 
 class ShadowMaps;
 class LinearShadowMaps;
@@ -26,7 +27,7 @@ struct AddLightReturn {
 	std::optional<Components::FrustrumPlanes> frustrumPlanes;
 };
 
-class LightManager {
+class LightManager: public IResourceProvider {
 public:
 	static std::unique_ptr<LightManager> CreateUnique() {
 		return std::unique_ptr<LightManager>(new LightManager());
@@ -49,6 +50,8 @@ public:
 	std::shared_ptr<Buffer>& GetClusterBuffer();
 	std::shared_ptr<Buffer>& GetLightPagesBuffer();
 	unsigned int GetLightPagePoolSize() { return m_lightPagePoolSize; }
+	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
     LightManager();

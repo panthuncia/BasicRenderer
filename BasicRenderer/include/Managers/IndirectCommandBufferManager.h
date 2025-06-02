@@ -7,12 +7,13 @@
 
 #include "Materials/MaterialBuckets.h"
 #include "Scene/Components.h"
+#include "Interfaces/IResourceProvider.h"
 
 class DynamicGloballyIndexedResource;
 class ResourceGroup;
 class Buffer;
 
-class IndirectCommandBufferManager {
+class IndirectCommandBufferManager : public IResourceProvider {
 public:
 	~IndirectCommandBufferManager();
 	static std::unique_ptr<IndirectCommandBufferManager> CreateUnique() {
@@ -41,6 +42,9 @@ public:
 	//std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
 	//std::shared_ptr<Buffer>& GetAlphaTestClearBuffer() { return m_clearBufferAlphaTest; }
 	//std::shared_ptr<Buffer>& GetBlendClearBuffer() { return m_clearBufferBlend; }
+
+	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
     IndirectCommandBufferManager();

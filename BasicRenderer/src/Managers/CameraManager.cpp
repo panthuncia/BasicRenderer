@@ -90,3 +90,25 @@ void CameraManager::SetNumMeshInstances(unsigned int numMeshInstances) {
 		buffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_currentMeshInstanceBitfieldSize, sizeof(unsigned int), false, true, false));
 	}
 }
+
+std::shared_ptr<Resource> CameraManager::ProvideResource(ResourceIdentifier const& key) {
+	switch (key.AsBuiltin()) {
+	case BuiltinResource::MeshletCullingBitfieldGroup:
+		return m_meshletCullingBitfieldGroup;
+	case BuiltinResource::MeshInstanceMeshletCullingBitfieldGroup:
+		return m_meshInstanceMeshletCullingBitfieldGroup;
+	case BuiltinResource::MeshInstanceOcclusionCullingBitfieldGroup:
+		return m_meshInstanceOcclusionCullingBitfieldGroup;
+	default:
+		spdlog::warn("CameraManager::ProvideResource: Unknown resource key {}", key.ToString());
+		return nullptr;
+	}
+}
+
+std::vector<ResourceIdentifier> CameraManager::GetSupportedKeys() {
+	return {
+		BuiltinResource::MeshletCullingBitfieldGroup,
+		BuiltinResource::MeshInstanceMeshletCullingBitfieldGroup,
+		BuiltinResource::MeshInstanceOcclusionCullingBitfieldGroup
+	};
+}

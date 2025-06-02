@@ -408,3 +408,25 @@ std::shared_ptr<Buffer>& LightManager::GetClusterBuffer() {
 std::shared_ptr<Buffer>& LightManager::GetLightPagesBuffer() {
 	return m_pLightPagesBuffer;
 }
+
+std::shared_ptr<Resource> LightManager::ProvideResource(ResourceIdentifier const& key) {
+	switch (key.AsBuiltin()) {
+	case BuiltinResource::LightBufferGroup:
+		return m_pLightBufferResourceGroup;
+	case BuiltinResource::LightClusterBuffer:
+		return m_pClusterBuffer;
+	case BuiltinResource::LightPagesBuffer:
+		return m_pLightPagesBuffer;
+	default:
+		spdlog::warn("LightManager: ProvideResource called with unknown key: {}", key.ToString());
+		return nullptr;
+	}
+}
+
+std::vector<ResourceIdentifier> LightManager::GetSupportedKeys() {
+	return {
+		BuiltinResource::LightBufferGroup,
+		BuiltinResource::LightClusterBuffer,
+		BuiltinResource::LightPagesBuffer
+	};
+}
