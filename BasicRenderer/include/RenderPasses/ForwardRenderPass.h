@@ -89,8 +89,9 @@ private:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         // Render targets
-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+        //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
+        auto dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

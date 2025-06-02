@@ -4,7 +4,6 @@
 #include "structs.hlsli"
 #include "materialflags.hlsli"
 #include "lighting.hlsli"
-#include "tonemapping.hlsli"
 #include "gammaCorrection.hlsli"
 #include "outputTypes.hlsli"
 #include "MaterialFlags.hlsli"
@@ -182,22 +181,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
     
-    float3 lighting;
-    switch (perFrameBuffer.tonemapType)
-    {
-        case TONEMAP_REINHARD_JODIE:
-            lighting = reinhardJodie(lightingOutput.lighting);
-            break;
-        case TONEMAP_KRONOS_PBR_NEUTRAL:
-            lighting = toneMap_KhronosPbrNeutral(lightingOutput.lighting);
-            break;
-        case TONEMAP_ACES_HILL:
-            lighting = toneMapACES_Hill(lightingOutput.lighting);
-            break;
-        default:
-            lighting = lightingOutput.lighting;
-    }
-    lighting = LinearToSRGB(lighting);
+    float3 lighting = lightingOutput.lighting;
     
     switch (perFrameBuffer.outputType) {
         case OUTPUT_COLOR:
@@ -277,22 +261,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, true);
 
     
-    float3 lighting;
-    switch (perFrameBuffer.tonemapType)
-    {
-        case TONEMAP_REINHARD_JODIE:
-            lighting = reinhardJodie(lightingOutput.lighting);
-            break;
-        case TONEMAP_KRONOS_PBR_NEUTRAL:
-            lighting = toneMap_KhronosPbrNeutral(lightingOutput.lighting);
-            break;
-        case TONEMAP_ACES_HILL:
-            lighting = toneMapACES_Hill(lightingOutput.lighting);
-            break;
-        default:
-            lighting = lightingOutput.lighting;
-    }
-    lighting = LinearToSRGB(lighting);
+    float3 lighting = lightingOutput.lighting;
     
     switch (perFrameBuffer.outputType)
     {

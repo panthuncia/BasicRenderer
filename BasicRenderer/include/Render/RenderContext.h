@@ -38,5 +38,6 @@ public:
 	UINT64 frameFenceValue;
     UINT xRes;
     UINT yRes;
+	std::shared_ptr<PixelBuffer> pHDRTarget;
     unsigned int globalPSOFlags;
 };

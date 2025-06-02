@@ -138,7 +138,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = psoFlags & PSOFlags::PSO_SHADOW ? 0 : 1;
     if(!(psoFlags & PSOFlags::PSO_SHADOW)) {
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
     }
 
     psoDesc.SampleDesc.Count = 1;
@@ -182,12 +182,8 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT pso
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    if(!(psoFlags & PSOFlags::PSO_SHADOW)) {
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-    }
-    else {
-		psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT; // Linear depth
-    }
+
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT; // Linear depth
 
     psoDesc.SampleDesc.Count = 1;
     psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
@@ -288,7 +284,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePPLLPSO(UINT psoFl
         psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT;
     }
     else {
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
     }
 
     psoDesc.SampleDesc.Count = 1;
@@ -336,7 +332,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 
     // Set the render target format
-    DXGI_FORMAT rtvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    DXGI_FORMAT rtvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
     DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
 
     // Define the pipeline state stream subobjects
@@ -688,7 +684,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
     depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
     depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
 
-    DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = inputLayoutDesc;

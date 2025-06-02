@@ -53,6 +53,9 @@ enum class BuiltinResource {
 	PPLLHeadPointerTexture,
 	PPLLBuffer,
 	PPLLCounter,
+	// Color
+	HDRColorTarget,
+	SRGBColorTarget,
 };
 
 inline static std::unordered_map<BuiltinResource, std::string_view> builtinResourceNames = {
@@ -98,6 +101,8 @@ inline static std::unordered_map<BuiltinResource, std::string_view> builtinResou
 	{BuiltinResource::PPLLHeadPointerTexture, "PPLLHeadPointerTexture"},
 	{BuiltinResource::PPLLBuffer, "PPLLBuffer"},
 	{BuiltinResource::PPLLCounter, "PPLLCounter"},
+	{BuiltinResource::HDRColorTarget, "HDRColorTarget"},
+	{BuiltinResource::SRGBColorTarget, "SRGBColorTarget"},
 };
 
 inline static std::unordered_map<std::string_view, BuiltinResource> inverseBuiltinResourceNames = {
@@ -142,7 +147,9 @@ inline static std::unordered_map<std::string_view, BuiltinResource> inverseBuilt
 	{"DebugTexture", BuiltinResource::DebugTexture},
 	{"PPLLHeadPointerTexture", BuiltinResource::PPLLHeadPointerTexture},
 	{"PPLLBuffer", BuiltinResource::PPLLBuffer},
-	{"PPLLCounter", BuiltinResource::PPLLCounter}
+	{"PPLLCounter", BuiltinResource::PPLLCounter},
+	{"HDRColorTarget", BuiltinResource::HDRColorTarget},
+	{"SRGBColorTarget", BuiltinResource::SRGBColorTarget},
 };
 
 [[nodiscard]]

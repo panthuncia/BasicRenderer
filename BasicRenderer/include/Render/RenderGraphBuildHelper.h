@@ -262,6 +262,7 @@ void BuildZPrepass(RenderGraphBuilder& builder) {
     bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
+	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     auto newObjectsPrepassBuilder = builder.BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
@@ -285,7 +286,7 @@ void BuildZPrepass(RenderGraphBuilder& builder) {
         //}
     }
     bool clearRTVs = false;
-    if (!occlusionCulling) {
+    if (!occlusionCulling || !indirect) {
         clearRTVs = true; // We will not run an earlier pass
     }
     newObjectsPrepassBuilder.Build<ZPrepass>(
@@ -295,7 +296,7 @@ void BuildZPrepass(RenderGraphBuilder& builder) {
         builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive),
         enableWireframe, 
         useMeshShaders,
-        true, 
+        indirect, 
         clearRTVs);
 }
 
@@ -493,7 +494,8 @@ void BuildPrimaryPass(RenderGraphBuilder& builder, Environment* currentEnvironme
 
     std::string primaryPassName = deferredRendering ? "Deferred Pass" : "Forward Pass";
     auto primaryPassBuilder = builder.BuildRenderPass(primaryPassName)
-        .WithShaderResource(BuiltinResource::CameraBuffer, BuiltinResource::EnvironmentPrefilteredCubemapsGroup);
+        .WithShaderResource(BuiltinResource::CameraBuffer, BuiltinResource::EnvironmentPrefilteredCubemapsGroup)
+        .WithRenderTarget(BuiltinResource::HDRColorTarget);
 
     if (!deferredRendering) {
         primaryPassBuilder.WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture);
@@ -592,10 +594,12 @@ void BuildPPLLPipeline(RenderGraphBuilder& builder) {
             BuiltinResource::PerMeshBuffer, 
             BuiltinResource::EnvironmentPrefilteredCubemapsGroup, 
             BuiltinResource::EnvironmentsInfoBuffer, 
-            BuiltinResource::CameraBuffer, 
-            BuiltinResource::GTAO_OutputAOTerm, 
+            BuiltinResource::CameraBuffer,  
             BuiltinResource::GBuf_Normals)
         .IsGeometryPass();
+    if (gtao) {
+        PPLLFillBuilder.WithShaderResource(BuiltinResource::GTAO_OutputAOTerm);
+    }
     if (drawShadows) {
         PPLLFillBuilder.WithShaderResource(BuiltinResource::ShadowMaps);
     }
@@ -621,5 +625,6 @@ void BuildPPLLPipeline(RenderGraphBuilder& builder) {
 
     builder.BuildRenderPass("PPLLResolvePass")
         .WithShaderResource(PPLLHeadPointerTexture, PPLLBuffer)
+        .WithRenderTarget(BuiltinResource::HDRColorTarget)
         .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
 }

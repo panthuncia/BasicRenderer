@@ -190,9 +190,12 @@ private:
         std::shared_ptr<LinearShadowMaps> m_linearShadowMaps = nullptr;
         std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
+        std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
 
         std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
             switch (key.AsBuiltin()) {
+            case BuiltinResource::HDRColorTarget:
+				return m_HDRColorTarget;
             case BuiltinResource::ShadowMaps:
 				return m_shadowMaps;
 			case BuiltinResource::LinearShadowMaps:
@@ -209,6 +212,7 @@ private:
 
         std::vector<ResourceIdentifier> GetSupportedKeys() override {
 			return {
+				ResourceIdentifier(BuiltinResource::HDRColorTarget),
 				ResourceIdentifier(BuiltinResource::ShadowMaps),
 				ResourceIdentifier(BuiltinResource::LinearShadowMaps),
 				ResourceIdentifier(BuiltinResource::DebugTexture),

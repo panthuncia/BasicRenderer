@@ -1,5 +1,4 @@
 #include "cbuffers.hlsli"
-#include "tonemapping.hlsli"
 
 cbuffer RootConstants1 : register(b1)
 {
@@ -40,21 +39,6 @@ float4 PSMain(VS_OUTPUT input) : SV_TARGET {
     EnvironmentInfo envInfo = environmentInfo[perFrameBuffer.activeEnvironmentIndex];
     TextureCube<float4> skyboxTexture = ResourceDescriptorHeap[envInfo.cubeMapDescriptorIndex];
     float3 color = skyboxTexture.Sample(g_linearClamp, input.direction.xyz).xyz;
-    
-    switch (perFrameBuffer.tonemapType)
-    {
-        case TONEMAP_REINHARD_JODIE:
-            color.xyz = reinhardJodie(color.xyz);
-            break;
-        case TONEMAP_KRONOS_PBR_NEUTRAL:
-            color.xyz = toneMap_KhronosPbrNeutral(color.xyz);
-            break;
-        case TONEMAP_ACES_HILL:
-            color.xyz = toneMapACES_Hill(color.xyz);
-            break;
-        default:
-            break;
-    }
     
     return float4(color, 1.0);
 }

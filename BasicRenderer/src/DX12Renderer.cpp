@@ -44,6 +44,7 @@
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "RenderPasses/DeferredRenderPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
+#include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -629,44 +630,23 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 }
 
 void DX12Renderer::CreateTextures() {
- //   TextureDescription depthStencilDesc;
- //   ImageDimensions dimensions;
- //   dimensions.width = m_xRes;
- //   dimensions.height = m_yRes;
- //   depthStencilDesc.imageDimensions.push_back(dimensions);
- //   depthStencilDesc.format = DXGI_FORMAT_R32_TYPELESS;
- //   depthStencilDesc.hasSRV = true;
- //   depthStencilDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
- //   depthStencilDesc.arraySize = 1;
- //   depthStencilDesc.channels = 1;
- //   depthStencilDesc.generateMipMaps = false;
- //   depthStencilDesc.hasDSV = true;
-	//depthStencilDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
- //   //depthStencilDesc.allowAlias = true;
-
- //   auto depthStencilBuffer = PixelBuffer::Create(depthStencilDesc);
- //   depthStencilBuffer->SetName(L"DepthStencilBuffer");
-
- //   TextureDescription linearDepthDesc;
-	//linearDepthDesc.imageDimensions.push_back(dimensions);
-	//linearDepthDesc.format = DXGI_FORMAT_R32_FLOAT;
-	//linearDepthDesc.hasSRV = true;
-	//linearDepthDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-	//linearDepthDesc.arraySize = 1;
-	//linearDepthDesc.channels = 1;
-	//linearDepthDesc.generateMipMaps = true;
-	//linearDepthDesc.hasUAV = true;
-	//linearDepthDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
-	//linearDepthDesc.hasRTV = true;
-	//linearDepthDesc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
- //   linearDepthDesc.clearColor[0] = std::numeric_limits<float>().max();
-
-
-	//auto linearDepthBuffer = PixelBuffer::Create(linearDepthDesc);
-	//linearDepthBuffer->SetName(L"LinearDepthBuffer");
-
-	//m_depthMap.depthMap = depthStencilBuffer;
-	//m_depthMap.linearDepthMap = linearDepthBuffer;
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
+    // Create HDR color target
+    TextureDescription hdrDesc;
+    hdrDesc.arraySize = 1;
+    hdrDesc.channels = 4; // RGBA
+    hdrDesc.isCubemap = false;
+    hdrDesc.hasRTV = true;
+    hdrDesc.hasUAV = false;
+    hdrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT; // HDR format
+    hdrDesc.generateMipMaps = false;
+    ImageDimensions dims;
+    dims.height = resolution.y;
+    dims.width = resolution.x;
+    hdrDesc.imageDimensions.push_back(dims);
+    auto hdrColorTarget = PixelBuffer::Create(hdrDesc);
+    hdrColorTarget->SetName(L"Primary Camera HDR Color Target");
+	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
@@ -800,6 +780,7 @@ void DX12Renderer::Render() {
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
 	m_context.drawStats = *drawStats;
+    m_context.pHDRTarget = m_coreResourceProvider.m_HDRColorTarget;
 
     unsigned int globalPSOFlags = 0;
     if (m_imageBasedLighting) {
@@ -816,10 +797,7 @@ void DX12Renderer::Render() {
     // Indicate that the back buffer will be used as a render target
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     commandList->ResourceBarrier(1, &barrier);
-    
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_context.frameIndex, m_context.rtvDescriptorSize);
-    //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
+   
     commandList->Close();
 
     // Execute the command list
@@ -1048,6 +1026,9 @@ void DX12Renderer::CreateRenderGraph() {
     // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
     // part of the compiler would need to become aware of DynamicResource.
 
+    // TODO: Some of these resources don't really need to be recreated (GTAO, etc.)
+    // Instead, just create them externally and register them
+
 	RenderGraphBuilder builder;
     builder.RegisterProvider(m_pMeshManager.get());
 	builder.RegisterProvider(m_pObjectManager.get());
@@ -1118,12 +1099,17 @@ void DX12Renderer::CreateRenderGraph() {
 		builder.BuildRenderPass("SkyboxPass")
 			.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap())
 			.WithDepthReadWrite(depthTexture)
+			.WithRenderTarget(BuiltinResource::HDRColorTarget)
 			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
 	
     BuildPrimaryPass(builder, m_currentEnvironment.get());
 
     BuildPPLLPipeline(builder);
+
+    builder.BuildRenderPass("TonemappingPass")
+        .WithShaderResource(BuiltinResource::HDRColorTarget)
+        .Build<TonemappingPass>();
 
     debugPassBuilder.Build<DebugRenderPass>();
 	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {

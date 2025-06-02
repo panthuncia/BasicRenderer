@@ -1,7 +1,6 @@
 #include "vertex.hlsli"
 #include "cbuffers.hlsli"
 #include "lighting.hlsli"
-#include "tonemapping.hlsli"
 #include "outputTypes.hlsli"
 #include "utilities.hlsli"
 #include "fullscreenVS.hlsli"
@@ -269,25 +268,6 @@ float4 PPLLResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target {
         float4 srcColor = LinkedListUAV[otherFragments[i]].color;
         outColor = outColor + srcColor * (1.0f - outColor.a);
     }
-
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    
-    switch (perFrameBuffer.tonemapType)
-    {
-        case TONEMAP_REINHARD_JODIE:
-            outColor.xyz = reinhardJodie(outColor.xyz);
-            break;
-        case TONEMAP_KRONOS_PBR_NEUTRAL:
-            outColor.xyz = toneMap_KhronosPbrNeutral(outColor.xyz);
-            break;
-        case TONEMAP_ACES_HILL:
-            outColor.xyz = toneMapACES_Hill(outColor.xyz);
-            break;
-        default:
-            break;
-    }
-    
-    outColor.xyz = LinearToSRGB(outColor.xyz);
 
     return outColor;
 }

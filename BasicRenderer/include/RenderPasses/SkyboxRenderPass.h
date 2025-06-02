@@ -36,8 +36,13 @@ public:
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+        //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
         auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+
+        // Clear HDR target
+        auto& clearColor = context.pHDRTarget->GetClearColor();
+        commandList->ClearRenderTargetView(rtvHandle, &clearColor[0], 0, nullptr);
 
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
@@ -233,7 +238,7 @@ private:
         depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // Prevent skybox from writing to the depth buffer
         depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
 
-        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.InputLayout = inputLayoutDesc;

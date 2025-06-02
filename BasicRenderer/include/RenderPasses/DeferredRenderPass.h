@@ -53,7 +53,8 @@ public:
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
 		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
