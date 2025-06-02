@@ -1,6 +1,7 @@
 #include "Render/RenderGraphBuilder.h"
 
 #include "Render/RenderGraph.h"
+#include "Resources/GloballyIndexedResource.h"
 
 std::shared_ptr<Resource> RenderGraphBuilder::RequestResource(ResourceIdentifier const& rid) {
     // If it's already in our registry, return it
@@ -32,6 +33,17 @@ std::shared_ptr<Resource> RenderGraphBuilder::RequestResource(ResourceIdentifier
 
 	return nullptr;
 }
+
+std::shared_ptr<GloballyIndexedResource> RenderGraphBuilder::RequestGloballyIndexedResource(ResourceIdentifier const& rid) {
+	auto resource = RequestResource(rid);
+	if (auto indexedResource = std::dynamic_pointer_cast<GloballyIndexedResource>(resource)) {
+		return indexedResource;
+	}
+	else {
+		throw std::runtime_error("Requested resource is not a GloballyIndexedResource: " + rid.ToString());
+	}
+}
+
 
 ComputePassBuilder RenderGraphBuilder::BuildComputePass(std::string const& name) {
     return ComputePassBuilder(_graph.get(), this, name);

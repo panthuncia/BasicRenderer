@@ -14,7 +14,7 @@
 
 class LightCullingPass : public ComputePass {
 public:
-	LightCullingPass(std::shared_ptr<GloballyIndexedResource> pClusterBuffer, std::shared_ptr<Buffer> pLightPagesBuffer, std::shared_ptr<Buffer> pLightPagesCounter) : m_pClusterBuffer(pClusterBuffer), m_pLightPagesBuffer(pLightPagesBuffer), m_pLightPagesCounter(pLightPagesCounter) {
+	LightCullingPass(std::shared_ptr<GloballyIndexedResource> pClusterBuffer, std::shared_ptr<GloballyIndexedResource> pLightPagesBuffer, std::shared_ptr<GloballyIndexedResource> pLightPagesCounter) : m_pClusterBuffer(pClusterBuffer), m_pLightPagesBuffer(pLightPagesBuffer), m_pLightPagesCounter(pLightPagesCounter) {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
 	}
 
@@ -100,8 +100,8 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
-	std::shared_ptr<Buffer> m_pLightPagesBuffer;
-	std::shared_ptr<Buffer> m_pLightPagesCounter;
+	std::shared_ptr<GloballyIndexedResource> m_pLightPagesBuffer;
+	std::shared_ptr<GloballyIndexedResource> m_pLightPagesCounter;
 	std::function<DirectX::XMUINT3()> getClusterSize;
 	std::shared_ptr<GloballyIndexedResource> m_pClusterBuffer;
 	ComPtr<ID3D12PipelineState> m_PSO;

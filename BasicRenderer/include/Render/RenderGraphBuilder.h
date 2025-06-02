@@ -6,6 +6,7 @@
 #include "PassBuilders.h"
 
 class RenderGraph;
+class GloballyIndexedResource;
 
 class RenderGraphBuilder {
 public:
@@ -38,6 +39,7 @@ public:
 	}
 
     std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid);
+	std::shared_ptr<GloballyIndexedResource> RequestGloballyIndexedResource(ResourceIdentifier const& rid);
 
     ComputePassBuilder BuildComputePass(std::string const& name);
     RenderPassBuilder BuildRenderPass(std::string const& name);
