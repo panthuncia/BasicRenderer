@@ -1,6 +1,7 @@
 #include "Managers/EnvironmentManager.h"
 
 #include <filesystem>
+#include <spdlog/spdlog.h>
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Environment.h"
@@ -145,4 +146,29 @@ void EnvironmentManager::RemoveEnvironment(Environment* e) {
 	m_workingEnvironmentCubemapGroup->RemoveResource(e->GetEnvironmentCubemap().get());
 	m_environmentsToConvert.erase(std::remove(m_environmentsToConvert.begin(), m_environmentsToConvert.end(), e), m_environmentsToConvert.end());
 	m_environmentsToPrefilter.erase(std::remove(m_environmentsToPrefilter.begin(), m_environmentsToPrefilter.end(), e), m_environmentsToPrefilter.end());
+}
+
+std::shared_ptr<Resource> EnvironmentManager::ProvideResource(ResourceIdentifier const& key) {
+	switch (key.AsBuiltin()) {
+	case BuiltinResource::EnvironmentsInfoBuffer:
+		return m_environmentInfoBuffer;
+	case BuiltinResource::EnvironmentPrefilteredCubemapsGroup:
+		return m_environmentPrefilteredCubemapGroup;
+	case BuiltinResource::WorkingEnvironmentHDRIGroup:
+		return m_workingHDRIGroup;
+	case BuiltinResource::WorkingEnvironmentCubemapGroup:
+		return m_workingEnvironmentCubemapGroup;
+	default:
+		spdlog::error("EnvironmentManager: Unknown resource key: {}", key.ToString());
+		return nullptr;
+	}
+}
+
+std::vector<ResourceIdentifier> EnvironmentManager::GetSupportedKeys() {
+	return {
+		BuiltinResource::EnvironmentsInfoBuffer,
+		BuiltinResource::EnvironmentPrefilteredCubemapsGroup,
+		BuiltinResource::WorkingEnvironmentHDRIGroup,
+		BuiltinResource::WorkingEnvironmentCubemapGroup
+	};
 }

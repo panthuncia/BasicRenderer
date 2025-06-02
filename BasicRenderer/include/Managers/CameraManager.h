@@ -8,11 +8,12 @@
 #include "ShaderBuffers.h"
 
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
+#include "Interfaces/IResourceProvider.h"
 
 class IndirectCommandBufferManager;
 class ResourceGroup;
 
-class CameraManager {
+class CameraManager : public IResourceProvider {
 public:
 	static std::unique_ptr<CameraManager> CreateUnique() {
 		return std::unique_ptr<CameraManager>(new CameraManager());
@@ -56,6 +57,9 @@ public:
 	void SetNumMeshInstances(unsigned int numMeshInstances);
 
 	void SetDepthBufferForCamera(Components::RenderView view, Components::DepthMap, bool isArray = false, unsigned int arrayIndex = 0);
+
+	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
 	CameraManager();

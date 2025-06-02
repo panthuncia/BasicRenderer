@@ -61,6 +61,10 @@
 #include "Managers/EnvironmentManager.h"
 #include "Render/TonemapTypes.h"
 #include "Managers/Singletons/StatisticsManager.h"
+#include "Resources/BuiltinResources.h"
+#include "Resources/ResourceIdentifier.h"
+#include "Render/RenderGraphBuilder.h"
+#include "Render/RenderGraphBuildHelper.h"
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -254,13 +258,13 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 }
 
 void DX12Renderer::CreateGlobalResources() {
-    m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
-	m_linearShadowMaps = std::make_shared<LinearShadowMaps>(L"linearShadowMaps");
+    m_coreResourceProvider.m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
+    m_coreResourceProvider.m_linearShadowMaps = std::make_shared<LinearShadowMaps>(L"linearShadowMaps");
     //m_shadowMaps->AddAliasedResource(m_downsampledShadowMaps.get());
 	//m_downsampledShadowMaps->AddAliasedResource(m_shadowMaps.get());
 
-    setShadowMaps(m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
-	setLinearShadowMaps(m_linearShadowMaps.get());
+    setShadowMaps(m_coreResourceProvider.m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
+	setLinearShadowMaps(m_coreResourceProvider.m_linearShadowMaps.get());
 }
 
 void DX12Renderer::SetSettings() {
@@ -1037,63 +1041,39 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
 void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
 
-    auto newGraph = std::make_shared<RenderGraph>();
+    // TODO: Find a better way to handle resources like this
+    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
+
+    // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
+    // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
+    // part of the compiler would need to become aware of DynamicResource.
+
+	RenderGraphBuilder builder;
+    builder.RegisterProvider(m_pMeshManager.get());
+	builder.RegisterProvider(m_pObjectManager.get());
+	builder.RegisterProvider(m_pCameraManager.get());
+	builder.RegisterProvider(m_pLightManager.get());
+	builder.RegisterProvider(m_pEnvironmentManager.get());
+    builder.RegisterProvider(m_pIndirectCommandBufferManager.get());
+    builder.RegisterProvider(&m_coreResourceProvider);
+
 	auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth->depthMap;
-	newGraph->AddResource(depthTexture, false);
-    newGraph->AddResource(depth->linearDepthMap);
-    auto& meshManager = m_pMeshManager;
-    auto& objectManager = m_pObjectManager;
-	auto meshResourceGroup = meshManager->GetResourceGroup();
-    auto& perObjectBuffer = objectManager->GetPerObjectBuffers();
-    auto& perMeshBuffer = meshManager->GetPerMeshBuffers();
-	auto& preSkinningVertices = meshManager->GetPreSkinningVertices();
-	auto& postSkinningVertices = meshManager->GetPostSkinningVertices();
-	auto& normalMatrixBuffer = objectManager->GetNormalMatrixBuffer();
-	auto& environmentsBuffer = m_pEnvironmentManager->GetEnvironmentInfoBuffer();
-    auto& environmentPrefilteredGroup = m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup();
-    auto& meshletCullingBitfieldBufferGroup = m_pCameraManager->GetMeshletCullingBitfieldGroup();
-	auto& meshInstanceMeshletCullingBitfieldBufferGoup = m_pCameraManager->GetMeshInstanceMeshletCullingBitfieldGroup();
-    auto& primaryCameraMeshletBitfieldBuffer = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
+
+    builder.RegisterResource(BuiltinResource::PrimaryCameraDepthTexture, depthTexture);
+	builder.RegisterResource(BuiltinResource::PrimaryCameraLinearDepthMap, depth->linearDepthMap);
+
+	//newGraph->AddResource(depthTexture, false);
+    //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
         useMeshShaders = false;
     }
 
-    //auto& perFrameBuffer = ResourceManager::GetInstance().GetPerFrameBuffer();
-    //newGraph->AddResource(perFrameBuffer, true, ResourceState::CONSTANT);
-
-    auto& cameraManager = m_pCameraManager;
-    auto& cameraBuffer = cameraManager->GetCameraBuffer();
-    auto& lightBufferResourceGroup = m_pLightManager->GetLightBufferResourceGroup();
-
-    std::shared_ptr<Buffer> clusterBuffer;
-    std::shared_ptr<Buffer> lightPagesBuffer;
-    if (m_clusteredLighting) {
-        clusterBuffer = m_pLightManager->GetClusterBuffer();
-        lightPagesBuffer = m_pLightManager->GetLightPagesBuffer();
-        newGraph->AddResource(clusterBuffer, false);
-        newGraph->AddResource(lightPagesBuffer, false);
-    }
-    newGraph->AddResource(cameraBuffer);
-    newGraph->AddResource(lightBufferResourceGroup);
-    newGraph->AddResource(preSkinningVertices);
-    newGraph->AddResource(postSkinningVertices);
-    newGraph->AddResource(normalMatrixBuffer);
-    newGraph->AddResource(perMeshBuffer);
-    newGraph->AddResource(perObjectBuffer);
-    newGraph->AddResource(meshResourceGroup);
-	newGraph->AddResource(environmentsBuffer);
-	newGraph->AddResource(environmentPrefilteredGroup);
-	newGraph->AddResource(meshletCullingBitfieldBufferGroup);
-    newGraph->AddResource(meshInstanceMeshletCullingBitfieldBufferGoup);
-	newGraph->AddResource(primaryCameraMeshletBitfieldBuffer);
-	newGraph->AddResource(m_linearShadowMaps);
-
     // Skinning comes before Z prepass
-    newGraph->BuildComputePass("SkinningPass")
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, preSkinningVertices, normalMatrixBuffer)
-        .WithUnorderedAccess(postSkinningVertices)
+    builder.BuildComputePass("SkinningPass")
+        .WithShaderResource(BuiltinResource::PerObjectBuffer, BuiltinResource::PerMeshBuffer, BuiltinResource::PreSkinningVertices, BuiltinResource::NormalMatrixBuffer)
+        .WithUnorderedAccess(BuiltinResource::PostSkinningVertices)
         .Build<SkinningPass>();
 
 
@@ -1102,516 +1082,67 @@ void DX12Renderer::CreateRenderGraph() {
         indirect = false;
     }
 
-    // Gbuffer resources
-    // Z prepass goes before light clustering for when active cluster determination is implemented
+    CreateGbufferResources(builder);
 
-    TextureDescription normalsWorldSpaceDesc;
-    normalsWorldSpaceDesc.arraySize = 1;
-    normalsWorldSpaceDesc.channels = 4;
-    normalsWorldSpaceDesc.isCubemap = false;
-    normalsWorldSpaceDesc.hasRTV = true;
-    normalsWorldSpaceDesc.format = DXGI_FORMAT_R10G10B10A2_UNORM;
-    normalsWorldSpaceDesc.generateMipMaps = false;
-    normalsWorldSpaceDesc.hasSRV = true;
-    normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
-    ImageDimensions dims = { m_xRes, m_yRes, 0, 0 };
-    normalsWorldSpaceDesc.imageDimensions.push_back(dims);
-    auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
-    normalsWorldSpace->SetName(L"Normals World Space");
-    newGraph->AddResource(normalsWorldSpace, false);
-
-    std::shared_ptr<PixelBuffer> albedo;
-    std::shared_ptr<PixelBuffer> metallicRoughness;
-    std::shared_ptr<PixelBuffer> emissive;
-    if (m_deferredRendering) {
-        TextureDescription albedoDesc;
-        albedoDesc.arraySize = 1;
-        albedoDesc.channels = 4;
-        albedoDesc.isCubemap = false;
-        albedoDesc.hasRTV = true;
-        albedoDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        albedoDesc.generateMipMaps = false;
-        albedoDesc.hasSRV = true;
-        albedoDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-        ImageDimensions albedoDims = { m_xRes, m_yRes, 0, 0 };
-        albedoDesc.imageDimensions.push_back(albedoDims);
-        albedo = PixelBuffer::Create(albedoDesc);
-        albedo->SetName(L"Albedo");
-        newGraph->AddResource(albedo, false);
-
-        TextureDescription metallicRoughnessDesc;
-        metallicRoughnessDesc.arraySize = 1;
-        metallicRoughnessDesc.channels = 2;
-        metallicRoughnessDesc.isCubemap = false;
-        metallicRoughnessDesc.hasRTV = true;
-        metallicRoughnessDesc.format = DXGI_FORMAT_R8G8_UNORM;
-        metallicRoughnessDesc.generateMipMaps = false;
-        metallicRoughnessDesc.hasSRV = true;
-        metallicRoughnessDesc.srvFormat = DXGI_FORMAT_R8G8_UNORM;
-        ImageDimensions metallicRoughnessDims = { m_xRes, m_yRes, 0, 0 };
-        metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
-        metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
-        metallicRoughness->SetName(L"Metallic Roughness");
-        newGraph->AddResource(metallicRoughness, false);
-
-        TextureDescription emissiveDesc;
-        emissiveDesc.arraySize = 1;
-        emissiveDesc.channels = 4;
-        emissiveDesc.isCubemap = false;
-        emissiveDesc.hasRTV = true;
-        emissiveDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        emissiveDesc.generateMipMaps = false;
-        emissiveDesc.hasSRV = true;
-        emissiveDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-        ImageDimensions emissiveDims = { m_xRes, m_yRes, 0, 0 };
-        emissiveDesc.imageDimensions.push_back(emissiveDims);
-        emissive = PixelBuffer::Create(emissiveDesc);
-        emissive->SetName(L"Emissive");
-        newGraph->AddResource(emissive, false);
-    }
-
-    auto& lightViewResourceGroup = m_pLightManager->GetLightViewInfoResourceGroup();
-    newGraph->AddResource(lightViewResourceGroup);
-
-    std::shared_ptr<ResourceGroup> indirectCommandBufferResourceGroup = nullptr;
-	std::shared_ptr<ResourceGroup> meshletCullingCommandBufferResourceGroup = nullptr;
-	std::shared_ptr<ResourceGroup> objectOcclusionCullingBitfieldGroup = nullptr;
     if (indirect) {
-        // Clear UAVs
-        indirectCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetResourceGroup();
-        meshletCullingCommandBufferResourceGroup = m_pIndirectCommandBufferManager->GetMeshletCullingCommandResourceGroup();
-        objectOcclusionCullingBitfieldGroup = m_pCameraManager->GetMeshInstanceOcclusionCullingBitfieldGroup();
-        newGraph->AddResource(indirectCommandBufferResourceGroup);
-		newGraph->AddResource(meshletCullingCommandBufferResourceGroup);
-		newGraph->AddResource(objectOcclusionCullingBitfieldGroup);
-
         if (m_occlusionCulling) {
-
-            newGraph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
-                .WithCopyDest(indirectCommandBufferResourceGroup)
-                .Build<ClearIndirectDrawCommandUAVsPass>();
-
-            newGraph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass0") // Clear meshlet culling reset command buffers from last frame
-                .WithCopyDest(meshletCullingCommandBufferResourceGroup)
-                .Build<ClearMeshletCullingCommandUAVsPass>();
-
-            newGraph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-                .WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
-                .Build<ObjectCullingPass>(true, true);
-
-            // We need to draw occluder shadows early
-            auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
-            if (drawShadows) {
-                newGraph->AddResource(m_shadowMaps);
-
-                auto shadowOccluderPassBuilder = newGraph->BuildRenderPass("OccluderShadowPrepass")
-                    .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-                    .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0, 1 }))
-                    .WithDepthReadWrite(m_shadowMaps)
-                    .IsGeometryPass();
-
-                if (useMeshShaders) {
-                    shadowOccluderPassBuilder.WithShaderResource(meshResourceGroup, meshletCullingBitfieldBufferGroup);
-                    if (indirect) {
-                        shadowOccluderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-                    }
-                }
-                shadowOccluderPassBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, true);
-            }
-
-            auto occludersPrepassBuilder = newGraph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-                .WithRenderTarget(normalsWorldSpace, Subresources(depth->linearDepthMap, Mip{ 0, 1 }), albedo, metallicRoughness, emissive)
-                .WithDepthReadWrite(depthTexture)
-                .IsGeometryPass();
-
-            if (useMeshShaders) {
-                occludersPrepassBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
-                if (indirect) {
-                    occludersPrepassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-                }
-            }
-            occludersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, true);
-
-            // Single-pass downsample on all occluder-only depth maps
-            // TODO: Unhandled edge case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped)
-            auto downsampleBuilder = newGraph->BuildComputePass("DownsamplePass")
-                .WithShaderResource(Subresources(depth->linearDepthMap, Mip{ 0, 1 }), Subresources(m_linearShadowMaps, Mip{ 0, 1 }))
-                .WithUnorderedAccess(Subresources(depth->linearDepthMap, FromMip{ 1 }), Subresources(m_linearShadowMaps, FromMip{ 1 }))
-                .Build<DownsamplePass>();
-
-            // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
-            // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
-            newGraph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-                .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-                .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-                .Build<MeshletCullingPass>(false, true, true);
-            
-            // Now, render the occluder remainders (prepass & shadows)
-            if (drawShadows) {
-
-                auto shadowOccluderRemainderPassBuilder = newGraph->BuildRenderPass("OccluderRemaindersShadowPass")
-                    .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-                    .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0, 1 }))
-                    .WithDepthReadWrite(m_shadowMaps)
-                    .IsGeometryPass();
-
-                if (useMeshShaders) {
-                    shadowOccluderRemainderPassBuilder.WithShaderResource(meshResourceGroup, meshletCullingBitfieldBufferGroup);
-                    if (indirect) {
-                        shadowOccluderRemainderPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-                    }
-                }
-                shadowOccluderRemainderPassBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, false);
-            }
-
-            auto occludersRemaindersPrepassBuilder = newGraph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-                .WithRenderTarget(normalsWorldSpace, Subresources(depth->linearDepthMap, Mip{ 0, 1 }), albedo, metallicRoughness, emissive)
-                .WithDepthReadWrite(depthTexture)
-                .IsGeometryPass();
-
-            if (useMeshShaders) {
-                occludersRemaindersPrepassBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
-                if (indirect) {
-                    occludersRemaindersPrepassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-                }
-            }
-            occludersRemaindersPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, false);
-
-            // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
-            //newGraph->BuildComputePass("OccludersMeshletCullingPass")
-            //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-            //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-            //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-            //    .Build<MeshletCullingPass>(true, false, false);
+            BuildOcclusionCullingPipeline(builder);
         }
-
-        newGraph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
-            .WithCopyDest(indirectCommandBufferResourceGroup)
-            .Build<ClearIndirectDrawCommandUAVsPass>();
-
-		newGraph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass1") // Clear meshlet culling reset command buffers from prepass
-            .WithCopyDest(meshletCullingCommandBufferResourceGroup)
-            .Build<ClearMeshletCullingCommandUAVsPass>();
-
-		newGraph->BuildComputePass("ObjectCullingPass") // Performs frustrum and occlusion culling
-			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, depth->linearDepthMap, m_linearShadowMaps)
-			.WithUnorderedAccess(indirectCommandBufferResourceGroup, meshletCullingCommandBufferResourceGroup, meshInstanceMeshletCullingBitfieldBufferGoup, objectOcclusionCullingBitfieldGroup)
-			.Build<ObjectCullingPass>(false, m_occlusionCulling);
-
-        if (m_meshletCulling || m_occlusionCulling) {
-            newGraph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum *or* occlusion culled are sent to the meshlet culling pass
-                .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer, depth->linearDepthMap, m_linearShadowMaps)
-                .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-                .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-                .Build<MeshletCullingPass>(false, false, true);
-        }
+        BuildGeneralCullingPipeline(builder);
     }
 
-    auto newObjectsPrepassBuilder = newGraph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-        .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer)
-        .WithRenderTarget(normalsWorldSpace, Subresources(depth->linearDepthMap, Mip{0, 1}), albedo, metallicRoughness, emissive)
-        .WithDepthReadWrite(depthTexture)
-        .IsGeometryPass();
-
-    if (useMeshShaders) {
-        newObjectsPrepassBuilder.WithShaderResource(meshResourceGroup, primaryCameraMeshletBitfieldBuffer);
-        if (indirect) {
-            newObjectsPrepassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-        }
-    }
-    bool clearRTVs = false;
-	if (!m_occlusionCulling || !indirect) {
-		clearRTVs = true; // We will not run an earlier pass
-	}
-    newObjectsPrepassBuilder.Build<ZPrepass>(normalsWorldSpace, albedo, metallicRoughness, emissive, getWireframeEnabled(), useMeshShaders, indirect, clearRTVs);
+    // Z prepass goes before light clustering for when active cluster determination is implemented
+    BuildZPrepass(builder);
 
     // GTAO pass
-    std::shared_ptr<PixelBuffer> outputAO;
     if (m_gtaoEnabled) {
-        TextureDescription workingDepthsDesc;
-        workingDepthsDesc.arraySize = 1;
-        workingDepthsDesc.channels = 1;
-        workingDepthsDesc.isCubemap = false;
-        workingDepthsDesc.hasRTV = false;
-        workingDepthsDesc.hasUAV = true;
-        workingDepthsDesc.format = DXGI_FORMAT_R32_FLOAT;
-        workingDepthsDesc.generateMipMaps = true;
-        ImageDimensions dims1 = { m_xRes, m_yRes, 0, 0 };
-        workingDepthsDesc.imageDimensions.push_back(dims1);
-        auto workingDepths = PixelBuffer::Create(workingDepthsDesc);
-        workingDepths->SetName(L"GTAO Working Depths");
-
-        TextureDescription workingEdgesDesc;
-        workingEdgesDesc.arraySize = 1;
-        workingEdgesDesc.channels = 1;
-        workingEdgesDesc.isCubemap = false;
-        workingEdgesDesc.hasRTV = false;
-        workingEdgesDesc.hasUAV = true;
-        workingEdgesDesc.format = DXGI_FORMAT_R8_UNORM;
-        workingEdgesDesc.generateMipMaps = false;
-        workingEdgesDesc.imageDimensions.push_back(dims1);
-        auto workingEdges = PixelBuffer::Create(workingEdgesDesc);
-        workingEdges->SetName(L"GTAO Working Edges");
-
-        TextureDescription workingAOTermDesc;
-        workingAOTermDesc.arraySize = 1;
-        workingAOTermDesc.channels = 1;
-        workingAOTermDesc.isCubemap = false;
-        workingAOTermDesc.hasRTV = false;
-        workingAOTermDesc.hasUAV = true;
-        workingAOTermDesc.format = DXGI_FORMAT_R8_UINT;
-        workingAOTermDesc.generateMipMaps = false;
-        workingAOTermDesc.imageDimensions.push_back(dims1);
-        auto workingAOTerm1 = PixelBuffer::Create(workingAOTermDesc);
-        workingAOTerm1->SetName(L"GTAO Working AO Term 1");
-        auto workingAOTerm2 = PixelBuffer::Create(workingAOTermDesc);
-        workingAOTerm2->SetName(L"GTAO Working AO Term 2");
-        outputAO = PixelBuffer::Create(workingAOTermDesc);
-        outputAO->SetName(L"GTAO Output AO Term");
-        newGraph->AddResource(workingAOTerm1, false);
-        newGraph->AddResource(workingAOTerm2, false);
-        newGraph->AddResource(outputAO, false);
-        newGraph->AddResource(workingDepths, false);
-        newGraph->AddResource(workingEdges, false);
-
-        auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
-        newGraph->AddResource(GTAOConstantBuffer, false);
-
-        // Point-clamp sampler
-        D3D12_SAMPLER_DESC samplerDesc = {};
-        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        samplerDesc.MipLODBias = 0.0f;
-        samplerDesc.MaxAnisotropy = 1;
-        //samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-
-        auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
-
-        auto cameraInfo = currentScene->GetPrimaryCamera().get<Components::Camera>();
-        GTAOInfo gtaoInfo;
-        XeGTAO::GTAOSettings gtaoSettings;
-        XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
-        XeGTAO::GTAOUpdateConstants(gtaoConstants, m_xRes, m_yRes, gtaoSettings, false, 0, *cameraInfo);
-        // Bindless indices
-        gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
-
-        // Filter pass
-        gtaoInfo.g_srcRawDepthDescriptorIndex = depthTexture->GetSRVInfo(0).index;
-        gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(0).index;
-        gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(1).index;
-        gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(2).index;
-        gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(3).index;
-        gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(4).index;
-
-        // Main pass
-        gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo(0).index;
-        gtaoInfo.g_srcNormalmapDescriptorIndex = normalsWorldSpace->GetSRVInfo(0).index;
-        // TODO: Hilbert lookup table
-        gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo(0).index;
-        gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo(0).index;
-
-        // Denoise pass
-        gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).index;
-        gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).index;
-
-        UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
-
-        newGraph->BuildComputePass("GTAOFilterPass") // Depth filter pass
-            .WithShaderResource(normalsWorldSpace, depth->depthMap)
-            .WithUnorderedAccess(workingDepths)
-            .Build<GTAOFilterPass>(GTAOConstantBuffer);
-
-        newGraph->BuildComputePass("GTAOMainPass") // Main pass
-            .WithShaderResource(normalsWorldSpace, workingDepths)
-            .WithUnorderedAccess(workingEdges, workingAOTerm1)
-            .Build<GTAOMainPass>(GTAOConstantBuffer);
-
-        newGraph->BuildComputePass("GTAODenoisePass") // Denoise pass
-            .WithShaderResource(workingEdges, workingAOTerm1)
-            .WithUnorderedAccess(outputAO)
-            .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo(0).index);
-
+		RegisterGTAOResources(builder);
+        BuildGTAOPipeline(builder, currentScene->GetPrimaryCamera().get<Components::Camera>());
     }
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
-        // light pages counter
-        auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
-        lightPagesCounter->SetName(L"Light Pages Counter");
-        newGraph->AddResource(lightPagesCounter, false);
-
-		newGraph->BuildComputePass("ClusterGenerationPass")
-			.WithShaderResource(cameraBuffer)
-			.WithUnorderedAccess(clusterBuffer)
-			.Build<ClusterGenerationPass>(clusterBuffer);
-
-		newGraph->BuildComputePass("LightCullingPass")
-			.WithShaderResource(cameraBuffer, lightBufferResourceGroup)
-			.WithUnorderedAccess(clusterBuffer, lightPagesBuffer, lightPagesCounter)
-			.Build<LightCullingPass>(clusterBuffer, lightPagesBuffer, lightPagesCounter);
-    }
-	std::string primaryPassName = m_deferredRendering ? "Deferred Pass" : "Forward Pass";
-    auto primaryPassBuilder = newGraph->BuildRenderPass(primaryPassName)
-        .WithShaderResource(cameraBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup());
-    
-    if (!m_deferredRendering) {
-        primaryPassBuilder.WithDepthReadWrite(depthTexture);
-		primaryPassBuilder.WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices);
-        primaryPassBuilder.IsGeometryPass();
-	}
-	else {
-		primaryPassBuilder.WithDepthRead(depthTexture);
-	}
-
-    if (m_clusteredLighting) {
-        primaryPassBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
+        BuildLightClusteringPipeline(builder);
     }
 
-    if (m_gtaoEnabled) {
-        primaryPassBuilder.WithShaderResource(outputAO);
-    }
+    BuildEnvironmentPipeline(builder);
 
-	if (useMeshShaders && !m_deferredRendering) { // Don't need meshlets for deferred rendering
-        primaryPassBuilder.WithShaderResource(meshResourceGroup,  primaryCameraMeshletBitfieldBuffer);
-		if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-            primaryPassBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-        }
-	}
+    auto debugPassBuilder = builder.BuildRenderPass("DebugPass");
 
-    newGraph->AddResource(m_pEnvironmentManager->GetWorkingHDRIGroup());
-    newGraph->AddResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup());
-    //newGraph->AddResource(m_environmentIrradiance);
-
-	newGraph->BuildRenderPass("Environment Conversion Pass")
-		.WithShaderResource(m_pEnvironmentManager->GetWorkingHDRIGroup())
-		.WithRenderTarget(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
-		.Build<EnvironmentConversionPass>();
-        
-    newGraph->BuildComputePass("Environment Spherical Harmonics Pass")
-        .WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
-        .WithUnorderedAccess(environmentsBuffer)
-		.Build<EnvironmentSHPass>();
-
-	newGraph->BuildRenderPass("Environment Prefilter Pass")
-		.WithShaderResource(m_pEnvironmentManager->GetWorkingEnvironmentCubemapGroup())
-		.WithRenderTarget(environmentPrefilteredGroup)
-		.Build<EnvironmentFilterPass>();
-
-    if (m_currentEnvironment != nullptr) {
-		newGraph->AddResource(m_currentEnvironment->GetEnvironmentCubemap());
-        primaryPassBuilder.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap());
-    }
-
-    auto debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
-
-    auto drawShadows = m_shadowMaps != nullptr && getShadowsEnabled();
+    auto drawShadows = m_coreResourceProvider.m_shadowMaps != nullptr && getShadowsEnabled();
     if (drawShadows) {
-        newGraph->AddResource(m_shadowMaps);
-
-        auto shadowBuilder = newGraph->BuildRenderPass("ShadowPass")
-            .WithShaderResource(perObjectBuffer, perMeshBuffer, postSkinningVertices, cameraBuffer, lightViewResourceGroup)
-            .WithRenderTarget(Subresources(m_linearShadowMaps, Mip{ 0, 1 }))
-			.WithDepthReadWrite(m_shadowMaps)
-            .IsGeometryPass();
-
-		if (useMeshShaders) {
-			shadowBuilder.WithShaderResource(meshResourceGroup, meshletCullingBitfieldBufferGroup);
-			if (indirect) {
-				shadowBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-			}
-		}
-		shadowBuilder.Build<ShadowPass>(getWireframeEnabled(), useMeshShaders, indirect, clearRTVs);
-
+        BuildMainShadowPass(builder);
         debugPassBuilder.WithShaderResource(depth->linearDepthMap);
     }
 
     if (m_currentEnvironment != nullptr) {
-		newGraph->BuildRenderPass("SkyboxPass")
+		builder.BuildRenderPass("SkyboxPass")
 			.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap())
 			.WithDepthReadWrite(depthTexture)
 			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
     }
-	if (m_deferredRendering) { // G-Buffer resources + depth
-        primaryPassBuilder.WithShaderResource(normalsWorldSpace, albedo, metallicRoughness, depthTexture);
-    }
-    if (m_deferredRendering) {
-		primaryPassBuilder.Build<DeferredRenderPass>(m_gtaoEnabled ? outputAO->GetSRVInfo(0).index : 0, normalsWorldSpace->GetSRVInfo(0).index, albedo->GetSRVInfo(0).index, metallicRoughness->GetSRVInfo(0).index, emissive->GetSRVInfo(0).index, depthTexture->GetSRVInfo(0).index);
-    }
-    else {
-        primaryPassBuilder.Build<ForwardRenderPass>(getWireframeEnabled(), useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo(0).index : 0);
-    }
-    static const size_t aveFragsPerPixel = 12;
-    auto numPPLLNodes = m_xRes * m_yRes * aveFragsPerPixel;
-	static const size_t PPLLNodeSize = 24; // two uints, four floats
-    TextureDescription desc;
-	ImageDimensions dimensions;
-	dimensions.width = m_xRes;
-	dimensions.height = m_yRes;
-	dimensions.rowPitch = m_xRes * sizeof(unsigned int);
-	dimensions.slicePitch = dimensions.rowPitch * m_yRes;
-	desc.imageDimensions.push_back(dimensions);
-    desc.channels = 1;
-    desc.format = DXGI_FORMAT_R32_UINT;
-    desc.hasRTV = false;
-    desc.hasUAV = true;
-	desc.hasNonShaderVisibleUAV = true;
-	auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
-	PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
-    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, false, true, false);
-	PPLLBuffer->SetName(L"PPLLBuffer");
-    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
-	PPLLCounter->SetName(L"PPLLCounter");
-	newGraph->AddResource(PPLLHeadPointerTexture);
-	newGraph->AddResource(PPLLBuffer);
-	newGraph->AddResource(PPLLCounter);
+	
+    BuildPrimaryPass(builder, m_currentEnvironment.get());
 
-    auto PPLLFillBuilder = newGraph->BuildRenderPass("PPFillPass")
-        .WithUnorderedAccess(PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter)
-        .WithShaderResource(lightBufferResourceGroup, postSkinningVertices, perObjectBuffer, perMeshBuffer, m_pEnvironmentManager->GetEnvironmentPrefilteredCubemapGroup(), m_pEnvironmentManager->GetEnvironmentInfoBuffer(), cameraBuffer, outputAO, normalsWorldSpace)
-        .IsGeometryPass();
-    if (drawShadows) {
-		PPLLFillBuilder.WithShaderResource(m_shadowMaps);
-    }
-	if (m_clusteredLighting) {
-		PPLLFillBuilder.WithShaderResource(clusterBuffer, lightPagesBuffer);
-	}
-	if (useMeshShaders) {
-		PPLLFillBuilder.WithShaderResource(meshResourceGroup);
-		if (indirect) {
-			PPLLFillBuilder.WithIndirectArguments(indirectCommandBufferResourceGroup);
-		}
-	}
-	PPLLFillBuilder.Build<PPLLFillPass>(getWireframeEnabled(), PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter, numPPLLNodes, useMeshShaders, indirect, m_gtaoEnabled ? outputAO->GetSRVInfo(0).index : 0, normalsWorldSpace->GetSRVInfo(0).index);
-
-
-    newGraph->BuildRenderPass("PPLLResolvePass")
-        .WithShaderResource(PPLLHeadPointerTexture, PPLLBuffer)
-        .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
+    BuildPPLLPipeline(builder);
 
     debugPassBuilder.Build<DebugRenderPass>();
-	if (m_currentDebugTexture != nullptr) {
-		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
+	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
+		auto debugRenderPass = builder.GetRenderPassByName("DebugPass");
 		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
         if (debugPass) {
-            debugPass->SetTexture(m_currentDebugTexture.get());
+            debugPass->SetTexture(m_coreResourceProvider.m_currentDebugTexture.get());
         }
 	}
 
     if (getDrawBoundingSpheres()) {
-		auto debugSphereBuilder = newGraph->BuildRenderPass("DebugSpherePass")
-			.WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
+		auto debugSphereBuilder = builder.BuildRenderPass("DebugSpherePass")
+			.WithShaderResource(BuiltinResource::PerObjectBuffer, BuiltinResource::PerMeshBuffer, BuiltinResource::CameraBuffer)
 			.WithDepthReadWrite(depthTexture)
 			.IsGeometryPass()
 			.Build<DebugSpherePass>();
     }
 
-    newGraph->Compile();
-    newGraph->Setup();
+    auto newGraph = builder.Build();
 
     DeletionManager::GetInstance().MarkForDelete(currentRenderGraph);
 	currentRenderGraph = std::move(newGraph);
@@ -1666,7 +1197,7 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
 }
 
 void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
-    m_currentDebugTexture = texture;
+    m_coreResourceProvider.m_currentDebugTexture = texture;
 	if (currentRenderGraph == nullptr) {
 		return;
 	}

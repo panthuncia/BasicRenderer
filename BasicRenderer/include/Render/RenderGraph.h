@@ -34,8 +34,6 @@ public:
 	std::shared_ptr<Resource> GetResourceByID(const uint64_t id);
 	std::shared_ptr<RenderPass> GetRenderPassByName(const std::string& name);
 	std::shared_ptr<ComputePass> GetComputePassByName(const std::string& name);
-	RenderPassBuilder BuildRenderPass(std::string name);
-	ComputePassBuilder BuildComputePass(std::string name);
 
 private:
 	struct RenderPassAndResources {

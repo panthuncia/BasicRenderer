@@ -186,3 +186,22 @@ unsigned int ObjectManager::GetActiveBlendDrawSetIndicesBufferSRVIndex() const {
 unsigned int ObjectManager::GetNormalMatrixBufferSRVIndex() const {
 	return m_normalMatrixBuffer->GetSRVInfo(0).index;
 }
+
+std::shared_ptr<Resource> ObjectManager::ProvideResource(ResourceIdentifier const& key) {
+	switch (key.AsBuiltin()) {
+	case BuiltinResource::PerObjectBuffer:
+		return m_perObjectBuffers;
+	case BuiltinResource::NormalMatrixBuffer:
+		return m_normalMatrixBuffer;
+	default:
+		spdlog::error("ObjectManager::ProvideResource: Unknown resource key: {}", key.ToString());
+		return nullptr;
+	}
+}
+
+std::vector<ResourceIdentifier> ObjectManager::GetSupportedKeys() {
+	return{
+		BuiltinResource::PerObjectBuffer,
+		BuiltinResource::NormalMatrixBuffer,
+	};
+}

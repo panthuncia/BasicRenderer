@@ -796,10 +796,3 @@ void RenderGraph::ComputeResourceLoops() {
 	}
 	batches.push_back(std::move(loopBatch));
 }
-
-RenderPassBuilder RenderGraph::BuildRenderPass(std::string name) {
-	return RenderPassBuilder(*this, name);
-}
-ComputePassBuilder RenderGraph::BuildComputePass(std::string name) {
-	return ComputePassBuilder(*this, name);
-}

@@ -9,11 +9,12 @@
 #include "ShaderBuffers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/ResourceGroup.h"
+#include "Interfaces/IResourceProvider.h"
 
 class BufferView;
 class DynamicBuffer;
 
-class EnvironmentManager {
+class EnvironmentManager : public IResourceProvider {
 public:
 	static std::unique_ptr<EnvironmentManager> CreateUnique() {
 		return std::unique_ptr<EnvironmentManager>(new EnvironmentManager());
@@ -84,6 +85,9 @@ public:
 	}
 
 	void SetFromHDRI(Environment* e, std::string hdriPath);
+
+	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
 	EnvironmentManager();

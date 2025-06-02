@@ -189,3 +189,21 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 void IndirectCommandBufferManager::SetIncrementSize(unsigned int incrementSize) {
     m_incrementSize = incrementSize;
 }
+
+std::shared_ptr<Resource> IndirectCommandBufferManager::ProvideResource(ResourceIdentifier const& key) {
+	switch (key.AsBuiltin()) {
+	case BuiltinResource::PrimaryIndirectCommandBuffers:
+		return m_parentResourceGroup;
+	case BuiltinResource::MeshletCullingCommandBuffers:
+		return m_meshletCullingCommandResourceGroup;
+	default:
+		return nullptr;
+	}
+}
+
+std::vector<ResourceIdentifier> IndirectCommandBufferManager::GetSupportedKeys() {
+	return {
+		BuiltinResource::PrimaryIndirectCommandBuffers,
+		BuiltinResource::MeshletCullingCommandBuffers
+	};
+}
