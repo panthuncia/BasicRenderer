@@ -192,7 +192,6 @@ void RenderGraph::Compile() {
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
 
-
 		bool isCompute = (pr.type == PassType::Compute);
 
 		if (isCompute) {

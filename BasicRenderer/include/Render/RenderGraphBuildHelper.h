@@ -642,7 +642,7 @@ void BuildBloomPipeline(RenderGraphBuilder& builder) {
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
     // Calculate max mips
 	unsigned int maxBloomMips = static_cast<unsigned int>(std::log2(std::max(resolution.x, resolution.y))) + 1;
-    unsigned int numBloomMips = 5;
+    unsigned int numBloomMips = 6;
 	if (maxBloomMips < numBloomMips) {
 		numBloomMips = maxBloomMips; // Limit to max mips
 	}
@@ -650,22 +650,22 @@ void BuildBloomPipeline(RenderGraphBuilder& builder) {
 	// Downsample numBloomMips mips of the HDR color target
     for (unsigned int i = 0; i < numBloomMips; i++) {
         builder.BuildRenderPass("BloomDownsamplePass" + std::to_string(i))
-            .WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ i, i + 1 }))
-            .WithRenderTarget(Subresources(BuiltinResource::HDRColorTarget, Mip{ i + 1, i + 2 }))
+            .WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ i, 1 }))
+            .WithRenderTarget(Subresources(BuiltinResource::HDRColorTarget, Mip{ i + 1, 1 }))
 			.Build<BloomSamplePass>(i, false);
     }
 
 	// Upsample numBloomMips - 1 mips of the HDR color target, starting from the last mip
     for (unsigned int i = numBloomMips-1; i > 1; i--) {
         builder.BuildRenderPass("BloomUpsamplePass" + std::to_string(i))
-            .WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ i + 1, i + 2 }))
-            .WithRenderTarget(Subresources(BuiltinResource::HDRColorTarget, Mip{ i, i + 1 }))
+            .WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ i + 1, 1 }))
+            .WithRenderTarget(Subresources(BuiltinResource::HDRColorTarget, Mip{ i, 1 }))
             .Build<BloomSamplePass>(i, true);
     }
     
     // Upsample and blend the first mip with the HDR color target
 	builder.BuildRenderPass("BloomUpsampleAndBlendPass")
-		.WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ 1, 2 }))
+		.WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ 1, 1 }))
 		.WithUnorderedAccess(Subresources(BuiltinResource::HDRColorTarget, Mip{ 0, 1 }))
 		.Build<BloomBlendPass>();
 }
