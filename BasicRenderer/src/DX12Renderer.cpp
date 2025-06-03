@@ -45,6 +45,7 @@
 #include "RenderPasses/DeferredRenderPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
+#include "RenderPasses/PostProcessing/Bloom.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -309,6 +310,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableGTAO", true);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
+    settingsManager.registerSetting<bool>("enableBloom", m_bloom);
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
         return AppendScene(scene);
         });
@@ -381,6 +383,10 @@ void DX12Renderer::SetSettings() {
 		});
 	settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
 		m_meshletCulling = newValue;
+		rebuildRenderGraph = true;
+		});
+	settingsManager.addObserver<bool>("enableBloom", [this](const bool& newValue) {
+		m_bloom = newValue;
 		rebuildRenderGraph = true;
 		});
 	settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
@@ -639,7 +645,8 @@ void DX12Renderer::CreateTextures() {
     hdrDesc.hasRTV = true;
     hdrDesc.hasUAV = false;
     hdrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT; // HDR format
-    hdrDesc.generateMipMaps = false;
+    hdrDesc.generateMipMaps = true; // For bloom downsampling
+    hdrDesc.hasUAV = true;
     ImageDimensions dims;
     dims.height = resolution.y;
     dims.width = resolution.x;
@@ -1106,6 +1113,10 @@ void DX12Renderer::CreateRenderGraph() {
     BuildPrimaryPass(builder, m_currentEnvironment.get());
 
     BuildPPLLPipeline(builder);
+
+    if (m_bloom) {
+        BuildBloomPipeline(builder);
+    }
 
     builder.BuildRenderPass("TonemappingPass")
         .WithShaderResource(BuiltinResource::HDRColorTarget)

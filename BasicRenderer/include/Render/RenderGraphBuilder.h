@@ -52,8 +52,8 @@ public:
 		if (m_isBuilt) {
 			throw std::runtime_error("RenderGraph is already built");
 		}
-		_graph->Setup();
 		_graph->Compile();
+		_graph->Setup();
 		m_isBuilt = true;
 		return _graph;
 	}

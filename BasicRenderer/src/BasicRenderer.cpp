@@ -336,11 +336,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //mountainScene->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
     //auto root = renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
 	//root.set<Components::Position>({ 0.0, 3.0, 0.0 });
@@ -355,8 +355,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
-    //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
-    //auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());
+    auto root = renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     //renderer.GetCurrentScene()->RemoveEntityByID(root->GetLocalID(), true);
     //renderer.GetCurrentScene()->AppendScene(*cubeScene);
 	//renderer.GetCurrentScene()->AppendScene(bistro);

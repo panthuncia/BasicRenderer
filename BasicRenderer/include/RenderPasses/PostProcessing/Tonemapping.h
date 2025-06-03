@@ -52,7 +52,7 @@ public:
 
 		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
-		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
+		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}
 

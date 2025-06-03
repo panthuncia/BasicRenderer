@@ -61,10 +61,10 @@ void CreateGbufferResources(RenderGraphBuilder& builder) {
         emissiveDesc.channels = 4;
         emissiveDesc.isCubemap = false;
         emissiveDesc.hasRTV = true;
-        emissiveDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        emissiveDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
         emissiveDesc.generateMipMaps = false;
         emissiveDesc.hasSRV = true;
-        emissiveDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        emissiveDesc.srvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
         ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
         emissiveDesc.imageDimensions.push_back(emissiveDims);
         emissive = PixelBuffer::Create(emissiveDesc);
@@ -632,9 +632,40 @@ void BuildPPLLPipeline(RenderGraphBuilder& builder) {
         gtao ? builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_OutputAOTerm)->GetSRVInfo(0).index : 0,
         builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index);
 
-
     builder.BuildRenderPass("PPLLResolvePass")
         .WithShaderResource(PPLLHeadPointerTexture, PPLLBuffer)
         .WithRenderTarget(BuiltinResource::HDRColorTarget)
         .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
+}
+
+void BuildBloomPipeline(RenderGraphBuilder& builder) {
+	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
+    // Calculate max mips
+	unsigned int maxBloomMips = static_cast<unsigned int>(std::log2(std::max(resolution.x, resolution.y))) + 1;
+    unsigned int numBloomMips = 5;
+	if (maxBloomMips < numBloomMips) {
+		numBloomMips = maxBloomMips; // Limit to max mips
+	}
+
+	// Downsample numBloomMips mips of the HDR color target
+    for (unsigned int i = 0; i < numBloomMips; i++) {
+        builder.BuildRenderPass("BloomDownsamplePass" + std::to_string(i))
+            .WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ i, i + 1 }))
+            .WithRenderTarget(Subresources(BuiltinResource::HDRColorTarget, Mip{ i + 1, i + 2 }))
+			.Build<BloomSamplePass>(i, false);
+    }
+
+	// Upsample numBloomMips - 1 mips of the HDR color target, starting from the last mip
+    for (unsigned int i = numBloomMips-1; i > 1; i--) {
+        builder.BuildRenderPass("BloomUpsamplePass" + std::to_string(i))
+            .WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ i + 1, i + 2 }))
+            .WithRenderTarget(Subresources(BuiltinResource::HDRColorTarget, Mip{ i, i + 1 }))
+            .Build<BloomSamplePass>(i, true);
+    }
+    
+    // Upsample and blend the first mip with the HDR color target
+	builder.BuildRenderPass("BloomUpsampleAndBlendPass")
+		.WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ 1, 2 }))
+		.WithUnorderedAccess(Subresources(BuiltinResource::HDRColorTarget, Mip{ 0, 1 }))
+		.Build<BloomBlendPass>();
 }

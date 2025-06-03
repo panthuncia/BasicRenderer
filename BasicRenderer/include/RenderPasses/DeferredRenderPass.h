@@ -112,7 +112,7 @@ public:
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
 
-		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
+		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}
 

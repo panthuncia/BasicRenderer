@@ -230,7 +230,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
 		psoDesc.RTVFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
         psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
         psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		psoDesc.RTVFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
+		psoDesc.RTVFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
 	}
 	else {
 		psoDesc.NumRenderTargets = 2;
@@ -529,7 +529,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 		rtvFormats.RTFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
         rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
         rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		rtvFormats.RTFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
+		rtvFormats.RTFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
 	}
 	else {
         rtvFormats.NumRenderTargets = 2;
