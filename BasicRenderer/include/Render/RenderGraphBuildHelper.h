@@ -78,6 +78,7 @@ void BuildOcclusionCullingPipeline(RenderGraphBuilder& builder) {
 	bool shadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows")();
 	bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
+	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     builder.BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
         .WithCopyDest(BuiltinResource::PrimaryIndirectCommandBuffers)
@@ -116,16 +117,21 @@ void BuildOcclusionCullingPipeline(RenderGraphBuilder& builder) {
     }
 
     auto occludersPrepassBuilder = builder.BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-        .WithShaderResource(BuiltinResource::PerObjectBuffer, 
-            BuiltinResource::PerMeshBuffer, 
-            BuiltinResource::PostSkinningVertices, 
+        .WithShaderResource(BuiltinResource::PerObjectBuffer,
+            BuiltinResource::PerMeshBuffer,
+            BuiltinResource::PostSkinningVertices,
             BuiltinResource::CameraBuffer)
-        .WithRenderTarget(BuiltinResource::GBuf_Normals, 
-            Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{ 0, 1 }), 
-            BuiltinResource::GBuf_Albedo, 
-            BuiltinResource::GBuf_MetallicRoughness, 
-            BuiltinResource::GBuf_Emissive)
-        .WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture)
+        .WithRenderTarget(
+            Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{ 0, 1 }),
+            BuiltinResource::GBuf_Normals);
+    if (deferredRendering) {
+        occludersPrepassBuilder.WithRenderTarget(
+            BuiltinResource::GBuf_Albedo,
+            BuiltinResource::GBuf_MetallicRoughness,
+            BuiltinResource::GBuf_Emissive);
+    }
+
+    occludersPrepassBuilder.WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture)
         .IsGeometryPass();
 
     if (meshShadersEnabled) {
@@ -135,10 +141,10 @@ void BuildOcclusionCullingPipeline(RenderGraphBuilder& builder) {
         //}
     }
     occludersPrepassBuilder.Build<ZPrepass>(
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals), 
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive),
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals, true), 
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo, true),
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness, true),
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive, true),
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -263,20 +269,24 @@ void BuildZPrepass(RenderGraphBuilder& builder) {
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
+	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     auto newObjectsPrepassBuilder = builder.BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-        .WithShaderResource(BuiltinResource::PerObjectBuffer, 
-            BuiltinResource::PerMeshBuffer, 
-            BuiltinResource::PostSkinningVertices, 
+        .WithShaderResource(BuiltinResource::PerObjectBuffer,
+            BuiltinResource::PerMeshBuffer,
+            BuiltinResource::PostSkinningVertices,
             BuiltinResource::CameraBuffer)
         .WithRenderTarget(
-            builder.RequestResource(BuiltinResource::GBuf_Normals),
-            Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{0, 1}), 
-            builder.RequestResource(BuiltinResource::GBuf_Albedo),
-            builder.RequestResource(BuiltinResource::GBuf_MetallicRoughness),
-            builder.RequestResource(BuiltinResource::GBuf_Emissive))
-        .WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture)
+            Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{ 0, 1 }),
+            BuiltinResource::GBuf_Normals);
+    if (deferredRendering) {
+        newObjectsPrepassBuilder.WithRenderTarget(
+            BuiltinResource::GBuf_Albedo,
+            BuiltinResource::GBuf_MetallicRoughness,
+            BuiltinResource::GBuf_Emissive);
+    }
+    newObjectsPrepassBuilder.WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture)
         .IsGeometryPass();
 
     if (meshShadersEnabled) {
@@ -290,10 +300,10 @@ void BuildZPrepass(RenderGraphBuilder& builder) {
         clearRTVs = true; // We will not run an earlier pass
     }
     newObjectsPrepassBuilder.Build<ZPrepass>(
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive),
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals, true),
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo, true),
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness, true),
+        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive, true),
         enableWireframe, 
         useMeshShaders,
         indirect, 

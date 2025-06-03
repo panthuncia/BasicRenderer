@@ -17,7 +17,7 @@ static const float2 QuadCorners[4] =
     float2(-1, 1), float2(1, 1),
 };
 
-FULLSCREEN_VS_OUTPUT FullscreenVSMain(float3 pos : POSITION, float2 uv : TEXCOORD0, uint vid : SV_VertexID)
+FULLSCREEN_VS_OUTPUT FullscreenVSMain(uint vid : SV_VertexID)
 {
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
@@ -27,7 +27,6 @@ FULLSCREEN_VS_OUTPUT FullscreenVSMain(float3 pos : POSITION, float2 uv : TEXCOOR
     float2 ndc = QuadCorners[vid];
     o.position = float4(ndc, 1.0f, 1);
     o.uv = ndc * 0.5 + 0.5;
-
     // build a ray in clip space:
     float4 clipRay = float4(ndc, -1, 1);
 

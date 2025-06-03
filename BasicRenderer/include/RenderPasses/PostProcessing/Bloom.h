@@ -11,59 +11,92 @@
 #include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
 
-class TonemappingPass : public RenderPass {
+class BloomDownsampleUpsamplePass : public RenderPass {
 public:
-	TonemappingPass() {
-		CreatePSO();
-	}
+    BloomDownsampleUpsamplePass() {
+        CreatePSO();
+    }
 
-	void Setup() override {
-	}
+    void Setup() override {
+        m_vertexBufferView = CreateFullscreenTriangleVertexBuffer();
+    }
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = context.commandList;
+    PassReturn Execute(RenderContext& context) override {
+        auto& psoManager = PSOManager::GetInstance();
+        auto& commandList = context.commandList;
 
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			context.textureDescriptorHeap, // The texture descriptor heap
-			context.samplerDescriptorHeap, // The sampler descriptor heap
-		};
+        ID3D12DescriptorHeap* descriptorHeaps[] = {
+            context.textureDescriptorHeap, // The texture descriptor heap
+            context.samplerDescriptorHeap, // The sampler descriptor heap
+        };
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
-		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
-		commandList->RSSetViewports(1, &viewport);
-		commandList->RSSetScissorRects(1, &scissorRect);
+        commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
-		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
+        CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
+        commandList->RSSetViewports(1, &viewport);
+        commandList->RSSetScissorRects(1, &scissorRect);
 
-		commandList->SetPipelineState(m_pso.Get());
-		auto rootSignature = psoManager.GetRootSignature();
-		commandList->SetGraphicsRootSignature(rootSignature.Get());
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+        commandList->SetPipelineState(m_pso.Get());
+        auto rootSignature = psoManager.GetRootSignature();
+        commandList->SetGraphicsRootSignature(rootSignature.Get());
 
 
-		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[0] = context.pHDRTarget->GetSRVInfo(0).index;
+        unsigned int misc[NumMiscUintRootConstants] = {};
+        misc[0] = context.pHDRTarget->GetSRVInfo(0).index;
 
-		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+        commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
-		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
-		return {};
-	}
+        commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
+        return {};
+    }
 
-	void Cleanup(RenderContext& context) override {
-		// Cleanup the render pass
-	}
+    void Cleanup(RenderContext& context) override {
+        // Cleanup the render pass
+    }
 
 private:
 
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+    std::shared_ptr<Buffer> m_vertexBufferHandle;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-	// Define the vertices for the full-screen triangle
+    // Define the vertices for the full-screen triangle
+
+    struct FullscreenPassVertex {
+        XMFLOAT3 position;
+        XMFLOAT2 texcoord;
+    };
+    FullscreenPassVertex fullscreenTriangleVertices[4] = {
+        { XMFLOAT3(-1.0f,  1.0f, 0.0f), XMFLOAT2(0.0, 0.0)},
+        { XMFLOAT3(1.0f,  1.0f, 0.0f), XMFLOAT2(1.0, 0.0) },
+        { XMFLOAT3(-1.0f, -1.0f, 0.0f), XMFLOAT2(0.0, 1.0) },
+        { XMFLOAT3(1.0f, -1.0f, 0.0f), XMFLOAT2(1.0, 1.0) }
+
+    };
+    // Create the vertex buffer for the full-screen triangle
+    D3D12_VERTEX_BUFFER_VIEW CreateFullscreenTriangleVertexBuffer() {
+
+        const UINT vertexBufferSize = static_cast<UINT>(4 * sizeof(FullscreenPassVertex));
+
+        m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)fullscreenTriangleVertices);
+        UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, m_vertexBufferHandle.get(), 0);
+
+        D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
+
+        vertexBufferView.BufferLocation = m_vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
+        vertexBufferView.StrideInBytes = sizeof(FullscreenPassVertex);
+        vertexBufferView.SizeInBytes = vertexBufferSize;
+
+        return vertexBufferView;
+    }
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
@@ -71,10 +104,14 @@ private:
         PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
         PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/tonemapping.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
+        static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+        };
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-        inputLayoutDesc.pInputElementDescs = nullptr;
-        inputLayoutDesc.NumElements = 0;
+        inputLayoutDesc.pInputElementDescs = inputElementDescs;
+        inputLayoutDesc.NumElements = _countof(inputElementDescs);
 
         D3D12_RASTERIZER_DESC rasterizerDesc = {};
         rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;

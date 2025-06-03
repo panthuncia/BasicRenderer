@@ -239,8 +239,8 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     float linearZ = unprojectDepth(depth, mainCamera.zNear, mainCamera.zFar);
     
     float2 pixel = input.position.xy;
-    float2 uv = (pixel) / float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY); // [0,1] over screen
-    float2 ndc = uv * 2.0f - 1.0f;
+    //float2 uv = (pixel) / float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY); // [0,1] over screen
+    float2 ndc = input.uv * 2.0f - 1.0f;
     
     float4 clipPos = float4(ndc, 1.0f, 1.0f);
 
@@ -248,7 +248,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     float4 viewPosH = mul(clipPos, mainCamera.projectionInverse);
 
     float3 positionVS = viewPosH.xyz * linearZ;
-    positionVS.y = -positionVS.y;
+    //positionVS.y = -positionVS.y;
     
     float4 worldPosH = mul(float4(positionVS, 1.0f), mainCamera.viewInverse);
     float3 positionWS = worldPosH.xyz;

@@ -3,7 +3,7 @@
 #include "Render/RenderGraph.h"
 #include "Resources/GloballyIndexedResource.h"
 
-std::shared_ptr<Resource> RenderGraphBuilder::RequestResource(ResourceIdentifier const& rid) {
+std::shared_ptr<Resource> RenderGraphBuilder::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
     // If it's already in our registry, return it
     auto it = _registry.find(rid);
     if (it != _registry.end()) 
@@ -28,14 +28,22 @@ std::shared_ptr<Resource> RenderGraphBuilder::RequestResource(ResourceIdentifier
 	}
 
 	// No provider registered for this key
+	if (allowFailure) {
+		// If we are allowed to fail, return nullptr
+		return nullptr;
+	}
 	std::string_view name = rid.IsBuiltin() ? BuiltinResourceToString(rid.AsBuiltin()) : rid.AsCustom();
 	throw std::runtime_error("No resource provider registered for key: " + std::string(name));
-
-	return nullptr;
 }
 
-std::shared_ptr<GloballyIndexedResource> RenderGraphBuilder::RequestGloballyIndexedResource(ResourceIdentifier const& rid) {
-	auto resource = RequestResource(rid);
+std::shared_ptr<GloballyIndexedResource> RenderGraphBuilder::RequestGloballyIndexedResource(ResourceIdentifier const& rid, bool allowFailure) {
+	auto resource = RequestResource(rid, allowFailure);
+	if (resource == nullptr) {
+		if (allowFailure) {
+			return nullptr; // If we are allowed to fail, return nullptr
+		}
+		throw std::runtime_error("Requested resource is null: " + rid.ToString());
+	}
 	if (auto indexedResource = std::dynamic_pointer_cast<GloballyIndexedResource>(resource)) {
 		return indexedResource;
 	}
