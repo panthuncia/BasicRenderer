@@ -139,6 +139,10 @@ private:
 	std::function<bool()> getGTAOEnabled;
 	std::function<void(bool)> setGTAOEnabled;
 
+	bool m_bloomEnabled = true;
+	std::function<bool()> getBloomEnabled;
+	std::function<void(bool)> setBloomEnabled;
+
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
@@ -264,6 +268,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setGTAOEnabled = settingsManager.getSettingSetter<bool>("enableGTAO");
 	m_gtaoEnabled = getGTAOEnabled();
 
+	setBloomEnabled = settingsManager.getSettingSetter<bool>("enableBloom");
+	getBloomEnabled = settingsManager.getSettingGetter<bool>("enableBloom");
+	m_bloomEnabled = getBloomEnabled();
+
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
 	m_collectPipelineStatistics = getCollectPipelineStatistics();
@@ -354,6 +362,9 @@ inline void Menu::Render(const RenderContext& context) {
         }
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
+		}
+		if (ImGui::Checkbox("Enable Bloom", &m_bloomEnabled)) {
+			setBloomEnabled(m_bloomEnabled);
 		}
 		if (ImGui::Checkbox("Collect Pipeline Statistics", &m_collectPipelineStatistics)) {
 			setCollectPipelineStatistics(m_collectPipelineStatistics);

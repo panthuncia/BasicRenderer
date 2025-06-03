@@ -27,7 +27,6 @@ public:
 		m_PPLLBuffer = PPLLBuffer;
 	}
 	void Setup() override {
-		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer();
 		CreatePSO();
 	}
 
@@ -51,8 +50,6 @@ public:
 		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
 		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-
-		commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
@@ -123,14 +120,9 @@ private:
 		PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
 		PSOManager::GetInstance().CompileShader(L"shaders/PPLL.hlsl", L"PPLLResolvePS", L"ps_6_6", {}, pixelShader);
 
-		static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-		};
-
 		D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-		inputLayoutDesc.pInputElementDescs = inputElementDescs;
-		inputLayoutDesc.NumElements = _countof(inputElementDescs);
+		inputLayoutDesc.pInputElementDescs = nullptr;
+		inputLayoutDesc.NumElements = 0;
 
 		D3D12_RASTERIZER_DESC rasterizerDesc = {};
 		rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
@@ -168,7 +160,7 @@ private:
 		depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
 		depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
 
-		DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+		DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 		psoDesc.InputLayout = inputLayoutDesc;
@@ -192,37 +184,5 @@ private:
 		if (FAILED(hr)) {
 			throw std::runtime_error("Failed to create debug PSO");
 		}
-	}
-
-	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-	std::shared_ptr<Buffer> m_vertexBufferHandle;
-	// Define the vertices for the full-screen triangle
-
-	struct FullscreenPassVertex {
-		XMFLOAT3 position;
-		XMFLOAT2 texcoord;
-	};
-	FullscreenPassVertex fullscreenTriangleVertices[4] = {
-		{ XMFLOAT3(-1.0f,  1.0f, 0.0f), XMFLOAT2(0.0, 0.0)},
-		{ XMFLOAT3(1.0f,  1.0f, 0.0f), XMFLOAT2(1.0, 0.0) },
-		{ XMFLOAT3(-1.0f, -1.0f, 0.0f), XMFLOAT2(0.0, 1.0) },
-		{ XMFLOAT3(1.0f, -1.0f, 0.0f), XMFLOAT2(1.0, 1.0) }
-
-	};
-	// Create the vertex buffer for the full-screen triangle
-	D3D12_VERTEX_BUFFER_VIEW CreateFullscreenTriangleVertexBuffer() {
-
-		const UINT vertexBufferSize = static_cast<UINT>(4 * sizeof(FullscreenPassVertex));
-
-		m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)fullscreenTriangleVertices);
-		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, m_vertexBufferHandle.get(), 0);
-
-		D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
-
-		vertexBufferView.BufferLocation = m_vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
-		vertexBufferView.StrideInBytes = sizeof(FullscreenPassVertex);
-		vertexBufferView.SizeInBytes = vertexBufferSize;
-
-		return vertexBufferView;
 	}
 };

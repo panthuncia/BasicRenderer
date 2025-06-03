@@ -39,7 +39,6 @@ public:
 	}
 
 	void Setup() override {
-		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer();
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -57,8 +56,6 @@ public:
 		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
 		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-		commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
@@ -115,7 +112,7 @@ public:
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
 
-		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
+		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}
 
@@ -138,36 +135,4 @@ private:
 	unsigned int m_depthBufferDescriptorIndex;
 
 	bool m_gtaoEnabled = true;
-
-	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-	std::shared_ptr<Buffer> m_vertexBufferHandle;
-	// Define the vertices for the full-screen triangle
-
-	struct FullscreenPassVertex {
-		XMFLOAT3 position;
-		XMFLOAT2 texcoord;
-	};
-	FullscreenPassVertex fullscreenTriangleVertices[4] = {
-		{ XMFLOAT3(-1.0f,  1.0f, 0.0f), XMFLOAT2(0.0, 0.0)},
-		{ XMFLOAT3(1.0f,  1.0f, 0.0f), XMFLOAT2(1.0, 0.0) },
-		{ XMFLOAT3(-1.0f, -1.0f, 0.0f), XMFLOAT2(0.0, 1.0) },
-		{ XMFLOAT3(1.0f, -1.0f, 0.0f), XMFLOAT2(1.0, 1.0) }
-
-	};
-	// Create the vertex buffer for the full-screen triangle
-	D3D12_VERTEX_BUFFER_VIEW CreateFullscreenTriangleVertexBuffer() {
-
-		const UINT vertexBufferSize = static_cast<UINT>(4 * sizeof(FullscreenPassVertex));
-
-		m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)fullscreenTriangleVertices);
-		UploadManager::GetInstance().UploadData((void*)fullscreenTriangleVertices, vertexBufferSize, m_vertexBufferHandle.get(), 0);
-
-		D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
-
-		vertexBufferView.BufferLocation = m_vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
-		vertexBufferView.StrideInBytes = sizeof(FullscreenPassVertex);
-		vertexBufferView.SizeInBytes = vertexBufferSize;
-
-		return vertexBufferView;
-	}
 };

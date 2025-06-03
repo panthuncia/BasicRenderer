@@ -334,6 +334,7 @@ std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
 
         if (materialTextures.find(aiTextureType_EMISSIVE) != materialTextures.end()) {
             emissiveTexture = materialTextures[aiTextureType_EMISSIVE];
+            emissive = aiColor3D(100.0, 100.0, 100.0);
             materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
 		if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {

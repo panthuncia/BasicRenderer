@@ -38,8 +38,8 @@ public:
 		}
 	}
 
-    std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid);
-	std::shared_ptr<GloballyIndexedResource> RequestGloballyIndexedResource(ResourceIdentifier const& rid);
+    std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
+	std::shared_ptr<GloballyIndexedResource> RequestGloballyIndexedResource(ResourceIdentifier const& rid, bool allowFailure = false);
 
     ComputePassBuilder BuildComputePass(std::string const& name);
     RenderPassBuilder BuildRenderPass(std::string const& name);
@@ -52,8 +52,8 @@ public:
 		if (m_isBuilt) {
 			throw std::runtime_error("RenderGraph is already built");
 		}
-		_graph->Setup();
 		_graph->Compile();
+		_graph->Setup();
 		m_isBuilt = true;
 		return _graph;
 	}

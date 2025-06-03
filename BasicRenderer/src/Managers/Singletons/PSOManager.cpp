@@ -230,7 +230,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
 		psoDesc.RTVFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
         psoDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
         psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		psoDesc.RTVFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
+		psoDesc.RTVFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
 	}
 	else {
 		psoDesc.NumRenderTargets = 2;
@@ -529,7 +529,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 		rtvFormats.RTFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
         rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
         rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		rtvFormats.RTFormats[4] = DXGI_FORMAT_R8G8B8A8_UNORM; // Emissive
+		rtvFormats.RTFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
 	}
 	else {
         rtvFormats.NumRenderTargets = 2;
@@ -639,14 +639,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
     PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", defines, vertexShader);
     PSOManager::GetInstance().CompileShader(L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6", defines, pixelShader);
 
-    static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-    };
-
     D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-    inputLayoutDesc.pInputElementDescs = inputElementDescs;
-    inputLayoutDesc.NumElements = _countof(inputElementDescs);
+    inputLayoutDesc.pInputElementDescs = nullptr;
+    inputLayoutDesc.NumElements = 0;
 
     D3D12_RASTERIZER_DESC rasterizerDesc = {};
     rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
