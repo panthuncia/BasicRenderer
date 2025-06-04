@@ -55,8 +55,16 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
     return Allocate(size, elementSize);
 }
 
-std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, size_t elementSize) {
-	std::unique_ptr<BufferView> view = Allocate(size, elementSize);
+std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, size_t elementSize, size_t fullAllocationSize) {
+	size_t actualSize = size;
+    if (fullAllocationSize != 0) {
+		actualSize = fullAllocationSize;
+		if (actualSize < size) {
+			spdlog::warn("Full allocation size is smaller than the data size. Using data size instead.");
+			actualSize = size;
+		}
+    }
+	std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
     
 	if (data != nullptr) {
 		auto& uploadManager = UploadManager::GetInstance();

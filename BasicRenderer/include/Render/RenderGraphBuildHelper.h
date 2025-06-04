@@ -22,6 +22,21 @@ void CreateGbufferResources(RenderGraphBuilder& builder) {
     normalsWorldSpace->SetName(L"Normals World Space");
     builder.RegisterResource(BuiltinResource::GBuf_Normals, normalsWorldSpace);
 
+    TextureDescription motionVectors;
+	motionVectors.arraySize = 1;
+    motionVectors.channels = 2;
+	motionVectors.isCubemap = false;
+	motionVectors.hasRTV = true;
+	motionVectors.format = DXGI_FORMAT_R16G16_FLOAT;
+	motionVectors.generateMipMaps = false;
+	motionVectors.hasSRV = true;
+	motionVectors.srvFormat = DXGI_FORMAT_R16G16_FLOAT;
+	ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
+	motionVectors.imageDimensions.push_back(motionVectorsDims);
+	auto motionVectorsBuffer = PixelBuffer::Create(motionVectors);
+	motionVectorsBuffer->SetName(L"Motion Vectors");
+	builder.RegisterResource(BuiltinResource::GBuf_MotionVectors, motionVectorsBuffer);
+
     std::shared_ptr<PixelBuffer> albedo;
     std::shared_ptr<PixelBuffer> metallicRoughness;
     std::shared_ptr<PixelBuffer> emissive;
@@ -123,7 +138,8 @@ void BuildOcclusionCullingPipeline(RenderGraphBuilder& builder) {
             BuiltinResource::CameraBuffer)
         .WithRenderTarget(
             Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{ 0, 1 }),
-            BuiltinResource::GBuf_Normals);
+            BuiltinResource::GBuf_Normals,
+            BuiltinResource::GBuf_MotionVectors);
     if (deferredRendering) {
         occludersPrepassBuilder.WithRenderTarget(
             BuiltinResource::GBuf_Albedo,
@@ -141,10 +157,11 @@ void BuildOcclusionCullingPipeline(RenderGraphBuilder& builder) {
         //}
     }
     occludersPrepassBuilder.Build<ZPrepass>(
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals, true), 
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo, true),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness, true),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals, true), 
+		builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_MotionVectors, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Albedo, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_MetallicRoughness, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Emissive, true),
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -194,6 +211,7 @@ void BuildOcclusionCullingPipeline(RenderGraphBuilder& builder) {
             BuiltinResource::CameraBuffer)
         .WithRenderTarget(
             builder.RequestResource(BuiltinResource::GBuf_Normals),
+			builder.RequestResource(BuiltinResource::GBuf_MotionVectors),
             Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{ 0, 1 }), 
             builder.RequestResource(BuiltinResource::GBuf_Albedo),
             builder.RequestResource(BuiltinResource::GBuf_MetallicRoughness),
@@ -208,10 +226,11 @@ void BuildOcclusionCullingPipeline(RenderGraphBuilder& builder) {
         //}
     }
     occludersRemaindersPrepassBuilder.Build<ZPrepass>(
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals),
+		builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_MotionVectors),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Albedo),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_MetallicRoughness),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Emissive),
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -279,7 +298,8 @@ void BuildZPrepass(RenderGraphBuilder& builder) {
             BuiltinResource::CameraBuffer)
         .WithRenderTarget(
             Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{ 0, 1 }),
-            BuiltinResource::GBuf_Normals);
+            BuiltinResource::GBuf_Normals,
+            BuiltinResource::GBuf_MotionVectors);
     if (deferredRendering) {
         newObjectsPrepassBuilder.WithRenderTarget(
             BuiltinResource::GBuf_Albedo,
@@ -300,10 +320,11 @@ void BuildZPrepass(RenderGraphBuilder& builder) {
         clearRTVs = true; // We will not run an earlier pass
     }
     newObjectsPrepassBuilder.Build<ZPrepass>(
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals, true),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo, true),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness, true),
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals, true),
+		builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_MotionVectors, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Albedo, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_MetallicRoughness, true),
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Emissive, true),
         enableWireframe, 
         useMeshShaders,
         indirect, 
@@ -384,14 +405,14 @@ void BuildGTAOPipeline(RenderGraphBuilder& builder, const Components::Camera* cu
     // Bindless indices
     gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
 
-	auto workingDepths = builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_WorkingDepths);
-	auto workingEdges = builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_WorkingEdges);
-	auto workingAOTerm1 = builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_WorkingAOTerm1);
-	auto outputAO = builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_OutputAOTerm);
-	auto normalsWorldSpace = builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals);
+	auto workingDepths = builder.RequestResource<PixelBuffer>(BuiltinResource::GTAO_WorkingDepths);
+	auto workingEdges = builder.RequestResource<PixelBuffer>(BuiltinResource::GTAO_WorkingEdges);
+	auto workingAOTerm1 = builder.RequestResource<PixelBuffer>(BuiltinResource::GTAO_WorkingAOTerm1);
+	auto outputAO = builder.RequestResource<PixelBuffer>(BuiltinResource::GTAO_OutputAOTerm);
+	auto normalsWorldSpace = builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals);
 
     // Filter pass
-    gtaoInfo.g_srcRawDepthDescriptorIndex = builder.RequestGloballyIndexedResource(BuiltinResource::PrimaryCameraDepthTexture)->GetSRVInfo(0).index;
+    gtaoInfo.g_srcRawDepthDescriptorIndex = builder.RequestResource<PixelBuffer>(BuiltinResource::PrimaryCameraDepthTexture)->GetSRVInfo(0).index;
     gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(0).index;
     gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(1).index;
     gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(2).index;
@@ -400,7 +421,7 @@ void BuildGTAOPipeline(RenderGraphBuilder& builder, const Components::Camera* cu
 
     // Main pass
     gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo(0).index;
-    gtaoInfo.g_srcNormalmapDescriptorIndex = builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index;
+    gtaoInfo.g_srcNormalmapDescriptorIndex = builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index;
     // TODO: Hilbert lookup table
     gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo(0).index;
     gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo(0).index;
@@ -436,14 +457,14 @@ void BuildLightClusteringPipeline(RenderGraphBuilder& builder) {
     builder.BuildComputePass("ClusterGenerationPass")
         .WithShaderResource(BuiltinResource::CameraBuffer)
         .WithUnorderedAccess(BuiltinResource::LightClusterBuffer)
-        .Build<ClusterGenerationPass>(builder.RequestGloballyIndexedResource(BuiltinResource::LightClusterBuffer));
+        .Build<ClusterGenerationPass>(builder.RequestResource<GloballyIndexedResource>(BuiltinResource::LightClusterBuffer));
 
     builder.BuildComputePass("LightCullingPass")
         .WithShaderResource(BuiltinResource::CameraBuffer, BuiltinResource::LightBufferGroup)
         .WithUnorderedAccess(BuiltinResource::LightClusterBuffer, BuiltinResource::LightPagesBuffer, lightPagesCounter)
         .Build<LightCullingPass>(
-            builder.RequestGloballyIndexedResource(BuiltinResource::LightClusterBuffer), 
-            builder.RequestGloballyIndexedResource(BuiltinResource::LightPagesBuffer), lightPagesCounter);
+            builder.RequestResource<GloballyIndexedResource>(BuiltinResource::LightClusterBuffer), 
+            builder.RequestResource<GloballyIndexedResource>(BuiltinResource::LightPagesBuffer), lightPagesCounter);
 }
 
 void BuildEnvironmentPipeline(RenderGraphBuilder& builder) {
@@ -545,19 +566,19 @@ void BuildPrimaryPass(RenderGraphBuilder& builder, Environment* currentEnvironme
     }
     if (deferredRendering) {
         primaryPassBuilder.Build<DeferredRenderPass>(
-            gtaoEnabled ? builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_OutputAOTerm)->GetSRVInfo(0).index : 0, 
-            builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index, 
-            builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Albedo)->GetSRVInfo(0).index, 
-            builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_MetallicRoughness)->GetSRVInfo(0).index, 
-            builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Emissive)->GetSRVInfo(0).index, 
-            builder.RequestGloballyIndexedResource(BuiltinResource::PrimaryCameraDepthTexture)->GetSRVInfo(0).index);
+            gtaoEnabled ? builder.RequestResource<PixelBuffer>(BuiltinResource::GTAO_OutputAOTerm)->GetSRVInfo(0).index : 0, 
+            builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index, 
+            builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Albedo)->GetSRVInfo(0).index, 
+            builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_MetallicRoughness)->GetSRVInfo(0).index, 
+            builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Emissive)->GetSRVInfo(0).index, 
+            builder.RequestResource<PixelBuffer>(BuiltinResource::PrimaryCameraDepthTexture)->GetSRVInfo(0).index);
     }
     else {
         primaryPassBuilder.Build<ForwardRenderPass>(
             wireframe, 
             meshShaders, 
             indirect, 
-            gtaoEnabled ? builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_OutputAOTerm)->GetSRVInfo(0).index : 0);
+            gtaoEnabled ? builder.RequestResource<PixelBuffer>(BuiltinResource::GTAO_OutputAOTerm)->GetSRVInfo(0).index : 0);
     }
 }
 
@@ -629,8 +650,8 @@ void BuildPPLLPipeline(RenderGraphBuilder& builder) {
         numPPLLNodes, 
         useMeshShaders, 
         indirect, 
-        gtao ? builder.RequestGloballyIndexedResource(BuiltinResource::GTAO_OutputAOTerm)->GetSRVInfo(0).index : 0,
-        builder.RequestGloballyIndexedResource(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index);
+        gtao ? builder.RequestResource<PixelBuffer>(BuiltinResource::GTAO_OutputAOTerm)->GetSRVInfo(0).index : 0,
+        builder.RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index);
 
     builder.BuildRenderPass("PPLLResolvePass")
         .WithShaderResource(PPLLHeadPointerTexture, PPLLBuffer)
@@ -642,7 +663,7 @@ void BuildBloomPipeline(RenderGraphBuilder& builder) {
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
     // Calculate max mips
 	unsigned int maxBloomMips = static_cast<unsigned int>(std::log2(std::max(resolution.x, resolution.y))) + 1;
-    unsigned int numBloomMips = 6;
+    unsigned int numBloomMips = 5;
 	if (maxBloomMips < numBloomMips) {
 		numBloomMips = maxBloomMips; // Limit to max mips
 	}
@@ -656,7 +677,7 @@ void BuildBloomPipeline(RenderGraphBuilder& builder) {
     }
 
 	// Upsample numBloomMips - 1 mips of the HDR color target, starting from the last mip
-    for (unsigned int i = numBloomMips-1; i > 1; i--) {
+    for (unsigned int i = numBloomMips-1; i > 0; i--) {
         builder.BuildRenderPass("BloomUpsamplePass" + std::to_string(i))
             .WithShaderResource(Subresources(BuiltinResource::HDRColorTarget, Mip{ i + 1, 1 }))
             .WithRenderTarget(Subresources(BuiltinResource::HDRColorTarget, Mip{ i, 1 }))

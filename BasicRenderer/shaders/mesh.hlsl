@@ -5,12 +5,21 @@
 #include "loadingUtils.hlsli"
 #include "Common/defines.h"
 
-PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
+PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint prevBlockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
     Vertex vertex = LoadVertex(byteOffset, buffer, flags);
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
+    float4 prevPos;
+    if (flags & VERTEX_SKINNED)
+    {
+        prevPos = (LoadFloat3(prevBlockByteOffset + index * vertexSize, buffer), 1.0);
+    }
+    else
+    {
+        prevPos = float4(vertex.position.xyz, 1.0f);
+    }
 
     float4 worldPosition = mul(pos, objectBuffer.model);
     PSInput result;
@@ -63,6 +72,11 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     float4 viewPosition = mul(worldPosition, mainCamera.view);
     result.positionViewSpace = viewPosition;
     result.position = mul(viewPosition, mainCamera.projection);
+    result.clipPosition = result.position;
+    
+    float4 prevPositionWorldSpace = mul(prevPos, objectBuffer.model);
+    float4 prevPositionViewSpace = mul(prevPositionWorldSpace, mainCamera.view);
+    result.prevClipPosition = mul(prevPositionViewSpace, mainCamera.projection);
     
     if (flags & VERTEX_SKINNED) {
         result.normalWorldSpace = normalize(vertex.normal);
@@ -226,9 +240,19 @@ void MSMain(
     
     uint vertOffset = meshlet.VertOffset;
     
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    uint postSkinningBufferOffset = meshInstanceBuffer.postSkinningVertexBufferOffset;
+    
+    uint prevPostSkinningBufferOffset = postSkinningBufferOffset;
+    if (meshBuffer.vertexFlags & VERTEX_SKINNED)
+    {
+        postSkinningBufferOffset += meshBuffer.vertexByteSize * meshBuffer.numVertices * (perFrameBuffer.frameIndex % 2);
+        prevPostSkinningBufferOffset += meshBuffer.vertexByteSize * meshBuffer.numVertices * ((perFrameBuffer.frameIndex + 1) % 2);
+    }
+    
     if (uGroupThreadID < meshlet.VertCount) {
         //uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, meshInstanceBuffer.postSkinningVertexBufferOffset, vertOffset + uGroupThreadID, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, meshletIndex, objectBuffer);
+        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, postSkinningBufferOffset, prevPostSkinningBufferOffset, vertOffset + uGroupThreadID, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, meshletIndex, objectBuffer);
     }
     if (uGroupThreadID < meshlet.TriCount) {
         outputTriangles[uGroupThreadID] = meshletIndices;

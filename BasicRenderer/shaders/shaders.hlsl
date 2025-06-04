@@ -20,11 +20,32 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
-        
-    uint byteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset + vertexID * meshBuffer.vertexByteSize;
+            
+    uint vertexFlags = meshBuffer.vertexFlags;
+    
+    uint postSkinningBufferOffset = meshInstanceBuffer.postSkinningVertexBufferOffset;
+    
+    uint prevPostSkinningBufferOffset = postSkinningBufferOffset;
+    if (meshBuffer.vertexFlags & VERTEX_SKINNED)
+    {
+        postSkinningBufferOffset += meshBuffer.vertexByteSize * meshBuffer.numVertices * (perFrameBuffer.frameIndex % 2);
+        prevPostSkinningBufferOffset += meshBuffer.vertexByteSize * meshBuffer.numVertices * ((perFrameBuffer.frameIndex + 1) % 2);
+    }
+    
+    uint byteOffset = postSkinningBufferOffset + vertexID * meshBuffer.vertexByteSize;
     Vertex input = LoadVertex(byteOffset, vertexBuffer, meshBuffer.vertexFlags);
     
     float4 pos = float4(input.position.xyz, 1.0f);
+    
+    float4 prevPos;
+    if (vertexFlags & VERTEX_SKINNED)
+    {
+        prevPos = (LoadFloat3(prevPostSkinningBufferOffset + vertexID * meshBuffer.vertexByteSize, vertexBuffer), 1.0);
+    }
+    else
+    {
+        prevPos = float4(input.position.xyz, 1.0f);
+    }
     
     PSInput output;
     float4 worldPosition = mul(pos, objectBuffer.model);
@@ -80,8 +101,12 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     float4 viewPosition = mul(worldPosition, mainCamera.view);
     output.positionViewSpace = viewPosition;
     output.position = mul(viewPosition, mainCamera.projection);
+    output.clipPosition = output.position;
         
-    uint vertexFlags = meshBuffer.vertexFlags;
+    float4 prevPositionWorldSpace = mul(prevPos, objectBuffer.model);
+    float4 prevPositionViewSpace = mul(prevPositionWorldSpace, mainCamera.view);
+    output.prevClipPosition = mul(prevPositionViewSpace, mainCamera.projection);
+    
     if (vertexFlags & VERTEX_SKINNED) {
         output.normalWorldSpace = normalize(input.normal);
     }
@@ -103,6 +128,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
 struct PrePassPSOutput
 {
     float4 signedOctEncodedNormal;
+    float2 motionVector;
     float linearDepth;
 #if defined(PSO_DEFERRED)
     float4 albedo;
@@ -128,6 +154,12 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     PrePassPSOutput output;
     output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
     output.linearDepth = -input.positionViewSpace.z;
+    
+    // Motion vector
+    float3 NDCPos = (input.clipPosition / input.clipPosition.w).xyz;
+    float3 PrevNDCPos = (input.prevClipPosition / input.prevClipPosition.w).xyz;
+    output.motionVector = (NDCPos - PrevNDCPos).xy;
+    
 #if defined(PSO_DEFERRED)
     output.albedo = float4(fragmentInfo.albedo.xyz, fragmentInfo.ambientOcclusion);
     output.metallicRoughness = float2(fragmentInfo.metallic, fragmentInfo.roughness);

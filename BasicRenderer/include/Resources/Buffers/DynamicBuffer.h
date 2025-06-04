@@ -30,7 +30,7 @@ public:
 
     std::unique_ptr<BufferView> Allocate(size_t size, size_t elementSize);
     void Deallocate(const BufferView* view);
-	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize);
+	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize, size_t fullAllocationSize = 0);
 	void UpdateView(BufferView* view, const void* data);
 
     void SetOnResized(const std::function<void(UINT, size_t, size_t, bool, DynamicBufferBase*, bool)>& callback) {

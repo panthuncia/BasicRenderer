@@ -3,13 +3,15 @@
 
 struct PSInput {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
-    float4 positionWorldSpace : TEXCOORD0; // For world-space lighting
-    float4 positionViewSpace : TEXCOORD1; // For cascaded shadows
-    float3 normalWorldSpace : TEXCOORD2; // For world-space lighting
-    float2 texcoord : TEXCOORD3;
-    float3 color : TEXCOORD7; // For models with vertex colors
-    float3 normalModelSpace : TEXCOORD8; // For debug view
-    uint meshletIndex : TEXCOORD9; // For meshlet debug view
+    float4 clipPosition : TEXCOORD0;
+    float4 prevClipPosition : TEXCOORD1; // Previous frame position for motion vectors
+    float4 positionWorldSpace : TEXCOORD2; // For world-space lighting
+    float4 positionViewSpace : TEXCOORD3; // For cascaded shadows
+    float3 normalWorldSpace : TEXCOORD4; // For world-space lighting
+    float2 texcoord : TEXCOORD5;
+    float3 color : TEXCOORD6; // For models with vertex colors
+    float3 normalModelSpace : TEXCOORD7; // For debug view
+    uint meshletIndex : TEXCOORD8; // For meshlet debug view
 };
 
 struct ClippingPlane {
@@ -70,7 +72,8 @@ struct PerFrameBuffer {
     float clusterZSplitDepth; // view-space depth to switch to log
     
     uint tonemapType;
-    uint pad[3];
+    uint frameIndex; // 0 to 64
+    uint pad[2];
 };
 
 struct BoundingSphere {
@@ -141,6 +144,7 @@ struct Meshlet {
 
 struct PerObjectBuffer {
     row_major matrix model;
+    row_major matrix prevModel;
     uint normalMatrixBufferIndex;
     uint pad[3];
 };

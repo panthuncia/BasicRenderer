@@ -22,7 +22,11 @@ void CSMain(uint3 dtid : SV_DispatchThreadID) {
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
     
     uint preSkinnedByteOffset = meshBuffer.vertexBufferOffset + vertexOffsetInMesh * meshBuffer.skinningVertexByteSize;
-    uint postSkinnedByteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset + vertexOffsetInMesh * meshBuffer.vertexByteSize;
+    uint postSkinnedByteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset;
+    
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    postSkinnedByteOffset += meshBuffer.vertexByteSize * meshBuffer.numVertices * (perFrameBuffer.frameIndex % 2); // ping-pong for motion vectors
+    postSkinnedByteOffset += vertexOffsetInMesh * meshBuffer.vertexByteSize;
     
     Vertex input = LoadSkinningVertex(preSkinnedByteOffset, preSkinningVertexBuffer, meshBuffer.vertexFlags);
     

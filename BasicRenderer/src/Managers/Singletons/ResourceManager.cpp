@@ -78,7 +78,7 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
 }
 
 
-void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT activeLightIndicesBufferIndex, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes) {
+void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT activeLightIndicesBufferIndex, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex) {
 	perFrameCBData.mainCameraIndex = cameraIndex;
 	perFrameCBData.numLights = numLights;
 	perFrameCBData.activeLightIndicesBufferIndex = activeLightIndicesBufferIndex;
@@ -93,6 +93,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UIN
 	perFrameCBData.lightClusterGridSizeZ = clusterSizes.z;
 	perFrameCBData.nearClusterCount = 4;
 	perFrameCBData.clusterZSplitDepth = 6.0f;
+	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
 	UploadManager::GetInstance().UploadData(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
 }

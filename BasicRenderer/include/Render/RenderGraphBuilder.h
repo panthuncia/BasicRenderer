@@ -8,6 +8,9 @@
 class RenderGraph;
 class GloballyIndexedResource;
 
+template<typename T>
+concept DerivedResource = std::derived_from<T, Resource>;
+
 class RenderGraphBuilder {
 public:
     RenderGraphBuilder() {
@@ -39,7 +42,32 @@ public:
 	}
 
     std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
-	std::shared_ptr<GloballyIndexedResource> RequestGloballyIndexedResource(ResourceIdentifier const& rid, bool allowFailure = false);
+
+	template<DerivedResource T>
+	std::shared_ptr<T> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false) {
+		auto basePtr = RequestResource(rid, allowFailure);
+
+		if (!basePtr) {
+			if (allowFailure) {
+				return nullptr;
+			}
+
+			throw std::runtime_error(
+				"RequestResource<" + std::string(typeid(T).name()) +
+				">: underlying Resource* is null (rid = " + rid.ToString() + ")"
+			);
+		}
+
+		auto derivedPtr = std::dynamic_pointer_cast<T>(basePtr);
+		if (!derivedPtr) {
+			throw std::runtime_error(
+				"Requested resource is not a " + std::string(typeid(T).name()) +
+				": " + rid.ToString()
+			);
+		}
+
+		return derivedPtr;
+	}
 
     ComputePassBuilder BuildComputePass(std::string const& name);
     RenderPassBuilder BuildRenderPass(std::string const& name);

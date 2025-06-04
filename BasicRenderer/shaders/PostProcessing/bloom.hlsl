@@ -4,13 +4,16 @@
 #include "gammaCorrection.hlsli"
 
 // UintRootConstant0 is HDR source SRV
+// UintRootConstant1 is mip level of bloom source SRV
+// UintRootConstant2 is src res x
+// UintRootConstant3 is src res y
+
+// FloatRootConstant0 is src texel size x
+// FloatRootConstant1 is src texel size y
 float4 downsample(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    float2 srcResolution = float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY);
-    float2 srcTexelSize = 1.0 / srcResolution;
-    float x = srcTexelSize.x;
-    float y = srcTexelSize.y;
+    float x = FloatRootConstant0;
+    float y = FloatRootConstant1;
     
     Texture2D<float4> source = ResourceDescriptorHeap[UintRootConstant0];
     float2 texCoord = input.uv;
@@ -63,11 +66,19 @@ float3 sample_for_upsample(Texture2D<float4> source, float2 texCoord, float x, f
     return upsample;
 }
 
+// UintRootConstant0 is HDR target UAV
+// UintRootConstant1 is bloom source SRV
+// UintRootConstant2 is src res x
+// UintRootConstant3 is src res y
+
+// FloatRootConstant0 is filter radius
+// FloatRootConstant1 is aspect ratio
+
 float4 upsample(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
     float filterRadius = FloatRootConstant0;
     float x = filterRadius;
-    float y = filterRadius;
+    float y = filterRadius * FloatRootConstant1;
     
     Texture2D<float4> source = ResourceDescriptorHeap[UintRootConstant0];
     float2 texCoord = input.uv;
@@ -80,16 +91,26 @@ float4 upsample(FULLSCREEN_VS_OUTPUT input) : SV_Target
 
 // UintRootConstant0 is HDR target UAV
 // UintRootConstant1 is bloom source SRV
+// UintRootConstant2 is src res x
+// UintRootConstant3 is src res y
+
+// FloatRootConstant0 is filter radius
+// FloatRootConstant1 is aspect ratio
 void blend(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
+    float filterRadius = FloatRootConstant0;
+    float x = filterRadius;
+    float y = filterRadius * FloatRootConstant1;
+    
     RWTexture2D<float4> HDR = ResourceDescriptorHeap[UintRootConstant0];
     Texture2D<float4> bloom = ResourceDescriptorHeap[UintRootConstant1];
+    float2 texCoord = input.uv;
+    texCoord.y = 1.0f - texCoord.y;
+
+    float3 finalBloom = sample_for_upsample(bloom, texCoord, x, y);
     
-    float3 finalBloom = sample_for_upsample(bloom, input.uv, 0, 0);
+    uint2 screenAddress = (uint2) (texCoord * uint2(UintRootConstant2, UintRootConstant3));
     
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    float2 srcResolution = float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY);
-    uint2 screenAddress = (uint2) (input.uv * srcResolution);
-    
-    HDR[screenAddress] = lerp(HDR[screenAddress], float4(finalBloom, 1.0), 0.04);
+    float3 existing = HDR[screenAddress].rgb;
+    HDR[screenAddress].rgb = lerp(existing, finalBloom, 0.04);
 }

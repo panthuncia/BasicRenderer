@@ -36,23 +36,6 @@ std::shared_ptr<Resource> RenderGraphBuilder::RequestResource(ResourceIdentifier
 	throw std::runtime_error("No resource provider registered for key: " + std::string(name));
 }
 
-std::shared_ptr<GloballyIndexedResource> RenderGraphBuilder::RequestGloballyIndexedResource(ResourceIdentifier const& rid, bool allowFailure) {
-	auto resource = RequestResource(rid, allowFailure);
-	if (resource == nullptr) {
-		if (allowFailure) {
-			return nullptr; // If we are allowed to fail, return nullptr
-		}
-		throw std::runtime_error("Requested resource is null: " + rid.ToString());
-	}
-	if (auto indexedResource = std::dynamic_pointer_cast<GloballyIndexedResource>(resource)) {
-		return indexedResource;
-	}
-	else {
-		throw std::runtime_error("Requested resource is not a GloballyIndexedResource: " + rid.ToString());
-	}
-}
-
-
 ComputePassBuilder RenderGraphBuilder::BuildComputePass(std::string const& name) {
     return ComputePassBuilder(_graph.get(), this, name);
 }

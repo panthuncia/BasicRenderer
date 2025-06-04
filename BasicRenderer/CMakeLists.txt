@@ -29,69 +29,51 @@ endif()
 #set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")
 
 function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_name)
-    # Default target name if not provided
-    if(NOT target_name)
+    cmake_parse_arguments(_args "" "" "IS_DIRECTORY;TARGET_NAME" ${ARGN})
+
+    if (NOT target_name)
         get_filename_component(target_name "${destination}" NAME)
     endif()
 
-    # Ensure IS_DIRECTORY is uppercase (TRUE or FALSE)
-    #string(TOUPPER "${IS_DIRECTORY}" IS_DIRECTORY)
-
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" BUILD_TYPE_UPPER)
-
-    if(BUILD_TYPE_UPPER STREQUAL "DEBUG")
-        # Debug Configuration - Create Symbolic Link
-        if(${IS_DIRECTORY})
-            add_custom_command(
-                OUTPUT "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E remove_directory "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E create_symlink "${source}" "${destination}"
-                DEPENDS "${source}"
-                COMMENT "Linking directory ${source} to ${destination}"
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+            if (IS_DIRECTORY)
+            add_custom_target(
+                "${target_name}_sync" ALL
+                COMMENT "Release: Copying directory ${destination} ← ${source}"
                 VERBATIM
+                COMMAND   ${CMAKE_COMMAND} -E remove_directory   "${destination}"
+                COMMAND   ${CMAKE_COMMAND} -E copy_directory     "${source}" "${destination}"
             )
         else()
-            add_custom_command(
-                OUTPUT "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E remove "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E create_symlink "${source}" "${destination}"
-                DEPENDS "${source}"
-                COMMENT "Linking file ${source} to ${destination}"
+            add_custom_target(
+                "${target_name}_sync" ALL
+                COMMENT "Release: Copying file ${destination} ← ${source}"
                 VERBATIM
+                COMMAND   ${CMAKE_COMMAND} -E remove            "${destination}"
+                COMMAND   ${CMAKE_COMMAND} -E copy              "${source}" "${destination}"
             )
         endif()
-
-        set(symlink_target_name "${target_name}_symlink_target")
-        add_custom_target(${symlink_target_name} ALL DEPENDS "${destination}")
-        set_target_properties(${symlink_target_name} PROPERTIES CONFIGURATIONS Debug)
-        add_dependencies(BasicRenderer ${symlink_target_name})
     else()
-    # Release Configuration - Copy
-        if(${IS_DIRECTORY})
-            add_custom_command(
-                OUTPUT "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E remove_directory "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "${source}" "${destination}"
-                DEPENDS "${source}"
-                COMMENT "Copying directory ${source} to ${destination}"
-                VERBATIM
-            )
+        if (IS_DIRECTORY)
+        add_custom_target(
+            "${target_name}_sync" ALL
+            COMMENT "Debug: Symlinking directory ${destination} ← ${source}"
+            VERBATIM
+            COMMAND   ${CMAKE_COMMAND} -E remove_directory   "${destination}"
+            COMMAND   ${CMAKE_COMMAND} -E create_symlink     "${source}" "${destination}"
+        )
         else()
-            add_custom_command(
-                OUTPUT "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E remove "${destination}"
-                COMMAND ${CMAKE_COMMAND} -E copy "${source}" "${destination}"
-                DEPENDS "${source}"
-                COMMENT "Copying file ${source} to ${destination}"
+            add_custom_target(
+                "${target_name}_sync" ALL
+                COMMENT "Debug: Symlinking file ${destination} ← ${source}"
                 VERBATIM
+                COMMAND   ${CMAKE_COMMAND} -E remove            "${destination}"
+                COMMAND   ${CMAKE_COMMAND} -E create_symlink    "${source}" "${destination}"
             )
         endif()
-
-        set(copy_target_name "${target_name}_copy_target")
-        add_custom_target(${copy_target_name} ALL DEPENDS "${destination}")
-        set_target_properties(${copy_target_name} PROPERTIES CONFIGURATIONS Release)
-        add_dependencies(BasicRenderer ${copy_target_name})
     endif()
+
+    add_dependencies(BasicRenderer "${target_name}_sync")
 endfunction()
 
 set(SHADERS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders")

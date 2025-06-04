@@ -62,11 +62,21 @@ public:
         commandList->SetGraphicsRootSignature(rootSignature.Get());
 
         unsigned int misc[NumMiscUintRootConstants] = {};
-        misc[0] = context.pHDRTarget->GetSRVInfo(m_mipIndex + m_isUpsample ? 1 : 0).index;
+        misc[UintRootConstant0] = context.pHDRTarget->GetSRVInfo(m_mipIndex + (m_isUpsample ? 1 : 0)).index;
+        misc[UintRootConstant1] = m_mipIndex;
+        misc[UintRootConstant2] = context.pHDRTarget->GetWidth() >> m_mipIndex;
+		misc[UintRootConstant3] = context.pHDRTarget->GetHeight() >> m_mipIndex;
         commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
 		float miscFloats[NumMiscFloatRootConstants] = {};
-		miscFloats[0] = 0.005f; // Kernel size
+        if (m_isUpsample) {
+            miscFloats[FloatRootConstant0] = 0.001f; // Kernel size
+			miscFloats[FloatRootConstant1] = misc[UintRootConstant2] / (float) misc[UintRootConstant3]; // Aspect ratio
+        }
+        else {
+            miscFloats[FloatRootConstant0] = 1.0 / misc[UintRootConstant2]; // Texel size X
+			miscFloats[FloatRootConstant1] = 1.0 / misc[UintRootConstant3]; // Texel size Y
+        }
 		commandList->SetGraphicsRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, &miscFloats, 0);
 
         commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
@@ -109,16 +119,34 @@ private:
         rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
         D3D12_BLEND_DESC blendDesc = {};
-        blendDesc.AlphaToCoverageEnable = FALSE;
-        blendDesc.IndependentBlendEnable = FALSE;
-        blendDesc.RenderTarget[0].BlendEnable = FALSE;
-        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        if (m_isUpsample) {
+            blendDesc.AlphaToCoverageEnable = FALSE;
+            blendDesc.IndependentBlendEnable = FALSE;
+
+            D3D12_RENDER_TARGET_BLEND_DESC& rt0 = blendDesc.RenderTarget[0];
+            rt0.BlendEnable           = TRUE;                  // turn on blending
+            rt0.LogicOpEnable         = FALSE;                 // we’re not using logic ops
+            rt0.SrcBlend              = D3D12_BLEND_ONE;       // use source color * 1
+            rt0.DestBlend             = D3D12_BLEND_ONE;       // use dest color * 1
+            rt0.BlendOp               = D3D12_BLEND_OP_ADD;    // add them: out = src + dst
+
+            rt0.SrcBlendAlpha         = D3D12_BLEND_ONE;
+            rt0.DestBlendAlpha        = D3D12_BLEND_ZERO;
+            rt0.BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+            rt0.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        }
+        else {
+            blendDesc.AlphaToCoverageEnable = FALSE;
+            blendDesc.IndependentBlendEnable = FALSE;
+            blendDesc.RenderTarget[0].BlendEnable = FALSE;
+            blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+            blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+            blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+            blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+            blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        }
 
         D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
         depthStencilDesc.DepthEnable = false;
@@ -207,10 +235,18 @@ public:
         commandList->SetGraphicsRootSignature(rootSignature.Get());
 
         unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[0] = context.pHDRTarget->GetUAVShaderVisibleInfo(0).index; // HDR target index
-		misc[1] = context.pHDRTarget->GetSRVInfo(1).index; // Bloom texture index
-
+		misc[UintRootConstant0] = context.pHDRTarget->GetUAVShaderVisibleInfo(0).index; // HDR target index
+		misc[UintRootConstant1] = context.pHDRTarget->GetSRVInfo(1).index; // Bloom texture index
+        misc[UintRootConstant2] = context.pHDRTarget->GetWidth();
+        misc[UintRootConstant3] = context.pHDRTarget->GetHeight();
         commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+
+        float miscFloats[NumMiscFloatRootConstants] = {};
+
+        miscFloats[FloatRootConstant0] = 0.001f; // Kernel size
+        miscFloats[FloatRootConstant1] = misc[UintRootConstant2] / (float) misc[UintRootConstant3]; // Aspect ratio
+
+        commandList->SetGraphicsRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, &miscFloats, 0);
 
         commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
         return {};

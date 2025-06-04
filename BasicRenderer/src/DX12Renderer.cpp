@@ -200,10 +200,12 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         if (entity.has<Components::RenderableObject>() && entity.has<Components::ObjectDrawInfo>()) {
             Components::RenderableObject* object = entity.get_mut<Components::RenderableObject>();
             Components::ObjectDrawInfo* drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
-            auto& modelMatrix = object->perObjectCB.modelMatrix;
-            modelMatrix = mOut.matrix;
+
+            object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
+            object->perObjectCB.modelMatrix = mOut.matrix;
             m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo->perObjectCBView.get(), object->perObjectCB);
 
+            auto& modelMatrix = object->perObjectCB.modelMatrix;
             XMMATRIX upperLeft3x3 = XMMatrixSet(
                 XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
                 XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
@@ -743,7 +745,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex(), { m_xRes, m_yRes }, m_lightClusterSize);
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex(), { m_xRes, m_yRes }, m_lightClusterSize, m_frameIndex);
 
 	currentRenderGraph->Update();
 

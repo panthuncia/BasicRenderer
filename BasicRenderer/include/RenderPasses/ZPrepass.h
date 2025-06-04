@@ -20,16 +20,18 @@
 
 class ZPrepass : public RenderPass {
 public:
-    ZPrepass(std::shared_ptr<GloballyIndexedResource> pNormals,
-        std::shared_ptr<GloballyIndexedResource> pAlbedo,
-        std::shared_ptr<GloballyIndexedResource> pMetallicRoughness,
-		std::shared_ptr<GloballyIndexedResource> pEmissive,
+    ZPrepass(std::shared_ptr<PixelBuffer> pNormals,
+		std::shared_ptr<PixelBuffer> pMotionVectors,
+        std::shared_ptr<PixelBuffer> pAlbedo,
+        std::shared_ptr<PixelBuffer> pMetallicRoughness,
+		std::shared_ptr<PixelBuffer> pEmissive,
         bool wireframe,
         bool meshShaders,
         bool indirect,
         bool clearGbuffer)
         : m_pNormals(pNormals),
         m_pAlbedo(pAlbedo), 
+		m_pMotionVectors(pMotionVectors),
 		m_pMetallicRoughness(pMetallicRoughness),
 		m_pEmissive(pEmissive),
         m_wireframe(wireframe),
@@ -65,6 +67,12 @@ public:
 			auto& clearColor1 = context.pLinearDepthBuffer->GetClearColor();
 			D3D12_RECT clearRect = { 0, 0, static_cast<LONG>(context.xRes), static_cast<LONG>(context.yRes) };
 			commandList->ClearRenderTargetView(rtvHandle1, clearColor1.data(), 1, &clearRect);
+
+			if (m_pMotionVectors) {
+				auto& rtvHandleMotion = m_pMotionVectors->GetRTVInfo(0).cpuHandle;
+                auto& motionVectorClear = m_pMotionVectors->GetClearColor();
+				commandList->ClearRenderTargetView(rtvHandleMotion, motionVectorClear.data(), 0, nullptr);
+			}
 
             if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
                 auto& rtvHandle2 = m_pAlbedo->GetRTVInfo(0).cpuHandle;
@@ -119,12 +127,12 @@ private:
 		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
         if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[5] = { m_pNormals->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle, m_pAlbedo->GetRTVInfo(0).cpuHandle, m_pMetallicRoughness->GetRTVInfo(0).cpuHandle, m_pEmissive->GetRTVInfo(0).cpuHandle};
-            commandList->OMSetRenderTargets(5, rtvHandles, FALSE, &dsvHandle);
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[6] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pMotionVectors->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle, m_pAlbedo->GetRTVInfo(0).cpuHandle, m_pMetallicRoughness->GetRTVInfo(0).cpuHandle, m_pEmissive->GetRTVInfo(0).cpuHandle};
+            commandList->OMSetRenderTargets(6, rtvHandles, FALSE, &dsvHandle);
         }
         else {
-			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[2] = { m_pNormals->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle };
-			commandList->OMSetRenderTargets(2, rtvHandles, FALSE, &dsvHandle);
+			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[3] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pMotionVectors->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle };
+			commandList->OMSetRenderTargets(3, rtvHandles, FALSE, &dsvHandle);
         }
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -307,10 +315,11 @@ private:
     }
 
 private:
-    std::shared_ptr<GloballyIndexedResource> m_pNormals;
-	std::shared_ptr<GloballyIndexedResource> m_pAlbedo;
-	std::shared_ptr<GloballyIndexedResource> m_pMetallicRoughness;
-    std::shared_ptr<GloballyIndexedResource> m_pEmissive;
+    std::shared_ptr<PixelBuffer> m_pNormals;
+	std::shared_ptr<PixelBuffer> m_pAlbedo;
+	std::shared_ptr<PixelBuffer> m_pMotionVectors;
+	std::shared_ptr<PixelBuffer> m_pMetallicRoughness;
+    std::shared_ptr<PixelBuffer> m_pEmissive;
 
     flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
     flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;

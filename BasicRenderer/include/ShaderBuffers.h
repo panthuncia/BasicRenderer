@@ -59,11 +59,13 @@ struct PerFrameCB {
     float clusterZSplitDepth; // view-space depth to switch to log
 
     unsigned int tonemapType;
-    unsigned int pad[3];
+    unsigned int frameIndex; // 0 to 63
+    unsigned int pad[2];
 };
 
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
+    DirectX::XMMATRIX prevModelMatrix;
     unsigned int normalMatrixBufferIndex;
     unsigned int pad[3];
 };

@@ -524,17 +524,19 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
     if (psoFlags & PSO_DEFERRED) {
-        rtvFormats.NumRenderTargets = 5;
+        rtvFormats.NumRenderTargets = 6;
         rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
-		rtvFormats.RTFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
-        rtvFormats.RTFormats[2] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-        rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		rtvFormats.RTFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
+        rtvFormats.RTFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // motion vector
+		rtvFormats.RTFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
+        rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
+        rtvFormats.RTFormats[4] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
+		rtvFormats.RTFormats[5] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
 	}
 	else {
-        rtvFormats.NumRenderTargets = 2;
+        rtvFormats.NumRenderTargets = 3;
         rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
-		rtvFormats.RTFormats[1] = DXGI_FORMAT_R32_FLOAT; // Depth
+		rtvFormats.RTFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // motion vector
+		rtvFormats.RTFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
 	}
     pipelineStateStream.RTVFormats = rtvFormats;
 

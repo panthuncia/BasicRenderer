@@ -36,6 +36,7 @@ enum class BuiltinResource {
 	MeshletCullingCommandBuffers,
     // Gbuffer
     GBuf_Normals,
+	GBuf_MotionVectors,
     GBuf_Albedo,
     GBuf_MetallicRoughness,
     GBuf_Emissive,
@@ -87,6 +88,7 @@ inline static std::unordered_map<BuiltinResource, std::string_view> builtinResou
 	{BuiltinResource::WorkingEnvironmentCubemapGroup, "WorkingEnvironmentCubemapGroup"},
 	{BuiltinResource::CurrentEnvironmentCubemap, "CurrentEnvironmentCubemap"},
 	{BuiltinResource::GBuf_Normals, "GBuf_Normals"},
+	{BuiltinResource::GBuf_MotionVectors, "GBuf_MotionVectors"},
 	{BuiltinResource::GBuf_Albedo, "GBuf_Albedo"},
 	{BuiltinResource::GBuf_MetallicRoughness, "GBuf_MetallicRoughness"},
 	{BuiltinResource::GBuf_Emissive, "GBuf_Emissive"},
@@ -134,6 +136,7 @@ inline static std::unordered_map<std::string_view, BuiltinResource> inverseBuilt
 	{"WorkingEnvironmentCubemapGroup", BuiltinResource::WorkingEnvironmentCubemapGroup},
 	{"CurrentEnvironmentCubemap", BuiltinResource::CurrentEnvironmentCubemap},
 	{"GBuf_Normals", BuiltinResource::GBuf_Normals},
+	{"GBuf_MotionVectors", BuiltinResource::GBuf_MotionVectors},
 	{"GBuf_Albedo", BuiltinResource::GBuf_Albedo},
 	{"GBuf_MetallicRoughness", BuiltinResource::GBuf_MetallicRoughness},
 	{"GBuf_Emissive", BuiltinResource::GBuf_Emissive},
