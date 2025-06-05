@@ -51,6 +51,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [assimp](https://github.com/assimp/assimp)
 - [flecs](https://www.flecs.dev/flecs/)
 - [XeGTAO](https://github.com/GameTechDev/XeGTAO)
+- [FidelityFX SPD](https://gpuopen.com/fidelityfx-spd/)
   
 ## Notable sources for development ideas
 
@@ -59,5 +60,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 [LearnOpenGL.com](https://learnopengl.com/)
 
 [Erik Svjannson](https://www.youtube.com/watch?v=EtX7WnFhxtQ)'s talk on GPU-driven rendering and mesh shaders
+
+[Medium article on occlusion culling](https://medium.com/@mil_kru/two-pass-occlusion-culling-4100edcad501)
 
 
