@@ -15,6 +15,10 @@
 #include <functional>
 #include <flecs.h>
 
+#include <ThirdParty/Streamline/sl.h>
+#include <ThirdParty/Streamline/sl_consts.h>
+#include <ThirdParty/Streamline/sl_dlss.h>
+
 #include "Mesh/Mesh.h"
 #include "ShaderBuffers.h"
 #include "Scene/Scene.h"
@@ -74,6 +78,7 @@ public:
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 
 private:
+    ComPtr<IDXGIAdapter1> m_currentAdapter;
     ComPtr<IDXGIFactory7> factory;
     ComPtr<ID3D12Device10> device;
     ComPtr<IDXGISwapChain4> swapChain;
@@ -81,6 +86,7 @@ private:
 	ComPtr<ID3D12CommandQueue> computeQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
+	std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;
@@ -107,8 +113,10 @@ private:
     std::shared_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool rebuildRenderGraph = true;
 
-    UINT m_xRes;
-    UINT m_yRes;
+    UINT m_xOutputRes;
+	UINT m_yOutputRes;
+    UINT m_xInternalRes;
+    UINT m_yInternalRes;
 
     RenderContext m_context;
 
@@ -128,8 +136,12 @@ private:
 
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
 
+    void CreateAdapter();
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
+	void CheckDLSSSupport();
+    void InitDLSS();
     void CreateTextures();
+	void TagDLSSResources(ID3D12Resource* pDepthTexture);
     void MoveForward();
     void SetupInputHandlers(InputManager& inputManager, InputContext& context);
     void CreateGlobalResources();
@@ -150,6 +162,9 @@ private:
 		m_preFrameDeferredFunctions.defer(fn);
 	}
 
+    // Feature support
+	bool m_dlssSupported = false;
+
 	// Settings
 	bool m_allowTearing = false;
 	bool m_clusteredLighting = true;
@@ -159,6 +174,7 @@ private:
 	bool m_occlusionCulling = true;
 	bool m_meshletCulling = true;
     bool m_bloom = true;
+    bool m_jitter = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<void(LinearShadowMaps*)> setLinearShadowMaps;
@@ -192,9 +208,12 @@ private:
         std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
+		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
 
         std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
             switch (key.AsBuiltin()) {
+            case BuiltinResource::GBuf_MotionVectors:
+				return m_gbufferMotionVectors;
             case BuiltinResource::HDRColorTarget:
 				return m_HDRColorTarget;
             case BuiltinResource::ShadowMaps:
@@ -213,6 +232,7 @@ private:
 
         std::vector<ResourceIdentifier> GetSupportedKeys() override {
 			return {
+				ResourceIdentifier(BuiltinResource::GBuf_MotionVectors),
 				ResourceIdentifier(BuiltinResource::HDRColorTarget),
 				ResourceIdentifier(BuiltinResource::ShadowMaps),
 				ResourceIdentifier(BuiltinResource::LinearShadowMaps),

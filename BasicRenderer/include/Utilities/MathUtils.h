@@ -13,3 +13,4 @@ float CalculateLightRadius(float intensity, float constant, float linear, float 
 BoundingSphere ComputeConeBoundingSphere(const DirectX::XMVECTOR& origin, const DirectX::XMVECTOR& direction, float height, float halfAngle);
 unsigned int GetNextPowerOfTwo(unsigned int value);
 inline uint32_t DivRoundUp(uint32_t num, uint32_t den) { return (num + den - 1) / den; }
+DirectX::XMFLOAT2 hammersley(uint i, float numSamples);

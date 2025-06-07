@@ -9,9 +9,13 @@ struct CameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX viewInverse;
-    DirectX::XMMATRIX projection;
+    DirectX::XMMATRIX jitteredProjection;
     DirectX::XMMATRIX projectionInverse;
 	DirectX::XMMATRIX viewProjection;
+
+    DirectX::XMMATRIX prevView;
+    DirectX::XMMATRIX unjitteredProjection;
+
 	ClippingPlane clippingPlanes[6];
 
 	float fov;

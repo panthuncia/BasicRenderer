@@ -156,6 +156,16 @@ add_symlink_or_copy_per_config(
     "aftermath_dll"
 )
 
+set(SL_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.dll")
+set(SL_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/sl.interposer.dll")
+
+add_symlink_or_copy_per_config(
+    "${SL_BINARY_DIR}"
+    "${SL_DEST_FILE}"
+    FALSE  # IS_DIRECTORY
+    "sl_interposer_dll"
+)
+
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/)
 
 # Heck off Microsoft
@@ -194,4 +204,4 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 # Find and link DirectX 12
-target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib")
+target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib")

@@ -20,6 +20,8 @@ struct ComputePassParameters {
 	std::vector<ResourceRequirement> resourceRequirements;
 };
 
+class ComputePassBuilder;
+
 class ComputePass {
 public:
 	virtual ~ComputePass() = default;
@@ -34,4 +36,7 @@ public:
 
 protected:
 	bool invalidated = true;
+	virtual void DeclareResourceUsages(ComputePassBuilder* builder) {};
+
+	friend class ComputePassBuilder;
 };

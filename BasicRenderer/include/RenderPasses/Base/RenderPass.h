@@ -26,6 +26,8 @@ struct RenderPassParameters {
 	bool isGeometryPass = false;
 };
 
+class RenderPassBuilder;
+
 class RenderPass {
 public:
     virtual ~RenderPass() = default;
@@ -40,4 +42,7 @@ public:
 
 protected:
 	bool invalidated = true;
+	virtual void DeclareResourceUsages(RenderPassBuilder* builder) {};
+	
+	friend class RenderPassBuilder;
 };

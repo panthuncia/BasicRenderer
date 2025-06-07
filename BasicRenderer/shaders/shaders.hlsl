@@ -103,9 +103,9 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     output.position = mul(viewPosition, mainCamera.projection);
     output.clipPosition = output.position;
         
-    float4 prevPositionWorldSpace = mul(prevPos, objectBuffer.model);
-    float4 prevPositionViewSpace = mul(prevPositionWorldSpace, mainCamera.view);
-    output.prevClipPosition = mul(prevPositionViewSpace, mainCamera.projection);
+    float4 prevPosition = mul(prevPos, objectBuffer.model);
+    prevPosition = mul(prevPosition, mainCamera.prevView);
+    output.prevClipPosition = mul(prevPosition, mainCamera.unjitteredProjection);
     
     if (vertexFlags & VERTEX_SKINNED) {
         output.normalWorldSpace = normalize(input.normal);

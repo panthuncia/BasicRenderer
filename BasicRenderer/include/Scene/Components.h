@@ -95,6 +95,8 @@ namespace Components {
 		CameraInfo info;
 	};
 
+	struct PrimaryCamera {}; // Tag for the primary camera in the scene
+
 	struct ProjectionMatrix {
 		ProjectionMatrix() : matrix(DirectX::XMMatrixIdentity()) {}
 		ProjectionMatrix(const DirectX::XMMATRIX& matrix) : matrix(matrix) {}

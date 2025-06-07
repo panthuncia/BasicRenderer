@@ -12,6 +12,11 @@
 #include <imgui.h>
 #include <random>
 
+#include <ThirdParty/Streamline/sl.h>
+#include <ThirdParty/Streamline/sl_consts.h>
+#include <ThirdParty/Streamline/sl_dlss.h>
+#include <ThirdParty/Streamline/sl_security.h>
+
 #include "ThirdParty/pix/pix3.h"
 #include "Mesh/Mesh.h"
 #include "DX12Renderer.h"
@@ -23,6 +28,13 @@
 #include "Render/PSOFlags.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Import/ModelLoader.h"
+#include "slHooks.h"
+
+PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
+PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
+PFunCreateDXGIFactory2 slCreateDXGIFactory2 = nullptr;
+PFunDXGIGetDebugInterface1 slDXGIGetDebugInterface1 = nullptr;
+PFunD3D12CreateDevice slD3D12CreateDevice = nullptr;
 
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
@@ -212,6 +224,59 @@ int main() {
     return 0;
 }
 
+void SlLogMessageCallback(sl::LogType level, const char* message) {
+	spdlog::info("Streamline Log: {}", message);
+}
+
+bool InitSL() {
+
+    // IMPORTANT: Always securely load SL library, see source/core/sl.security/secureLoadLibrary for more details
+// Always secure load SL modules
+    if (!sl::security::verifyEmbeddedSignature(L"sl.interposer.dll"))
+    {
+        // SL module not signed, disable SL
+    }
+    else
+    {
+        auto mod = LoadLibrary(L"sl.interposer.dll");
+
+        if (!mod) {
+            spdlog::error("Failed to load sl.interposer.dll, ensure it is in the correct directory.");
+            return false;
+		}
+
+        // Map functions from SL and use them instead of standard DXGI/D3D12 API
+        slCreateDXGIFactory = reinterpret_cast<PFunCreateDXGIFactory>(GetProcAddress(mod, "CreateDXGIFactory"));
+        slCreateDXGIFactory1 = reinterpret_cast<PFunCreateDXGIFactory1>(GetProcAddress(mod, "CreateDXGIFactory1"));
+        slCreateDXGIFactory2 = reinterpret_cast<PFunCreateDXGIFactory2>(GetProcAddress(mod, "CreateDXGIFactory2"));
+        slDXGIGetDebugInterface1 = reinterpret_cast<PFunDXGIGetDebugInterface1>(GetProcAddress(mod, "DXGIGetDebugInterface1"));
+        slD3D12CreateDevice = reinterpret_cast<PFunD3D12CreateDevice>(GetProcAddress(mod, "D3D12CreateDevice"));
+    }
+
+    sl::Preferences pref{};
+    pref.showConsole = true; // for debugging, set to false in production
+    pref.logLevel = sl::LogLevel::eDefault;
+    pref.pathsToPlugins = {}; // change this if Streamline plugins are not located next to the executable
+    pref.numPathsToPlugins = 0; // change this if Streamline plugins are not located next to the executable
+    pref.pathToLogsAndData = {}; // change this to enable logging to a file
+    pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
+    pref.applicationId = 0; // Provided by NVDA, required if using NGX components (DLSS 2/3)
+    pref.engine = sl::EngineType::eCustom; // If using UE or Unity
+    pref.engineVersion = "0.0.1"; // Optional version
+    pref.projectId = 0; // Optional project id
+    sl::Feature myFeatures[] = { sl::kFeatureDLSS };
+    pref.featuresToLoad = myFeatures;
+    pref.numFeaturesToLoad = _countof(myFeatures);
+    if (SL_FAILED(res, slInit(pref)))
+    {
+        // Handle error, check the logs
+        if (res == sl::Result::eErrorDriverOutOfDate) { /* inform user */ }
+        // and so on ...
+		return false;
+    }
+	return true;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
     spdlog::set_default_logger(file_logger);
@@ -242,6 +307,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     GetClientRect(hwnd, &clientRect);
     UINT x_res = clientRect.right - clientRect.left;
     UINT y_res = clientRect.bottom - clientRect.top;
+
+    // Initialize Nvidia Streamline
+
     renderer.Initialize(hwnd, x_res, y_res);
     spdlog::info("Renderer initialized.");
     renderer.SetInputMode(InputMode::wasd);
@@ -418,7 +486,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
 	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 10.0, XMFLOAT3(0, -1, -1));
-    auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 10, 3), XMFLOAT3(1, 1, 1), 2000.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
+    //auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 10, 3), XMFLOAT3(1, 1, 1), 2000.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
     //auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 1.0, 0.0, 0.0, 1.0);
     
     for (int i = 0; i < 0; i++) {

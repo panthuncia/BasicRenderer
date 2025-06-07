@@ -74,9 +74,9 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     result.position = mul(viewPosition, mainCamera.projection);
     result.clipPosition = result.position;
     
-    float4 prevPositionWorldSpace = mul(prevPos, objectBuffer.model);
-    float4 prevPositionViewSpace = mul(prevPositionWorldSpace, mainCamera.view);
-    result.prevClipPosition = mul(prevPositionViewSpace, mainCamera.projection);
+    float4 prevPosition = mul(prevPos, objectBuffer.model);
+    prevPosition = mul(prevPosition, mainCamera.prevView);
+    result.prevClipPosition = mul(prevPosition, mainCamera.unjitteredProjection);
     
     if (flags & VERTEX_SKINNED) {
         result.normalWorldSpace = normalize(vertex.normal);

@@ -25,6 +25,10 @@ struct Camera {
     row_major matrix projection;
     row_major matrix projectionInverse;
     row_major matrix viewProjection;
+    
+    row_major matrix prevView;
+    row_major matrix unjitteredProjection;
+
     ClippingPlane clippingPlanes[6];
     
     float fov;
