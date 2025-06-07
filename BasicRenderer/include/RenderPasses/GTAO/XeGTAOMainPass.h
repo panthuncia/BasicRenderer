@@ -12,7 +12,7 @@ class GTAOMainPass : public ComputePass {
 public:
     GTAOMainPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& manager = DeviceManager::GetInstance();
         auto& device = manager.GetDevice();
         uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();

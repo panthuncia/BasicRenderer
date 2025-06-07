@@ -25,7 +25,7 @@ public:
 	~MeshletCullingPass() {
 	}
 
-	void Setup() override {
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 

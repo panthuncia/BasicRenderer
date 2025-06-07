@@ -13,7 +13,7 @@ public:
         m_texture = skyboxTexture;
     }
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateSkyboxRootSignature();
         CreateSkyboxPSO();

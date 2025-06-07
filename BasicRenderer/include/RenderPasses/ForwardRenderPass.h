@@ -39,7 +39,7 @@ public:
 	~ForwardRenderPass() {
 	}
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();

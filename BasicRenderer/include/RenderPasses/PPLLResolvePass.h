@@ -26,7 +26,7 @@ public:
 		m_PPLLHeadPointerTexture = PPLLHeads;
 		m_PPLLBuffer = PPLLBuffer;
 	}
-	void Setup() override {
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreatePSO();
 	}
 

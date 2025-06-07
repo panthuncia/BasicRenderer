@@ -17,7 +17,7 @@ public:
         m_viewMatrices = GetCubemapViewMatrices({ 0.0, 0.0, 0.0 });
     }
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateRootSignature();
         CreatePSO();

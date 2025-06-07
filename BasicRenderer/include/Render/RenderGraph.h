@@ -15,42 +15,11 @@
 #include "Resources/ResourceStates.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Interfaces/IResourceProvider.h"
+#include "Render/ResourceRegistry.h"
 
 class Resource;
 class RenderPassBuilder;
 class ComputePassBuilder;
-
-using OnResourceChangedFn = std::function<void(ResourceIdentifier, std::shared_ptr<Resource>)>;
-
-class ResourceRegistry {
-public:
-	void Register(ResourceIdentifier id, std::shared_ptr<Resource> resource) {
-		if (_map.find(id) != _map.end()) {
-			throw std::runtime_error("Resource already registered: " + id.ToString());
-		}
-		_map[id] = resource;
-	}
-	std::shared_ptr<Resource> Request(ResourceIdentifier const& rid) {
-		auto it = _map.find(rid);
-		if (it != _map.end())
-			return it->second;
-		return nullptr;
-	}
-	void Update(ResourceIdentifier id, std::shared_ptr<Resource> r) {
-		_map[id] = r;
-		for (auto& cb : _listeners[id])
-			cb(id, r);
-	}
-	void AddListener(ResourceIdentifier id, OnResourceChangedFn cb) {
-		_listeners[id].push_back(cb);
-	}
-private:
-	std::unordered_map<ResourceIdentifier,
-		std::shared_ptr<Resource>,
-		ResourceIdentifier::Hasher>
-		_map;
-	std::unordered_map<ResourceIdentifier, std::vector<OnResourceChangedFn>, ResourceIdentifier::Hasher> _listeners;
-};
 
 template<typename T>
 concept DerivedResource = std::derived_from<T, Resource>;

@@ -30,7 +30,7 @@ public:
     ~ShadowPass() {
     }
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();

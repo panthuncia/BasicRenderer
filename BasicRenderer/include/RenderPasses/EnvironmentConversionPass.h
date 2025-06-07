@@ -19,7 +19,7 @@ public:
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
     }
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
 		CreateEnvironmentConversionRootSignature();
 		CreateEnvironmentConversionPSO();

@@ -12,6 +12,7 @@
 #include "RenderPasses/Base/PassReturn.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
+#include "Render/ResourceRegistry.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;
@@ -29,7 +30,7 @@ class ComputePass {
 public:
 	virtual ~ComputePass() = default;
 
-	virtual void Setup() = 0;
+	virtual void Setup(const ResourceRegistryView& resourceRegistryView) = 0;
 	virtual void Update() {};
 	virtual PassReturn Execute(RenderContext& context) = 0;
 	virtual void Cleanup(RenderContext& context) = 0;

@@ -20,7 +20,7 @@ public:
         CreatePSO();
     }
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -201,7 +201,7 @@ public:
         CreatePSO();
     }
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
     }
 
     PassReturn Execute(RenderContext& context) override {

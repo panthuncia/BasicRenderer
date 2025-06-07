@@ -21,7 +21,7 @@ public:
 	~LightCullingPass() {
 	}
 
-	void Setup() override {
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();
 	}

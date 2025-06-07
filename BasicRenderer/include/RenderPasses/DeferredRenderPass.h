@@ -38,7 +38,7 @@ public:
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 	}
 
-	void Setup() override {
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 	}
 
 	PassReturn Execute(RenderContext& context) override {

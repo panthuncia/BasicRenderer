@@ -17,7 +17,7 @@ class ClearIndirectDrawCommandUAVsPass : public RenderPass {
 public:
 	ClearIndirectDrawCommandUAVsPass() {}
 
-	void Setup() override {
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
@@ -88,7 +88,7 @@ class ClearMeshletCullingCommandUAVsPass : public RenderPass {
 public:
 	ClearMeshletCullingCommandUAVsPass() {}
 
-	void Setup() override {
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}

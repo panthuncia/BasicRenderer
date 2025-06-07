@@ -11,7 +11,7 @@ class GTAODenoisePass : public ComputePass {
 public:
     GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex(workingBufferIndex) {}
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreateXeGTAOComputePSO();
     }
 

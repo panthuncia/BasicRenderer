@@ -378,15 +378,14 @@ void RenderGraph::Setup() {
         switch (pass.type) {
         case PassType::Render: {
             auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
-			for (auto& id : renderPass.resources.identifierSet) {
-				
-			}
-            renderPass.pass->Setup();
+			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
+            renderPass.pass->Setup(view);
             break;
         }
         case PassType::Compute: {
             auto& computePass = std::get<ComputePassAndResources>(pass.pass);
-            computePass.pass->Setup();
+			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
+            computePass.pass->Setup(view);
             break;
         }
         }

@@ -32,7 +32,7 @@ public:
 		addObserver.destruct(); // Needed for clean shutdown
 		removeObserver.destruct();
     }
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<spdConstants>(1, L"Downsample constants");
 
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();

@@ -36,7 +36,7 @@ public:
 	~EnvironmentSHPass() {
 	}
 
-	void Setup() override {
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreatePSO();
 	}
 
