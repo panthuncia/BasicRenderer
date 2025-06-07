@@ -195,12 +195,12 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             BuiltinResource::PostSkinningVertices, 
             BuiltinResource::CameraBuffer)
         .WithRenderTarget(
-            graph->RequestResource(BuiltinResource::GBuf_Normals),
-			graph->RequestResource(BuiltinResource::GBuf_MotionVectors),
+            BuiltinResource::GBuf_Normals,
+			BuiltinResource::GBuf_MotionVectors,
             Subresources(BuiltinResource::PrimaryCameraLinearDepthMap, Mip{ 0, 1 }), 
-            graph->RequestResource(BuiltinResource::GBuf_Albedo),
-            graph->RequestResource(BuiltinResource::GBuf_MetallicRoughness),
-            graph->RequestResource(BuiltinResource::GBuf_Emissive))
+            BuiltinResource::GBuf_Albedo,
+            BuiltinResource::GBuf_MetallicRoughness,
+            BuiltinResource::GBuf_Emissive)
         .WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture)
         .IsGeometryPass();
 
@@ -419,17 +419,17 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
     graph->BuildComputePass("GTAOFilterPass") // Depth filter pass
         .WithShaderResource(BuiltinResource::GBuf_Normals, BuiltinResource::PrimaryCameraDepthTexture)
-        .WithUnorderedAccess(workingDepths)
+        .WithUnorderedAccess(BuiltinResource::GTAO_WorkingDepths, BuiltinResource::GTAO_WorkingDepths)
         .Build<GTAOFilterPass>(GTAOConstantBuffer);
 
     graph->BuildComputePass("GTAOMainPass") // Main pass
-        .WithShaderResource(normalsWorldSpace, workingDepths)
-        .WithUnorderedAccess(workingEdges, workingAOTerm1)
+        .WithShaderResource(BuiltinResource::GBuf_Normals, BuiltinResource::GTAO_WorkingDepths)
+        .WithUnorderedAccess(BuiltinResource::GTAO_WorkingEdges, BuiltinResource::GTAO_WorkingAOTerm1)
         .Build<GTAOMainPass>(GTAOConstantBuffer);
 
     graph->BuildComputePass("GTAODenoisePass") // Denoise pass
-        .WithShaderResource(workingEdges, workingAOTerm1)
-        .WithUnorderedAccess(outputAO)
+        .WithShaderResource(BuiltinResource::GTAO_WorkingEdges, BuiltinResource::GTAO_WorkingAOTerm1)
+        .WithUnorderedAccess(BuiltinResource::GTAO_OutputAOTerm)
         .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo(0).index);
 }
 
@@ -446,10 +446,11 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
 
     graph->BuildComputePass("LightCullingPass")
         .WithShaderResource(BuiltinResource::CameraBuffer, BuiltinResource::LightBufferGroup)
-        .WithUnorderedAccess(BuiltinResource::LightClusterBuffer, BuiltinResource::LightPagesBuffer, lightPagesCounter)
+        .WithUnorderedAccess(BuiltinResource::LightClusterBuffer, BuiltinResource::LightPagesBuffer, BuiltinResource::LightPagesCounter)
         .Build<LightCullingPass>(
             graph->RequestResource<GloballyIndexedResource>(BuiltinResource::LightClusterBuffer), 
-            graph->RequestResource<GloballyIndexedResource>(BuiltinResource::LightPagesBuffer), lightPagesCounter);
+            graph->RequestResource<GloballyIndexedResource>(BuiltinResource::LightPagesBuffer), 
+            graph->RequestResource<GloballyIndexedResource>(BuiltinResource::LightPagesCounter));
 }
 
 void BuildEnvironmentPipeline(RenderGraph* graph) {
@@ -538,16 +539,15 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     }
 
     if (currentEnvironment != nullptr) {
-        graph->RegisterResource(BuiltinResource::CurrentEnvironmentCubemap, currentEnvironment->GetEnvironmentCubemap());
-        primaryPassBuilder.WithShaderResource(currentEnvironment->GetEnvironmentCubemap());
+        primaryPassBuilder.WithShaderResource(BuiltinResource::CurrentEnvironmentCubemap);
     }
 
     if (deferredRendering) { // G-Buffer resources + depth
         primaryPassBuilder.WithShaderResource(
-            graph->RequestResource(BuiltinResource::GBuf_Normals),
-            graph->RequestResource(BuiltinResource::GBuf_Albedo),
-            graph->RequestResource(BuiltinResource::GBuf_MetallicRoughness),
-            graph->RequestResource(BuiltinResource::PrimaryCameraDepthTexture));
+            BuiltinResource::GBuf_Normals,
+            BuiltinResource::GBuf_Albedo,
+            BuiltinResource::GBuf_MetallicRoughness,
+            BuiltinResource::PrimaryCameraDepthTexture);
     }
     if (deferredRendering) {
         primaryPassBuilder.Build<DeferredRenderPass>(
@@ -603,7 +603,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     graph->RegisterResource(BuiltinResource::PPLLCounter, PPLLCounter);
 
     auto PPLLFillBuilder = graph->BuildRenderPass("PPFillPass")
-        .WithUnorderedAccess(PPLLHeadPointerTexture, PPLLBuffer, PPLLCounter)
+        .WithUnorderedAccess(BuiltinResource::PPLLHeadPointerTexture, BuiltinResource::PPLLBuffer, BuiltinResource::PPLLCounter)
         .WithShaderResource(BuiltinResource::LightBufferGroup, 
             BuiltinResource::PostSkinningVertices, 
             BuiltinResource::PerObjectBuffer, 
@@ -639,7 +639,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         graph->RequestResource<PixelBuffer>(BuiltinResource::GBuf_Normals)->GetSRVInfo(0).index);
 
     graph->BuildRenderPass("PPLLResolvePass")
-        .WithShaderResource(PPLLHeadPointerTexture, PPLLBuffer)
+        .WithShaderResource(BuiltinResource::PPLLHeadPointerTexture, BuiltinResource::PPLLBuffer)
         .WithRenderTarget(BuiltinResource::HDRColorTarget)
         .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
 }

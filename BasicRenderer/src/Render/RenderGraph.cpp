@@ -378,6 +378,9 @@ void RenderGraph::Setup() {
         switch (pass.type) {
         case PassType::Render: {
             auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
+			for (auto& id : renderPass.resources.identifierSet) {
+				
+			}
             renderPass.pass->Setup();
             break;
         }
@@ -810,10 +813,7 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 
 void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,
 	IResourceProvider* provider) {
-	if (_registry.find(id) != _registry.end()) {
-		throw std::runtime_error("Resource already registered: " + id.ToString());
-	}
-	_registry[id] = resource;
+	_registry.Register(id, resource);
 	AddResource(resource);
 	if (provider) {
 		_providerMap[id] = provider;
@@ -822,10 +822,12 @@ void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resour
 
 std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
 	// If it's already in our registry, return it
-	auto it = _registry.find(rid);
-	if (it != _registry.end())
-		return it->second;
+	auto cached = _registry.Request(rid);
+	if (cached) {
+		return cached;
+	}
 
+	// We don't have it in our registry, check if we have a provider for it
 	auto providerIt = _providerMap.find(rid);
 	if (providerIt != _providerMap.end()) {
 		// If we have a provider for this key, use it to provide the resource
@@ -834,7 +836,7 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 			auto resource = provider->ProvideResource(rid);
 			if (resource) {
 				// Register the resource in our registry
-				_registry[rid] = resource;
+				_registry.Register(rid, resource);
 				AddResource(resource);
 				return resource;
 			}

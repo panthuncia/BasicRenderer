@@ -1246,17 +1246,18 @@ void DX12Renderer::CreateRenderGraph() {
     auto drawShadows = m_coreResourceProvider.m_shadowMaps != nullptr && getShadowsEnabled();
     if (drawShadows) {
         BuildMainShadowPass(newGraph.get());
-        debugPassBuilder.WithShaderResource(depth->linearDepthMap);
-    }
-
-    if (m_currentEnvironment != nullptr) {
-        newGraph->BuildRenderPass("SkyboxPass")
-			.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap())
-			.WithDepthReadWrite(depthTexture)
-			.WithRenderTarget(BuiltinResource::HDRColorTarget)
-			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
+        debugPassBuilder.WithShaderResource(BuiltinResource::PrimaryCameraLinearDepthMap);
     }
 	
+    if (m_currentEnvironment != nullptr) {
+        newGraph->RegisterResource(BuiltinResource::CurrentEnvironmentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
+        newGraph->BuildRenderPass("SkyboxPass")
+            .WithShaderResource(BuiltinResource::CurrentEnvironmentCubemap)
+            .WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture)
+            .WithRenderTarget(BuiltinResource::HDRColorTarget)
+            .Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
+    }
+
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
 
     BuildPPLLPipeline(newGraph.get());
@@ -1281,7 +1282,7 @@ void DX12Renderer::CreateRenderGraph() {
     if (getDrawBoundingSpheres()) {
 		auto debugSphereBuilder = newGraph->BuildRenderPass("DebugSpherePass")
 			.WithShaderResource(BuiltinResource::PerObjectBuffer, BuiltinResource::PerMeshBuffer, BuiltinResource::CameraBuffer)
-			.WithDepthReadWrite(depthTexture)
+			.WithDepthReadWrite(BuiltinResource::PrimaryCameraDepthTexture)
 			.IsGeometryPass()
 			.Build<DebugSpherePass>();
     }

@@ -225,49 +225,49 @@ inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
 //
 
 // If we already have a ResourceAndRange, just return it in a vector:
-inline std::vector<ResourceAndRange>
-expandToRanges(ResourceAndRange const & rar, RenderGraph* graph)
-{
-    if (!rar.resource) return {};
-    return { rar };
-}
-
-// If we have a list of ResourceAndRange, return a vector copy of it:
-inline std::vector<ResourceAndRange>
-expandToRanges(std::initializer_list<ResourceAndRange> list, RenderGraph* graph)
-{
-    std::vector<ResourceAndRange> out;
-    out.reserve(list.size());
-    for (auto const & r : list) {
-        if (!r.resource) continue;
-        out.push_back(r);
-    }
-    return out;
-}
+//inline std::vector<ResourceAndRange>
+//expandToRanges(ResourceAndRange const & rar, RenderGraph* graph)
+//{
+//    if (!rar.resource) return {};
+//    return { rar };
+//}
+//
+//// If we have a list of ResourceAndRange, return a vector copy of it:
+//inline std::vector<ResourceAndRange>
+//expandToRanges(std::initializer_list<ResourceAndRange> list, RenderGraph* graph)
+//{
+//    std::vector<ResourceAndRange> out;
+//    out.reserve(list.size());
+//    for (auto const & r : list) {
+//        if (!r.resource) continue;
+//        out.push_back(r);
+//    }
+//    return out;
+//}
 
 // If we have a shared_ptr<Resource>, wrap it in a ResourceAndRange:
-template<typename U>
-inline std::enable_if_t<std::is_base_of_v<Resource, U>,
-    std::vector<ResourceAndRange>>
-    expandToRanges(std::shared_ptr<U> const& r, RenderGraph* graph)
-{
-    if (!r) return {};
-    std::shared_ptr<Resource> basePtr = r;
-    return { ResourceAndRange{ basePtr } };
-}
+//template<typename U>
+//inline std::enable_if_t<std::is_base_of_v<Resource, U>,
+//    std::vector<ResourceAndRange>>
+//    expandToRanges(std::shared_ptr<U> const& r, RenderGraph* graph)
+//{
+//    if (!r) return {};
+//    std::shared_ptr<Resource> basePtr = r;
+//    return { ResourceAndRange{ basePtr } };
+//}
 
 // If we have an initializer_list of shared_ptr<Resource>:
-inline std::vector<ResourceAndRange>
-expandToRanges(std::initializer_list<std::shared_ptr<Resource>> list, RenderGraph* graph)
-{
-    std::vector<ResourceAndRange> out;
-    out.reserve(list.size());
-    for (auto const & r : list) {
-        if (!r) continue;
-        out.push_back(ResourceAndRange{ r });
-    }
-    return out;
-}
+//inline std::vector<ResourceAndRange>
+//expandToRanges(std::initializer_list<std::shared_ptr<Resource>> list, RenderGraph* graph)
+//{
+//    std::vector<ResourceAndRange> out;
+//    out.reserve(list.size());
+//    for (auto const & r : list) {
+//        if (!r) continue;
+//        out.push_back(ResourceAndRange{ r });
+//    }
+//    return out;
+//}
 
 // If we have a ResourceIdentifierAndRange, ask the builder to resolve it into an actual ResourceAndRange:
 std::vector<ResourceAndRange> expandToRanges(ResourceIdentifierAndRange const& rir, RenderGraph* graph);
@@ -302,19 +302,19 @@ processResourceArguments(const ResourceAndRange& rar,
     return { rar };
 }
 
-template<typename U>
-inline std::enable_if_t<
-    std::is_base_of_v<Resource, U>,
-    std::vector<ResourceAndRange>
->
-processResourceArguments(const std::shared_ptr<U>& childPtr,
-    RenderGraph* graph)
-{
-    if (!childPtr) return {};
-
-    std::shared_ptr<Resource> basePtr = childPtr;
-    return expandToRanges(basePtr, graph);
-}
+//template<typename U>
+//inline std::enable_if_t<
+//    std::is_base_of_v<Resource, U>,
+//    std::vector<ResourceAndRange>
+//>
+//processResourceArguments(const std::shared_ptr<U>& childPtr,
+//    RenderGraph* graph)
+//{
+//    if (!childPtr) return {};
+//
+//    std::shared_ptr<Resource> basePtr = childPtr;
+//    return expandToRanges(basePtr, graph);
+//}
 
 inline std::vector<ResourceAndRange>
 processResourceArguments(const ResourceIdentifierAndRange& rir,
@@ -359,6 +359,31 @@ processResourceArguments(T&& list, RenderGraph* graph)
             out.push_back(std::move(vec.front()));
     }
     return out;
+}
+
+namespace detail {
+    template<typename U>
+    inline void extractId(std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher>& out, std::shared_ptr<U> const&) {
+        // TODO
+        throw std::runtime_error("extractId not implemented for shared_ptr<Resource>");
+    }
+    inline void extractId(auto& out, const ResourceAndRange& rar) {
+		extractId(out, rar.resource); // empty identifier
+    }
+    inline void extractId(auto& out, ResourceIdentifierAndRange const& rir) {
+        out.insert(rir.identifier);
+    }
+    inline void extractId(auto& out, ResourceIdentifier const& rid) {
+        out.insert(rid);
+    }
+    inline void extractId(auto& out, BuiltinResource br) {
+        out.insert(ResourceIdentifier{ br });
+    }
+
+    template<typename T>
+    inline void extractId(auto& out, std::initializer_list<T> list) {
+        for (auto const& e : list) extractId(out, e);
+    }
 }
 
 template<typename T>
@@ -494,10 +519,11 @@ public:
         ensureNotBuilt();
         built_ = true;
 
-        params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
         pass->DeclareResourceUsages(this);
+
+        params.identifierSet = _declaredIds;
+        params.resourceRequirements = GatherResourceRequirements();
 
         graph->AddRenderPass(pass, params, passName);
 
@@ -510,15 +536,18 @@ public:
         ensureNotBuilt();
         built_ = true;
 
-		params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
         pass->DeclareResourceUsages(this);
+
+        params.identifierSet = _declaredIds;
+        params.resourceRequirements = GatherResourceRequirements();
 
         graph->AddRenderPass(pass, params, passName);
 
         return std::move(*this);
     }
+
+    auto const& DeclaredResourceIds() const { return _declaredIds; }
 
 private:
     RenderPassBuilder(RenderGraph* g, std::string name)
@@ -527,6 +556,7 @@ private:
     // Shader Resource
 	template<typename T>
 	RenderPassBuilder& addShaderResource(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -538,6 +568,7 @@ private:
     // Render target
     template<typename T>
     RenderPassBuilder& addRenderTarget(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -549,6 +580,7 @@ private:
     // Depth target
 	template<typename T>
 	RenderPassBuilder& addDepthReadWrite(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -559,6 +591,7 @@ private:
 
 	template<typename T>
 	RenderPassBuilder& addDepthRead(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -570,6 +603,7 @@ private:
     // Constant buffer
 	template<typename T>
 	RenderPassBuilder& addConstantBuffer(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -581,6 +615,7 @@ private:
     // Unordered access
 	template<typename T>
 	RenderPassBuilder& addUnorderedAccess(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -592,6 +627,7 @@ private:
     // Copy destination
 	template<typename T>
 	RenderPassBuilder& addCopyDest(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -603,6 +639,7 @@ private:
     // Copy source
 	template<typename T>
 	RenderPassBuilder& addCopySource(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -614,6 +651,7 @@ private:
     // Indirect arguments
 	template<typename T>
 	RenderPassBuilder& addIndirectArguments(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -721,6 +759,7 @@ private:
     std::string              passName;
     RenderPassParameters     params;
     bool built_ = false;
+    std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> _declaredIds;
 
     friend class RenderGraph; // Allow RenderGraph to create instances of this builder
 };
@@ -788,11 +827,12 @@ public:
         ensureNotBuilt();
         built_ = true;
 
-        params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
         pass->DeclareResourceUsages(this);
-        
+
+        params.identifierSet = _declaredIds;
+        params.resourceRequirements = GatherResourceRequirements();
+
         graph->AddComputePass(pass, params, passName);
 
         return *this;
@@ -804,15 +844,18 @@ public:
         ensureNotBuilt();
         built_ = true;
 
-        params.resourceRequirements = GatherResourceRequirements();
         auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
         pass->DeclareResourceUsages(this);
+
+		params.identifierSet = _declaredIds;
+        params.resourceRequirements = GatherResourceRequirements();
 
         graph->AddComputePass(pass, params, passName);
 
         return std::move(*this);
     }
+
+    auto const& DeclaredResourceIds() const { return _declaredIds; }
 
 private:
     ComputePassBuilder(RenderGraph* g, std::string name)
@@ -821,6 +864,7 @@ private:
     // Shader resource
 	template<typename T>
 	ComputePassBuilder& addShaderResource(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -832,6 +876,7 @@ private:
     // Constant buffer
 	template<typename T>
 	ComputePassBuilder& addConstantBuffer(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -843,6 +888,7 @@ private:
     // Unordered access
 	template<typename T>
 	ComputePassBuilder& addUnorderedAccess(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -854,6 +900,7 @@ private:
 	// Indirect arguments
 	template<typename T>
 	ComputePassBuilder& addIndirectArguments(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			if (!r.resource) continue;
@@ -950,6 +997,7 @@ private:
     std::string              passName;
     ComputePassParameters     params;
     bool built_ = false;
+    std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> _declaredIds;
 
 	friend class RenderGraph; // Allow RenderGraph to create instances of this builder
 };

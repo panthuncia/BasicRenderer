@@ -3,6 +3,7 @@
 #include <vector>
 #include <directx/d3d12.h>
 #include <wrl/client.h>
+#include <unordered_set>
 
 #include "Resources/Resource.h"
 #include "Render/RenderContext.h"
@@ -10,6 +11,7 @@
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
 #include "Resources/ResourceStateTracker.h"
+#include "Resources/ResourceIdentifier.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;
@@ -17,6 +19,7 @@ struct ComputePassParameters {
 	std::vector<ResourceAndRange> unorderedAccessViews;
 	std::vector<ResourceAndRange> indirectArgumentBuffers;
 
+	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> identifierSet;
 	std::vector<ResourceRequirement> resourceRequirements;
 };
 
