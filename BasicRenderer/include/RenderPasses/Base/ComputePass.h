@@ -13,6 +13,7 @@
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/ResourceRegistry.h"
+#include "../../../generated/BuiltinResources.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;

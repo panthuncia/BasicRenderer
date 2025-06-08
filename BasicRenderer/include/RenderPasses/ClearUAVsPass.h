@@ -20,6 +20,10 @@ public:
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
+
+		m_primaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
+		m_primaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+		m_primaryCameraBlendIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -34,21 +38,21 @@ public:
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 
 		// opaque buffer
-		auto resource = currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer()->GetResource();
+		auto resource = m_primaryCameraOpaqueIndirectCommandBuffer->GetResource();
 		auto counterOffset = resource->GetUAVCounterOffset();
 		auto apiResource = resource->GetAPIResource();
 
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
 		// Alpha test buffer
-		resource = currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer()->GetResource();
+		resource = m_primaryCameraAlphaTestIndirectCommandBuffer->GetResource();
 		counterOffset = resource->GetUAVCounterOffset();
 		apiResource = resource->GetAPIResource();
 
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
 		// Blend buffer
-		resource = currentScene->GetPrimaryCameraBlendIndirectCommandBuffer()->GetResource();
+		resource = m_primaryCameraBlendIndirectCommandBuffer->GetResource();
 		counterOffset = resource->GetUAVCounterOffset();
 		apiResource = resource->GetAPIResource();
 
@@ -82,6 +86,10 @@ public:
 private:
 	flecs::query<Components::LightViewInfo> lightQuery;
 	ComPtr<ID3D12PipelineState> m_PSO;
+
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraAlphaTestIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraBlendIndirectCommandBuffer;
 };
 
 class ClearMeshletCullingCommandUAVsPass : public RenderPass {
@@ -91,6 +99,10 @@ public:
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
+
+		m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling);
+		m_primaryCameraMeshletOcclusionCullingIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletOcclusionCulling);
+		m_primaryCameraMeshletCullingResetIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -105,18 +117,18 @@ public:
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 
 		// Meshlet frustrum culling buffer
-		auto resource = currentScene->GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer()->GetResource();
+		auto resource = m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer->GetResource(); // TODO: One of these is not used anymore
 		auto counterOffset = resource->GetUAVCounterOffset();
 		auto apiResource = resource->GetAPIResource();
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
-		resource = currentScene->GetPrimaryCameraMeshletOcclusionCullingIndirectCommandBuffer()->GetResource();
+		resource = m_primaryCameraMeshletOcclusionCullingIndirectCommandBuffer->GetResource();
 		counterOffset = resource->GetUAVCounterOffset();
 		apiResource = resource->GetAPIResource();
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 
 		// Meshlet frustrum culling reset buffer
-		resource = currentScene->GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer()->GetResource();
+		resource = m_primaryCameraMeshletCullingResetIndirectCommandBuffer->GetResource();
 		counterOffset = resource->GetUAVCounterOffset();
 		apiResource = resource->GetAPIResource();
 		commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
@@ -151,4 +163,8 @@ public:
 private:
 	flecs::query<Components::LightViewInfo> lightQuery;
 	ComPtr<ID3D12PipelineState> m_PSO;
+
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletOcclusionCullingIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingResetIndirectCommandBuffer;
 };

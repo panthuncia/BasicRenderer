@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
 
 	json data = json::parse(std::ifstream{ argv[1] });
 
-	std::string result = "#pragma once\n\n#include <string>\n\n";
+	std::string result = "#pragma once\n\n#include <string>\n\n// GENERATED CODE, DO NOT EDIT\n\n";
 	for (auto& [nsName, nsObj] : data.items()) {
 		result += "namespace " + nsName + " {\n";
 		result += recurse_ns(nsObj, nsName);

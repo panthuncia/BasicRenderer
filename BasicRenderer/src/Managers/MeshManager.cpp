@@ -19,10 +19,6 @@ MeshManager::MeshManager() {
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
 	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
 	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
-	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
-	m_resourceGroup->AddResource(m_meshletOffsets);
-	m_resourceGroup->AddResource(m_meshletVertexIndices);
-	m_resourceGroup->AddResource(m_meshletTriangles);
 
 	m_perMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"PerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 	
@@ -30,7 +26,6 @@ MeshManager::MeshManager() {
 
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
 	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
-	m_resources[Builtin::MeshResourceGroup] = m_resourceGroup;
 	m_resources[Builtin::PerMeshBuffer] = m_perMeshBuffers;
 }
 

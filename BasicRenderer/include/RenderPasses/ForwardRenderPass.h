@@ -43,7 +43,30 @@ public:
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+        
+        // Setup resources
+        m_normalMatrixBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
+		m_postSkinningVertexBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
+		m_meshletOffsetBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
+		m_meshletVertexIndexBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
+		m_meshletTriangleBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
+		m_perObjectBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+		m_cameraBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		m_perMeshInstanceBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
+        m_perMeshBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
+        m_lightClusterBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
+		m_lightPagesBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetSRVInfo(0).index;
+        
+        m_primaryCameraMeshletCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+        m_primaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
+		m_primaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
     }
+
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        //builder->WithShaderResource(Builtin::CameraBuffer, Builtin::Environment::PrefilteredCubemapsGroup)
+        //    .WithRenderTarget(Builtin::Color::HDRColorTarget);
+    };
+
 
     PassReturn Execute(RenderContext& context) override {
         auto& psoManager = PSOManager::GetInstance();
@@ -112,25 +135,25 @@ private:
         auto& lightManager = context.lightManager;
 
         unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
-        staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
-        staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
-        staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletVertexIndexBufferSRVIndex();
-        staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
-        staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
-        staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-        staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+        staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferDescriptorIndex;
+        staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferDescriptorIndex;
+        staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferDescriptorIndex;
+        staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferDescriptorIndex;
+        staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferDescriptorIndex;
+        staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferDescriptorIndex;
+        staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferDescriptorIndex;
+        staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferDescriptorIndex;
+		staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferDescriptorIndex;
         staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
-        lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo(0).index;
-        lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo(0).index;
+        lightClusterInfo[LightClusterBufferDescriptorIndex] = m_lightClusterBufferDescriptorIndex;
+        lightClusterInfo[LightPagesBufferDescriptorIndex] = m_lightPagesBufferDescriptorIndex;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
 		unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-		variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetSRVInfo(0).index;
+		variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
 
     }
 
@@ -244,7 +267,7 @@ private:
         auto numOpaque = context.drawStats.numOpaqueDraws;
         if (numOpaque > 0) {
 
-            auto opaqueIndirectBuffer = context.currentScene->GetPrimaryCameraOpaqueIndirectCommandBuffer();
+            auto opaqueIndirectBuffer = m_primaryCameraOpaqueIndirectCommandBuffer;
             auto pso = psoManager.GetMeshPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
             commandList->SetPipelineState(pso.Get());
 
@@ -262,7 +285,7 @@ private:
 		auto numAlphaTest = context.drawStats.numAlphaTestDraws;
         if (numAlphaTest > 0) {
 
-            auto alphaTestIndirectBuffer = context.currentScene->GetPrimaryCameraAlphaTestIndirectCommandBuffer();
+            auto alphaTestIndirectBuffer = m_primaryCameraAlphaTestIndirectCommandBuffer;
             auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
                 BlendState::BLEND_STATE_MASK, m_wireframe);
             commandList->SetPipelineState(pso.Get());
@@ -286,6 +309,23 @@ private:
     bool m_indirect;
 	unsigned int m_aoTextureDescriptorIndex;
     bool m_gtaoEnabled = true;
+
+    // Resources
+    int m_normalMatrixBufferDescriptorIndex = -1;
+	int m_postSkinningVertexBufferDescriptorIndex = -1;
+	int m_meshletOffsetBufferDescriptorIndex = -1;
+	int m_meshletVertexIndexBufferDescriptorIndex = -1;
+	int m_meshletTriangleBufferDescriptorIndex = -1;
+	int m_perObjectBufferDescriptorIndex = -1;
+	int m_cameraBufferDescriptorIndex = -1;
+	int m_perMeshInstanceBufferDescriptorIndex = -1;
+	int m_perMeshBufferDescriptorIndex = -1;
+	int m_lightClusterBufferDescriptorIndex = -1;
+	int m_lightPagesBufferDescriptorIndex = -1;
+    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
+
+    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer = nullptr;
+    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraAlphaTestIndirectCommandBuffer = nullptr;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;

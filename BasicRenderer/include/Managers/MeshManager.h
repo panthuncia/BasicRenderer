@@ -50,7 +50,5 @@ private:
 	// Skinned mesh instances
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;
 	
-	std::shared_ptr<ResourceGroup> m_resourceGroup;
-
 	CameraManager* m_pCameraManager;
 };

@@ -36,6 +36,16 @@ public:
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+    
+        m_normalMatrixBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
+        m_postSkinningVertexBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
+        m_meshletOffsetBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
+        m_meshletVertexIndexBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
+        m_meshletTriangleBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
+        m_perObjectBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+        m_cameraBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+        m_perMeshInstanceBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
+        m_perMeshBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -95,15 +105,15 @@ private:
         auto& cameraManager = context.cameraManager;
 
         unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
-        staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
-        staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
-        staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletVertexIndexBufferSRVIndex();
-        staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
-        staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
-        staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-        staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
-        staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+        staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferIndex;
+        staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferIndex;
+        staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferIndex;
+        staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferIndex;
+        staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferIndex;
+        staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferIndex;
+        staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferIndex;
+        staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferIndex;
+        staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferIndex;
 
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
     }
@@ -492,6 +502,16 @@ private:
 	bool m_clearDepths;
 
     float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
+
+    int m_normalMatrixBufferIndex = -1;
+    int m_postSkinningVertexBufferIndex = -1;
+    int m_meshletOffsetBufferIndex = -1;
+    int m_meshletVertexIndexBufferIndex = -1;
+    int m_meshletTriangleBufferIndex = -1;
+    int m_perObjectBufferIndex = -1;
+    int m_cameraBufferIndex = -1;
+    int m_perMeshInstanceBufferIndex = -1;
+    int m_perMeshBufferIndex = -1;
 
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<uint16_t()> getShadowResolution;

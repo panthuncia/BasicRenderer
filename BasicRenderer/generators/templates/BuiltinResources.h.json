@@ -3,14 +3,27 @@
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},
-      "MeshletBitfield": {}
+      "MeshletBitfield": {},
+      "IndirectCommandBuffers": {
+        "Opaque": {},
+        "AlphaTest": {},
+        "Blend": {},
+        "MeshletFrustrumCulling": {},
+        "MeshletOcclusionCulling": {},
+        "MeshletCullingReset": {}
+      }
     },
     "PerObjectBuffer": {},
     "PerMeshBuffer": {},
+    "PerMeshInstanceBuffer": {},
     "PreSkinningVertices": {},
     "PostSkinningVertices": {},
     "NormalMatrixBuffer": {},
-    "MeshResourceGroup": {},
+    "MeshResources": {
+      "MeshletOffsets": {},
+      "MeshletVertexIndices": {},
+      "MeshletTriangles": {}
+    },
     "MeshletCullingBitfieldGroup": {},
     "MeshInstanceMeshletCullingBitfieldGroup": {},
     "MeshInstanceOcclusionCullingBitfieldGroup": {},

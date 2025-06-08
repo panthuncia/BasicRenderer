@@ -86,29 +86,6 @@ public:
 };
 
 class ResourceRegistryView {
-public:
-	template<class Iterable>
-	ResourceRegistryView(ResourceRegistry& global, Iterable const& allowed)
-		: _global(global)
-		, _allowed(allowed.begin(), allowed.end())
-	{}
-
-	ResourceRegistryView(ResourceRegistry& global)
-		: _global(global){}
-
-	template<typename T = Resource>
-	std::shared_ptr<T> Request(ResourceIdentifier const& id) {
-		if (!_allowed.count(id)) {
-			throw std::runtime_error("Pass tried to fetch resource it didn’t declare: " + id.ToString());
-		}
-		return std::dynamic_pointer_cast<T>(_global.Request(id));
-	}
-private:
-	const ResourceRegistry& _global;
-	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> _allowed;
-};
-
-class ResourceRegistryView {
     ResourceRegistry& _global;
     std::vector<ResourceIdentifier>                              _allowedPrefixes;
 
@@ -122,8 +99,12 @@ public:
             _allowedPrefixes.push_back(id);
     }
 
+    ResourceRegistryView(ResourceRegistry& global)
+        : _global(global) {
+    }
+
     template<typename T = Resource>
-    std::shared_ptr<T> Request(ResourceIdentifier const& id) {
+    std::shared_ptr<T> Request(ResourceIdentifier const& id) const {
         // prefix check
         bool ok = false;
         for (auto const& prefix : _allowedPrefixes) {

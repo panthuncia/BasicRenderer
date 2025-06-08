@@ -2,6 +2,8 @@
 
 #include <string>
 
+// GENERATED CODE, DO NOT EDIT
+
 namespace Builtin {
 namespace ActiveDrawSetIndices {
 inline constexpr std::string_view AlphaTest = "Builtin::ActiveDrawSetIndices::AlphaTest";
@@ -48,7 +50,11 @@ inline constexpr std::string_view ViewResourceGroup = "Builtin::Light::ViewResou
 }
 inline constexpr std::string_view MeshInstanceMeshletCullingBitfieldGroup = "Builtin::MeshInstanceMeshletCullingBitfieldGroup";
 inline constexpr std::string_view MeshInstanceOcclusionCullingBitfieldGroup = "Builtin::MeshInstanceOcclusionCullingBitfieldGroup";
-inline constexpr std::string_view MeshResourceGroup = "Builtin::MeshResourceGroup";
+namespace MeshResources {
+inline constexpr std::string_view MeshletOffsets = "Builtin::MeshResources::MeshletOffsets";
+inline constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
+inline constexpr std::string_view MeshletVertexIndices = "Builtin::MeshResources::MeshletVertexIndices";
+}
 inline constexpr std::string_view MeshletCullingBitfieldGroup = "Builtin::MeshletCullingBitfieldGroup";
 inline constexpr std::string_view NormalMatrixBuffer = "Builtin::NormalMatrixBuffer";
 namespace PPLL {
@@ -57,11 +63,20 @@ inline constexpr std::string_view Counter = "Builtin::PPLL::Counter";
 inline constexpr std::string_view HeadPointerTexture = "Builtin::PPLL::HeadPointerTexture";
 }
 inline constexpr std::string_view PerMeshBuffer = "Builtin::PerMeshBuffer";
+inline constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
 inline constexpr std::string_view PerObjectBuffer = "Builtin::PerObjectBuffer";
 inline constexpr std::string_view PostSkinningVertices = "Builtin::PostSkinningVertices";
 inline constexpr std::string_view PreSkinningVertices = "Builtin::PreSkinningVertices";
 namespace PrimaryCamera {
 inline constexpr std::string_view DepthTexture = "Builtin::PrimaryCamera::DepthTexture";
+namespace IndirectCommandBuffers {
+inline constexpr std::string_view AlphaTest = "Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest";
+inline constexpr std::string_view Blend = "Builtin::PrimaryCamera::IndirectCommandBuffers::Blend";
+inline constexpr std::string_view MeshletCullingReset = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset";
+inline constexpr std::string_view MeshletFrustrumCulling = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling";
+inline constexpr std::string_view MeshletOcclusionCulling = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletOcclusionCulling";
+inline constexpr std::string_view Opaque = "Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque";
+}
 inline constexpr std::string_view LinearDepthMap = "Builtin::PrimaryCamera::LinearDepthMap";
 inline constexpr std::string_view MeshletBitfield = "Builtin::PrimaryCamera::MeshletBitfield";
 }
