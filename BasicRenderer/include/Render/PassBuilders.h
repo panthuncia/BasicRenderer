@@ -178,41 +178,41 @@ inline ResourceIdentifierAndRange Subresources(const ResourceIdentifier& r,
 }
 
 // BuiltinResource
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r) {
+inline ResourceIdentifierAndRange Subresources(const char* r) {
 	return Subresources(ResourceIdentifier{ r });
 }
 
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+inline ResourceIdentifierAndRange Subresources(const char* r,
     Mip m) {
 	return Subresources(ResourceIdentifier{ r }, m);
 }
 
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+inline ResourceIdentifierAndRange Subresources(const char* r,
     FromMip fm) {
 	return Subresources(ResourceIdentifier{ r }, fm);
 }
 
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+inline ResourceIdentifierAndRange Subresources(const char* r,
     UpToMip um) {
 	return Subresources(ResourceIdentifier{ r }, um);
 }
 
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+inline ResourceIdentifierAndRange Subresources(const char* r,
     Slice s) {
 	return Subresources(ResourceIdentifier{ r }, s);
 }
 
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+inline ResourceIdentifierAndRange Subresources(const char* r,
     FromSlice fs) {
 	return Subresources(ResourceIdentifier{ r }, fs);
 }
 
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+inline ResourceIdentifierAndRange Subresources(const char* r,
     UpToSlice us) {
 	return Subresources(ResourceIdentifier{ r }, us);
 }
 
-inline ResourceIdentifierAndRange Subresources(const BuiltinResource& r,
+inline ResourceIdentifierAndRange Subresources(const char* r,
     Mip     m,
     Slice   s) {
 	return Subresources(ResourceIdentifier{ r }, m, s);
@@ -334,7 +334,7 @@ processResourceArguments(const ResourceIdentifier& rid,
 }
 
 inline std::vector<ResourceAndRange>
-processResourceArguments(const BuiltinResource& br,
+processResourceArguments(const char* br,
     RenderGraph* graph)
 {
     return processResourceArguments(
@@ -376,7 +376,7 @@ namespace detail {
     inline void extractId(auto& out, ResourceIdentifier const& rid) {
         out.insert(rid);
     }
-    inline void extractId(auto& out, BuiltinResource br) {
+    inline void extractId(auto& out, char* br) {
         out.insert(ResourceIdentifier{ br });
     }
 

@@ -1,0 +1,70 @@
+{
+  "Builtin": {
+    "PrimaryCamera": {
+      "LinearDepthMap": {},
+      "DepthTexture": {},
+      "MeshletBitfield": {}
+    },
+    "PerObjectBuffer": {},
+    "PerMeshBuffer": {},
+    "PreSkinningVertices": {},
+    "PostSkinningVertices": {},
+    "NormalMatrixBuffer": {},
+    "MeshResourceGroup": {},
+    "MeshletCullingBitfieldGroup": {},
+    "MeshInstanceMeshletCullingBitfieldGroup": {},
+    "MeshInstanceOcclusionCullingBitfieldGroup": {},
+    "CameraBuffer": {},
+    "Light": {
+      "ViewResourceGroup": {},
+      "BufferGroup": {},
+      "ClusterBuffer": {},
+      "PagesBuffer": {},
+      "PagesCounter": {}
+    },
+    "Environment": {
+      "InfoBuffer": {},
+      "PrefilteredCubemapsGroup": {},
+      "WorkingHDRIGroup": {},
+      "WorkingCubemapGroup": {},
+      "CurrentCubemap": {}
+    },
+    "IndirectCommandBuffers": {
+      "Primary": {},
+      "MeshletCulling": {}
+    },
+    "GBuffer": {
+      "Normals": {},
+      "MotionVectors": {},
+      "Albedo": {},
+      "MetallicRoughness": {},
+      "Emissive": {}
+    },
+    "GTAO": {
+      "WorkingDepths": {},
+      "WorkingEdges": {},
+      "WorkingAOTerm1": {},
+      "WorkingAOTerm2": {},
+      "OutputAOTerm": {}
+    },
+    "Shadows": {
+      "ShadowMaps": {},
+      "LinearShadowMaps": {}
+    },
+    "PPLL": {
+      "HeadPointerTexture": {},
+      "Buffer": {},
+      "Counter": {}
+    },
+    "Color": {
+      "HDRColorTarget": {},
+      "SRGBColorTarget": {}
+    },
+    "ActiveDrawSetIndices": {
+      "Opaque": {},
+      "AlphaTest": {},
+      "Blend": {}
+    },
+    "DebugTexture": {}
+  }
+}

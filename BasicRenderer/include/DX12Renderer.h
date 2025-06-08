@@ -35,6 +35,7 @@
 #include "Managers/EnvironmentManager.h"
 #include "Scene/MovementState.h"
 #include "Scene/Components.h"
+#include "../generated/BuiltinResources.h"
 
 using namespace Microsoft::WRL;
 
@@ -210,34 +211,32 @@ private:
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
 
-        std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
-            switch (key.AsBuiltin()) {
-            case BuiltinResource::GBuf_MotionVectors:
+		std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override { // TODO: don't use ifs
+            if (key.ToString() == Builtin::GBuffer::MotionVectors)
 				return m_gbufferMotionVectors;
-            case BuiltinResource::HDRColorTarget:
+            if (key.ToString() == Builtin::Color::HDRColorTarget)
 				return m_HDRColorTarget;
-            case BuiltinResource::ShadowMaps:
+            if (key.ToString() == Builtin::Shadows::ShadowMaps)
 				return m_shadowMaps;
-			case BuiltinResource::LinearShadowMaps:
+            if (key.ToString() == Builtin::Shadows::LinearShadowMaps)
 				return m_linearShadowMaps;
-			case BuiltinResource::DebugTexture:
+            if (key.ToString() == Builtin::DebugTexture)
 				return m_currentDebugTexture;
-			case BuiltinResource::PrimaryCameraMeshletBitfield:
+			if (key.ToString() == Builtin::PrimaryCamera::MeshletBitfield)
 				return m_primaryCameraMeshletBitfield;
-			default:
-				spdlog::error("CoreResourceProvider: ProvideResource called with unknown key: {}", key.ToString());
-				return nullptr;
-            }
+		
+			spdlog::error("CoreResourceProvider: ProvideResource called with unknown key: {}", key.ToString());
+			return nullptr;
         }
 
         std::vector<ResourceIdentifier> GetSupportedKeys() override {
 			return {
-				ResourceIdentifier(BuiltinResource::GBuf_MotionVectors),
-				ResourceIdentifier(BuiltinResource::HDRColorTarget),
-				ResourceIdentifier(BuiltinResource::ShadowMaps),
-				ResourceIdentifier(BuiltinResource::LinearShadowMaps),
-				ResourceIdentifier(BuiltinResource::DebugTexture),
-                ResourceIdentifier(BuiltinResource::PrimaryCameraMeshletBitfield),
+                Builtin::GBuffer::MotionVectors,
+                Builtin::Color::HDRColorTarget,
+                Builtin::Shadows::ShadowMaps,
+                Builtin::Shadows::LinearShadowMaps,
+                Builtin::DebugTexture,
+                Builtin::PrimaryCamera::MeshletBitfield,
 			};
         }
 

@@ -635,41 +635,6 @@ void Scene::Activate(ManagerInterface managerInterface) {
 	MakeResident();
 }
 
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.opaqueIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraAlphaTestIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.alphaTestIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraBlendIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.blendIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletOcclusionCullingIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->meshletBitfieldBuffer;
-}
-
 void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {
 	if (src.has<Components::SkeletonRoot>()) {
 		return; // Skip skeleton roots, they are handled separately

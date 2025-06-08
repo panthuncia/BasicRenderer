@@ -26,20 +26,6 @@ public:
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
 
-	unsigned int GetPreSkinningVertexBufferSRVIndex() const;
-	unsigned int GetPostSkinningVertexBufferSRVIndex() const;
-	unsigned int GetPostSkinningVertexBufferUAVIndex() const;
-	unsigned int GetMeshletOffsetBufferSRVIndex() const;
-	unsigned int GetMeshletVertexIndexBufferSRVIndex() const;
-	unsigned int GetMeshletTriangleBufferSRVIndex() const;
-	unsigned int GetMeshletBoundsBufferSRVIndex() const;
-	std::shared_ptr<ResourceGroup> GetResourceGroup();
-	unsigned int GetPerMeshBufferSRVIndex() const;
-	std::shared_ptr<DynamicBuffer>& GetPerMeshBuffers();
-	std::shared_ptr<DynamicBuffer>& GetPreSkinningVertices();
-	std::shared_ptr<DynamicBuffer>& GetPostSkinningVertices();
-	unsigned int GetPerMeshInstanceBufferSRVIndex() const;
-
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
 	void SetCameraManager(CameraManager* cameraManager) { m_pCameraManager = cameraManager; }
@@ -49,6 +35,7 @@ public:
 
 private:
 	MeshManager();
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::shared_ptr<DynamicBuffer> m_preSkinningVertices;
 	std::shared_ptr<DynamicBuffer> m_postSkinningVertices;
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets;

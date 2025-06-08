@@ -35,10 +35,6 @@ public:
 
     void SetIncrementSize(unsigned int incrementSize);
 
-	std::shared_ptr<ResourceGroup> GetResourceGroup() { return m_parentResourceGroup; }
-
-	std::shared_ptr<ResourceGroup> GetMeshletCullingCommandResourceGroup() { return m_meshletCullingCommandResourceGroup; }
-
 	//std::shared_ptr<Buffer>& GetOpaqueClearBuffer() { return m_clearBufferOpaque; }
 	//std::shared_ptr<Buffer>& GetAlphaTestClearBuffer() { return m_clearBufferAlphaTest; }
 	//std::shared_ptr<Buffer>& GetBlendClearBuffer() { return m_clearBufferBlend; }
@@ -48,6 +44,7 @@ public:
 
 private:
     IndirectCommandBufferManager();
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::unordered_map<uint64_t, Components::IndirectCommandBuffers> m_viewIDToBuffers;
 	unsigned int m_opaqueCommandBufferSize = 0;
 	unsigned int m_alphaTestCommandBufferSize = 0;

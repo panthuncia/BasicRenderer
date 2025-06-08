@@ -12,6 +12,7 @@
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Utilities/MathUtils.h"
 #include "ShaderBuffers.h"
+#include "../../generated/BuiltinResources.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -47,6 +48,11 @@ LightManager::LightManager() {
 	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
 	m_pLightPagesBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), false, true, false);
 	m_pLightPagesBuffer->SetName(L"lightPagesBuffer");
+
+	m_resources[Builtin::Light::ViewResourceGroup] = m_pLightViewInfoResourceGroup;
+	m_resources[Builtin::Light::BufferGroup] = m_pLightBufferResourceGroup;
+	m_resources[Builtin::Light::ClusterBuffer] = m_pClusterBuffer;
+	m_resources[Builtin::Light::PagesBuffer] = m_pLightPagesBuffer;
 }
 
 LightManager::~LightManager() {
@@ -105,26 +111,6 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
 
 void LightManager::RemoveLight(LightInfo* light) {
 
-}
-
-unsigned int LightManager::GetLightBufferDescriptorIndex() {
-    return m_lightBuffer->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetActiveLightIndicesBufferDescriptorIndex() {
-	return m_activeLightIndices->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
-	return m_pointViewInfo->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
-	return m_spotViewInfo->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return m_directionalViewInfo->GetSRVInfo(0).index;
 }
 
 unsigned int LightManager::GetNumLights() {
@@ -399,43 +385,15 @@ void LightManager::UpdateLightBufferView(BufferView* view, LightInfo& data) {
 	m_lightBuffer->UpdateView(view, &data);
 }
 
-std::shared_ptr<ResourceGroup>& LightManager::GetLightViewInfoResourceGroup() {
-	return m_pLightViewInfoResourceGroup;
-}
-
-std::shared_ptr<ResourceGroup>& LightManager::GetLightBufferResourceGroup() {
-	return m_pLightBufferResourceGroup;
-}
-
-std::shared_ptr<Buffer>& LightManager::GetClusterBuffer() {
-	return m_pClusterBuffer;
-}
-
-std::shared_ptr<Buffer>& LightManager::GetLightPagesBuffer() {
-	return m_pLightPagesBuffer;
-}
-
 std::shared_ptr<Resource> LightManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::LightViewResourceGroup:
-		return m_pLightViewInfoResourceGroup;
-	case BuiltinResource::LightBufferGroup:
-		return m_pLightBufferResourceGroup;
-	case BuiltinResource::LightClusterBuffer:
-		return m_pClusterBuffer;
-	case BuiltinResource::LightPagesBuffer:
-		return m_pLightPagesBuffer;
-	default:
-		spdlog::warn("LightManager: ProvideResource called with unknown key: {}", key.ToString());
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> LightManager::GetSupportedKeys() {
-	return {
-		BuiltinResource::LightViewResourceGroup,
-		BuiltinResource::LightBufferGroup,
-		BuiltinResource::LightClusterBuffer,
-		BuiltinResource::LightPagesBuffer
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }

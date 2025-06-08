@@ -802,7 +802,7 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 	auto keys = prov->GetSupportedKeys();
 	for (const auto& key : keys) {
 		if (_providerMap.find(key) != _providerMap.end()) {
-			std::string_view name = key.IsBuiltin() ? BuiltinResourceToString(key.AsBuiltin()) : key.AsCustom();
+			std::string_view name = key.ToString();
 			throw std::runtime_error("Resource provider already registered for key: " + std::string(name));
 		}
 		_providerMap[key] = prov;
@@ -850,7 +850,7 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 		// If we are allowed to fail, return nullptr
 		return nullptr;
 	}
-	std::string_view name = rid.IsBuiltin() ? BuiltinResourceToString(rid.AsBuiltin()) : rid.AsCustom();
+	std::string_view name = rid.ToString();
 	throw std::runtime_error("No resource provider registered for key: " + std::string(name));
 }
 

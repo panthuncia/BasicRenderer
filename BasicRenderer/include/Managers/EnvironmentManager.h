@@ -60,30 +60,6 @@ public:
 		return environments;
 	}
 
-	unsigned int GetEnvironmentBufferSRVDescriptorIndex() const {
-		return m_environmentInfoBuffer->GetSRVInfo(0).index;
-	}
-
-	unsigned int GetEnvironmentBufferUAVDescriptorIndex() const {
-		return m_environmentInfoBuffer->GetUAVShaderVisibleInfo(0).index;
-	}
-
-	std::shared_ptr<ResourceGroup>& GetWorkingEnvironmentCubemapGroup() {
-		return m_workingEnvironmentCubemapGroup;
-	}
-
-	std::shared_ptr<ResourceGroup>& GetWorkingHDRIGroup() {
-		return m_workingHDRIGroup;
-	}
-
-	std::shared_ptr<ResourceGroup>& GetEnvironmentPrefilteredCubemapGroup() {
-		return m_environmentPrefilteredCubemapGroup;
-	}
-
-	std::shared_ptr<LazyDynamicStructuredBuffer<EnvironmentInfo>>& GetEnvironmentInfoBuffer() {
-		return m_environmentInfoBuffer;
-	}
-
 	void SetFromHDRI(Environment* e, std::string hdriPath);
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
@@ -91,6 +67,7 @@ public:
 
 private:
 	EnvironmentManager();
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::shared_ptr<LazyDynamicStructuredBuffer<EnvironmentInfo>> m_environmentInfoBuffer;
 	std::mutex m_environmentInfoBufferMutex; // Mutex for thread safety
 

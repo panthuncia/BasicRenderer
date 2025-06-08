@@ -8,6 +8,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Resources/DynamicResource.h"
+#include "../../generated/BuiltinResources.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
@@ -24,6 +25,9 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 	UpdateBuffersForBucket(MaterialBuckets::Opaque, 1000);
 	UpdateBuffersForBucket(MaterialBuckets::AlphaTest, 1000);
 	UpdateBuffersForBucket(MaterialBuckets::Blend, 1000);
+
+	m_resources[Builtin::IndirectCommandBuffers::Primary] = m_parentResourceGroup;
+	m_resources[Builtin::IndirectCommandBuffers::MeshletCulling] = m_meshletCullingCommandResourceGroup;
 }
 
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
@@ -191,19 +195,14 @@ void IndirectCommandBufferManager::SetIncrementSize(unsigned int incrementSize) 
 }
 
 std::shared_ptr<Resource> IndirectCommandBufferManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::PrimaryIndirectCommandBuffers:
-		return m_parentResourceGroup;
-	case BuiltinResource::MeshletCullingCommandBuffers:
-		return m_meshletCullingCommandResourceGroup;
-	default:
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> IndirectCommandBufferManager::GetSupportedKeys() {
-	return {
-		BuiltinResource::PrimaryIndirectCommandBuffers,
-		BuiltinResource::MeshletCullingCommandBuffers
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }

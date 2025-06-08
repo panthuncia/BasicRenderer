@@ -12,6 +12,7 @@
 #include "Resources/ResourceGroup.h"
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ReadbackManager.h"
+#include "../../generated/BuiltinResources.h"
 
 EnvironmentManager::EnvironmentManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -22,6 +23,11 @@ EnvironmentManager::EnvironmentManager() {
 	m_workingEnvironmentCubemapGroup = std::make_shared<ResourceGroup>(L"EnvironmentCubemapGroup");
 	m_workingHDRIGroup = std::make_shared<ResourceGroup>(L"WorkingHDRIGroup");
 	m_environmentPrefilteredCubemapGroup = std::make_shared<ResourceGroup>(L"EnvironmentPrefilteredCubemapGroup");
+
+	m_resources[Builtin::Environment::InfoBuffer] = m_environmentInfoBuffer;
+	m_resources[Builtin::Environment::PrefilteredCubemapsGroup] = m_environmentPrefilteredCubemapGroup;
+	m_resources[Builtin::Environment::WorkingHDRIGroup] = m_workingHDRIGroup;
+	m_resources[Builtin::Environment::WorkingCubemapGroup] = m_workingEnvironmentCubemapGroup;
 }
 
 std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment(std::wstring name) {
@@ -149,26 +155,14 @@ void EnvironmentManager::RemoveEnvironment(Environment* e) {
 }
 
 std::shared_ptr<Resource> EnvironmentManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::EnvironmentsInfoBuffer:
-		return m_environmentInfoBuffer;
-	case BuiltinResource::EnvironmentPrefilteredCubemapsGroup:
-		return m_environmentPrefilteredCubemapGroup;
-	case BuiltinResource::WorkingEnvironmentHDRIGroup:
-		return m_workingHDRIGroup;
-	case BuiltinResource::WorkingEnvironmentCubemapGroup:
-		return m_workingEnvironmentCubemapGroup;
-	default:
-		spdlog::error("EnvironmentManager: Unknown resource key: {}", key.ToString());
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> EnvironmentManager::GetSupportedKeys() {
-	return {
-		BuiltinResource::EnvironmentsInfoBuffer,
-		BuiltinResource::EnvironmentPrefilteredCubemapsGroup,
-		BuiltinResource::WorkingEnvironmentHDRIGroup,
-		BuiltinResource::WorkingEnvironmentCubemapGroup
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }

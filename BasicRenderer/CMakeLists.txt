@@ -17,13 +17,62 @@ find_package(DirectX-Headers CONFIG REQUIRED)
 find_package(DirectX12-Agility CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(inja CONFIG REQUIRED)
+find_package(fmt CONFIG REQUIRED)
+
+# Build inja tool for code generation
+add_executable(codegen_with_inja
+  "generators/resource_codegen.cpp"
+)
+
+target_link_libraries(codegen_with_inja
+  PRIVATE
+    nlohmann_json::nlohmann_json
+    fmt::fmt
+)
+
+set(GENERATED_DIR  "${CMAKE_SOURCE_DIR}/BasicRenderer/generated")
+set(GENERATED_HDR  "${GENERATED_DIR}/BuiltinResources.h")
+
+# ensure the output directory exists
+file(MAKE_DIRECTORY "${GENERATED_DIR}")
+set(CMAKE_VERBOSE_MAKEFILE ON)
+add_custom_command(
+  OUTPUT "${GENERATED_HDR}"
+  COMMAND codegen_with_inja
+          "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
+          "${GENERATED_HDR}"
+  DEPENDS codegen_with_inja
+          "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
+  COMMENT "Regenerating BuiltinResources.h from BuiltinResources.h.json"
+  VERBATIM
+  USES_TERMINAL
+)
+
+set_target_properties(codegen_with_inja PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+)
+
+add_custom_target(GenerateBuiltinResources
+  DEPENDS "${GENERATED_HDR}"
+)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
-add_executable (BasicRenderer WIN32  ${SOURCES})
+add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET BasicRenderer PROPERTY CXX_STANDARD 23)
+  set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 endif()
+
+# pend on the generated header in the BasicRenderer target
+add_dependencies(${PROJECT_NAME} GenerateBuiltinResources)
+
+target_include_directories(${PROJECT_NAME}
+  PRIVATE
+    "${GENERATED_DIR}"
+)
 
 #set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi") # For MSVC
 #set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")

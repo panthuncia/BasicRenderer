@@ -9,6 +9,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Utilities/MathUtils.h"
 #include "../shaders/Common/defines.h"
+#include "../../generated/BuiltinResources.h"
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -20,6 +21,13 @@ ObjectManager::ObjectManager() {
 	m_activeOpaqueDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeOpaqueDrawSetIndices");
 	m_activeAlphaTestDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeAlphaTestDrawSetIndices");
 	m_activeBlendDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeBlendDrawSetIndices");
+
+	m_resources[Builtin::PerObjectBuffer] = m_perObjectBuffers;
+	m_resources[Builtin::NormalMatrixBuffer] = m_normalMatrixBuffer;
+	//m_resources["Builtin::MasterIndirectCommandsBuffer"] = m_masterIndirectCommandsBuffer;
+	m_resources[Builtin::ActiveDrawSetIndices::Opaque] = m_activeOpaqueDrawSetIndices;
+	m_resources[Builtin::ActiveDrawSetIndices::AlphaTest] = m_activeAlphaTestDrawSetIndices;
+	m_resources[Builtin::ActiveDrawSetIndices::Blend] = m_activeBlendDrawSetIndices;
 }
 Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObjectCB, const Components::OpaqueMeshInstances* opaqueInstances, const Components::AlphaTestMeshInstances* alphaTestInstances, const Components::BlendMeshInstances* blendInstances) {
 	
@@ -163,45 +171,15 @@ void ObjectManager::UpdateNormalMatrixBuffer(BufferView* view, void* data) {
 	m_normalMatrixBuffer->UpdateView(view, data);
 }
 
-unsigned int ObjectManager::GetPerObjectBufferSRVIndex() const {
-	return m_perObjectBuffers->GetSRVInfo(0).index;
-}
-
-unsigned int ObjectManager::GetMasterIndirectCommandsBufferSRVIndex() const {
-	return m_masterIndirectCommandsBuffer->GetSRVInfo(0).index;
-}
-
-unsigned int ObjectManager::GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const {
-	return m_activeOpaqueDrawSetIndices->GetSRVInfo(0).index;
-}
-
-unsigned int ObjectManager::GetActiveAlphaTestDrawSetIndicesBufferSRVIndex() const {
-	return m_activeAlphaTestDrawSetIndices->GetSRVInfo(0).index;
-}
-
-unsigned int ObjectManager::GetActiveBlendDrawSetIndicesBufferSRVIndex() const {
-	return m_activeBlendDrawSetIndices->GetSRVInfo(0).index;
-}
-
-unsigned int ObjectManager::GetNormalMatrixBufferSRVIndex() const {
-	return m_normalMatrixBuffer->GetSRVInfo(0).index;
-}
-
 std::shared_ptr<Resource> ObjectManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::PerObjectBuffer:
-		return m_perObjectBuffers;
-	case BuiltinResource::NormalMatrixBuffer:
-		return m_normalMatrixBuffer;
-	default:
-		spdlog::error("ObjectManager::ProvideResource: Unknown resource key: {}", key.ToString());
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> ObjectManager::GetSupportedKeys() {
-	return{
-		BuiltinResource::PerObjectBuffer,
-		BuiltinResource::NormalMatrixBuffer,
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }
