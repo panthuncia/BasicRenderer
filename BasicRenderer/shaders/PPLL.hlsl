@@ -60,7 +60,7 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     FragmentInfo fragmentInfo;
     GetFragmentInfoDirect(input, viewDir, enableGTAO, true, isFrontFace, fragmentInfo);
     
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, environmentBufferDescriptorIndex, isFrontFace);
 
     
     // Fill the PPLL buffers with the fragment data

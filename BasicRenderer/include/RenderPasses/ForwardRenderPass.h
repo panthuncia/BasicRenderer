@@ -56,6 +56,14 @@ public:
         m_perMeshBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
         m_lightClusterBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
 		m_lightPagesBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetSRVInfo(0).index;
+
+        m_activeLightIndicesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ActiveLightIndices)->GetSRVInfo(0).index;
+        m_lightBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::InfoBuffer)->GetSRVInfo(0).index;
+        m_pointLightCubemapBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PointLightCubemapBuffer)->GetSRVInfo(0).index;
+        m_spotLightMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::SpotLightMatrixBuffer)->GetSRVInfo(0).index;
+        m_directionalLightCascadeBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::DirectionalLightCascadeBuffer)->GetSRVInfo(0).index;
+
+        m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
         
         m_primaryCameraMeshletCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         m_primaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
@@ -145,6 +153,15 @@ private:
         staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferDescriptorIndex;
 		staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferDescriptorIndex;
         staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
+
+        staticBufferIndices[ActiveLightIndicesBufferDescriptorIndex] = m_activeLightIndicesBufferSRVIndex;
+        staticBufferIndices[LightBufferDescriptorIndex] = m_lightBufferSRVIndex;
+        staticBufferIndices[PointLightCubemapBufferDescriptorIndex] = m_pointLightCubemapBufferSRVIndex;
+        staticBufferIndices[SpotLightMatrixBufferDescriptorIndex] = m_spotLightMatrixBufferSRVIndex;
+        staticBufferIndices[DirectionalLightCascadeBufferDescriptorIndex] = m_directionalLightCascadeBufferSRVIndex;
+
+		staticBufferIndices[EnvironmentBufferDescriptorIndex] = m_environmentBufferDescriptorIndex;
+
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
@@ -322,6 +339,15 @@ private:
 	int m_perMeshBufferDescriptorIndex = -1;
 	int m_lightClusterBufferDescriptorIndex = -1;
 	int m_lightPagesBufferDescriptorIndex = -1;
+
+    int m_activeLightIndicesBufferSRVIndex = -1;
+    int m_lightBufferSRVIndex = -1;
+    int m_pointLightCubemapBufferSRVIndex = -1;
+    int m_spotLightMatrixBufferSRVIndex = -1;
+    int m_directionalLightCascadeBufferSRVIndex = -1;
+
+	int m_environmentBufferDescriptorIndex = -1;
+
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
 
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer = nullptr;

@@ -17,8 +17,7 @@
 
 class DeferredRenderPass : public RenderPass {
 public:
-	DeferredRenderPass(
-) {
+	DeferredRenderPass() {
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
@@ -37,6 +36,14 @@ public:
 		m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
 		m_lightClusterBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
 		m_lightPagesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetSRVInfo(0).index;
+
+		m_activeLightIndicesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ActiveLightIndices)->GetSRVInfo(0).index;
+		m_lightBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::InfoBuffer)->GetSRVInfo(0).index;
+		m_pointLightCubemapBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PointLightCubemapBuffer)->GetSRVInfo(0).index;
+		m_spotLightMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::SpotLightMatrixBuffer)->GetSRVInfo(0).index;
+		m_directionalLightCascadeBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::DirectionalLightCascadeBuffer)->GetSRVInfo(0).index;
+
+		m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
 
 		m_aoTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).index;
 		m_normalsTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Normals)->GetSRVInfo(0).index;
@@ -97,6 +104,14 @@ public:
 		staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureSRVIndex;
 		staticBufferIndices[EmissiveTextureDescriptorIndex] = m_emissiveTextureSRVIndex;
 
+		staticBufferIndices[ActiveLightIndicesBufferDescriptorIndex] = m_activeLightIndicesBufferSRVIndex;
+		staticBufferIndices[LightBufferDescriptorIndex] = m_lightBufferSRVIndex;
+		staticBufferIndices[PointLightCubemapBufferDescriptorIndex] = m_pointLightCubemapBufferSRVIndex;
+		staticBufferIndices[SpotLightMatrixBufferDescriptorIndex] = m_spotLightMatrixBufferSRVIndex;
+		staticBufferIndices[DirectionalLightCascadeBufferDescriptorIndex] = m_directionalLightCascadeBufferSRVIndex;
+
+		staticBufferIndices[EnvironmentBufferDescriptorIndex] = m_environmentBufferDescriptorIndex;
+
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
@@ -152,6 +167,14 @@ private:
 	int m_emissiveTextureSRVIndex = -1;
 
 	int m_depthBufferSRVIndex = -1;
+
+	int m_activeLightIndicesBufferSRVIndex = -1;
+	int m_lightBufferSRVIndex = -1;
+	int m_pointLightCubemapBufferSRVIndex = -1;
+	int m_spotLightMatrixBufferSRVIndex = -1;
+	int m_directionalLightCascadeBufferSRVIndex = -1;
+
+	int m_environmentBufferDescriptorIndex = -1;
 
 	bool m_gtaoEnabled = true;
 };

@@ -34,7 +34,12 @@
       "BufferGroup": {},
       "ClusterBuffer": {},
       "PagesBuffer": {},
-      "PagesCounter": {}
+      "PagesCounter": {},
+      "ActiveLightIndices": {},
+      "InfoBuffer": {},
+      "PointLightCubemapBuffer": {},
+      "SpotLightMatrixBuffer": {},
+      "DirectionalLightCascadeBuffer": {}
     },
     "Environment": {
       "InfoBuffer": {},

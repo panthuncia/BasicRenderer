@@ -177,7 +177,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pCameraManager = CameraManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
-	ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
+	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
 	m_pCameraManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Camera manager needs to make indirect command buffers
     m_pMeshManager->SetCameraManager(m_pCameraManager.get());
@@ -890,7 +890,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex(), { m_xInternalRes, m_yInternalRes }, m_lightClusterSize, m_frameIndex);
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { m_xInternalRes, m_yInternalRes }, m_lightClusterSize, m_frameIndex);
 
 	currentRenderGraph->Update();
 
@@ -1174,7 +1174,7 @@ void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
-    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
+    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCamera().get<Components::RenderView>()->meshletBitfieldBuffer;
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
     // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
@@ -1217,7 +1217,7 @@ void DX12Renderer::CreateRenderGraph() {
         indirect = false;
     }
 
-    CreateGbufferResources(newGraph.get());
+    CreateGBufferResources(newGraph.get());
 
     if (indirect) {
         if (m_occlusionCulling) {
@@ -1255,7 +1255,7 @@ void DX12Renderer::CreateRenderGraph() {
             .WithShaderResource(Builtin::Environment::CurrentCubemap)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
-            .Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
+            .Build<SkyboxRenderPass>();
     }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());

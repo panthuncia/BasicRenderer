@@ -43,10 +43,15 @@ inline constexpr std::string_view MeshletCulling = "Builtin::IndirectCommandBuff
 inline constexpr std::string_view Primary = "Builtin::IndirectCommandBuffers::Primary";
 }
 namespace Light {
+inline constexpr std::string_view ActiveLightIndices = "Builtin::Light::ActiveLightIndices";
 inline constexpr std::string_view BufferGroup = "Builtin::Light::BufferGroup";
 inline constexpr std::string_view ClusterBuffer = "Builtin::Light::ClusterBuffer";
+inline constexpr std::string_view DirectionalLightCascadeBuffer = "Builtin::Light::DirectionalLightCascadeBuffer";
+inline constexpr std::string_view InfoBuffer = "Builtin::Light::InfoBuffer";
 inline constexpr std::string_view PagesBuffer = "Builtin::Light::PagesBuffer";
 inline constexpr std::string_view PagesCounter = "Builtin::Light::PagesCounter";
+inline constexpr std::string_view PointLightCubemapBuffer = "Builtin::Light::PointLightCubemapBuffer";
+inline constexpr std::string_view SpotLightMatrixBuffer = "Builtin::Light::SpotLightMatrixBuffer";
 inline constexpr std::string_view ViewResourceGroup = "Builtin::Light::ViewResourceGroup";
 }
 inline constexpr std::string_view MeshInstanceMeshletCullingBitfieldGroup = "Builtin::MeshInstanceMeshletCullingBitfieldGroup";

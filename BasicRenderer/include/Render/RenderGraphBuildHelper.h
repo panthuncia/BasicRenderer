@@ -111,7 +111,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .IsGeometryPass();
 
         if (meshShadersEnabled) {
-            shadowOccluderPassBuilder.WithShaderResource(Builtin::MeshResourceGroup, Builtin::MeshletCullingBitfieldGroup);
+            shadowOccluderPassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::MeshletCullingBitfieldGroup);
             shadowOccluderPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
         }
         shadowOccluderPassBuilder.Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, true);
@@ -143,11 +143,6 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         //}
     }
     occludersPrepassBuilder.Build<ZPrepass>(
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals, true), 
-		graph->RequestResource<PixelBuffer>(Builtin::GBuffer::MotionVectors, true),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Albedo, true),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::MetallicRoughness, true),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Emissive, true),
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -182,7 +177,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .IsGeometryPass();
 
         if (meshShadersEnabled) {
-            shadowOccluderRemainderPassBuilder.WithShaderResource(Builtin::MeshResourceGroup, Builtin::MeshletCullingBitfieldGroup);
+            shadowOccluderRemainderPassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::MeshletCullingBitfieldGroup);
             //if (indirect) {
             shadowOccluderRemainderPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
             //}
@@ -206,17 +201,12 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         .IsGeometryPass();
 
     if (meshShadersEnabled) {
-        occludersRemaindersPrepassBuilder.WithShaderResource(Builtin::MeshResourceGroup, Builtin::PrimaryCamera::MeshletBitfield);
+        occludersRemaindersPrepassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::PrimaryCamera::MeshletBitfield);
         //if (indirect) {
         occludersRemaindersPrepassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
         //}
     }
     occludersRemaindersPrepassBuilder.Build<ZPrepass>(
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals),
-		graph->RequestResource<PixelBuffer>(Builtin::GBuffer::MotionVectors),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Albedo),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::MetallicRoughness),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Emissive),
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -296,7 +286,7 @@ void BuildZPrepass(RenderGraph* graph) {
         .IsGeometryPass();
 
     if (meshShadersEnabled) {
-        newObjectsPrepassBuilder.WithShaderResource(Builtin::MeshResourceGroup, Builtin::PrimaryCamera::MeshletBitfield);
+        newObjectsPrepassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::PrimaryCamera::MeshletBitfield);
         //if (indirect) {
         newObjectsPrepassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
         //}
@@ -306,11 +296,6 @@ void BuildZPrepass(RenderGraph* graph) {
         clearRTVs = true; // We will not run an earlier pass
     }
     newObjectsPrepassBuilder.Build<ZPrepass>(
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals, true),
-		graph->RequestResource<PixelBuffer>(Builtin::GBuffer::MotionVectors, true),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Albedo, true),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::MetallicRoughness, true),
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Emissive, true),
         enableWireframe, 
         useMeshShaders,
         indirect, 
@@ -443,15 +428,12 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
     graph->BuildComputePass("ClusterGenerationPass")
         .WithShaderResource(Builtin::CameraBuffer)
         .WithUnorderedAccess(Builtin::Light::ClusterBuffer)
-        .Build<ClusterGenerationPass>(graph->RequestResource<GloballyIndexedResource>(Builtin::Light::ClusterBuffer));
+        .Build<ClusterGenerationPass>();
 
     graph->BuildComputePass("LightCullingPass")
         .WithShaderResource(Builtin::CameraBuffer, Builtin::Light::BufferGroup)
         .WithUnorderedAccess(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer, Builtin::Light::PagesCounter)
-        .Build<LightCullingPass>(
-            graph->RequestResource<GloballyIndexedResource>(Builtin::Light::ClusterBuffer), 
-            graph->RequestResource<GloballyIndexedResource>(Builtin::Light::PagesBuffer), 
-            graph->RequestResource<GloballyIndexedResource>(Builtin::Light::PagesCounter));
+        .Build<LightCullingPass>();
 }
 
 void BuildEnvironmentPipeline(RenderGraph* graph) {
@@ -493,7 +475,7 @@ void BuildMainShadowPass(RenderGraph* graph) {
         .IsGeometryPass();
 
     if (useMeshShaders) {
-        shadowBuilder.WithShaderResource(Builtin::MeshResourceGroup, Builtin::MeshletCullingBitfieldGroup);
+        shadowBuilder.WithShaderResource("Builtin::MeshResources", Builtin::MeshletCullingBitfieldGroup);
         if (indirect) {
             shadowBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
         }
@@ -533,7 +515,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     }
 
     if (meshShaders && !deferredRendering) { // Don't need meshlets for deferred rendering
-        primaryPassBuilder.WithShaderResource(Builtin::MeshResourceGroup, Builtin::PrimaryCamera::MeshletBitfield);
+        primaryPassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::PrimaryCamera::MeshletBitfield);
         if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
             primaryPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
         }
@@ -551,13 +533,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
             Builtin::PrimaryCamera::DepthTexture);
     }
     if (deferredRendering) {
-        primaryPassBuilder.Build<DeferredRenderPass>(
-            gtaoEnabled ? graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).index : 0, 
-            graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals)->GetSRVInfo(0).index, 
-            graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Albedo)->GetSRVInfo(0).index, 
-            graph->RequestResource<PixelBuffer>(Builtin::GBuffer::MetallicRoughness)->GetSRVInfo(0).index, 
-            graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Emissive)->GetSRVInfo(0).index, 
-            graph->RequestResource<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).index);
+        primaryPassBuilder.Build<DeferredRenderPass>();
     }
     else {
         primaryPassBuilder.Build<ForwardRenderPass>(
@@ -624,20 +600,15 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         PPLLFillBuilder.WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
     }
     if (useMeshShaders) {
-        PPLLFillBuilder.WithShaderResource(Builtin::MeshResourceGroup);
+        PPLLFillBuilder.WithShaderResource("Builtin::MeshResources");
         if (indirect) {
             PPLLFillBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
         }
     }
     PPLLFillBuilder.Build<PPLLFillPass>(wireframe,
-        PPLLHeadPointerTexture, 
-        PPLLBuffer, 
-        PPLLCounter, 
         numPPLLNodes, 
         useMeshShaders, 
-        indirect, 
-        gtao ? graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).index : 0,
-        graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals)->GetSRVInfo(0).index);
+        indirect);
 
     graph->BuildRenderPass("PPLLResolvePass")
         .WithShaderResource(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::Buffer)

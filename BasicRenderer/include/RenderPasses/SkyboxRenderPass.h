@@ -9,14 +9,15 @@
 
 class SkyboxRenderPass : public RenderPass {
 public:
-    SkyboxRenderPass(std::shared_ptr<Texture> skyboxTexture) {
-        m_texture = skyboxTexture;
+    SkyboxRenderPass() {
     }
 
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateSkyboxRootSignature();
         CreateSkyboxPSO();
+
+        m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -53,8 +54,7 @@ public:
         viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
         auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.jitteredProjection);
         commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
-        commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo(0).index, 0);
-        commandList->SetGraphicsRoot32BitConstant(2, m_texture->GetSamplerDescriptorIndex(), 0);
+        commandList->SetGraphicsRoot32BitConstant(1, m_environmentBufferDescriptorIndex, 0);
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
 
@@ -68,10 +68,12 @@ public:
 private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
-    std::shared_ptr<Texture> m_texture = nullptr;
+    //std::shared_ptr<Texture> m_texture = nullptr;
 
     ComPtr<ID3D12RootSignature> skyboxRootSignature;
     ComPtr<ID3D12PipelineState> skyboxPSO;
+
+	int m_environmentBufferDescriptorIndex = -1;
 
     struct SkyboxVertex {
         XMFLOAT3 position;
@@ -146,8 +148,7 @@ private:
         CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[3] = {};
 
         skyboxRootParameters[0].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
-        skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox texture index
-        skyboxRootParameters[2].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox sampler index
+		skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Environment buffer index
 
         D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
 
