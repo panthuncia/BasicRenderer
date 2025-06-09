@@ -14,7 +14,7 @@
 
 class LightCullingPass : public ComputePass {
 public:
-	LightCullingPass(std::shared_ptr<GloballyIndexedResource> pClusterBuffer, std::shared_ptr<GloballyIndexedResource> pLightPagesBuffer, std::shared_ptr<GloballyIndexedResource> pLightPagesCounter) : m_pClusterBuffer(pClusterBuffer), m_pLightPagesBuffer(pLightPagesBuffer), m_pLightPagesCounter(pLightPagesCounter) {
+	LightCullingPass() {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
 	}
 
@@ -24,6 +24,12 @@ public:
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();
+
+		m_pLightPagesCounter = resourceRegistryView.Request<Buffer>(Builtin::Light::PagesCounter);
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		m_lightClusterBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetUAVShaderVisibleInfo(0).index;
+		m_lightPagesBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetUAVShaderVisibleInfo(0).index;
+
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -48,12 +54,12 @@ public:
 		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
 		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
-		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo(0).index;
-		lightClusterConstants[LightPagesBufferDescriptorIndex] = m_pLightPagesBuffer->GetUAVShaderVisibleInfo(0).index;
+		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_lightClusterBufferUAVIndex;
+		lightClusterConstants[LightPagesBufferDescriptorIndex] = m_lightPagesBufferUAVIndex;
 		lightClusterConstants[LightPagesCounterDescriptorIndex] = m_pLightPagesCounter->GetUAVShaderVisibleInfo(0).index;
 		lightClusterConstants[LightPagesPoolSize] = context.lightManager->GetLightPagePoolSize();
 		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
@@ -75,6 +81,11 @@ public:
 	}
 
 private:
+
+	std::shared_ptr<Buffer> m_pLightPagesCounter = nullptr;
+	int m_cameraBufferSRVIndex = -1;
+	int m_lightClusterBufferUAVIndex = -1;
+	int m_lightPagesBufferUAVIndex = -1;
 
 	void CreatePSO() {
 		// Compile the compute shader
@@ -100,9 +111,6 @@ private:
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
 	}
 
-	std::shared_ptr<GloballyIndexedResource> m_pLightPagesBuffer;
-	std::shared_ptr<GloballyIndexedResource> m_pLightPagesCounter;
 	std::function<DirectX::XMUINT3()> getClusterSize;
-	std::shared_ptr<GloballyIndexedResource> m_pClusterBuffer;
 	ComPtr<ID3D12PipelineState> m_PSO;
 };

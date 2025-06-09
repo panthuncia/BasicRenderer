@@ -14,7 +14,7 @@
 
 class ClusterGenerationPass : public ComputePass {
 public:
-	ClusterGenerationPass(std::shared_ptr<GloballyIndexedResource> pClusterBuffer) : m_pClusterBuffer(pClusterBuffer) {
+	ClusterGenerationPass() {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
 	}
 
@@ -24,6 +24,9 @@ public:
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();
+
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		m_clusterBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetUAVShaderVisibleInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -48,11 +51,11 @@ public:
 		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
+		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
 		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
-		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_pClusterBuffer->GetUAVShaderVisibleInfo(0).index;
+		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_clusterBufferUAVIndex;
 		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
 
 		auto clusterSize = getClusterSize();
@@ -65,6 +68,9 @@ public:
 	}
 
 private:
+
+	int m_cameraBufferSRVIndex = -1;
+	int m_clusterBufferUAVIndex = -1;
 
 	void CreatePSO() {
 		// Compile the compute shader
@@ -91,6 +97,5 @@ private:
 	}
 
 	std::function<DirectX::XMUINT3()> getClusterSize;
-	std::shared_ptr<GloballyIndexedResource> m_pClusterBuffer;
 	ComPtr<ID3D12PipelineState> m_PSO;
 };
