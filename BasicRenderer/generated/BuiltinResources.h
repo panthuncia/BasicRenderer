@@ -38,6 +38,7 @@ inline constexpr std::string_view WorkingDepths = "Builtin::GTAO::WorkingDepths"
 inline constexpr std::string_view WorkingEdges = "Builtin::GTAO::WorkingEdges";
 }
 namespace IndirectCommandBuffers {
+inline constexpr std::string_view Master = "Builtin::IndirectCommandBuffers::Master";
 inline constexpr std::string_view MeshletCulling = "Builtin::IndirectCommandBuffers::MeshletCulling";
 inline constexpr std::string_view Primary = "Builtin::IndirectCommandBuffers::Primary";
 }
@@ -51,6 +52,7 @@ inline constexpr std::string_view ViewResourceGroup = "Builtin::Light::ViewResou
 inline constexpr std::string_view MeshInstanceMeshletCullingBitfieldGroup = "Builtin::MeshInstanceMeshletCullingBitfieldGroup";
 inline constexpr std::string_view MeshInstanceOcclusionCullingBitfieldGroup = "Builtin::MeshInstanceOcclusionCullingBitfieldGroup";
 namespace MeshResources {
+inline constexpr std::string_view MeshletBounds = "Builtin::MeshResources::MeshletBounds";
 inline constexpr std::string_view MeshletOffsets = "Builtin::MeshResources::MeshletOffsets";
 inline constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
 inline constexpr std::string_view MeshletVertexIndices = "Builtin::MeshResources::MeshletVertexIndices";

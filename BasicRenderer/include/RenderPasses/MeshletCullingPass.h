@@ -30,6 +30,16 @@ public:
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
+
+		m_perObjectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
+		m_perMeshInstanceBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
+		m_meshletBoundsBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletBounds)->GetSRVInfo(0).index;
+
+		m_primaryCameraMeshletFrustrumCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+		m_primaryCameraMeshletCullingResetIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset);
+
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -61,16 +71,16 @@ public:
 		auto& cameraManager = context.cameraManager;
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
-		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
+		staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
+		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
+		staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
+		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferSRVIndex;
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-		miscRootConstants[UintRootConstant0] = context.meshManager->GetMeshletBoundsBufferSRVIndex();
-		miscRootConstants[UintRootConstant1] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetUAVShaderVisibleInfo(0).index;
+		miscRootConstants[UintRootConstant0] = m_meshletBoundsBufferSRVIndex;
+		miscRootConstants[UintRootConstant1] = m_primaryCameraMeshletFrustrumCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 		auto primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
 		miscRootConstants[UintRootConstant2] = primaryDepth->linearDepthMap->GetSRVInfo(0).index;
 
@@ -82,7 +92,7 @@ public:
 		// Culling for main camera
 
 		// Frustrum culling
-		auto meshletCullingBuffer = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer();
+		auto meshletCullingBuffer = m_primaryCameraMeshletFrustrumCullingBitfieldBuffer;
 		
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchCommandSignature();
 		commandList->ExecuteIndirect(
@@ -115,7 +125,7 @@ public:
 
 		// Reset necessary meshlets
 		if (m_doResets) {
-			auto meshletCullingClearBuffer = context.currentScene->GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer();
+			auto meshletCullingClearBuffer = m_primaryCameraMeshletCullingResetIndirectCommandBuffer;
 			commandList->SetPipelineState(m_clearPSO.Get());
 
 			commandList->ExecuteIndirect(
@@ -269,6 +279,16 @@ private:
 	ComPtr<ID3D12PipelineState> m_frustrumCullingPSO;
 	//ComPtr<ID3D12PipelineState> m_occlusionCullingPSO;
 	ComPtr<ID3D12PipelineState> m_clearPSO;
+
+	int m_perObjectBufferSRVIndex = -1;
+	int m_cameraBufferSRVIndex = -1;
+	int m_perMeshBufferSRVIndex = -1;
+	int m_perMeshInstanceBufferSRVIndex = -1;
+
+	int m_meshletBoundsBufferSRVIndex = -1;
+
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingBitfieldBuffer = nullptr;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingResetIndirectCommandBuffer = nullptr;
 
 	bool m_isOccludersPass = false;
 	bool m_isRemaindersPass = false;

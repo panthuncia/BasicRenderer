@@ -25,6 +25,9 @@ public:
 		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+	
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		m_objectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -71,8 +74,8 @@ public:
 		constants.center[2] = 0.0;
 		constants.radius = 1.0;
 		constants.perObjectIndex = 0;
-		constants.cameraBufferIndex = context.cameraManager->GetCameraBufferSRVIndex();
-		constants.objectBufferIndex = context.objectManager->GetPerObjectBufferSRVIndex();
+		constants.cameraBufferIndex = m_cameraBufferSRVIndex;
+		constants.objectBufferIndex = m_objectBufferSRVIndex;
 
 		commandList->SetGraphicsRoot32BitConstants(0, 8, &constants, 0);
 
@@ -227,6 +230,10 @@ private:
 	ComPtr<ID3D12RootSignature> m_debugRootSignature;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 	bool m_wireframe;
+
+	int m_cameraBufferSRVIndex = -1;
+	int m_objectBufferSRVIndex = -1;
+
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;

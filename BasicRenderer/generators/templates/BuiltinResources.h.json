@@ -22,7 +22,8 @@
     "MeshResources": {
       "MeshletOffsets": {},
       "MeshletVertexIndices": {},
-      "MeshletTriangles": {}
+      "MeshletTriangles": {},
+      "MeshletBounds": {}
     },
     "MeshletCullingBitfieldGroup": {},
     "MeshInstanceMeshletCullingBitfieldGroup": {},
@@ -44,7 +45,8 @@
     },
     "IndirectCommandBuffers": {
       "Primary": {},
-      "MeshletCulling": {}
+      "MeshletCulling": {},
+      "Master": {}
     },
     "GBuffer": {
       "Normals": {},
