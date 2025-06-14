@@ -54,7 +54,7 @@ private:
 	std::shared_ptr<ResourceGroup> m_alphaTestResourceGroup;
 	std::shared_ptr<ResourceGroup> m_opaqueResourceGroup;
 	std::shared_ptr<ResourceGroup> m_blendResourceGroup;
-	std::shared_ptr<ResourceGroup> m_parentResourceGroup;
+	//std::shared_ptr<ResourceGroup> m_parentResourceGroup;
 
 	std::shared_ptr<ResourceGroup> m_meshletCullingCommandResourceGroup;
 	//std::shared_ptr<Buffer> m_clearBufferOpaque;

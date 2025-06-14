@@ -18,18 +18,21 @@ find_package(DirectX12-Agility CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(inja CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
-
-# Build inja tool for code generation
-add_executable(codegen_with_inja
+# Build tool for code generation
+add_executable(codegen
   "generators/resource_codegen.cpp"
 )
 
-target_link_libraries(codegen_with_inja
+target_link_libraries(codegen
   PRIVATE
     nlohmann_json::nlohmann_json
     fmt::fmt
+)
+
+target_include_directories(codegen
+    PRIVATE
+    refl-cpp::refl-cpp
 )
 
 set(GENERATED_DIR  "${CMAKE_SOURCE_DIR}/BasicRenderer/generated")
@@ -40,17 +43,17 @@ file(MAKE_DIRECTORY "${GENERATED_DIR}")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 add_custom_command(
   OUTPUT "${GENERATED_HDR}"
-  COMMAND codegen_with_inja
+  COMMAND codegen
           "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
           "${GENERATED_HDR}"
-  DEPENDS codegen_with_inja
+  DEPENDS codegen
           "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
   COMMENT "Regenerating BuiltinResources.h from BuiltinResources.h.json"
   VERBATIM
   USES_TERMINAL
 )
 
-set_target_properties(codegen_with_inja PROPERTIES
+set_target_properties(codegen PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
 )
@@ -215,7 +218,7 @@ add_symlink_or_copy_per_config(
     "sl_interposer_dll"
 )
 
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/)
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)

@@ -63,7 +63,7 @@
 #include "Managers/EnvironmentManager.h"
 #include "Render/TonemapTypes.h"
 #include "Managers/Singletons/StatisticsManager.h"
-#include "Resources/BuiltinResources.h"
+#include "../generated/BuiltinResources.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/RenderGraphBuildHelper.h"
 #include "slHooks.h"
@@ -1207,7 +1207,7 @@ void DX12Renderer::CreateRenderGraph() {
 
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
-        .WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PreSkinningVertices, Builtin::NormalMatrixBuffer)
+        .WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PerMeshInstanceBuffer, Builtin::PreSkinningVertices, Builtin::NormalMatrixBuffer)
         .WithUnorderedAccess(Builtin::PostSkinningVertices)
         .Build<SkinningPass>();
 

@@ -3,6 +3,9 @@
 #include "Render/RenderGraph.h"
 #include "../../generated/BuiltinResources.h"
 
+// TODO: Find better way of batching these with namespaces
+#define MESH_RESOURCE_IDFENTIFIERS Builtin::MeshResources::MeshletBounds, Builtin::MeshResources::MeshletOffsets, Builtin::MeshResources::MeshletVertexIndices, Builtin::MeshResources::MeshletTriangles
+
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -82,16 +85,23 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
-        .WithCopyDest(Builtin::IndirectCommandBuffers::Primary)
-        .Build<ClearIndirectDrawCommandUAVsPass>();
+        .WithCopyDest(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest, Builtin::IndirectCommandBuffers::Blend)
+        .Build<ClearIndirectDrawCommandUAVsPass>(true);
 
     graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass0") // Clear meshlet culling reset command buffers from last frame
         .WithCopyDest(Builtin::IndirectCommandBuffers::MeshletCulling)
         .Build<ClearMeshletCullingCommandUAVsPass>();
 
     graph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
-        .WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
-        .WithUnorderedAccess(Builtin::IndirectCommandBuffers::Primary, 
+        .WithShaderResource(Builtin::PerObjectBuffer, 
+            Builtin::PerMeshBuffer, 
+            Builtin::CameraBuffer,
+            Builtin::IndirectCommandBuffers::Master,
+            Builtin::ActiveDrawSetIndices::Opaque,
+            Builtin::ActiveDrawSetIndices::AlphaTest,
+            Builtin::ActiveDrawSetIndices::Blend)
+        .WithUnorderedAccess(Builtin::IndirectCommandBuffers::Opaque, 
+            Builtin::IndirectCommandBuffers::AlphaTest,
             Builtin::IndirectCommandBuffers::MeshletCulling, 
             Builtin::MeshInstanceMeshletCullingBitfieldGroup, 
             Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
@@ -102,17 +112,25 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     if (drawShadows) {
         auto shadowOccluderPassBuilder = graph->BuildRenderPass("OccluderShadowPrepass")
             .WithShaderResource(Builtin::PerObjectBuffer, 
+                Builtin::NormalMatrixBuffer,
                 Builtin::PerMeshBuffer, 
+                Builtin::PerMeshInstanceBuffer,
                 Builtin::PostSkinningVertices, 
                 Builtin::CameraBuffer, 
-                Builtin::Light::ViewResourceGroup)
+                Builtin::Light::ViewResourceGroup,
+                Builtin::Light::InfoBuffer,
+                Builtin::Light::PointLightCubemapBuffer,
+                Builtin::Light::DirectionalLightCascadeBuffer,
+                Builtin::Light::SpotLightMatrixBuffer)
             .WithRenderTarget(Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
             .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
             .IsGeometryPass();
 
         if (meshShadersEnabled) {
-            shadowOccluderPassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::MeshletCullingBitfieldGroup);
-            shadowOccluderPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+            shadowOccluderPassBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::MeshletCullingBitfieldGroup);
+            shadowOccluderPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Opaque, 
+                Builtin::IndirectCommandBuffers::AlphaTest, 
+                Builtin::IndirectCommandBuffers::Blend);
         }
         shadowOccluderPassBuilder.Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, true);
     }
@@ -139,7 +157,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     if (meshShadersEnabled) {
         occludersPrepassBuilder.WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
         //if (indirect) {
-        occludersPrepassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+        occludersPrepassBuilder.WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
         //}
     }
     occludersPrepassBuilder.Build<ZPrepass>(
@@ -168,18 +186,24 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 
         auto shadowOccluderRemainderPassBuilder = graph->BuildRenderPass("OccluderRemaindersShadowPass")
             .WithShaderResource(Builtin::PerObjectBuffer, 
+                Builtin::NormalMatrixBuffer,
                 Builtin::PerMeshBuffer, 
+                Builtin::PerMeshInstanceBuffer,
                 Builtin::PostSkinningVertices, 
                 Builtin::CameraBuffer, 
-                Builtin::Light::ViewResourceGroup)
+                Builtin::Light::ViewResourceGroup,
+                Builtin::Light::InfoBuffer,
+                Builtin::Light::PointLightCubemapBuffer,
+                Builtin::Light::DirectionalLightCascadeBuffer,
+                Builtin::Light::SpotLightMatrixBuffer)
             .WithRenderTarget(Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
             .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
             .IsGeometryPass();
 
         if (meshShadersEnabled) {
-            shadowOccluderRemainderPassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::MeshletCullingBitfieldGroup);
+            shadowOccluderRemainderPassBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::MeshletCullingBitfieldGroup);
             //if (indirect) {
-            shadowOccluderRemainderPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+            shadowOccluderRemainderPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest);
             //}
         }
         shadowOccluderRemainderPassBuilder.Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false);
@@ -201,9 +225,9 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         .IsGeometryPass();
 
     if (meshShadersEnabled) {
-        occludersRemaindersPrepassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::PrimaryCamera::MeshletBitfield);
+        occludersRemaindersPrepassBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
         //if (indirect) {
-        occludersRemaindersPrepassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+        occludersRemaindersPrepassBuilder.WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
         //}
     }
     occludersRemaindersPrepassBuilder.Build<ZPrepass>(
@@ -226,8 +250,8 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
 	bool meshletCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshletCulling")();
 
     graph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
-        .WithCopyDest(Builtin::IndirectCommandBuffers::Primary)
-        .Build<ClearIndirectDrawCommandUAVsPass>();
+        .WithCopyDest(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest)
+        .Build<ClearIndirectDrawCommandUAVsPass>(false);
 
     graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass1") // Clear meshlet culling reset command buffers from prepass
         .WithCopyDest(Builtin::IndirectCommandBuffers::MeshletCulling)
@@ -238,8 +262,14 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
             Builtin::PerMeshBuffer, 
             Builtin::CameraBuffer, 
             Builtin::PrimaryCamera::LinearDepthMap, 
-            Builtin::Shadows::LinearShadowMaps)
-        .WithUnorderedAccess(Builtin::IndirectCommandBuffers::Primary, 
+            Builtin::Shadows::LinearShadowMaps,
+            Builtin::IndirectCommandBuffers::Master,
+            Builtin::ActiveDrawSetIndices::Opaque,
+            Builtin::ActiveDrawSetIndices::AlphaTest,
+            Builtin::ActiveDrawSetIndices::Blend)
+        .WithUnorderedAccess(Builtin::IndirectCommandBuffers::Opaque, 
+            Builtin::IndirectCommandBuffers::AlphaTest, 
+            Builtin::IndirectCommandBuffers::Blend,
             Builtin::IndirectCommandBuffers::MeshletCulling,
             Builtin::MeshInstanceMeshletCullingBitfieldGroup, 
             Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
@@ -286,9 +316,9 @@ void BuildZPrepass(RenderGraph* graph) {
         .IsGeometryPass();
 
     if (meshShadersEnabled) {
-        newObjectsPrepassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::PrimaryCamera::MeshletBitfield);
+        newObjectsPrepassBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
         //if (indirect) {
-        newObjectsPrepassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+        newObjectsPrepassBuilder.WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
         //}
     }
     bool clearRTVs = false;
@@ -466,18 +496,24 @@ void BuildMainShadowPass(RenderGraph* graph) {
 
     auto shadowBuilder = graph->BuildRenderPass("ShadowPass")
         .WithShaderResource(Builtin::PerObjectBuffer, 
+            Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer, 
+            Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices, 
             Builtin::CameraBuffer, 
-            Builtin::Light::ViewResourceGroup)
+            Builtin::Light::ViewResourceGroup,
+            Builtin::Light::InfoBuffer,
+            Builtin::Light::PointLightCubemapBuffer,
+            Builtin::Light::DirectionalLightCascadeBuffer,
+            Builtin::Light::SpotLightMatrixBuffer)
         .WithRenderTarget(Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
         .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
         .IsGeometryPass();
 
     if (useMeshShaders) {
-        shadowBuilder.WithShaderResource("Builtin::MeshResources", Builtin::MeshletCullingBitfieldGroup);
+        shadowBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::MeshletCullingBitfieldGroup);
         if (indirect) {
-            shadowBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+            shadowBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest, Builtin::IndirectCommandBuffers::Blend);
         }
     }
     shadowBuilder.Build<ShadowPass>(wireframe, useMeshShaders, indirect, clearRTVs);
@@ -515,9 +551,9 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     }
 
     if (meshShaders && !deferredRendering) { // Don't need meshlets for deferred rendering
-        primaryPassBuilder.WithShaderResource("Builtin::MeshResources", Builtin::PrimaryCamera::MeshletBitfield);
+        primaryPassBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
         if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-            primaryPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+            primaryPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest);
         }
     }
 
@@ -600,9 +636,9 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         PPLLFillBuilder.WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
     }
     if (useMeshShaders) {
-        PPLLFillBuilder.WithShaderResource("Builtin::MeshResources");
+        PPLLFillBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
         if (indirect) {
-            PPLLFillBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Primary);
+            PPLLFillBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Blend);
         }
     }
     PPLLFillBuilder.Build<PPLLFillPass>(wireframe,

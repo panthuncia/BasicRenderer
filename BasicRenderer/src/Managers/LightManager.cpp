@@ -53,6 +53,10 @@ LightManager::LightManager() {
 	m_resources[Builtin::Light::BufferGroup] = m_pLightBufferResourceGroup;
 	m_resources[Builtin::Light::ClusterBuffer] = m_pClusterBuffer;
 	m_resources[Builtin::Light::PagesBuffer] = m_pLightPagesBuffer;
+	m_resources[Builtin::Light::InfoBuffer] = m_lightBuffer;
+	m_resources[Builtin::Light::PointLightCubemapBuffer] = m_pointViewInfo;
+	m_resources[Builtin::Light::SpotLightMatrixBuffer] = m_spotViewInfo;
+	m_resources[Builtin::Light::DirectionalLightCascadeBuffer] = m_directionalViewInfo;
 }
 
 LightManager::~LightManager() {

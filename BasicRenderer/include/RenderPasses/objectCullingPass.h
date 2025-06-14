@@ -30,11 +30,11 @@ public:
 		m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
 		m_masterIndirectCommandsBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::IndirectCommandBuffers::Master)->GetSRVInfo(0).index;
 
-		m_primaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
-		m_primaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
-		m_primaryCameraBlendIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
+		//m_primaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
+		//m_primaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+		//m_primaryCameraBlendIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
 
-		m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling);
+		//m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling);
 	
 		m_activeOpaqueDrawSetIndicesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::Opaque)->GetSRVInfo(0).index;
 		m_activeAlphaTestDrawSetIndicesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::AlphaTest)->GetSRVInfo(0).index;
@@ -83,15 +83,15 @@ public:
 		if (numOpaqueDraws > 0) {
 			unsigned int numThreadGroups = std::ceil(numOpaqueDraws / 64.0);
 			// First, process buffer for main camera
-			auto resource = m_primaryCameraOpaqueIndirectCommandBuffer->GetResource();
-			auto apiResource = resource->GetAPIResource();
+			auto resource = primaryView->indirectCommandBuffers.opaqueIndirectCommandBuffer->GetResource();
+			//auto apiResource = resource->GetAPIResource();
 			//auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 			//auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
 			unsigned int bufferIndices[NumVariableBufferRootConstants] = {};
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = m_activeOpaqueDrawSetIndicesBufferSRVIndex;
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = resource->GetUAVShaderVisibleInfo(0).index;
 			bufferIndices[MaxDrawIndex] = numOpaqueDraws-1;
-			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -135,7 +135,7 @@ public:
 		auto numAlphaTestDraws = context.drawStats.numAlphaTestDraws;
 		if (numAlphaTestDraws > 0) {
 			unsigned int numThreadGroups = std::ceil(numAlphaTestDraws / 64.0);
-			auto resource = m_primaryCameraAlphaTestIndirectCommandBuffer->GetResource();
+			auto resource = primaryView->indirectCommandBuffers.alphaTestIndirectCommandBuffer->GetResource();
 			auto apiResource = resource->GetAPIResource();
 			//auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 			//auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
@@ -143,7 +143,7 @@ public:
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = m_activeAlphaTestDrawSetIndicesBufferSRVIndex;
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = resource->GetUAVShaderVisibleInfo(0).index;
 			bufferIndices[MaxDrawIndex] = numAlphaTestDraws-1;
-			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -189,7 +189,7 @@ public:
 			auto numBlendDraws = context.drawStats.numBlendDraws;
 			if (numBlendDraws > 0) {
 				unsigned int numThreadGroups = std::ceil(numBlendDraws / 64.0);
-				auto resource = m_primaryCameraBlendIndirectCommandBuffer->GetResource();
+				auto resource = primaryView->indirectCommandBuffers.blendIndirectCommandBuffer->GetResource();
 				auto apiResource = resource->GetAPIResource();
 				//auto uavShaderVisibleInfo = resource->GetUAVShaderVisibleInfo();
 				//auto uavNonShaderVisibleInfo = resource->GetUAVNonShaderVisibleInfo();
@@ -197,7 +197,7 @@ public:
 				bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = m_activeBlendDrawSetIndicesBufferSRVIndex;
 				bufferIndices[IndirectCommandBufferDescriptorIndex] = resource->GetUAVShaderVisibleInfo(0).index;
 				bufferIndices[MaxDrawIndex] = numBlendDraws - 1;
-				bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+				bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 
 				commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 				//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -295,15 +295,15 @@ private:
 	int m_perMeshBufferSRVIndex = -1;
 	int m_masterIndirectCommandsBufferSRVIndex = -1;
 
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer;
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraAlphaTestIndirectCommandBuffer;
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraBlendIndirectCommandBuffer;
+	//std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer;
+	//std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraAlphaTestIndirectCommandBuffer;
+	//std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraBlendIndirectCommandBuffer;
 
 	int m_activeOpaqueDrawSetIndicesBufferSRVIndex = -1;
 	int m_activeAlphaTestDrawSetIndicesBufferSRVIndex = -1;
 	int m_activeBlendDrawSetIndicesBufferSRVIndex = -1;
 
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer;
+	//std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingIndirectCommandBuffer;
 
 
 

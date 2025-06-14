@@ -27,6 +27,11 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
 	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
 	m_resources[Builtin::PerMeshBuffer] = m_perMeshBuffers;
+	m_resources[Builtin::PerMeshInstanceBuffer] = m_perMeshInstanceBuffers;
+	m_resources[Builtin::MeshResources::MeshletBounds] = m_meshletBoundsBuffer;
+	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
+	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
+	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, bool useMeshletReorderedVertices) {

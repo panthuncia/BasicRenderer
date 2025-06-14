@@ -46,7 +46,7 @@ public:
     std::shared_ptr<Resource> Request(ResourceIdentifier const& id) const {
         auto* node = const_cast<ResourceRegistry*>(this)
             ->traverse(id, /*create=*/false);
-        if (!node) throw std::runtime_error("Unknown resource: " + id.ToString());
+        if (!node) return nullptr;//throw std::runtime_error("Unknown resource: " + id.ToString());
         if (!node->resource)
             throw std::runtime_error("'" + id.ToString() + "' is a namespace, not a leaf");
         return node->resource;

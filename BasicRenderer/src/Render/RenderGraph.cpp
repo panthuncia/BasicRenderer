@@ -808,6 +808,16 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 		_providerMap[key] = prov;
 	}
 	_providers.push_back(prov);
+
+	// Register all resources provided by this provider
+	for (const auto& key : prov->GetSupportedKeys()) {
+		auto resource = prov->ProvideResource(key);
+		if (resource) {
+			RegisterResource(key, resource, prov);
+		} else {
+			spdlog::warn("Provider returned null for advertised key: {}", key.ToString());
+		}
+	}
 }
 
 void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,
@@ -821,6 +831,9 @@ void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resour
 
 std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
 	// If it's already in our registry, return it
+	if (rid.hasPrefix("Builtin::MeshResources")) {
+		spdlog::info("here");
+	}
 	auto cached = _registry.Request(rid);
 	if (cached) {
 		return cached;
@@ -850,8 +863,7 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 		// If we are allowed to fail, return nullptr
 		return nullptr;
 	}
-	std::string_view name = rid.ToString();
-	throw std::runtime_error("No resource provider registered for key: " + std::string(name));
+	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
 }
 
 ComputePassBuilder RenderGraph::BuildComputePass(std::string const& name) {

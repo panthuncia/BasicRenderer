@@ -49,7 +49,9 @@
       "CurrentCubemap": {}
     },
     "IndirectCommandBuffers": {
-      "Primary": {},
+      "Opaque": {},
+      "AlphaTest": {},
+      "Blend": {},
       "MeshletCulling": {},
       "Master": {}
     },

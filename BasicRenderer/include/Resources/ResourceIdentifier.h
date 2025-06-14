@@ -4,8 +4,11 @@
 #include <string_view>
 #include <cassert>
 #include <functional>
+#include <refl.hpp>
 
 #include "Resources/ResourceStateTracker.h"
+
+template<typename T> struct ReflectNamespaceTag {};
 
 struct ResourceIdentifier {
     // e.g. {"Builtin","GBuffer","Normals"}
@@ -29,6 +32,11 @@ struct ResourceIdentifier {
 
     // direct-from-literal ctor:
     ResourceIdentifier(char const* s) : ResourceIdentifier(std::string_view{ s }){}
+
+    template<typename T>
+    explicit ResourceIdentifier(std::in_place_type_t<T>)
+        : ResourceIdentifier{ refl::reflect<T>().name() }
+    {}
 
     // join back into "A::B::C"
     std::string ToString() const {

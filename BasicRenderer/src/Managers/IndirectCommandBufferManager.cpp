@@ -11,13 +11,13 @@
 #include "../../generated/BuiltinResources.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
-    m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+    //m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_opaqueResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_alphaTestResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_blendResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
-	m_parentResourceGroup->AddResource(m_opaqueResourceGroup);
-	m_parentResourceGroup->AddResource(m_alphaTestResourceGroup);
-	m_parentResourceGroup->AddResource(m_blendResourceGroup);
+	//m_parentResourceGroup->AddResource(m_opaqueResourceGroup);
+	//m_parentResourceGroup->AddResource(m_alphaTestResourceGroup);
+	//m_parentResourceGroup->AddResource(m_blendResourceGroup);
 
 	m_meshletCullingCommandResourceGroup = std::make_shared<ResourceGroup>(L"MeshletCullingCommandBuffers");
 
@@ -26,7 +26,9 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 	UpdateBuffersForBucket(MaterialBuckets::AlphaTest, 1000);
 	UpdateBuffersForBucket(MaterialBuckets::Blend, 1000);
 
-	m_resources[Builtin::IndirectCommandBuffers::Primary] = m_parentResourceGroup;
+	m_resources[Builtin::IndirectCommandBuffers::Opaque] = m_opaqueResourceGroup;
+	m_resources[Builtin::IndirectCommandBuffers::AlphaTest] = m_alphaTestResourceGroup;
+	m_resources[Builtin::IndirectCommandBuffers::Blend] = m_blendResourceGroup;
 	m_resources[Builtin::IndirectCommandBuffers::MeshletCulling] = m_meshletCullingCommandResourceGroup;
 }
 
@@ -47,7 +49,7 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 	//DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest);
 	//DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend);
 
-	DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup);
+	//DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup);
 }
 
 // Add a single buffer to an existing ID
