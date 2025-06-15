@@ -145,7 +145,7 @@ private:
     }
     void CreateSkyboxRootSignature() {
 
-        CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[3] = {};
+        CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[2] = {};
 
         skyboxRootParameters[0].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
 		skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Environment buffer index

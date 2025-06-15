@@ -31,13 +31,13 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     }
     
 #if defined(PSO_SHADOW)
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[LightBufferDescriptorIndex];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
-            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[PointLightCubemapBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[pointLightCubemapBufferDescriptorIndex];
             uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -45,7 +45,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             break;
         }
         case 1: { // Spot light
-            StructuredBuffer<unsigned int> spotLightMapIndicesBuffer = ResourceDescriptorHeap[SpotLightMatrixBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> spotLightMapIndicesBuffer = ResourceDescriptorHeap[spotLightMatrixBufferDescriptorIndex];
             uint lightCameraIndex = spotLightMapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -53,7 +53,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             break;
         }
         case 2: { // Directional light
-            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[DirectionalLightCascadeBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[directionalLightCascadeBufferDescriptorIndex];
             uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;

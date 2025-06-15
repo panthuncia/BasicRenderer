@@ -26,14 +26,14 @@ public:
 	}
 
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
-		m_normalMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
-		m_postSkinningVertexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
-		m_meshletOffsetBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
-		m_meshletVertexIndexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
-		m_meshletTriangleBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
-		m_perObjectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+		//m_normalMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
+		//m_postSkinningVertexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
+		//m_meshletOffsetBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
+		//m_meshletVertexIndexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
+		//m_meshletTriangleBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
+		//m_perObjectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
 		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
-		m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
+		//m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
 		m_lightClusterBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
 		m_lightPagesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetSRVInfo(0).index;
 
@@ -90,14 +90,14 @@ public:
 		auto& cameraManager = context.cameraManager;
 		auto& lightManager = context.lightManager;
 
-		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferSRVIndex;
-		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferSRVIndex;
-		staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferSRVIndex;
-		staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferSRVIndex;
-		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferSRVIndex;
-		staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
+		//staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferSRVIndex;
+		//staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferSRVIndex;
+		//staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferSRVIndex;
+		//staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferSRVIndex;
+		//staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferSRVIndex;
+		//staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
 		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
+		//staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
 		staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureSRVIndex;
 		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureSRVIndex;
 		staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureSRVIndex;
@@ -118,10 +118,6 @@ public:
 		lightClusterInfo[LightClusterBufferDescriptorIndex] = m_lightClusterBufferSRVIndex;
 		lightClusterInfo[LightPagesBufferDescriptorIndex] = m_lightPagesBufferSRVIndex;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
-
-		unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-		variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = m_primaryCameraMeshletFrustrumCullingBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
-		commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
 
 		unsigned int misc[NumMiscUintRootConstants] = {};
 		misc[0] = m_depthBufferSRVIndex;
@@ -147,16 +143,14 @@ private:
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
 
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingBitfieldBuffer;
-
-	int m_normalMatrixBufferSRVIndex = -1;
-	int m_postSkinningVertexBufferSRVIndex = -1;
-	int m_meshletOffsetBufferSRVIndex = -1;
-	int m_meshletVertexIndexBufferSRVIndex = -1;
-	int m_meshletTriangleBufferSRVIndex = -1;
-	int m_perObjectBufferSRVIndex = -1;
+	//int m_normalMatrixBufferSRVIndex = -1;
+	//int m_postSkinningVertexBufferSRVIndex = -1;
+	//int m_meshletOffsetBufferSRVIndex = -1;
+	//int m_meshletVertexIndexBufferSRVIndex = -1;
+	//int m_meshletTriangleBufferSRVIndex = -1;
+	//int m_perObjectBufferSRVIndex = -1;
 	int m_cameraBufferSRVIndex = -1;
-	int m_perMeshBufferSRVIndex = -1;
+	//int m_perMeshBufferSRVIndex = -1;
 	int m_lightClusterBufferSRVIndex = -1;
 	int m_lightPagesBufferSRVIndex = -1;
 

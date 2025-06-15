@@ -60,13 +60,13 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     }
     
 #if defined(PSO_SHADOW)
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[LightBufferDescriptorIndex];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
-            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[PointLightCubemapBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[pointLightCubemapBufferDescriptorIndex];
             uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -74,7 +74,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
             break;
         }
         case 1: { // Spot light
-            StructuredBuffer<unsigned int> spotLightMatrixIndexBuffer = ResourceDescriptorHeap[SpotLightMatrixBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> spotLightMatrixIndexBuffer = ResourceDescriptorHeap[spotLightMatrixBufferDescriptorIndex];
             uint lightCameraIndex = spotLightMatrixIndexBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -82,7 +82,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
             break;
         }
         case 2: { // Directional light
-            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[DirectionalLightCascadeBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[directionalLightCascadeBufferDescriptorIndex];
             uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -290,7 +290,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     FragmentInfo fragmentInfo;
     GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
     
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, perFrameBuffer.environmentBufferDescriptorIndex, true);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, environmentBufferDescriptorIndex, true);
 
     
     float3 lighting = lightingOutput.lighting;

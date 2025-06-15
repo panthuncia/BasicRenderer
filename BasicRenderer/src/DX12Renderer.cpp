@@ -1198,7 +1198,13 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth->linearDepthMap);
 
-	//newGraph->AddResource(depthTexture, false);
+    auto view = currentScene->GetPrimaryCamera().get<Components::RenderView>();
+    newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view->indirectCommandBuffers.opaqueIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view->indirectCommandBuffers.alphaTestIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view->indirectCommandBuffers.blendIndirectCommandBuffer);
+	//newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
+    //newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1252,7 +1258,7 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
         newGraph->BuildRenderPass("SkyboxPass")
-            .WithShaderResource(Builtin::Environment::CurrentCubemap)
+            .WithShaderResource(Builtin::Environment::CurrentCubemap, Builtin::Environment::InfoBuffer)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .Build<SkyboxRenderPass>();

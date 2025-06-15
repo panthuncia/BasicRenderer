@@ -136,8 +136,11 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     }
 
     auto occludersPrepassBuilder = graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-        .WithShaderResource(Builtin::PerObjectBuffer,
+        .WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::PerObjectBuffer,
+			Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
+            Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices,
             Builtin::CameraBuffer)
         .WithRenderTarget(
@@ -176,9 +179,9 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
     // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
     graph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-        .WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
-        .WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup)
-        .WithIndirectArguments(Builtin::IndirectCommandBuffers::MeshletCulling)
+        .WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PerMeshInstanceBuffer, Builtin::MeshResources::MeshletBounds, Builtin::CameraBuffer)
+        .WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, Builtin::PrimaryCamera::MeshletBitfield)
+        .WithIndirectArguments(Builtin::IndirectCommandBuffers::MeshletCulling, Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset)
         .Build<MeshletCullingPass>(false, true, true);
 
     // Now, render the occluder remainders (prepass & shadows)
@@ -210,8 +213,11 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     }
 
     auto occludersRemaindersPrepassBuilder = graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-        .WithShaderResource(Builtin::PerObjectBuffer, 
-            Builtin::PerMeshBuffer, 
+        .WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::PerObjectBuffer, 
+            Builtin::NormalMatrixBuffer,
+            Builtin::PerMeshBuffer,
+            Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices, 
             Builtin::CameraBuffer)
         .WithRenderTarget(
@@ -278,12 +284,14 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
     if (meshletCulling || occlusionCulling) {
         graph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum *or* occlusion culled are sent to the meshlet culling pass
             .WithShaderResource(Builtin::PerObjectBuffer, 
-                Builtin::PerMeshBuffer, 
-                Builtin::CameraBuffer, 
+                Builtin::PerMeshBuffer,
+                Builtin::PerMeshInstanceBuffer,
+                Builtin::MeshResources::MeshletBounds,
+                Builtin::CameraBuffer,
                 Builtin::PrimaryCamera::LinearDepthMap, 
                 Builtin::Shadows::LinearShadowMaps)
-            .WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup)
-            .WithIndirectArguments(Builtin::IndirectCommandBuffers::MeshletCulling)
+            .WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, Builtin::PrimaryCamera::MeshletBitfield)
+            .WithIndirectArguments(Builtin::IndirectCommandBuffers::MeshletCulling, Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset)
             .Build<MeshletCullingPass>(false, false, true);
     }
 }
@@ -298,8 +306,11 @@ void BuildZPrepass(RenderGraph* graph) {
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     auto newObjectsPrepassBuilder = graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-        .WithShaderResource(Builtin::PerObjectBuffer,
+        .WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::PerObjectBuffer,
+			Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
+            Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices,
             Builtin::CameraBuffer)
         .WithRenderTarget(
@@ -439,7 +450,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
         .Build<GTAOFilterPass>(GTAOConstantBuffer);
 
     graph->BuildComputePass("GTAOMainPass") // Main pass
-        .WithShaderResource(Builtin::GBuffer::Normals, Builtin::GTAO::WorkingDepths)
+        .WithShaderResource(Builtin::GBuffer::Normals, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
         .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
         .Build<GTAOMainPass>(GTAOConstantBuffer);
 
@@ -530,7 +541,14 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
     std::string primaryPassName = deferredRendering ? "Deferred Pass" : "Forward Pass";
     auto primaryPassBuilder = graph->BuildRenderPass(primaryPassName)
-        .WithShaderResource(Builtin::CameraBuffer, Builtin::Environment::PrefilteredCubemapsGroup)
+        .WithShaderResource(Builtin::CameraBuffer, 
+            Builtin::Environment::PrefilteredCubemapsGroup, 
+            Builtin::Light::ActiveLightIndices, 
+            Builtin::Light::InfoBuffer,
+            Builtin::Light::PointLightCubemapBuffer,
+            Builtin::Light::DirectionalLightCascadeBuffer,
+            Builtin::Light::SpotLightMatrixBuffer,
+            Builtin::Environment::InfoBuffer)
         .WithRenderTarget(Builtin::Color::HDRColorTarget);
 
     if (!deferredRendering) {
@@ -565,6 +583,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
         primaryPassBuilder.WithShaderResource(
             Builtin::GBuffer::Normals,
             Builtin::GBuffer::Albedo,
+            Builtin::GBuffer::Emissive,
             Builtin::GBuffer::MetallicRoughness,
             Builtin::PrimaryCamera::DepthTexture);
     }
@@ -620,11 +639,18 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         .WithShaderResource(Builtin::Light::BufferGroup, 
             Builtin::PostSkinningVertices, 
             Builtin::PerObjectBuffer, 
+			Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer, 
+            Builtin::PerMeshInstanceBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup, 
             Builtin::Environment::InfoBuffer, 
             Builtin::CameraBuffer,  
-            Builtin::GBuffer::Normals)
+            Builtin::GBuffer::Normals,
+            Builtin::Light::ActiveLightIndices,
+            Builtin::Light::InfoBuffer,
+            Builtin::Light::PointLightCubemapBuffer,
+            Builtin::Light::SpotLightMatrixBuffer,
+            Builtin::Light::DirectionalLightCascadeBuffer)
         .IsGeometryPass();
     if (gtao) {
         PPLLFillBuilder.WithShaderResource(Builtin::GTAO::OutputAOTerm);
@@ -638,7 +664,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     if (useMeshShaders) {
         PPLLFillBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
         if (indirect) {
-            PPLLFillBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Blend);
+            PPLLFillBuilder.WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
         }
     }
     PPLLFillBuilder.Build<PPLLFillPass>(wireframe,

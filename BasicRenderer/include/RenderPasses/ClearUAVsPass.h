@@ -40,9 +40,8 @@ public:
 
 		// Opaque buffer
 		for (auto& child : m_opaqueIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<DynamicGloballyIndexedResource> dynamicResource = std::static_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!dynamicResource) continue;
-			auto resource = dynamicResource->GetResource();
+			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			if (!resource) continue;
 			auto counterOffset = resource->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
@@ -50,9 +49,8 @@ public:
 
 		// Alpha test buffer
 		for (auto& child : m_alphaTestIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<DynamicGloballyIndexedResource> dynamicResource = std::static_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!dynamicResource) continue;
-			auto resource = dynamicResource->GetResource();
+			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			if (!resource) continue;
 			auto counterOffset = resource->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
@@ -61,9 +59,8 @@ public:
 		// Blend buffer
 		if (!m_clearBlend) return {};
 		for (auto& child : m_blendIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<DynamicGloballyIndexedResource> dynamicResource = std::static_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!dynamicResource) continue;
-			auto resource = dynamicResource->GetResource();
+			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			if (!resource) continue;
 			auto counterOffset = resource->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
@@ -110,9 +107,8 @@ public:
 
 		// Meshlet frustrum culling buffer
 		for (auto& child : m_meshletCullingCommandBuffers->GetChildren()) {
-			std::shared_ptr<DynamicGloballyIndexedResource> dynamicResource = std::static_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!dynamicResource) continue;
-			auto resource = dynamicResource->GetResource();
+			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			if (!resource) continue;
 			auto counterOffset = resource->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));

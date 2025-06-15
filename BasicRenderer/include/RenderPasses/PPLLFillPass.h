@@ -38,7 +38,8 @@ public:
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		
 		m_PPLLHeadPointerTexture = resourceRegistryView.Request<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
-		m_primaryCameraMeshletFrustrumCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+		//m_primaryCameraMeshletFrustrumCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+		if (m_indirect)
 		m_primaryCameraBlendIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
 
 		m_PPLLBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PPLL::Buffer)->GetUAVShaderVisibleInfo(0).index;
@@ -265,7 +266,7 @@ private:
 
 	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
 	std::shared_ptr<Buffer> m_PPLLCounter;
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingBitfieldBuffer;
+	//std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingBitfieldBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraBlendIndirectCommandBuffer;
 	int m_PPLLBufferUAVIndex = -1;
 	int m_normalMatrixBufferSRVIndex = -1;

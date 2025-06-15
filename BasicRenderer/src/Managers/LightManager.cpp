@@ -57,6 +57,7 @@ LightManager::LightManager() {
 	m_resources[Builtin::Light::PointLightCubemapBuffer] = m_pointViewInfo;
 	m_resources[Builtin::Light::SpotLightMatrixBuffer] = m_spotViewInfo;
 	m_resources[Builtin::Light::DirectionalLightCascadeBuffer] = m_directionalViewInfo;
+	m_resources[Builtin::Light::ActiveLightIndices] = m_activeLightIndices;
 }
 
 LightManager::~LightManager() {
