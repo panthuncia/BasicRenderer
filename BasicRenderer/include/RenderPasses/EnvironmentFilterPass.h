@@ -17,6 +17,11 @@ public:
         m_viewMatrices = GetCubemapViewMatrices({ 0.0, 0.0, 0.0 });
     }
 
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        builder->WithShaderResource(Builtin::Environment::WorkingCubemapGroup)
+            .WithRenderTarget(Builtin::Environment::PrefilteredCubemapsGroup);
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateRootSignature();

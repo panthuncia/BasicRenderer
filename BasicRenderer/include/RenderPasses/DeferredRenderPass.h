@@ -26,6 +26,34 @@ public:
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
 	}
 
+	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		builder->WithShaderResource(Builtin::CameraBuffer,
+			Builtin::Environment::PrefilteredCubemapsGroup,
+			Builtin::Light::ActiveLightIndices,
+			Builtin::Light::InfoBuffer,
+			Builtin::Light::PointLightCubemapBuffer,
+			Builtin::Light::DirectionalLightCascadeBuffer,
+			Builtin::Light::SpotLightMatrixBuffer,
+			Builtin::Environment::InfoBuffer,
+			Builtin::GBuffer::Normals,
+			Builtin::GBuffer::Albedo,
+			Builtin::GBuffer::Emissive,
+			Builtin::GBuffer::MetallicRoughness,
+			Builtin::PrimaryCamera::DepthTexture,
+			Builtin::Environment::CurrentCubemap,
+			Builtin::Shadows::ShadowMaps)
+			.WithRenderTarget(Builtin::Color::HDRColorTarget)
+			.WithDepthRead(Builtin::PrimaryCamera::DepthTexture);
+
+		if (m_clusteredLightingEnabled) {
+			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
+		}
+
+		if (m_gtaoEnabled) {
+			builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
+		}
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		//m_normalMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
 		//m_postSkinningVertexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;

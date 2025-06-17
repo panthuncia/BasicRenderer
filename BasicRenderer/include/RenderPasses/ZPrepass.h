@@ -40,6 +40,36 @@ public:
     ~ZPrepass() {
     }
 
+    void DeclareResourceUsages(RenderPassBuilder* builder) {
+        builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::PerObjectBuffer,
+            Builtin::NormalMatrixBuffer,
+            Builtin::PerMeshBuffer,
+            Builtin::PerMeshInstanceBuffer,
+            Builtin::PostSkinningVertices,
+            Builtin::CameraBuffer)
+            .WithRenderTarget(
+                Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }),
+                Builtin::GBuffer::Normals,
+                Builtin::GBuffer::MotionVectors)
+            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+            .IsGeometryPass();
+        if (m_deferred) {
+            builder->WithRenderTarget(
+                Builtin::GBuffer::Albedo,
+                Builtin::GBuffer::MetallicRoughness,
+                Builtin::GBuffer::Emissive);
+        }
+
+        if (m_meshShaders) {
+            builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
+            if (m_indirect) {
+                builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, 
+                    Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+            }
+        }
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();

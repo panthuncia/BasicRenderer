@@ -15,6 +15,11 @@ public:
 		CreateXeGTAOComputePSO();
     }
 
+    void DeclareResourceUsages(ComputePassBuilder* builder){
+        builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::DepthTexture)
+            .WithUnorderedAccess(Builtin::GTAO::WorkingDepths);
+    }
+
     PassReturn Execute(RenderContext& context) override {
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;

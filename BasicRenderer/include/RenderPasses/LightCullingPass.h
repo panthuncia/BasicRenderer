@@ -21,6 +21,11 @@ public:
 	~LightCullingPass() {
 	}
 
+	void DeclareResourceUsages(ComputePassBuilder* builder) {
+		builder->WithShaderResource(Builtin::CameraBuffer, Builtin::Light::ActiveLightIndices, Builtin::Light::InfoBuffer)
+			.WithUnorderedAccess(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer, Builtin::Light::PagesCounter);
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();

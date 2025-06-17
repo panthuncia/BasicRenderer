@@ -20,6 +20,13 @@ public:
 	}
 	~DebugSpherePass() {
 	}
+
+	void DeclareResourceUsages(RenderPassBuilder* builder) {
+		builder->WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
+			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+			.IsGeometryPass();
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();

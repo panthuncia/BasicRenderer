@@ -19,6 +19,21 @@ public:
 	~ObjectCullingPass() {
 	}
 
+	void DeclareResourceUsages(ComputePassBuilder* builder) {
+		builder->WithShaderResource(Builtin::PerObjectBuffer,
+				Builtin::PerMeshBuffer,
+				Builtin::CameraBuffer,
+				Builtin::IndirectCommandBuffers::Master,
+				Builtin::ActiveDrawSetIndices::Opaque,
+				Builtin::ActiveDrawSetIndices::AlphaTest,
+				Builtin::ActiveDrawSetIndices::Blend)
+			.WithUnorderedAccess(Builtin::IndirectCommandBuffers::Opaque,
+				Builtin::IndirectCommandBuffers::AlphaTest,
+				Builtin::IndirectCommandBuffers::MeshletCulling,
+				Builtin::MeshInstanceMeshletCullingBitfieldGroup,
+				Builtin::MeshInstanceOcclusionCullingBitfieldGroup);
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();

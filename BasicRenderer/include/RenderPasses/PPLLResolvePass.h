@@ -26,6 +26,12 @@ public:
 		m_PPLLHeadPointerTexture = PPLLHeads;
 		m_PPLLBuffer = PPLLBuffer;
 	}
+
+	void DeclareResourceUsages(RenderPassBuilder* builder) {
+		builder->WithShaderResource(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::Buffer)
+			.WithRenderTarget(Builtin::Color::HDRColorTarget);
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreatePSO();
 

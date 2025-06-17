@@ -41,6 +41,42 @@ public:
 	~ForwardRenderPass() {
 	}
 
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        builder->WithShaderResource(Builtin::CameraBuffer,
+            Builtin::Environment::PrefilteredCubemapsGroup,
+            Builtin::Light::ActiveLightIndices,
+            Builtin::Light::InfoBuffer,
+            Builtin::Light::PointLightCubemapBuffer,
+            Builtin::Light::DirectionalLightCascadeBuffer,
+            Builtin::Light::SpotLightMatrixBuffer,
+            Builtin::Environment::InfoBuffer,
+            Builtin::Environment::CurrentCubemap,
+            Builtin::NormalMatrixBuffer, 
+            Builtin::PerObjectBuffer, 
+            Builtin::PerMeshBuffer, 
+            Builtin::PerMeshInstanceBuffer, 
+            Builtin::PostSkinningVertices,
+            Builtin::Shadows::ShadowMaps)
+            .WithRenderTarget(Builtin::Color::HDRColorTarget)
+            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+            .IsGeometryPass();
+        if (m_clusteredLightingEnabled) {
+            builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
+        }
+
+        if (m_gtaoEnabled) {
+            builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
+        }
+
+        if (m_meshShaders) {
+            builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
+            if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
+                builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, 
+                    Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+            }
+        }
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -80,12 +116,6 @@ public:
             m_primaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
         }
     }
-
-    void DeclareResourceUsages(RenderPassBuilder* builder) override {
-        //builder->WithShaderResource(Builtin::CameraBuffer, Builtin::Environment::PrefilteredCubemapsGroup)
-        //    .WithRenderTarget(Builtin::Color::HDRColorTarget);
-    };
-
 
     PassReturn Execute(RenderContext& context) override {
         auto& psoManager = PSOManager::GetInstance();

@@ -16,6 +16,9 @@ class ResourceGroup;
 class BufferView;
 class CameraManager;
 
+// TODO: Find better way of batching these with namespaces
+#define MESH_RESOURCE_IDFENTIFIERS Builtin::MeshResources::MeshletBounds, Builtin::MeshResources::MeshletOffsets, Builtin::MeshResources::MeshletVertexIndices, Builtin::MeshResources::MeshletTriangles
+
 class MeshManager : public IResourceProvider {
 public:
 	static std::unique_ptr<MeshManager> CreateUnique() {

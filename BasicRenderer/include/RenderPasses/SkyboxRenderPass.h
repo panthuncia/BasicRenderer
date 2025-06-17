@@ -12,6 +12,12 @@ public:
     SkyboxRenderPass() {
     }
 
+    void DeclareResourceUsages(RenderPassBuilder* builder) {
+        builder->WithShaderResource(Builtin::Environment::CurrentCubemap, Builtin::Environment::InfoBuffer)
+            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+            .WithRenderTarget(Builtin::Color::HDRColorTarget);
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateSkyboxRootSignature();

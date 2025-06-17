@@ -12,6 +12,11 @@ class GTAOMainPass : public ComputePass {
 public:
     GTAOMainPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
 
+    void DeclareResourceUsages(ComputePassBuilder* builder) {
+        builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
+            .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1);
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& manager = DeviceManager::GetInstance();
         auto& device = manager.GetDevice();

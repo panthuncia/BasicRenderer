@@ -17,6 +17,10 @@ public:
 		CreatePSO();
 	}
 
+    void DeclareResourceUsages(RenderPassBuilder* builder) {
+        builder->WithShaderResource(Builtin::Color::HDRColorTarget);
+    }
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 	}
 

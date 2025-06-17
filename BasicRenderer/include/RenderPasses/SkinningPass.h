@@ -21,6 +21,11 @@ public:
 	~SkinningPass() {
 	}
 
+	void DeclareResourceUsages(ComputePassBuilder* builder) {
+		builder->WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PerMeshInstanceBuffer, Builtin::PreSkinningVertices, Builtin::NormalMatrixBuffer)
+			.WithUnorderedAccess(Builtin::PostSkinningVertices);
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		opaqueQuery = ecsWorld.query_builder<Components::OpaqueSkinned, Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();

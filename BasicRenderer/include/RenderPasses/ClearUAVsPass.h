@@ -17,6 +17,13 @@ class ClearIndirectDrawCommandUAVsPass : public RenderPass {
 public:
 	ClearIndirectDrawCommandUAVsPass(bool clearBlend) : m_clearBlend(clearBlend) {}
 
+	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		builder->WithCopyDest(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest);
+		if (m_clearBlend) {
+			builder->WithCopyDest(Builtin::IndirectCommandBuffers::Blend);
+		}
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -86,6 +93,10 @@ private:
 class ClearMeshletCullingCommandUAVsPass : public RenderPass {
 public:
 	ClearMeshletCullingCommandUAVsPass() {}
+
+	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		builder->WithCopyDest(Builtin::IndirectCommandBuffers::MeshletCulling);
+	}
 
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();

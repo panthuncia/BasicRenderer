@@ -36,6 +36,11 @@ public:
 	~EnvironmentSHPass() {
 	}
 
+	void DeclareResourceUsages(ComputePassBuilder* builder) override {
+		builder->WithShaderResource(Builtin::Environment::WorkingCubemapGroup)
+			.WithUnorderedAccess(Builtin::Environment::InfoBuffer);
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreatePSO();
 

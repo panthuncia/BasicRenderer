@@ -15,6 +15,11 @@ public:
 		CreateXeGTAOComputePSO();
     }
 
+    void DeclareResourceUsages(ComputePassBuilder* builder) {
+        builder->WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
+            .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm);
+    }
+
     PassReturn Execute(RenderContext& context) override {
 
         auto& psoManager = PSOManager::GetInstance();

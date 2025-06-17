@@ -19,6 +19,11 @@ public:
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
     }
 
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        builder->WithShaderResource(Builtin::Environment::WorkingHDRIGroup)
+            .WithRenderTarget(Builtin::Environment::WorkingCubemapGroup);
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
 		CreateEnvironmentConversionRootSignature();

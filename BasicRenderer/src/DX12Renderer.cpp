@@ -1213,8 +1213,6 @@ void DX12Renderer::CreateRenderGraph() {
 
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
-        .WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PerMeshInstanceBuffer, Builtin::PreSkinningVertices, Builtin::NormalMatrixBuffer)
-        .WithUnorderedAccess(Builtin::PostSkinningVertices)
         .Build<SkinningPass>();
 
 
@@ -1258,9 +1256,6 @@ void DX12Renderer::CreateRenderGraph() {
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
         newGraph->BuildRenderPass("SkyboxPass")
-            .WithShaderResource(Builtin::Environment::CurrentCubemap, Builtin::Environment::InfoBuffer)
-            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
-            .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .Build<SkyboxRenderPass>();
     }
 
@@ -1273,7 +1268,6 @@ void DX12Renderer::CreateRenderGraph() {
     }
 
     newGraph->BuildRenderPass("TonemappingPass")
-        .WithShaderResource(Builtin::Color::HDRColorTarget)
         .Build<TonemappingPass>();
 
     debugPassBuilder.Build<DebugRenderPass>();
@@ -1287,9 +1281,6 @@ void DX12Renderer::CreateRenderGraph() {
 
     if (getDrawBoundingSpheres()) {
 		auto debugSphereBuilder = newGraph->BuildRenderPass("DebugSpherePass")
-			.WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
-			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
-			.IsGeometryPass()
 			.Build<DebugSpherePass>();
     }
 

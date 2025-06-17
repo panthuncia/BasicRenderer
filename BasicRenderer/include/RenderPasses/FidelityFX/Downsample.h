@@ -32,6 +32,12 @@ public:
 		addObserver.destruct(); // Needed for clean shutdown
 		removeObserver.destruct();
     }
+
+    void DeclareResourceUsages(ComputePassBuilder* builder) {
+        builder->WithShaderResource(Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }), Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
+            .WithUnorderedAccess(Subresources(Builtin::PrimaryCamera::LinearDepthMap, FromMip{ 1 }), Subresources(Builtin::Shadows::LinearShadowMaps, FromMip{ 1 }));
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<spdConstants>(1, L"Downsample constants");
 

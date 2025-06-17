@@ -20,6 +20,17 @@ public:
         CreatePSO();
     }
 
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        if (!m_isUpsample) {
+            builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex, 1 }))
+                .WithRenderTarget(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex + 1, 1 }));
+        }
+        else {
+            builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex + 1, 1 }))
+                .WithRenderTarget(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex, 1 }));
+        }
+    }
+
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
     }
 
@@ -199,6 +210,11 @@ public:
 
     BloomBlendPass() {
         CreatePSO();
+    }
+
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ 1, 1 }))
+            .WithUnorderedAccess(Subresources(Builtin::Color::HDRColorTarget, Mip{ 0, 1 }));
     }
 
     void Setup(const ResourceRegistryView& resourceRegistryView) override {

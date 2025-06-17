@@ -21,6 +21,11 @@ public:
 	~ClusterGenerationPass() {
 	}
 
+	void DeclareResourceUsages(ComputePassBuilder* builder) {
+		builder->WithShaderResource(Builtin::CameraBuffer)
+			.WithUnorderedAccess(Builtin::Light::ClusterBuffer);
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();

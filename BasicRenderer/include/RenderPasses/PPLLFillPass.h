@@ -32,6 +32,41 @@ public:
 	~PPLLFillPass() {
 	}
 
+	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		builder->WithUnorderedAccess(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::Buffer, Builtin::PPLL::Counter)
+			.WithShaderResource(Builtin::Light::BufferGroup,
+				Builtin::PostSkinningVertices,
+				Builtin::PerObjectBuffer,
+				Builtin::NormalMatrixBuffer,
+				Builtin::PerMeshBuffer,
+				Builtin::PerMeshInstanceBuffer,
+				Builtin::Environment::PrefilteredCubemapsGroup,
+				Builtin::Environment::InfoBuffer,
+				Builtin::CameraBuffer,
+				Builtin::GBuffer::Normals,
+				Builtin::Light::ActiveLightIndices,
+				Builtin::Light::InfoBuffer,
+				Builtin::Light::PointLightCubemapBuffer,
+				Builtin::Light::SpotLightMatrixBuffer,
+				Builtin::Light::DirectionalLightCascadeBuffer,
+				Builtin::Shadows::ShadowMaps)
+			.IsGeometryPass();
+
+		if (m_gtaoEnabled) {
+			builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
+		}
+		if (m_clusteredLightingEnabled) {
+			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
+		}
+		if (m_meshShaders) {
+			builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
+			if (m_indirect) {
+				builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
+				builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
+			}
+		}
+	}
+
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
