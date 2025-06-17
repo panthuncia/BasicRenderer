@@ -91,7 +91,7 @@ public:
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = m_activeOpaqueDrawSetIndicesBufferSRVIndex;
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = resource->GetUAVShaderVisibleInfo(0).index;
 			bufferIndices[MaxDrawIndex] = numOpaqueDraws-1;
-			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -101,7 +101,7 @@ public:
 			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			miscRootConstants[UintRootConstant2] = primaryDepth->linearDepthMap->GetSRVInfo(0).index;
 			miscRootConstants[UintRootConstant3] = primaryView->meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[UintRootConstant5] = primaryView->indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			miscRootConstants[UintRootConstant5] = primaryView->indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
 			commandList->Dispatch(numThreadGroups, 1, 1);
@@ -112,7 +112,7 @@ public:
 					for (auto& view : lightViewInfo.renderViews) {
 						auto& buffer = view.indirectCommandBuffers.opaqueIndirectCommandBuffer;
 						bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 
 						unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
@@ -122,7 +122,7 @@ public:
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
 						i++;
@@ -143,7 +143,7 @@ public:
 			bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = m_activeAlphaTestDrawSetIndicesBufferSRVIndex;
 			bufferIndices[IndirectCommandBufferDescriptorIndex] = resource->GetUAVShaderVisibleInfo(0).index;
 			bufferIndices[MaxDrawIndex] = numAlphaTestDraws-1;
-			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 
 			commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 			//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -153,7 +153,7 @@ public:
 			miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			miscRootConstants[UintRootConstant2] = primaryDepth->linearDepthMap->GetSRVInfo(0).index;
 			miscRootConstants[UintRootConstant3] = primaryView->meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[UintRootConstant5] = primaryView->indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			miscRootConstants[UintRootConstant5] = primaryView->indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 		
 			commandList->Dispatch(numThreadGroups, 1, 1);
@@ -164,7 +164,7 @@ public:
 					for (auto& view : lightViewInfo.renderViews) {
 						auto& buffer = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer;
 						bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 						unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
@@ -173,7 +173,7 @@ public:
 						miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 						miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
 						i++;
@@ -197,7 +197,7 @@ public:
 				bufferIndices[ActiveDrawSetIndicesBufferDescriptorIndex] = m_activeBlendDrawSetIndicesBufferSRVIndex;
 				bufferIndices[IndirectCommandBufferDescriptorIndex] = resource->GetUAVShaderVisibleInfo(0).index;
 				bufferIndices[MaxDrawIndex] = numBlendDraws - 1;
-				bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+				bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = primaryView->indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 
 				commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 				//unsigned int cameraIndex = context.currentScene->GetCamera()->GetCameraBufferView()->GetOffset() / sizeof(CameraInfo);
@@ -207,7 +207,7 @@ public:
 				miscRootConstants[UintRootConstant1] = primaryView->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 				miscRootConstants[UintRootConstant2] = primaryDepth->linearDepthMap->GetSRVInfo(0).index;
 				miscRootConstants[UintRootConstant3] = primaryView->meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-				miscRootConstants[UintRootConstant5] = primaryView->indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+				miscRootConstants[UintRootConstant5] = primaryView->indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 				commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
 				commandList->Dispatch(numThreadGroups, 1, 1);
@@ -218,7 +218,7 @@ public:
 						for (auto& view : lightViewInfo.renderViews) {
 							auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
 							bufferIndices[IndirectCommandBufferDescriptorIndex] = buffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-							bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+							bufferIndices[MeshletCullingIndirectCommandBufferDescriptorIndex] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 							commandList->SetComputeRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, bufferIndices, 0);
 							unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
 							commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
@@ -227,7 +227,7 @@ public:
 							miscRootConstants[UintRootConstant1] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 							miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 							miscRootConstants[UintRootConstant3] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-							miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+							miscRootConstants[UintRootConstant5] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 							commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
 
 							i++;

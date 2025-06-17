@@ -89,8 +89,8 @@ Components::IndirectCommandBuffers IndirectCommandBufferManager::CreateBuffersFo
 	bufferComponent.opaqueIndirectCommandBuffer = pOpaqueDynamicResource;
 	bufferComponent.alphaTestIndirectCommandBuffer = pAlphaTestDynamicResource;
 	bufferComponent.blendIndirectCommandBuffer = pBlendDynamicResource;
-	bufferComponent.meshletFrustrumCullingIndirectCommandBuffer = pMeshletFrustrumCullingDynamicResource;
-	bufferComponent.meshletOcclusionCullingIndirectCommandBuffer = pMeshletOcclusionCullingDynamicResource;
+	bufferComponent.meshletCullingIndirectCommandBuffer = pMeshletFrustrumCullingDynamicResource;
+	//bufferComponent.meshletOcclusionCullingIndirectCommandBuffer = pMeshletOcclusionCullingDynamicResource;
 	bufferComponent.meshletCullingResetIndirectCommandBuffer = pMeshletFrustrumCullingResetDynamicResource;
 
 	m_viewIDToBuffers[viewID] = bufferComponent;
@@ -104,16 +104,16 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.opaqueIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.alphaTestIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.blendIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+	//DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletCullingResetIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 
 	m_opaqueResourceGroup->RemoveResource(bufferComponent.opaqueIndirectCommandBuffer->GetResource().get());
 	m_alphaTestResourceGroup->RemoveResource(bufferComponent.alphaTestIndirectCommandBuffer->GetResource().get());
 	m_blendResourceGroup->RemoveResource(bufferComponent.blendIndirectCommandBuffer->GetResource().get());
 
-	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource().get());
-	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource().get());
+	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletCullingIndirectCommandBuffer->GetResource().get());
+	//m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource().get());
 	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletCullingResetIndirectCommandBuffer->GetResource().get());
 
 	m_viewIDToBuffers.erase(viewID);
@@ -183,11 +183,11 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 			break;
 		}
 		auto& deletionManager = DeletionManager::GetInstance();
-		deletionManager.MarkForDelete(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-		deletionManager.MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+		deletionManager.MarkForDelete(bufferComponent.meshletCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+		//deletionManager.MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 		deletionManager.MarkForDelete(bufferComponent.meshletCullingResetIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-		bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
-		bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
+		bufferComponent.meshletCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
+		//bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
 		bufferComponent.meshletCullingResetIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
     }
 }

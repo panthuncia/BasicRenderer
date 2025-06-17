@@ -105,7 +105,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             Builtin::IndirectCommandBuffers::MeshletCulling, 
             Builtin::MeshInstanceMeshletCullingBitfieldGroup, 
             Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
-        .Build<ObjectCullingPass>(true, true);
+        .Build<ObjectCullingPass>(true, false);
 
     // We need to draw occluder shadows early
     auto drawShadows = graph->RequestResource(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
@@ -179,9 +179,6 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
     // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
     graph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-        .WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PerMeshInstanceBuffer, Builtin::MeshResources::MeshletBounds, Builtin::CameraBuffer)
-        .WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, Builtin::PrimaryCamera::MeshletBitfield)
-        .WithIndirectArguments(Builtin::IndirectCommandBuffers::MeshletCulling, Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset)
         .Build<MeshletCullingPass>(false, true, true);
 
     // Now, render the occluder remainders (prepass & shadows)
@@ -283,15 +280,6 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
 
     if (meshletCulling || occlusionCulling) {
         graph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum *or* occlusion culled are sent to the meshlet culling pass
-            .WithShaderResource(Builtin::PerObjectBuffer, 
-                Builtin::PerMeshBuffer,
-                Builtin::PerMeshInstanceBuffer,
-                Builtin::MeshResources::MeshletBounds,
-                Builtin::CameraBuffer,
-                Builtin::PrimaryCamera::LinearDepthMap, 
-                Builtin::Shadows::LinearShadowMaps)
-            .WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, Builtin::PrimaryCamera::MeshletBitfield)
-            .WithIndirectArguments(Builtin::IndirectCommandBuffers::MeshletCulling, Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset)
             .Build<MeshletCullingPass>(false, false, true);
     }
 }
@@ -472,7 +460,7 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
         .Build<ClusterGenerationPass>();
 
     graph->BuildComputePass("LightCullingPass")
-        .WithShaderResource(Builtin::CameraBuffer, Builtin::Light::BufferGroup)
+        .WithShaderResource(Builtin::CameraBuffer, Builtin::Light::ActiveLightIndices, Builtin::Light::InfoBuffer)
         .WithUnorderedAccess(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer, Builtin::Light::PagesCounter)
         .Build<LightCullingPass>();
 }
@@ -553,7 +541,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
     if (!deferredRendering) {
         primaryPassBuilder.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture);
-        primaryPassBuilder.WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PostSkinningVertices);
+        primaryPassBuilder.WithShaderResource(Builtin::NormalMatrixBuffer, Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PerMeshInstanceBuffer, Builtin::PostSkinningVertices);
         primaryPassBuilder.IsGeometryPass();
     }
     else {
@@ -571,7 +559,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     if (meshShaders && !deferredRendering) { // Don't need meshlets for deferred rendering
         primaryPassBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
         if (indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-            primaryPassBuilder.WithIndirectArguments(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest);
+            primaryPassBuilder.WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
         }
     }
 
@@ -664,6 +652,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     if (useMeshShaders) {
         PPLLFillBuilder.WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
         if (indirect) {
+			PPLLFillBuilder.WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
             PPLLFillBuilder.WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
         }
     }

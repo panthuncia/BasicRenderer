@@ -34,6 +34,8 @@ public:
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
+		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
+        m_deferred = settingsManager.getSettingGetter<bool>("enableDeferredRendering")();
     }
 
 	~ForwardRenderPass() {
@@ -47,15 +49,21 @@ public:
         // Setup resources
         m_normalMatrixBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
 		m_postSkinningVertexBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
-		m_meshletOffsetBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
-		m_meshletVertexIndexBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
-		m_meshletTriangleBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
 		m_perObjectBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
 		m_cameraBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
 		m_perMeshInstanceBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
         m_perMeshBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
-        m_lightClusterBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
-		m_lightPagesBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetSRVInfo(0).index;
+        
+        if (m_clusteredLightingEnabled) {
+            m_lightClusterBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
+            m_lightPagesBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetSRVInfo(0).index;
+        }
+
+        if (m_meshShaders) {
+            m_meshletOffsetBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
+            m_meshletVertexIndexBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
+            m_meshletTriangleBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
+        }
 
         m_activeLightIndicesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ActiveLightIndices)->GetSRVInfo(0).index;
         m_lightBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::InfoBuffer)->GetSRVInfo(0).index;
@@ -65,9 +73,12 @@ public:
 
         m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
         
-        m_primaryCameraMeshletCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
-        m_primaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
-		m_primaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+        if (m_indirect) {
+            if (m_meshShaders)
+                m_primaryCameraMeshletCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            m_primaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
+            m_primaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+        }
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
@@ -169,8 +180,10 @@ private:
         lightClusterInfo[LightPagesBufferDescriptorIndex] = m_lightPagesBufferDescriptorIndex;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
-		unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-		variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
+        if (m_indirect && m_meshShaders) {
+            unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
+            variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
+        }
 
     }
 
@@ -326,6 +339,8 @@ private:
     bool m_indirect;
 	unsigned int m_aoTextureDescriptorIndex;
     bool m_gtaoEnabled = true;
+	bool m_clusteredLightingEnabled = true;
+	bool m_deferred = false;
 
     // Resources
     int m_normalMatrixBufferDescriptorIndex = -1;

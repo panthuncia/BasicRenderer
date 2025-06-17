@@ -9,7 +9,7 @@
         "AlphaTest": {},
         "Blend": {},
         "MeshletFrustrumCulling": {},
-        "MeshletOcclusionCulling": {},
+        "MeshletCulling": {},
         "MeshletCullingReset": {}
       }
     },

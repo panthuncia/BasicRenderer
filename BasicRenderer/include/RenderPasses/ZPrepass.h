@@ -34,6 +34,7 @@ public:
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+		m_deferred = settingsManager.getSettingGetter<bool>("enableDeferredRendering")();
     }
 
     ~ZPrepass() {
@@ -46,20 +47,29 @@ public:
     
         m_pNormals = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Normals);
 		m_pMotionVectors = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-		m_pAlbedo = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Albedo);
-		m_pMetallicRoughness = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
-		m_pEmissive = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Emissive);
+
+        if (m_deferred) {
+            m_pAlbedo = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Albedo);
+            m_pMetallicRoughness = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
+            m_pEmissive = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Emissive);
+        }
 
         if (m_indirect) {
             m_pPrimaryCameraOpaqueIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
             m_pPrimaryCameraAlphaTestIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+            if (m_meshShaders) {
+                m_meshletCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            }
+        }
+
+        if (m_meshShaders) {
+            m_meshletOffsetBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
+            m_meshletVertexIndexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
+            m_meshletTriangleBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
         }
 
 		m_normalMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
 		m_postSkinningVertexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
-		m_meshletOffsetBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
-		m_meshletVertexIndexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
-		m_meshletTriangleBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
 		m_perObjectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
 		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
 		m_perMeshInstanceBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
@@ -177,10 +187,12 @@ private:
 		staticBufferIndices[NormalsTextureDescriptorIndex] = m_pNormals->GetRTVInfo(0).index;
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
-		//unsigned int variableRootConstants[NumVariableBufferRootConstants] = {};
-		//variableRootConstants[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetUAVShaderVisibleInfo(0).index;
+        if (m_indirect && m_meshShaders) {
+            unsigned int variableRootConstants[NumVariableBufferRootConstants] = {};
+            variableRootConstants[MeshletCullingBitfieldBufferDescriptorIndex] = m_meshletCullingBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
 
-		//commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableRootConstants, 0);
+            commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableRootConstants, 0);
+        }
     }
 
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
@@ -335,6 +347,7 @@ private:
     bool m_meshShaders;
     bool m_indirect;
     bool m_clearGbuffer = true;
+	bool m_deferred = false;
 
 	std::shared_ptr<PixelBuffer> m_pNormals;
 	std::shared_ptr<PixelBuffer> m_pMotionVectors;
@@ -344,6 +357,7 @@ private:
 
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_meshletCullingBitfieldBuffer;
 
 	int m_normalMatrixBufferSRVIndex = -1;
 	int m_postSkinningVertexBufferSRVIndex = -1;

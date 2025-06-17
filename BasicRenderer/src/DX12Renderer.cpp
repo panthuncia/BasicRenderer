@@ -1202,7 +1202,7 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view->indirectCommandBuffers.opaqueIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view->indirectCommandBuffers.alphaTestIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view->indirectCommandBuffers.blendIndirectCommandBuffer);
-	//newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view->indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
     //newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);

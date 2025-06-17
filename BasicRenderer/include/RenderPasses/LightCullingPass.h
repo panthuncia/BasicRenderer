@@ -29,7 +29,8 @@ public:
 		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
 		m_lightClusterBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetUAVShaderVisibleInfo(0).index;
 		m_lightPagesBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetUAVShaderVisibleInfo(0).index;
-
+		m_activeLightIndicesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ActiveLightIndices)->GetSRVInfo(0).index;
+		m_lightInfoBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::InfoBuffer)->GetSRVInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -55,6 +56,8 @@ public:
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
 		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
+		staticBufferIndices[ActiveLightIndicesBufferDescriptorIndex] = m_activeLightIndicesBufferSRVIndex;
+		staticBufferIndices[LightBufferDescriptorIndex] = m_lightInfoBufferSRVIndex;
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
 		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
@@ -86,6 +89,8 @@ private:
 	int m_cameraBufferSRVIndex = -1;
 	int m_lightClusterBufferUAVIndex = -1;
 	int m_lightPagesBufferUAVIndex = -1;
+	int m_activeLightIndicesBufferSRVIndex = -1;
+	int m_lightInfoBufferSRVIndex = -1;
 
 	void CreatePSO() {
 		// Compile the compute shader
