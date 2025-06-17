@@ -229,7 +229,7 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 
 	Components::Camera newCameraInfo = {};
 	newCameraInfo = *camera;
-	auto screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
+	auto screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	auto depth = CreateDepthMapComponent(screenRes.x, screenRes.y, 1, false);
 	newCameraInfo.info.numDepthMips = NumMips(screenRes.x, screenRes.y);
 	newCameraInfo.info.depthResX = screenRes.x;
@@ -245,6 +245,8 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(newCameraInfo.info);
 	entity.set<Components::RenderView>(renderView);
 	entity.set<Components::DepthMap>(depth);
+
+	entity.add<Components::PrimaryCamera>();
 }
 
 void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
@@ -478,9 +480,9 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
     CameraInfo info;
 	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
 	info.view = XMMatrixIdentity();
-	info.projection = XMMatrixPerspectiveFovRH(fov, aspect, zNear, zFar);
-	info.viewProjection = DirectX::XMMatrixMultiply(info.view, info.projection);
-	info.projectionInverse = XMMatrixInverse(nullptr, info.projection);
+	info.unjitteredProjection = XMMatrixPerspectiveFovRH(fov, aspect, zNear, zFar);
+	info.viewProjection = DirectX::XMMatrixMultiply(info.view, info.unjitteredProjection);
+	info.projectionInverse = XMMatrixInverse(nullptr, info.unjitteredProjection);
 	info.clippingPlanes[0] = planes[0];
 	info.clippingPlanes[1] = planes[1];
 	info.clippingPlanes[2] = planes[2];
@@ -631,41 +633,6 @@ void Scene::Activate(ManagerInterface managerInterface) {
 	ECSSceneRoot.add<Components::Active>();
 
 	MakeResident();
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraOpaqueIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.opaqueIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraAlphaTestIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.alphaTestIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraBlendIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.blendIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.meshletFrustrumCullingIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletOcclusionCullingIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletCullingResetIndirectCommandBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
-}
-
-const std::shared_ptr<DynamicGloballyIndexedResource>& Scene::GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer() const {
-	auto view = m_primaryCamera.get<Components::RenderView>();
-	return view->meshletBitfieldBuffer;
 }
 
 void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {

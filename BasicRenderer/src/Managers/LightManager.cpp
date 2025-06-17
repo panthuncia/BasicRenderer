@@ -12,6 +12,7 @@
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Utilities/MathUtils.h"
 #include "ShaderBuffers.h"
+#include "../../generated/BuiltinResources.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -47,6 +48,16 @@ LightManager::LightManager() {
 	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
 	m_pLightPagesBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), false, true, false);
 	m_pLightPagesBuffer->SetName(L"lightPagesBuffer");
+
+	m_resources[Builtin::Light::ViewResourceGroup] = m_pLightViewInfoResourceGroup;
+	m_resources[Builtin::Light::BufferGroup] = m_pLightBufferResourceGroup;
+	m_resources[Builtin::Light::ClusterBuffer] = m_pClusterBuffer;
+	m_resources[Builtin::Light::PagesBuffer] = m_pLightPagesBuffer;
+	m_resources[Builtin::Light::InfoBuffer] = m_lightBuffer;
+	m_resources[Builtin::Light::PointLightCubemapBuffer] = m_pointViewInfo;
+	m_resources[Builtin::Light::SpotLightMatrixBuffer] = m_spotViewInfo;
+	m_resources[Builtin::Light::DirectionalLightCascadeBuffer] = m_directionalViewInfo;
+	m_resources[Builtin::Light::ActiveLightIndices] = m_activeLightIndices;
 }
 
 LightManager::~LightManager() {
@@ -107,26 +118,6 @@ void LightManager::RemoveLight(LightInfo* light) {
 
 }
 
-unsigned int LightManager::GetLightBufferDescriptorIndex() {
-    return m_lightBuffer->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetActiveLightIndicesBufferDescriptorIndex() {
-	return m_activeLightIndices->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetPointCubemapMatricesDescriptorIndex() {
-	return m_pointViewInfo->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetSpotMatricesDescriptorIndex() {
-	return m_spotViewInfo->GetSRVInfo(0).index;
-}
-
-unsigned int LightManager::GetDirectionalCascadeMatricesDescriptorIndex() {
-	return m_directionalViewInfo->GetSRVInfo(0).index;
-}
-
 unsigned int LightManager::GetNumLights() {
 	return m_activeLightIndices->Size();
 }
@@ -148,8 +139,9 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 		CameraInfo camera = {};
 		camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
 		camera.view = cubemapMatrices[i];
-		camera.projection = projection;
-		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.projection);
+		camera.unjitteredProjection = projection;
+		camera.jitteredProjection = projection; // lights don't use jittering.
+		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.unjitteredProjection);
 
 		auto renderView = m_pCameraManager->AddCamera(camera);
 		m_pointViewInfo->Add(renderView.cameraBufferIndex);
@@ -173,14 +165,15 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	camera.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
 	DirectX::XMFLOAT3 up = { 0, 1, 0 };
 	camera.view = DirectX::XMMatrixLookToRH(info.posWorldSpace, info.dirWorldSpace, DirectX::XMLoadFloat3(&up));
-	camera.projection = GetProjectionMatrixForLight(info);
-	camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, camera.projection);
+	camera.unjitteredProjection = GetProjectionMatrixForLight(info);
+	camera.jitteredProjection = camera.unjitteredProjection; // lights don't use jittering.
+	camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, camera.unjitteredProjection);
 
 	auto renderView = m_pCameraManager->AddCamera(camera);
 	m_spotViewInfo->Add(renderView.cameraBufferIndex);
 	viewInfo.renderViews.push_back(renderView);
 
-	viewInfo.projectionMatrix = Components::Matrix(camera.projection);
+	viewInfo.projectionMatrix = Components::Matrix(camera.unjitteredProjection);
 	return { viewInfo, std::nullopt };
 }
 
@@ -219,7 +212,8 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		CameraInfo cameraInfo = {};
 		cameraInfo.positionWorldSpace = { posFloats.x, posFloats.y, posFloats.z, 1.0f };
 		cameraInfo.view = cascades[i].viewMatrix;
-		cameraInfo.projection = cascades[i].orthoMatrix;
+		cameraInfo.unjitteredProjection = cascades[i].orthoMatrix;
+		cameraInfo.jitteredProjection = cameraInfo.unjitteredProjection; // lights don't use jittering.
 		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 		cameraInfo.aspectRatio = camera->aspect;
 		cameraInfo.clippingPlanes[0] = cascades[i].frustumPlanes[0];
@@ -262,7 +256,8 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cubemapMatrices[i];
-			info.projection = viewInfo->projectionMatrix.matrix;
+			info.unjitteredProjection = viewInfo->projectionMatrix.matrix;
+			info.jitteredProjection = info.unjitteredProjection; // lights don't use jittering.
 			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], viewInfo->projectionMatrix.matrix);
 			info.clippingPlanes[0] = planes[i][0];
 			info.clippingPlanes[1] = planes[i][1];
@@ -287,7 +282,8 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		camera.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 		auto up = DirectX::XMFLOAT3(0, 1, 0);
 		camera.view = DirectX::XMMatrixLookToRH(DirectX::XMLoadFloat3(&globalPos), DirectX::XMVector3Normalize(lightMatrix->matrix.r[2]), XMLoadFloat3(&up));
-		camera.projection = viewInfo->projectionMatrix.matrix;
+		camera.unjitteredProjection = viewInfo->projectionMatrix.matrix;
+		camera.jitteredProjection = camera.unjitteredProjection; // lights don't use jittering.
 		camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, viewInfo->projectionMatrix.matrix);
 		camera.clippingPlanes[0] = planes[0][0];
 		camera.clippingPlanes[1] = planes[0][1];
@@ -322,7 +318,8 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cascades[i].viewMatrix;
-			info.projection = cascades[i].orthoMatrix;
+			info.unjitteredProjection = cascades[i].orthoMatrix;
+			info.jitteredProjection = info.unjitteredProjection; // lights don't use jittering.
 			info.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 			info.clippingPlanes[0] = cascades[i].frustumPlanes[0];
 			info.clippingPlanes[1] = cascades[i].frustumPlanes[1];
@@ -393,43 +390,15 @@ void LightManager::UpdateLightBufferView(BufferView* view, LightInfo& data) {
 	m_lightBuffer->UpdateView(view, &data);
 }
 
-std::shared_ptr<ResourceGroup>& LightManager::GetLightViewInfoResourceGroup() {
-	return m_pLightViewInfoResourceGroup;
-}
-
-std::shared_ptr<ResourceGroup>& LightManager::GetLightBufferResourceGroup() {
-	return m_pLightBufferResourceGroup;
-}
-
-std::shared_ptr<Buffer>& LightManager::GetClusterBuffer() {
-	return m_pClusterBuffer;
-}
-
-std::shared_ptr<Buffer>& LightManager::GetLightPagesBuffer() {
-	return m_pLightPagesBuffer;
-}
-
 std::shared_ptr<Resource> LightManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::LightViewResourceGroup:
-		return m_pLightViewInfoResourceGroup;
-	case BuiltinResource::LightBufferGroup:
-		return m_pLightBufferResourceGroup;
-	case BuiltinResource::LightClusterBuffer:
-		return m_pClusterBuffer;
-	case BuiltinResource::LightPagesBuffer:
-		return m_pLightPagesBuffer;
-	default:
-		spdlog::warn("LightManager: ProvideResource called with unknown key: {}", key.ToString());
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> LightManager::GetSupportedKeys() {
-	return {
-		BuiltinResource::LightViewResourceGroup,
-		BuiltinResource::LightBufferGroup,
-		BuiltinResource::LightClusterBuffer,
-		BuiltinResource::LightPagesBuffer
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }

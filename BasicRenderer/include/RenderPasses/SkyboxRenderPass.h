@@ -9,14 +9,24 @@
 
 class SkyboxRenderPass : public RenderPass {
 public:
-    SkyboxRenderPass(std::shared_ptr<Texture> skyboxTexture) {
-        m_texture = skyboxTexture;
+    SkyboxRenderPass() {
     }
 
-    void Setup() override {
+    void DeclareResourceUsages(RenderPassBuilder* builder) {
+        builder->WithShaderResource(Builtin::Environment::CurrentCubemap, Builtin::Environment::InfoBuffer)
+            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+            .WithRenderTarget(Builtin::Color::HDRColorTarget);
+    }
+
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateSkyboxRootSignature();
         CreateSkyboxPSO();
+
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+
+        m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -37,11 +47,11 @@ public:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
-        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
+        auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
         // Clear HDR target
-        auto& clearColor = context.pHDRTarget->GetClearColor();
+        auto& clearColor = m_pHDRTarget->GetClearColor();
         commandList->ClearRenderTargetView(rtvHandle, &clearColor[0], 0, nullptr);
 
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
@@ -51,10 +61,9 @@ public:
 
         auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.view;
         viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
-        auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.projection);
+        auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.jitteredProjection);
         commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
-        commandList->SetGraphicsRoot32BitConstant(1, m_texture->GetBuffer()->GetSRVInfo(0).index, 0);
-        commandList->SetGraphicsRoot32BitConstant(2, m_texture->GetSamplerDescriptorIndex(), 0);
+        commandList->SetGraphicsRoot32BitConstant(1, m_environmentBufferDescriptorIndex, 0);
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
 
@@ -68,10 +77,15 @@ public:
 private:
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     std::shared_ptr<Buffer> vertexBufferHandle;
-    std::shared_ptr<Texture> m_texture = nullptr;
+    //std::shared_ptr<Texture> m_texture = nullptr;
 
     ComPtr<ID3D12RootSignature> skyboxRootSignature;
     ComPtr<ID3D12PipelineState> skyboxPSO;
+
+	std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
+    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
+
+	int m_environmentBufferDescriptorIndex = -1;
 
     struct SkyboxVertex {
         XMFLOAT3 position;
@@ -143,11 +157,10 @@ private:
     }
     void CreateSkyboxRootSignature() {
 
-        CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[3] = {};
+        CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[2] = {};
 
         skyboxRootParameters[0].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
-        skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox texture index
-        skyboxRootParameters[2].InitAsConstants(1, 3, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Skybox sampler index
+		skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Environment buffer index
 
         D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
 

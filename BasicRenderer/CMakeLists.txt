@@ -17,13 +17,65 @@ find_package(DirectX-Headers CONFIG REQUIRED)
 find_package(DirectX12-Agility CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(fmt CONFIG REQUIRED)
+# Build tool for code generation
+add_executable(codegen
+  "generators/resource_codegen.cpp"
+)
+
+target_link_libraries(codegen
+  PRIVATE
+    nlohmann_json::nlohmann_json
+    fmt::fmt
+)
+
+target_include_directories(codegen
+    PRIVATE
+    refl-cpp::refl-cpp
+)
+
+set(GENERATED_DIR  "${CMAKE_SOURCE_DIR}/BasicRenderer/generated")
+set(GENERATED_HDR  "${GENERATED_DIR}/BuiltinResources.h")
+
+# ensure the output directory exists
+file(MAKE_DIRECTORY "${GENERATED_DIR}")
+set(CMAKE_VERBOSE_MAKEFILE ON)
+add_custom_command(
+  OUTPUT "${GENERATED_HDR}"
+  COMMAND codegen
+          "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
+          "${GENERATED_HDR}"
+  DEPENDS codegen
+          "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
+  COMMENT "Regenerating BuiltinResources.h from BuiltinResources.h.json"
+  VERBATIM
+  USES_TERMINAL
+)
+
+set_target_properties(codegen PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+)
+
+add_custom_target(GenerateBuiltinResources
+  DEPENDS "${GENERATED_HDR}"
+)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
-add_executable (BasicRenderer WIN32  ${SOURCES})
+add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET BasicRenderer PROPERTY CXX_STANDARD 23)
+  set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 endif()
+
+# pend on the generated header in the BasicRenderer target
+add_dependencies(${PROJECT_NAME} GenerateBuiltinResources)
+
+target_include_directories(${PROJECT_NAME}
+  PRIVATE
+    "${GENERATED_DIR}"
+)
 
 #set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi") # For MSVC
 #set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")
@@ -156,7 +208,17 @@ add_symlink_or_copy_per_config(
     "aftermath_dll"
 )
 
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/)
+set(SL_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.dll")
+set(SL_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/sl.interposer.dll")
+
+add_symlink_or_copy_per_config(
+    "${SL_BINARY_DIR}"
+    "${SL_DEST_FILE}"
+    FALSE  # IS_DIRECTORY
+    "sl_interposer_dll"
+)
+
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
@@ -194,4 +256,4 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 # Find and link DirectX 12
-target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib")
+target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib")

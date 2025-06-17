@@ -143,6 +143,10 @@ private:
 	std::function<bool()> getBloomEnabled;
 	std::function<void(bool)> setBloomEnabled;
 
+    bool m_jitterEnabled = true;
+    std::function<bool()> getJitterEnabled;
+    std::function<void(bool)> setJitterEnabled;
+
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
@@ -272,6 +276,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getBloomEnabled = settingsManager.getSettingGetter<bool>("enableBloom");
 	m_bloomEnabled = getBloomEnabled();
 
+    setJitterEnabled = settingsManager.getSettingSetter<bool>("enableJitter");
+    getJitterEnabled = settingsManager.getSettingGetter<bool>("enableJitter");
+    m_jitterEnabled = getJitterEnabled();
+
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
 	m_collectPipelineStatistics = getCollectPipelineStatistics();
@@ -366,6 +374,9 @@ inline void Menu::Render(const RenderContext& context) {
 		if (ImGui::Checkbox("Enable Bloom", &m_bloomEnabled)) {
 			setBloomEnabled(m_bloomEnabled);
 		}
+        if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
+            setJitterEnabled(m_jitterEnabled);
+        }
 		if (ImGui::Checkbox("Collect Pipeline Statistics", &m_collectPipelineStatistics)) {
 			setCollectPipelineStatistics(m_collectPipelineStatistics);
 		}

@@ -28,39 +28,12 @@ public:
 		return m_perObjectBuffers;
 	}
 
-	unsigned int GetPerObjectBufferSRVIndex() const;
-
-	unsigned int GetMasterIndirectCommandsBufferSRVIndex() const;
-
-	unsigned int GetActiveOpaqueDrawSetIndicesBufferSRVIndex() const;
-
-	unsigned int GetActiveAlphaTestDrawSetIndicesBufferSRVIndex() const;
-
-	unsigned int GetActiveBlendDrawSetIndicesBufferSRVIndex() const;
-
-	unsigned int GetNormalMatrixBufferSRVIndex() const;
-
-	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveOpaqueDrawSetIndices() {
-		return m_activeOpaqueDrawSetIndices;
-	}
-
-	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveAlphaTestDrawSetIndices() {
-		return m_activeAlphaTestDrawSetIndices;
-	}
-
-	std::shared_ptr<SortedUnsignedIntBuffer>& GetActiveBlendDrawSetIndices() {
-		return m_activeBlendDrawSetIndices;
-	}
-
-	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>>& GetNormalMatrixBuffer() {
-		return m_normalMatrixBuffer;
-	}
-
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
 	ObjectManager();
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::shared_ptr<DynamicBuffer> m_perObjectBuffers; // Per object constant buffer
 	std::shared_ptr<DynamicBuffer> m_masterIndirectCommandsBuffer; // Indirect draw command buffer
 	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>> m_normalMatrixBuffer; // Normal matrices for each object

@@ -378,12 +378,14 @@ void RenderGraph::Setup() {
         switch (pass.type) {
         case PassType::Render: {
             auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
-            renderPass.pass->Setup();
+			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
+            renderPass.pass->Setup(view);
             break;
         }
         case PassType::Compute: {
             auto& computePass = std::get<ComputePassAndResources>(pass.pass);
-            computePass.pass->Setup();
+			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
+            computePass.pass->Setup(view);
             break;
         }
         }
@@ -794,4 +796,79 @@ void RenderGraph::ComputeResourceLoops() {
 		);
 	}
 	batches.push_back(std::move(loopBatch));
+}
+
+void RenderGraph::RegisterProvider(IResourceProvider* prov) {
+	auto keys = prov->GetSupportedKeys();
+	for (const auto& key : keys) {
+		if (_providerMap.find(key) != _providerMap.end()) {
+			std::string_view name = key.ToString();
+			throw std::runtime_error("Resource provider already registered for key: " + std::string(name));
+		}
+		_providerMap[key] = prov;
+	}
+	_providers.push_back(prov);
+
+	// Register all resources provided by this provider
+	for (const auto& key : prov->GetSupportedKeys()) {
+		auto resource = prov->ProvideResource(key);
+		if (resource) {
+			RegisterResource(key, resource, prov);
+		} else {
+			spdlog::warn("Provider returned null for advertised key: {}", key.ToString());
+		}
+	}
+}
+
+void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,
+	IResourceProvider* provider) {
+	_registry.Register(id, resource);
+	AddResource(resource);
+	if (provider) {
+		_providerMap[id] = provider;
+	}
+}
+
+std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
+	// If it's already in our registry, return it
+	if (rid.hasPrefix("Builtin::MeshResources")) {
+		spdlog::info("here");
+	}
+	auto cached = _registry.Request(rid);
+	if (cached) {
+		return cached;
+	}
+
+	// We don't have it in our registry, check if we have a provider for it
+	auto providerIt = _providerMap.find(rid);
+	if (providerIt != _providerMap.end()) {
+		// If we have a provider for this key, use it to provide the resource
+		auto provider = providerIt->second;
+		if (provider) {
+			auto resource = provider->ProvideResource(rid);
+			if (resource) {
+				// Register the resource in our registry
+				_registry.Register(rid, resource);
+				AddResource(resource);
+				return resource;
+			}
+			else {
+				throw std::runtime_error("Provider returned null for key: " + rid.ToString());
+			}
+		}
+	}
+
+	// No provider registered for this key
+	if (allowFailure) {
+		// If we are allowed to fail, return nullptr
+		return nullptr;
+	}
+	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
+}
+
+ComputePassBuilder RenderGraph::BuildComputePass(std::string const& name) {
+	return ComputePassBuilder(this, name);
+}
+RenderPassBuilder RenderGraph::BuildRenderPass(std::string const& name) {
+	return RenderPassBuilder(this, name);
 }

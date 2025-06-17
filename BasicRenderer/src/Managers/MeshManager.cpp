@@ -8,6 +8,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Managers/CameraManager.h"
+#include "../../generated/BuiltinResources.h"
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -18,14 +19,19 @@ MeshManager::MeshManager() {
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
 	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
 	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
-	m_resourceGroup = std::make_shared<ResourceGroup>(L"MeshInfo");
-	m_resourceGroup->AddResource(m_meshletOffsets);
-	m_resourceGroup->AddResource(m_meshletVertexIndices);
-	m_resourceGroup->AddResource(m_meshletTriangles);
 
 	m_perMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"PerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 	
 	m_perMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"perMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
+
+	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
+	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
+	m_resources[Builtin::PerMeshBuffer] = m_perMeshBuffers;
+	m_resources[Builtin::PerMeshInstanceBuffer] = m_perMeshInstanceBuffers;
+	m_resources[Builtin::MeshResources::MeshletBounds] = m_meshletBoundsBuffer;
+	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
+	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
+	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, bool useMeshletReorderedVertices) {
@@ -180,68 +186,16 @@ void MeshManager::UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view,
 	view->GetBuffer()->UpdateView(view.get(), &data);
 }
 
-unsigned int  MeshManager::GetPreSkinningVertexBufferSRVIndex() const {
-	return m_preSkinningVertices->GetSRVInfo(0).index;
-}
-unsigned int  MeshManager::GetPostSkinningVertexBufferSRVIndex() const {
-	return m_postSkinningVertices->GetSRVInfo(0).index;
-}
-unsigned int  MeshManager::GetPostSkinningVertexBufferUAVIndex() const {
-	return m_postSkinningVertices->GetUAVShaderVisibleInfo(0).index;
-}
-unsigned int  MeshManager::GetMeshletOffsetBufferSRVIndex() const {
-	return m_meshletOffsets->GetSRVInfo(0).index;
-}
-unsigned int  MeshManager::GetMeshletVertexIndexBufferSRVIndex() const {
-	return m_meshletVertexIndices->GetSRVInfo(0).index;
-}
-unsigned int  MeshManager::GetMeshletTriangleBufferSRVIndex() const {
-	return m_meshletTriangles->GetSRVInfo(0).index;
-}
-std::shared_ptr<ResourceGroup>  MeshManager::GetResourceGroup() {
-	return m_resourceGroup;
-}
-unsigned int  MeshManager::GetPerMeshBufferSRVIndex() const {
-	return m_perMeshBuffers->GetSRVInfo(0).index;
-}
-std::shared_ptr<DynamicBuffer>&  MeshManager::GetPerMeshBuffers() {
-	return m_perMeshBuffers;
-}
-std::shared_ptr<DynamicBuffer>&  MeshManager::GetPreSkinningVertices() {
-	return m_preSkinningVertices;
-}
-std::shared_ptr<DynamicBuffer>&  MeshManager::GetPostSkinningVertices() {
-	return m_postSkinningVertices;
-}
-unsigned int  MeshManager::GetPerMeshInstanceBufferSRVIndex() const {
-	return m_perMeshInstanceBuffers->GetSRVInfo(0).index;
-}
-unsigned int MeshManager::GetMeshletBoundsBufferSRVIndex() const {
-	return m_meshletBoundsBuffer->GetSRVInfo(0).index;
-}
-
 std::shared_ptr<Resource> MeshManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::PreSkinningVertices:
-		return m_preSkinningVertices;
-	case BuiltinResource::PostSkinningVertices:
-		return m_postSkinningVertices;
-	case BuiltinResource::MeshResourceGroup:
-		return m_resourceGroup;
-	case BuiltinResource::PerMeshBuffer:
-		return m_perMeshBuffers;
-	default:
-		spdlog::warn("MeshManager: ProvideResource called with unknown key: {}", key.ToString());
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> MeshManager::GetSupportedKeys() {
-	return {
-		BuiltinResource::PreSkinningVertices,
-		BuiltinResource::PostSkinningVertices,
-		BuiltinResource::MeshResourceGroup,
-		BuiltinResource::PerMeshBuffer
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }
 

@@ -26,8 +26,16 @@ public:
 		m_PPLLHeadPointerTexture = PPLLHeads;
 		m_PPLLBuffer = PPLLBuffer;
 	}
-	void Setup() override {
+
+	void DeclareResourceUsages(RenderPassBuilder* builder) {
+		builder->WithShaderResource(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::Buffer)
+			.WithRenderTarget(Builtin::Color::HDRColorTarget);
+	}
+
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreatePSO();
+
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -48,7 +56,7 @@ public:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
+		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
@@ -70,14 +78,14 @@ public:
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
 		auto& cameraManager = context.cameraManager;
-		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
-		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
-		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
-		staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletVertexIndexBufferSRVIndex();
-		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
-		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+		//staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferSRVIndex;
+		//staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferSRVIndex;
+		//staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferSRVIndex;
+		//staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferSRVIndex;
+		//staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferSRVIndex;
+		//staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
+		//staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
+		//staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
 
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
 		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo(0).index;
@@ -106,6 +114,7 @@ public:
 private:
 	ComPtr<ID3D12PipelineState> pso;
 
+	std::shared_ptr<PixelBuffer> m_pHDRTarget;
 	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
 	std::shared_ptr<Buffer> m_PPLLBuffer;
 

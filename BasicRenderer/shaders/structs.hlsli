@@ -25,6 +25,10 @@ struct Camera {
     row_major matrix projection;
     row_major matrix projectionInverse;
     row_major matrix viewProjection;
+    
+    row_major matrix prevView;
+    row_major matrix unjitteredProjection;
+
     ClippingPlane clippingPlanes[6];
     
     float fov;
@@ -47,19 +51,19 @@ struct PerFrameBuffer {
     float4 shadowCascadeSplits;
     
     uint mainCameraIndex;
-    uint activeLightIndicesBufferIndex;
-    uint lightBufferIndex;
+    //uint activeLightIndicesBufferIndex;
+    //uint lightBufferIndex;
     uint numLights;
     
-    uint pointLightCubemapBufferIndex;
-    uint spotLightMatrixBufferIndex;
-    uint directionalLightCascadeBufferIndex;
+    //uint pointLightCubemapBufferIndex;
+    //uint spotLightMatrixBufferIndex;
+    //uint directionalLightCascadeBufferIndex;
     uint numShadowCascades;
     
     unsigned int activeEnvironmentIndex;
-    unsigned int environmentBufferDescriptorIndex;
-    uint environmentBRDFLUTIndex;
-    uint environmentBRDFLUTSamplerIndex;
+    //unsigned int environmentBufferDescriptorIndex;
+    //uint environmentBRDFLUTIndex;
+    //uint environmentBRDFLUTSamplerIndex;
     
     uint outputType;
     uint screenResX;

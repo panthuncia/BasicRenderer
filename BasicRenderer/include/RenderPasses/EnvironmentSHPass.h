@@ -36,8 +36,15 @@ public:
 	~EnvironmentSHPass() {
 	}
 
-	void Setup() override {
+	void DeclareResourceUsages(ComputePassBuilder* builder) override {
+		builder->WithShaderResource(Builtin::Environment::WorkingCubemapGroup)
+			.WithUnorderedAccess(Builtin::Environment::InfoBuffer);
+	}
+
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreatePSO();
+
+		m_environmentBufferUAVDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetUAVShaderVisibleInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -60,7 +67,7 @@ public:
 		// Root parameters
 		unsigned int miscParams[NumMiscUintRootConstants] = { };
 		miscParams[UintRootConstant1] = m_samplerIndex; // Sampler index
-		miscParams[UintRootConstant2] = context.environmentManager->GetEnvironmentBufferUAVDescriptorIndex();
+		miscParams[UintRootConstant2] = m_environmentBufferUAVDescriptorIndex;
 
 		float miscFloatParams[NumMiscFloatRootConstants] = { };
 
@@ -90,6 +97,8 @@ public:
 	}
 
 private:
+
+	int m_environmentBufferUAVDescriptorIndex = -1;
 
 	void CreatePSO() {
 		// Compile the compute shader

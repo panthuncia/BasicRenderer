@@ -31,13 +31,13 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     }
     
 #if defined(PSO_SHADOW)
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
-            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
+            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[pointLightCubemapBufferDescriptorIndex];
             uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -45,7 +45,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             break;
         }
         case 1: { // Spot light
-            StructuredBuffer<unsigned int> spotLightMapIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
+            StructuredBuffer<unsigned int> spotLightMapIndicesBuffer = ResourceDescriptorHeap[spotLightMatrixBufferDescriptorIndex];
             uint lightCameraIndex = spotLightMapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -53,7 +53,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             break;
         }
         case 2: { // Directional light
-            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[directionalLightCascadeBufferDescriptorIndex];
             uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -74,9 +74,9 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     result.position = mul(viewPosition, mainCamera.projection);
     result.clipPosition = result.position;
     
-    float4 prevPositionWorldSpace = mul(prevPos, objectBuffer.model);
-    float4 prevPositionViewSpace = mul(prevPositionWorldSpace, mainCamera.view);
-    result.prevClipPosition = mul(prevPositionViewSpace, mainCamera.projection);
+    float4 prevPosition = mul(prevPos, objectBuffer.model);
+    prevPosition = mul(prevPosition, mainCamera.prevView);
+    result.prevClipPosition = mul(prevPosition, mainCamera.unjitteredProjection);
     
     if (flags & VERTEX_SKINNED) {
         result.normalWorldSpace = normalize(vertex.normal);

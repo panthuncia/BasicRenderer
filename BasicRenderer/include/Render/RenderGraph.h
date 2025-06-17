@@ -14,10 +14,15 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Resources/ResourceStates.h"
 #include "Resources/ResourceStateTracker.h"
+#include "Interfaces/IResourceProvider.h"
+#include "Render/ResourceRegistry.h"
 
 class Resource;
 class RenderPassBuilder;
 class ComputePassBuilder;
+
+template<typename T>
+concept DerivedResource = std::derived_from<T, Resource>;
 
 class RenderGraph {
 public:
@@ -28,12 +33,44 @@ public:
 	void Compile();
 	void Setup();
 	//void AllocateResources(RenderContext& context);
-	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
 	std::shared_ptr<Resource> GetResourceByID(const uint64_t id);
 	std::shared_ptr<RenderPass> GetRenderPassByName(const std::string& name);
 	std::shared_ptr<ComputePass> GetComputePassByName(const std::string& name);
+
+	void RegisterProvider(IResourceProvider* prov);
+	void RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource, IResourceProvider* provider = nullptr);
+	std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
+
+	template<DerivedResource T>
+	std::shared_ptr<T> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false) {
+		auto basePtr = RequestResource(rid, allowFailure);
+
+		if (!basePtr) {
+			if (allowFailure) {
+				return nullptr;
+			}
+
+			throw std::runtime_error(
+				"RequestResource<" + std::string(typeid(T).name()) +
+				">: underlying Resource* is null (rid = " + rid.ToString() + ")"
+			);
+		}
+
+		auto derivedPtr = std::dynamic_pointer_cast<T>(basePtr);
+		if (!derivedPtr) {
+			throw std::runtime_error(
+				"Requested resource is not a " + std::string(typeid(T).name()) +
+				": " + rid.ToString()
+			);
+		}
+
+		return derivedPtr;
+	}
+
+	ComputePassBuilder BuildComputePass(std::string const& name);
+	RenderPassBuilder BuildRenderPass(std::string const& name);
 
 private:
 	struct RenderPassAndResources {
@@ -119,6 +156,10 @@ private:
 		std::unordered_map<uint64_t, unsigned int> transHistRender;
 	};
 
+	std::vector<IResourceProvider*> _providers;
+	ResourceRegistry _registry;
+	std::unordered_map<ResourceIdentifier, IResourceProvider*, ResourceIdentifier::Hasher> _providerMap;
+
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
@@ -137,7 +178,6 @@ private:
 
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
-
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 
 	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
@@ -164,6 +204,8 @@ private:
 	UINT64 GetNextComputeQueueFenceValue() {
 		return m_computeQueueFenceValue++;
 	}
+
+	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(

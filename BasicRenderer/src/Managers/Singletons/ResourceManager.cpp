@@ -78,14 +78,9 @@ ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
 }
 
 
-void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT activeLightIndicesBufferIndex, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex) {
+void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex) {
 	perFrameCBData.mainCameraIndex = cameraIndex;
 	perFrameCBData.numLights = numLights;
-	perFrameCBData.activeLightIndicesBufferIndex = activeLightIndicesBufferIndex;
-	perFrameCBData.lightBufferIndex = lightBufferIndex;
-	perFrameCBData.pointLightCubemapBufferIndex = pointCubemapMatricesBufferIndex;
-	perFrameCBData.spotLightMatrixBufferIndex = spotMatricesBufferIndex;
-	perFrameCBData.directionalLightCascadeBufferIndex = directionalCascadeMatricesBufferIndex;
 	perFrameCBData.screenResX = screenRes.x;
 	perFrameCBData.screenResY = screenRes.y;
 	perFrameCBData.lightClusterGridSizeX = clusterSizes.x;

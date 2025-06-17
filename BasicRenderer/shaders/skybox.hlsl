@@ -1,4 +1,10 @@
-#include "cbuffers.hlsli"
+#include "Structs.hlsli"
+
+// point-clamp at s0
+SamplerState g_pointClamp : register(s0);
+
+// linear-clamp at s1
+SamplerState g_linearClamp : register(s1);
 
 cbuffer RootConstants1 : register(b1)
 {
@@ -7,12 +13,7 @@ cbuffer RootConstants1 : register(b1)
 
 cbuffer RootConstants2 : register(b2)
 {
-    uint skyboxTextureIndex;
-};
-
-cbuffer RootConstants1 : register(b3)
-{
-    uint skyboxSamplerIndex;
+    uint environmentBufferDescriptorIndex;
 };
 
 // Vertex Shader
@@ -35,7 +36,7 @@ VS_OUTPUT VSMain(float3 pos : POSITION)
 
 float4 PSMain(VS_OUTPUT input) : SV_TARGET {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<EnvironmentInfo> environmentInfo = ResourceDescriptorHeap[perFrameBuffer.environmentBufferDescriptorIndex];
+    StructuredBuffer<EnvironmentInfo> environmentInfo = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
     EnvironmentInfo envInfo = environmentInfo[perFrameBuffer.activeEnvironmentIndex];
     TextureCube<float4> skyboxTexture = ResourceDescriptorHeap[envInfo.cubeMapDescriptorIndex];
     float3 color = skyboxTexture.Sample(g_linearClamp, input.direction.xyz).xyz;

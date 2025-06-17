@@ -13,6 +13,10 @@ public:
 		name = groupName;
     }
 
+	const std::vector<std::shared_ptr<Resource>>& GetChildren() {
+		return resources;
+	}
+
 	void AddResource(std::shared_ptr<Resource> resource) {
 		auto id = resource->GetGlobalResourceID();
 		if (!resourcesByID.contains(id)) {

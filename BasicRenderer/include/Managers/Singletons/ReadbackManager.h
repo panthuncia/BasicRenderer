@@ -24,7 +24,9 @@ public:
 	static ReadbackManager& GetInstance();
 
 	void Initialize(ID3D12Fence* readbackFence) {
-		m_readbackPass->Setup();
+        ResourceRegistry r;
+        auto view = ResourceRegistryView(r); // Dummy view
+		m_readbackPass->Setup(view);
 		m_readbackFence = readbackFence;
         m_readbackPass->SetReadbackFence(readbackFence);
 	}
@@ -50,7 +52,7 @@ private:
         ReadbackPass() {
         }
 
-        void Setup() override {
+        void Setup(const ResourceRegistryView& resourceRegistryView) override {
             
         }
 

@@ -36,7 +36,7 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
     ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
     ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
-    void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, UINT activeLightIndicesBufferIndex, UINT lightBufferIndex, UINT pointCubemapMatricesBufferIndex, UINT spotMatricesBufferIndex, UINT directionalCascadeMatricesBufferIndex, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
+    void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
     
     std::shared_ptr<Buffer>& GetPerFrameBuffer() {
 		return perFrameBufferHandle;
@@ -440,10 +440,7 @@ public:
 	//void QueueResourceTransition(const ResourceTransition& transition);
     //void ExecuteResourceTransitions();
 
-	void SetEnvironmentBufferDescriptorIndex(unsigned int index) { perFrameCBData.environmentBufferDescriptorIndex = index; }
 	void SetActiveEnvironmentIndex(unsigned int index) { perFrameCBData.activeEnvironmentIndex = index; }
-	void SetEnvironmentBRDFLUTIndex(int index) { perFrameCBData.environmentBRDFLUTIndex = index; }
-	void SetEnvironmentBRDFLUTSamplerIndex(int index) { perFrameCBData.environmentBRDFLUTSamplerIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
     void SetTonemapType(unsigned int type) { perFrameCBData.tonemapType = type; }
 

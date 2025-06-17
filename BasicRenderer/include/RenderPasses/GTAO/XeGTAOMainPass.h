@@ -12,7 +12,12 @@ class GTAOMainPass : public ComputePass {
 public:
     GTAOMainPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
 
-    void Setup() override {
+    void DeclareResourceUsages(ComputePassBuilder* builder) {
+        builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
+            .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1);
+    }
+
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& manager = DeviceManager::GetInstance();
         auto& device = manager.GetDevice();
         uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
@@ -26,6 +31,8 @@ public:
             m_commandLists.push_back(commandList);
         }
 		CreateXeGTAOComputePSO();
+
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -43,7 +50,7 @@ public:
 		commandList->SetPipelineState(GTAOHighPSO.Get());
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[CameraBufferDescriptorIndex] = context.cameraManager->GetCameraBufferSRVIndex();
+        staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
 
@@ -79,6 +86,8 @@ private:
     ComPtr<ID3D12PipelineState> GenerateNormalsPSO;
 
     uint64_t frameIndex = 0;
+
+	int m_cameraBufferSRVIndex = -1;
 
     void CreateXeGTAOComputePSO() {
         auto device = DeviceManager::GetInstance().GetDevice();

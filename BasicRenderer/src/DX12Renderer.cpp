@@ -63,10 +63,11 @@
 #include "Managers/EnvironmentManager.h"
 #include "Render/TonemapTypes.h"
 #include "Managers/Singletons/StatisticsManager.h"
-#include "Resources/BuiltinResources.h"
+#include "../generated/BuiltinResources.h"
 #include "Resources/ResourceIdentifier.h"
-#include "Render/RenderGraphBuilder.h"
 #include "Render/RenderGraphBuildHelper.h"
+#include "slHooks.h"
+
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 void D3D12DebugCallback(
@@ -143,8 +144,14 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
 }
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
-    m_xRes = x_res;
-    m_yRes = y_res;
+    m_xOutputRes = x_res;
+    m_yOutputRes = y_res;
+	m_xInternalRes = x_res;
+	m_yInternalRes = y_res;
+    CreateAdapter();
+    CheckDLSSSupport();
+    InitDLSS();
+
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
@@ -162,6 +169,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     CreateTextures();
     CreateGlobalResources();
 
+
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
     m_pMeshManager = MeshManager::CreateUnique();
@@ -169,7 +177,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pCameraManager = CameraManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
-	ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
+	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
 	m_pCameraManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Camera manager needs to make indirect command buffers
     m_pMeshManager->SetCameraManager(m_pCameraManager.get());
@@ -220,10 +228,29 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
 
             Components::Camera* camera = entity.get_mut<Components::Camera>();
-            camera->info.view = XMMatrixInverse(nullptr, cameraModel);
+
+			auto view = XMMatrixInverse(nullptr, cameraModel);
+			DirectX::XMMATRIX projection = camera->info.unjitteredProjection;
+            if (m_jitter && entity.has<Components::PrimaryCamera>()) {
+                // Apply jitter
+                unsigned int sequenceLength = 16;
+				unsigned int sequenceIndex = m_frameIndex % sequenceLength;
+				auto sequenceOffset = hammersley(sequenceIndex, sequenceLength);
+                DirectX::XMFLOAT2 jitterNDC = {
+                    (sequenceOffset.x - 0.5f) * (2.0f / m_xInternalRes),
+                    (sequenceOffset.y - 0.5f) * (2.0f / m_yInternalRes)
+                };
+				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
+				projection = XMMatrixMultiply(projection, jitterMatrix); // Apply jitter to projection matrix
+            }
+
+			camera->info.jitteredProjection = projection; // Save jittered projection matrix
+            camera->info.prevView = camera->info.view; // Save view from last frame
+
+            camera->info.view = view;
 			camera->info.viewInverse = cameraModel;
-            camera->info.viewProjection = XMMatrixMultiply(camera->info.view, camera->info.projection);
-			camera->info.projectionInverse = XMMatrixInverse(nullptr, camera->info.projection);
+            camera->info.viewProjection = XMMatrixMultiply(camera->info.view, projection);
+			camera->info.projectionInverse = XMMatrixInverse(nullptr, projection);
 
             auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
             camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
@@ -298,7 +325,8 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
-	settingsManager.registerSetting<DirectX::XMUINT2>("screenResolution", { m_xRes, m_yRes });
+	settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { m_xInternalRes, m_yInternalRes });
+    settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { m_xOutputRes, m_yOutputRes });
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -313,6 +341,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<bool>("enableBloom", m_bloom);
+    settingsManager.registerSetting<bool>("enableJitter", m_jitter);
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
         return AppendScene(scene);
         });
@@ -391,6 +420,9 @@ void DX12Renderer::SetSettings() {
 		m_bloom = newValue;
 		rebuildRenderGraph = true;
 		});
+    settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
+        m_jitter = newValue;
+        });
 	settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
 		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
@@ -482,6 +514,11 @@ void EnableShaderBasedValidation() {
     spDebugController1->SetEnableGPUBasedValidation(true);
 }
 
+void DX12Renderer::CreateAdapter() {
+    ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
+    m_currentAdapter = bestAdapter;
+}
+
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
@@ -495,19 +532,32 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 #endif
 
     // Create DXGI factory
-    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+    if (slCreateDXGIFactory2 != nullptr) {
+		ThrowIfFailed(slCreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+    }
+    else {
+        ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+    }
 
     // Create device
-    ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     m_gpuCrashTracker.Initialize();
 #endif
 
-    ThrowIfFailed(D3D12CreateDevice(
-        bestAdapter.Get(),
-        D3D_FEATURE_LEVEL_12_0,
-        IID_PPV_ARGS(&device)));
+
+    if (slD3D12CreateDevice != nullptr) {
+        ThrowIfFailed(slD3D12CreateDevice(
+            m_currentAdapter.Get(),
+            D3D_FEATURE_LEVEL_12_0,
+			IID_PPV_ARGS(&device)));
+    }
+    else {
+        ThrowIfFailed(D3D12CreateDevice(
+            m_currentAdapter.Get(),
+            D3D_FEATURE_LEVEL_12_0,
+            IID_PPV_ARGS(&device)));
+    }
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
@@ -637,8 +687,62 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
 }
 
+void DX12Renderer::CheckDLSSSupport() {
+    DXGI_ADAPTER_DESC desc{};
+    if (SUCCEEDED(m_currentAdapter->GetDesc(&desc)))
+    {
+        sl::AdapterInfo adapterInfo{};
+        adapterInfo.deviceLUID = (uint8_t*)&desc.AdapterLuid;
+        adapterInfo.deviceLUIDSizeInBytes = sizeof(LUID);
+        if (SL_FAILED(result, slIsFeatureSupported(sl::kFeatureDLSS, adapterInfo)))
+        {
+            // Requested feature is not supported on the system, fallback to the default method
+            switch (result)
+            {
+            case sl::Result::eErrorOSOutOfDate:         // inform user to update OS
+            case sl::Result::eErrorDriverOutOfDate:     // inform user to update driver
+            case sl::Result::eErrorAdapterNotSupported:  // cannot use this adapter (older or non-NVDA GPU etc)
+				m_dlssSupported = false; // Do not initialize DLSS
+				return;
+            };
+        }
+        else
+        {
+        }
+    }
+}
+
+void DX12Renderer::InitDLSS() {
+	if (!m_dlssSupported) return; // Do not initialize DLSS if not supported
+    slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
+    
+
+    sl::DLSSOptimalSettings dlssSettings;
+    sl::DLSSOptions dlssOptions;
+    // These are populated based on user selection in the UI
+    dlssOptions.mode = sl::DLSSMode::eBalanced;
+    dlssOptions.outputWidth = m_xOutputRes;
+    dlssOptions.outputHeight = m_yOutputRes;
+    // Now let's check what should our rendering resolution be
+    if (SL_FAILED(result, slDLSSGetOptimalSettings(dlssOptions, dlssSettings)))
+    {
+        // Handle error here
+    }
+    // Setup rendering based on the provided values in the sl::DLSSSettings structure
+    m_xInternalRes = dlssSettings.optimalRenderWidth;
+    m_yInternalRes = dlssSettings.optimalRenderHeight;
+
+	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")({ m_xInternalRes, m_yInternalRes });
+
+	m_frameTokens.resize(m_numFramesInFlight);
+    for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
+		slGetNewFrameToken(m_frameTokens[i], &i);
+    }
+
+}
+
 void DX12Renderer::CreateTextures() {
-    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("screenResolution")();
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     // Create HDR color target
     TextureDescription hdrDesc;
     hdrDesc.arraySize = 1;
@@ -656,12 +760,51 @@ void DX12Renderer::CreateTextures() {
     auto hdrColorTarget = PixelBuffer::Create(hdrDesc);
     hdrColorTarget->SetName(L"Primary Camera HDR Color Target");
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
+
+    TextureDescription motionVectors;
+    motionVectors.arraySize = 1;
+    motionVectors.channels = 2;
+    motionVectors.isCubemap = false;
+    motionVectors.hasRTV = true;
+    motionVectors.format = DXGI_FORMAT_R16G16_FLOAT;
+    motionVectors.generateMipMaps = false;
+    motionVectors.hasSRV = true;
+    motionVectors.srvFormat = DXGI_FORMAT_R16G16_FLOAT;
+    ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
+    motionVectors.imageDimensions.push_back(motionVectorsDims);
+    auto motionVectorsBuffer = PixelBuffer::Create(motionVectors);
+    motionVectorsBuffer->SetName(L"Motion Vectors");
+	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
+}
+
+void DX12Renderer::TagDLSSResources(ID3D12Resource* pDepthTexture) {
+    if (!m_dlssSupported) return; // Do not tag DLSS resources if not supported
+    
+	sl::Extent myExtent = { m_xInternalRes, m_yInternalRes };
+	sl::Extent fullExtent = { m_xOutputRes, m_yOutputRes };
+
+    for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
+        sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)m_coreResourceProvider.m_HDRColorTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+        sl::Resource colorOut = { sl::ResourceType::eTex2d, renderTargets[i].Get(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+        sl::Resource depth = { sl::ResourceType::eTex2d, pDepthTexture, nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        sl::Resource mvec = { sl::ResourceType::eTex2d, m_coreResourceProvider.m_gbufferMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
+
+        sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
+        sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eOnlyValidNow, &fullExtent };
+        sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &myExtent };
+        sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
+        //sl::ResourceTag exposureTag = sl::ResourceTag{ &exposure, sl::kBufferTypeExposure, sl::ResourceLifecycle::eOnlyValidNow, &my1x1Extent };
+
+        sl::ResourceTag inputs[] = { colorInTag, colorOutTag, depthTag, mvecTag };
+        //slSetTagForFrame(*m_frameTokens[i], viewport, inputs, _countof(inputs), cmdList);
+    }
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     if (!device) return;
-	m_xRes = newWidth;
-	m_yRes = newHeight;
+	m_xInternalRes = newWidth;
+	m_yInternalRes = newHeight;
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
 
@@ -690,6 +833,8 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     }
 
     CreateTextures();
+
+
 
 	//Rebuild the render graph
 	rebuildRenderGraph = true;
@@ -745,7 +890,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), m_pLightManager->GetActiveLightIndicesBufferDescriptorIndex(), m_pLightManager->GetLightBufferDescriptorIndex(), m_pLightManager->GetPointCubemapMatricesDescriptorIndex(), m_pLightManager->GetSpotMatricesDescriptorIndex(), m_pLightManager->GetDirectionalCascadeMatricesDescriptorIndex(), { m_xRes, m_yRes }, m_lightClusterSize, m_frameIndex);
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { m_xInternalRes, m_yInternalRes }, m_lightClusterSize, m_frameIndex);
 
 	currentRenderGraph->Update();
 
@@ -772,16 +917,12 @@ void DX12Renderer::Render() {
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
-    m_context.renderTargets = renderTargets.data();
-    auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
-	m_context.pPrimaryDepthBuffer = depth->depthMap.get();
-	m_context.pLinearDepthBuffer = depth->linearDepthMap.get();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
     m_context.frameFenceValue = m_currentFrameFenceValue;
-    m_context.xRes = m_xRes;
-    m_context.yRes = m_yRes;
+    m_context.xRes = m_xInternalRes;
+    m_context.yRes = m_yInternalRes;
 	m_context.cameraManager = m_pCameraManager.get();
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
@@ -789,7 +930,6 @@ void DX12Renderer::Render() {
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
 	m_context.drawStats = *drawStats;
-    m_context.pHDRTarget = m_coreResourceProvider.m_HDRColorTarget;
 
     unsigned int globalPSOFlags = 0;
     if (m_imageBasedLighting) {
@@ -1029,7 +1169,7 @@ void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
-    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer();
+    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCamera().get<Components::RenderView>()->meshletBitfieldBuffer;
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
     // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
@@ -1038,22 +1178,28 @@ void DX12Renderer::CreateRenderGraph() {
     // TODO: Some of these resources don't really need to be recreated (GTAO, etc.)
     // Instead, just create them externally and register them
 
-	RenderGraphBuilder builder;
-    builder.RegisterProvider(m_pMeshManager.get());
-	builder.RegisterProvider(m_pObjectManager.get());
-	builder.RegisterProvider(m_pCameraManager.get());
-	builder.RegisterProvider(m_pLightManager.get());
-	builder.RegisterProvider(m_pEnvironmentManager.get());
-    builder.RegisterProvider(m_pIndirectCommandBufferManager.get());
-    builder.RegisterProvider(&m_coreResourceProvider);
+	std::shared_ptr<RenderGraph> newGraph = std::make_shared<RenderGraph>();
+    newGraph->RegisterProvider(m_pMeshManager.get());
+    newGraph->RegisterProvider(m_pObjectManager.get());
+    newGraph->RegisterProvider(m_pCameraManager.get());
+    newGraph->RegisterProvider(m_pLightManager.get());
+    newGraph->RegisterProvider(m_pEnvironmentManager.get());
+    newGraph->RegisterProvider(m_pIndirectCommandBufferManager.get());
+    newGraph->RegisterProvider(&m_coreResourceProvider);
 
 	auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth->depthMap;
 
-    builder.RegisterResource(BuiltinResource::PrimaryCameraDepthTexture, depthTexture);
-	builder.RegisterResource(BuiltinResource::PrimaryCameraLinearDepthMap, depth->linearDepthMap);
+    newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
+    newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth->linearDepthMap);
 
-	//newGraph->AddResource(depthTexture, false);
+    auto view = currentScene->GetPrimaryCamera().get<Components::RenderView>();
+    newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view->indirectCommandBuffers.opaqueIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view->indirectCommandBuffers.alphaTestIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view->indirectCommandBuffers.blendIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view->indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
+    //newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1061,9 +1207,7 @@ void DX12Renderer::CreateRenderGraph() {
     }
 
     // Skinning comes before Z prepass
-    builder.BuildComputePass("SkinningPass")
-        .WithShaderResource(BuiltinResource::PerObjectBuffer, BuiltinResource::PerMeshBuffer, BuiltinResource::PreSkinningVertices, BuiltinResource::NormalMatrixBuffer)
-        .WithUnorderedAccess(BuiltinResource::PostSkinningVertices)
+    newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
 
 
@@ -1072,61 +1216,58 @@ void DX12Renderer::CreateRenderGraph() {
         indirect = false;
     }
 
-    CreateGbufferResources(builder);
+    CreateGBufferResources(newGraph.get());
 
     if (indirect) {
         if (m_occlusionCulling) {
-            BuildOcclusionCullingPipeline(builder);
+            BuildOcclusionCullingPipeline(newGraph.get());
         }
-        BuildGeneralCullingPipeline(builder);
+        BuildGeneralCullingPipeline(newGraph.get());
     }
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
-    BuildZPrepass(builder);
+    BuildZPrepass(newGraph.get());
 
     // GTAO pass
     if (m_gtaoEnabled) {
-		RegisterGTAOResources(builder);
-        BuildGTAOPipeline(builder, currentScene->GetPrimaryCamera().get<Components::Camera>());
+		RegisterGTAOResources(newGraph.get());
+        BuildGTAOPipeline(newGraph.get(), currentScene->GetPrimaryCamera().get<Components::Camera>());
     }
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
-        BuildLightClusteringPipeline(builder);
+        BuildLightClusteringPipeline(newGraph.get());
     }
 
-    BuildEnvironmentPipeline(builder);
+    BuildEnvironmentPipeline(newGraph.get());
 
-    auto debugPassBuilder = builder.BuildRenderPass("DebugPass");
+    auto debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
 
     auto drawShadows = m_coreResourceProvider.m_shadowMaps != nullptr && getShadowsEnabled();
     if (drawShadows) {
-        BuildMainShadowPass(builder);
-        debugPassBuilder.WithShaderResource(depth->linearDepthMap);
-    }
-
-    if (m_currentEnvironment != nullptr) {
-		builder.BuildRenderPass("SkyboxPass")
-			.WithShaderResource(m_currentEnvironment->GetEnvironmentCubemap())
-			.WithDepthReadWrite(depthTexture)
-			.WithRenderTarget(BuiltinResource::HDRColorTarget)
-			.Build<SkyboxRenderPass>(m_currentEnvironment->GetEnvironmentCubemap());
+        BuildMainShadowPass(newGraph.get());
+        debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
     }
 	
-    BuildPrimaryPass(builder, m_currentEnvironment.get());
-
-    BuildPPLLPipeline(builder);
-
-    if (m_bloom) {
-        BuildBloomPipeline(builder);
+    if (m_currentEnvironment != nullptr) {
+        newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
+        newGraph->BuildRenderPass("SkyboxPass")
+            .Build<SkyboxRenderPass>();
     }
 
-    builder.BuildRenderPass("TonemappingPass")
-        .WithShaderResource(BuiltinResource::HDRColorTarget)
+    BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
+
+    BuildPPLLPipeline(newGraph.get());
+
+    if (m_bloom) {
+        BuildBloomPipeline(newGraph.get());
+    }
+
+    newGraph->BuildRenderPass("TonemappingPass")
         .Build<TonemappingPass>();
 
     debugPassBuilder.Build<DebugRenderPass>();
 	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
-		auto debugRenderPass = builder.GetRenderPassByName("DebugPass");
+		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
 		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
         if (debugPass) {
             debugPass->SetTexture(m_coreResourceProvider.m_currentDebugTexture.get());
@@ -1134,14 +1275,12 @@ void DX12Renderer::CreateRenderGraph() {
 	}
 
     if (getDrawBoundingSpheres()) {
-		auto debugSphereBuilder = builder.BuildRenderPass("DebugSpherePass")
-			.WithShaderResource(BuiltinResource::PerObjectBuffer, BuiltinResource::PerMeshBuffer, BuiltinResource::CameraBuffer)
-			.WithDepthReadWrite(depthTexture)
-			.IsGeometryPass()
+		auto debugSphereBuilder = newGraph->BuildRenderPass("DebugSpherePass")
 			.Build<DebugSpherePass>();
     }
 
-    auto newGraph = builder.Build();
+    newGraph->Compile();
+    newGraph->Setup();
 
     DeletionManager::GetInstance().MarkForDelete(currentRenderGraph);
 	currentRenderGraph = std::move(newGraph);

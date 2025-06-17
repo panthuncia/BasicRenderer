@@ -5,6 +5,7 @@
 #include "Managers/Singletons/ECSManager.h"
 #include "Resources/DynamicResource.h"
 #include "Resources/ResourceGroup.h"
+#include "../../generated/BuiltinResources.h"
 
 CameraManager::CameraManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -12,6 +13,11 @@ CameraManager::CameraManager() {
 	m_meshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshletCullingBitfieldGroup");
 	m_meshInstanceMeshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"ObjectCullingBitfieldGroup");
 	m_meshInstanceOcclusionCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshInstanceOcclusionCullingBitfieldGroup");
+
+	m_resources[Builtin::CameraBuffer] = m_pCameraBuffer;
+	m_resources[Builtin::MeshletCullingBitfieldGroup] = m_meshletCullingBitfieldGroup;
+	m_resources[Builtin::MeshInstanceMeshletCullingBitfieldGroup] = m_meshInstanceMeshletCullingBitfieldGroup;
+	m_resources[Builtin::MeshInstanceOcclusionCullingBitfieldGroup] = m_meshInstanceOcclusionCullingBitfieldGroup;
 }
 
 Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
@@ -92,26 +98,14 @@ void CameraManager::SetNumMeshInstances(unsigned int numMeshInstances) {
 }
 
 std::shared_ptr<Resource> CameraManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::CameraBuffer:
-		return m_pCameraBuffer;
-	case BuiltinResource::MeshletCullingBitfieldGroup:
-		return m_meshletCullingBitfieldGroup;
-	case BuiltinResource::MeshInstanceMeshletCullingBitfieldGroup:
-		return m_meshInstanceMeshletCullingBitfieldGroup;
-	case BuiltinResource::MeshInstanceOcclusionCullingBitfieldGroup:
-		return m_meshInstanceOcclusionCullingBitfieldGroup;
-	default:
-		spdlog::warn("CameraManager::ProvideResource: Unknown resource key {}", key.ToString());
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> CameraManager::GetSupportedKeys() {
-	return {
-		BuiltinResource::CameraBuffer,
-		BuiltinResource::MeshletCullingBitfieldGroup,
-		BuiltinResource::MeshInstanceMeshletCullingBitfieldGroup,
-		BuiltinResource::MeshInstanceOcclusionCullingBitfieldGroup
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }

@@ -20,7 +20,19 @@ public:
         CreatePSO();
     }
 
-    void Setup() override {
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        if (!m_isUpsample) {
+            builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex, 1 }))
+                .WithRenderTarget(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex + 1, 1 }));
+        }
+        else {
+            builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex + 1, 1 }))
+                .WithRenderTarget(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex, 1 }));
+        }
+    }
+
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -36,13 +48,12 @@ public:
 
         unsigned int mipOffset = m_isUpsample ? 0 : 1;
 
-		auto& rtvHandle =  context.pHDRTarget->GetRTVInfo(m_mipIndex+mipOffset).cpuHandle;
-        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		auto& rtvHandle =  m_pHDRTarget->GetRTVInfo(m_mipIndex+mipOffset).cpuHandle;
+        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         // Calculate viewport from mip level
-		unsigned int width = context.pHDRTarget->GetWidth() >> m_mipIndex+mipOffset;
-		unsigned int height = context.pHDRTarget->GetHeight() >> m_mipIndex+mipOffset;
+		unsigned int width = m_pHDRTarget->GetWidth() >> m_mipIndex+mipOffset;
+		unsigned int height = m_pHDRTarget->GetHeight() >> m_mipIndex+mipOffset;
 
         CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, width, height);
         CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, width, width);
@@ -62,10 +73,10 @@ public:
         commandList->SetGraphicsRootSignature(rootSignature.Get());
 
         unsigned int misc[NumMiscUintRootConstants] = {};
-        misc[UintRootConstant0] = context.pHDRTarget->GetSRVInfo(m_mipIndex + (m_isUpsample ? 1 : 0)).index;
+        misc[UintRootConstant0] = m_pHDRTarget->GetSRVInfo(m_mipIndex + (m_isUpsample ? 1 : 0)).index;
         misc[UintRootConstant1] = m_mipIndex;
-        misc[UintRootConstant2] = context.pHDRTarget->GetWidth() >> m_mipIndex;
-		misc[UintRootConstant3] = context.pHDRTarget->GetHeight() >> m_mipIndex;
+        misc[UintRootConstant2] = m_pHDRTarget->GetWidth() >> m_mipIndex;
+		misc[UintRootConstant3] = m_pHDRTarget->GetHeight() >> m_mipIndex;
         commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
 		float miscFloats[NumMiscFloatRootConstants] = {};
@@ -94,6 +105,8 @@ private:
 
 	ComPtr<ID3D12PipelineState> m_downsamplePso;
 	ComPtr<ID3D12PipelineState> m_upsamplePso;
+
+    std::shared_ptr<PixelBuffer> m_pHDRTarget;
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
@@ -201,7 +214,13 @@ public:
         CreatePSO();
     }
 
-    void Setup() override {
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ 1, 1 }))
+            .WithUnorderedAccess(Subresources(Builtin::Color::HDRColorTarget, Mip{ 0, 1 }));
+    }
+
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+        m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -215,12 +234,11 @@ public:
 
         commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-        commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
+        commandList->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 
         // Calculate viewport from mip level
-        unsigned int width = context.pHDRTarget->GetWidth();
-        unsigned int height = context.pHDRTarget->GetHeight();
+        unsigned int width = m_pHDRTarget->GetWidth();
+        unsigned int height = m_pHDRTarget->GetHeight();
 
         CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, width, height);
         CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, width, width);
@@ -235,10 +253,10 @@ public:
         commandList->SetGraphicsRootSignature(rootSignature.Get());
 
         unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[UintRootConstant0] = context.pHDRTarget->GetUAVShaderVisibleInfo(0).index; // HDR target index
-		misc[UintRootConstant1] = context.pHDRTarget->GetSRVInfo(1).index; // Bloom texture index
-        misc[UintRootConstant2] = context.pHDRTarget->GetWidth();
-        misc[UintRootConstant3] = context.pHDRTarget->GetHeight();
+		misc[UintRootConstant0] = m_pHDRTarget->GetUAVShaderVisibleInfo(0).index; // HDR target index
+		misc[UintRootConstant1] = m_pHDRTarget->GetSRVInfo(1).index; // Bloom texture index
+        misc[UintRootConstant2] = m_pHDRTarget->GetWidth();
+        misc[UintRootConstant3] = m_pHDRTarget->GetHeight();
         commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
         float miscFloats[NumMiscFloatRootConstants] = {};
@@ -262,6 +280,8 @@ private:
     bool m_isUpsample = false;
 
     ComPtr<ID3D12PipelineState> m_pso;
+
+	std::shared_ptr<PixelBuffer> m_pHDRTarget;
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;

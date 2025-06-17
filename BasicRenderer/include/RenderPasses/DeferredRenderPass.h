@@ -17,28 +17,71 @@
 
 class DeferredRenderPass : public RenderPass {
 public:
-	DeferredRenderPass(
-		int aoTextureDescriptorIndex,
-		int normalsTextureDescriptorIndex,
-		unsigned int albedoTextureDescriptorIndex,
-		unsigned int metallicRoughnessTextureDescriptorIndex,
-		unsigned int emissiveTextureDescriptorIndex,
-		unsigned int depthBufferDescriptorIndex) : 
-		m_aoTextureDescriptorIndex(aoTextureDescriptorIndex),
-		m_normalsTextureDescriptorIndex(normalsTextureDescriptorIndex), 
-		m_albedoTextureDescriptorIndex(albedoTextureDescriptorIndex),
-		m_metallicRoughnessTextureDescriptorIndex(metallicRoughnessTextureDescriptorIndex),
-		m_emissiveTextureDescriptorIndex(emissiveTextureDescriptorIndex),
-		m_depthBufferDescriptorIndex(depthBufferDescriptorIndex) {
-
+	DeferredRenderPass() {
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
+		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
 	}
 
-	void Setup() override {
+	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		builder->WithShaderResource(Builtin::CameraBuffer,
+			Builtin::Environment::PrefilteredCubemapsGroup,
+			Builtin::Light::ActiveLightIndices,
+			Builtin::Light::InfoBuffer,
+			Builtin::Light::PointLightCubemapBuffer,
+			Builtin::Light::DirectionalLightCascadeBuffer,
+			Builtin::Light::SpotLightMatrixBuffer,
+			Builtin::Environment::InfoBuffer,
+			Builtin::GBuffer::Normals,
+			Builtin::GBuffer::Albedo,
+			Builtin::GBuffer::Emissive,
+			Builtin::GBuffer::MetallicRoughness,
+			Builtin::PrimaryCamera::DepthTexture,
+			Builtin::Environment::CurrentCubemap,
+			Builtin::Shadows::ShadowMaps)
+			.WithRenderTarget(Builtin::Color::HDRColorTarget)
+			.WithDepthRead(Builtin::PrimaryCamera::DepthTexture);
+
+		if (m_clusteredLightingEnabled) {
+			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
+		}
+
+		if (m_gtaoEnabled) {
+			builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
+		}
+	}
+
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		
+		if (m_clusteredLightingEnabled) {
+			m_lightClusterBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
+			m_lightPagesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PagesBuffer)->GetSRVInfo(0).index;
+		}
+
+		m_activeLightIndicesBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ActiveLightIndices)->GetSRVInfo(0).index;
+		m_lightBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::InfoBuffer)->GetSRVInfo(0).index;
+		m_pointLightCubemapBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PointLightCubemapBuffer)->GetSRVInfo(0).index;
+		m_spotLightMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::SpotLightMatrixBuffer)->GetSRVInfo(0).index;
+		m_directionalLightCascadeBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::DirectionalLightCascadeBuffer)->GetSRVInfo(0).index;
+
+		m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
+
+		if (m_gtaoEnabled)
+		m_aoTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).index;
+		
+		m_normalsTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Normals)->GetSRVInfo(0).index;
+		m_albedoTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Albedo)->GetSRVInfo(0).index;
+		m_metallicRoughnessTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::MetallicRoughness)->GetSRVInfo(0).index;
+		m_emissiveTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Emissive)->GetSRVInfo(0).index;
+
+		m_depthBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -53,8 +96,8 @@ public:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
+		auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
@@ -77,33 +120,37 @@ public:
 		auto& cameraManager = context.cameraManager;
 		auto& lightManager = context.lightManager;
 
-		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
-		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
-		staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
-		staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletVertexIndexBufferSRVIndex();
-		staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
-		staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
-		staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
-		staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureDescriptorIndex;
-		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureDescriptorIndex;
-		staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureDescriptorIndex;
-		staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureDescriptorIndex;
-		staticBufferIndices[EmissiveTextureDescriptorIndex] = m_emissiveTextureDescriptorIndex;
+		//staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferSRVIndex;
+		//staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferSRVIndex;
+		//staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferSRVIndex;
+		//staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferSRVIndex;
+		//staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferSRVIndex;
+		//staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
+		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
+		//staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
+		staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureSRVIndex;
+		staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureSRVIndex;
+		staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureSRVIndex;
+		staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureSRVIndex;
+		staticBufferIndices[EmissiveTextureDescriptorIndex] = m_emissiveTextureSRVIndex;
+
+		staticBufferIndices[ActiveLightIndicesBufferDescriptorIndex] = m_activeLightIndicesBufferSRVIndex;
+		staticBufferIndices[LightBufferDescriptorIndex] = m_lightBufferSRVIndex;
+		staticBufferIndices[PointLightCubemapBufferDescriptorIndex] = m_pointLightCubemapBufferSRVIndex;
+		staticBufferIndices[SpotLightMatrixBufferDescriptorIndex] = m_spotLightMatrixBufferSRVIndex;
+		staticBufferIndices[DirectionalLightCascadeBufferDescriptorIndex] = m_directionalLightCascadeBufferSRVIndex;
+
+		staticBufferIndices[EnvironmentBufferDescriptorIndex] = m_environmentBufferDescriptorIndex;
 
 		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
 		unsigned int lightClusterInfo[NumLightClusterRootConstants] = {};
-		lightClusterInfo[LightClusterBufferDescriptorIndex] = lightManager->GetClusterBuffer()->GetSRVInfo(0).index;
-		lightClusterInfo[LightPagesBufferDescriptorIndex] = lightManager->GetLightPagesBuffer()->GetSRVInfo(0).index;
+		lightClusterInfo[LightClusterBufferDescriptorIndex] = m_lightClusterBufferSRVIndex;
+		lightClusterInfo[LightPagesBufferDescriptorIndex] = m_lightPagesBufferSRVIndex;
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
-		unsigned int variableBufferIndices[NumVariableBufferRootConstants] = {};
-		variableBufferIndices[MeshletCullingBitfieldBufferDescriptorIndex] = context.currentScene->GetPrimaryCameraMeshletFrustrumCullingBitfieldBuffer()->GetResource()->GetSRVInfo(0).index;
-		commandList->SetGraphicsRoot32BitConstants(VariableBufferRootSignatureIndex, NumVariableBufferRootConstants, &variableBufferIndices, 0);
-
 		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[0] = m_depthBufferDescriptorIndex;
+		misc[0] = m_depthBufferSRVIndex;
 
 		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
@@ -126,13 +173,29 @@ private:
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
 
-	unsigned int m_aoTextureDescriptorIndex;
-	unsigned int m_normalsTextureDescriptorIndex;
-	unsigned int m_albedoTextureDescriptorIndex;
-	unsigned int m_metallicRoughnessTextureDescriptorIndex;
-	unsigned int m_emissiveTextureDescriptorIndex;
+	std::shared_ptr<PixelBuffer> m_pHDRTarget;
+	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
 
-	unsigned int m_depthBufferDescriptorIndex;
+	int m_cameraBufferSRVIndex = -1;
+	int m_lightClusterBufferSRVIndex = -1;
+	int m_lightPagesBufferSRVIndex = -1;
+
+	int m_aoTextureSRVIndex = -1;
+	int m_normalsTextureSRVIndex = -1;
+	int m_albedoTextureSRVIndex = -1;
+	int m_metallicRoughnessTextureSRVIndex = -1;
+	int m_emissiveTextureSRVIndex = -1;
+
+	int m_depthBufferSRVIndex = -1;
+
+	int m_activeLightIndicesBufferSRVIndex = -1;
+	int m_lightBufferSRVIndex = -1;
+	int m_pointLightCubemapBufferSRVIndex = -1;
+	int m_spotLightMatrixBufferSRVIndex = -1;
+	int m_directionalLightCascadeBufferSRVIndex = -1;
+
+	int m_environmentBufferDescriptorIndex = -1;
 
 	bool m_gtaoEnabled = true;
+	bool m_clusteredLightingEnabled = true;
 };

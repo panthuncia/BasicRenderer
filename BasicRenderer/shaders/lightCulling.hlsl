@@ -42,9 +42,9 @@ void CSMain(uint3 groupID : SV_GroupID,
     // Compute the global index for the cluster.
     uint index = groupID.x * 128 + threadID.x;
     
+    StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[activeLightIndicesBufferDescriptorIndex];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[perFrameBuffer.activeLightIndicesBufferIndex];
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
     uint lightCount = perFrameBuffer.numLights;
     
     RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];

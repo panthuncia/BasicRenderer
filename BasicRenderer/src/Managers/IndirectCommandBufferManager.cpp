@@ -8,15 +8,16 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Resources/DynamicResource.h"
+#include "../../generated/BuiltinResources.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
-    m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
+    //m_parentResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_opaqueResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_alphaTestResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
 	m_blendResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
-	m_parentResourceGroup->AddResource(m_opaqueResourceGroup);
-	m_parentResourceGroup->AddResource(m_alphaTestResourceGroup);
-	m_parentResourceGroup->AddResource(m_blendResourceGroup);
+	//m_parentResourceGroup->AddResource(m_opaqueResourceGroup);
+	//m_parentResourceGroup->AddResource(m_alphaTestResourceGroup);
+	//m_parentResourceGroup->AddResource(m_blendResourceGroup);
 
 	m_meshletCullingCommandResourceGroup = std::make_shared<ResourceGroup>(L"MeshletCullingCommandBuffers");
 
@@ -24,6 +25,11 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 	UpdateBuffersForBucket(MaterialBuckets::Opaque, 1000);
 	UpdateBuffersForBucket(MaterialBuckets::AlphaTest, 1000);
 	UpdateBuffersForBucket(MaterialBuckets::Blend, 1000);
+
+	m_resources[Builtin::IndirectCommandBuffers::Opaque] = m_opaqueResourceGroup;
+	m_resources[Builtin::IndirectCommandBuffers::AlphaTest] = m_alphaTestResourceGroup;
+	m_resources[Builtin::IndirectCommandBuffers::Blend] = m_blendResourceGroup;
+	m_resources[Builtin::IndirectCommandBuffers::MeshletCulling] = m_meshletCullingCommandResourceGroup;
 }
 
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
@@ -43,7 +49,7 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 	//DeletionManager::GetInstance().MarkForDelete(m_clearBufferAlphaTest);
 	//DeletionManager::GetInstance().MarkForDelete(m_clearBufferBlend);
 
-	DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup);
+	//DeletionManager::GetInstance().MarkForDelete(m_parentResourceGroup);
 }
 
 // Add a single buffer to an existing ID
@@ -83,8 +89,8 @@ Components::IndirectCommandBuffers IndirectCommandBufferManager::CreateBuffersFo
 	bufferComponent.opaqueIndirectCommandBuffer = pOpaqueDynamicResource;
 	bufferComponent.alphaTestIndirectCommandBuffer = pAlphaTestDynamicResource;
 	bufferComponent.blendIndirectCommandBuffer = pBlendDynamicResource;
-	bufferComponent.meshletFrustrumCullingIndirectCommandBuffer = pMeshletFrustrumCullingDynamicResource;
-	bufferComponent.meshletOcclusionCullingIndirectCommandBuffer = pMeshletOcclusionCullingDynamicResource;
+	bufferComponent.meshletCullingIndirectCommandBuffer = pMeshletFrustrumCullingDynamicResource;
+	//bufferComponent.meshletOcclusionCullingIndirectCommandBuffer = pMeshletOcclusionCullingDynamicResource;
 	bufferComponent.meshletCullingResetIndirectCommandBuffer = pMeshletFrustrumCullingResetDynamicResource;
 
 	m_viewIDToBuffers[viewID] = bufferComponent;
@@ -98,16 +104,16 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.opaqueIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.alphaTestIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.blendIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+	//DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 	DeletionManager::GetInstance().MarkForDelete(bufferComponent.meshletCullingResetIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 
 	m_opaqueResourceGroup->RemoveResource(bufferComponent.opaqueIndirectCommandBuffer->GetResource().get());
 	m_alphaTestResourceGroup->RemoveResource(bufferComponent.alphaTestIndirectCommandBuffer->GetResource().get());
 	m_blendResourceGroup->RemoveResource(bufferComponent.blendIndirectCommandBuffer->GetResource().get());
 
-	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource().get());
-	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource().get());
+	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletCullingIndirectCommandBuffer->GetResource().get());
+	//m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource().get());
 	m_meshletCullingCommandResourceGroup->RemoveResource(bufferComponent.meshletCullingResetIndirectCommandBuffer->GetResource().get());
 
 	m_viewIDToBuffers.erase(viewID);
@@ -177,11 +183,11 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 			break;
 		}
 		auto& deletionManager = DeletionManager::GetInstance();
-		deletionManager.MarkForDelete(bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-		deletionManager.MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+		deletionManager.MarkForDelete(bufferComponent.meshletCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
+		//deletionManager.MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 		deletionManager.MarkForDelete(bufferComponent.meshletCullingResetIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
-		bufferComponent.meshletFrustrumCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
-		bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
+		bufferComponent.meshletCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
+		//bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
 		bufferComponent.meshletCullingResetIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true));
     }
 }
@@ -191,19 +197,14 @@ void IndirectCommandBufferManager::SetIncrementSize(unsigned int incrementSize) 
 }
 
 std::shared_ptr<Resource> IndirectCommandBufferManager::ProvideResource(ResourceIdentifier const& key) {
-	switch (key.AsBuiltin()) {
-	case BuiltinResource::PrimaryIndirectCommandBuffers:
-		return m_parentResourceGroup;
-	case BuiltinResource::MeshletCullingCommandBuffers:
-		return m_meshletCullingCommandResourceGroup;
-	default:
-		return nullptr;
-	}
+	return m_resources[key];
 }
 
 std::vector<ResourceIdentifier> IndirectCommandBufferManager::GetSupportedKeys() {
-	return {
-		BuiltinResource::PrimaryIndirectCommandBuffers,
-		BuiltinResource::MeshletCullingCommandBuffers
-	};
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resources.size());
+	for (auto const& [key, _] : m_resources)
+		keys.push_back(key);
+
+	return keys;
 }

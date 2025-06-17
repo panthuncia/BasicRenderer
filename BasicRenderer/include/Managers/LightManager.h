@@ -35,26 +35,18 @@ public:
     ~LightManager();
     AddLightReturn AddLight(LightInfo* lightInfo, uint64_t entityId);
     void RemoveLight(LightInfo* light);
-    unsigned int GetLightBufferDescriptorIndex();
-	unsigned int GetActiveLightIndicesBufferDescriptorIndex();
-    unsigned int GetPointCubemapMatricesDescriptorIndex();
-    unsigned int GetSpotMatricesDescriptorIndex();
-    unsigned int GetDirectionalCascadeMatricesDescriptorIndex();
     unsigned int GetNumLights();
     void SetCurrentCamera(flecs::entity camera);
 	void SetCameraManager(CameraManager* cameraManager);
 	void UpdateLightBufferView(BufferView* view, LightInfo& data);
     void UpdateLightViewInfo(flecs::entity light);
-	std::shared_ptr<ResourceGroup>& GetLightViewInfoResourceGroup();
-	std::shared_ptr<ResourceGroup>& GetLightBufferResourceGroup();
-	std::shared_ptr<Buffer>& GetClusterBuffer();
-	std::shared_ptr<Buffer>& GetLightPagesBuffer();
 	unsigned int GetLightPagePoolSize() { return m_lightPagePoolSize; }
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
     LightManager();
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	flecs::entity m_currentCamera;
     std::shared_ptr<LazyDynamicStructuredBuffer<LightInfo>> m_lightBuffer;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeLightIndices; // Sorted list of active light indices

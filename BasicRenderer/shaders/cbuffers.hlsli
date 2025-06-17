@@ -46,6 +46,13 @@ cbuffer StaticBufferInfo : register(b5) {
     uint albedoTextureDescriptorIndex;
     uint metallicRoughnessTextureDescriptorIndex;
     uint emissiveTextureDescriptorIndex;
+    
+    uint activeLightIndicesBufferDescriptorIndex;
+    uint lightBufferDescriptorIndex;
+    uint pointLightCubemapBufferDescriptorIndex;
+    uint spotLightMatrixBufferDescriptorIndex;
+    uint directionalLightCascadeBufferDescriptorIndex;
+    uint environmentBufferDescriptorIndex;
 }
 
 cbuffer variableBufferInfo : register(b6) {

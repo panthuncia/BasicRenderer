@@ -11,8 +11,13 @@ class GTAOFilterPass : public ComputePass {
 public:
     GTAOFilterPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreateXeGTAOComputePSO();
+    }
+
+    void DeclareResourceUsages(ComputePassBuilder* builder){
+        builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::DepthTexture)
+            .WithUnorderedAccess(Builtin::GTAO::WorkingDepths);
     }
 
     PassReturn Execute(RenderContext& context) override {

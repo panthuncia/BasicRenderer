@@ -11,8 +11,13 @@ class GTAODenoisePass : public ComputePass {
 public:
     GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex(workingBufferIndex) {}
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreateXeGTAOComputePSO();
+    }
+
+    void DeclareResourceUsages(ComputePassBuilder* builder) {
+        builder->WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
+            .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm);
     }
 
     PassReturn Execute(RenderContext& context) override {

@@ -1,0 +1,92 @@
+{
+  "Builtin": {
+    "PrimaryCamera": {
+      "LinearDepthMap": {},
+      "DepthTexture": {},
+      "MeshletBitfield": {},
+      "IndirectCommandBuffers": {
+        "Opaque": {},
+        "AlphaTest": {},
+        "Blend": {},
+        "MeshletFrustrumCulling": {},
+        "MeshletCulling": {},
+        "MeshletCullingReset": {}
+      }
+    },
+    "PerObjectBuffer": {},
+    "PerMeshBuffer": {},
+    "PerMeshInstanceBuffer": {},
+    "PreSkinningVertices": {},
+    "PostSkinningVertices": {},
+    "NormalMatrixBuffer": {},
+    "MeshResources": {
+      "MeshletOffsets": {},
+      "MeshletVertexIndices": {},
+      "MeshletTriangles": {},
+      "MeshletBounds": {}
+    },
+    "MeshletCullingBitfieldGroup": {},
+    "MeshInstanceMeshletCullingBitfieldGroup": {},
+    "MeshInstanceOcclusionCullingBitfieldGroup": {},
+    "CameraBuffer": {},
+    "Light": {
+      "ViewResourceGroup": {},
+      "BufferGroup": {},
+      "ClusterBuffer": {},
+      "PagesBuffer": {},
+      "PagesCounter": {},
+      "ActiveLightIndices": {},
+      "InfoBuffer": {},
+      "PointLightCubemapBuffer": {},
+      "SpotLightMatrixBuffer": {},
+      "DirectionalLightCascadeBuffer": {}
+    },
+    "Environment": {
+      "InfoBuffer": {},
+      "PrefilteredCubemapsGroup": {},
+      "WorkingHDRIGroup": {},
+      "WorkingCubemapGroup": {},
+      "CurrentCubemap": {}
+    },
+    "IndirectCommandBuffers": {
+      "Opaque": {},
+      "AlphaTest": {},
+      "Blend": {},
+      "MeshletCulling": {},
+      "Master": {}
+    },
+    "GBuffer": {
+      "Normals": {},
+      "MotionVectors": {},
+      "Albedo": {},
+      "MetallicRoughness": {},
+      "Emissive": {}
+    },
+    "GTAO": {
+      "WorkingDepths": {},
+      "WorkingEdges": {},
+      "WorkingAOTerm1": {},
+      "WorkingAOTerm2": {},
+      "OutputAOTerm": {}
+    },
+    "Shadows": {
+      "ShadowMaps": {},
+      "LinearShadowMaps": {}
+    },
+    "PPLL": {
+      "HeadPointerTexture": {},
+      "Buffer": {},
+      "Counter": {}
+    },
+    "Color": {
+      "HDRColorTarget": {},
+      "SRGBColorTarget": {}
+    },
+    "ActiveDrawSetIndices": {
+      "Opaque": {},
+      "AlphaTest": {},
+      "Blend": {}
+    },
+    "DebugTexture": {}
+  }
+}

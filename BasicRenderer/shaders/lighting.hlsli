@@ -192,13 +192,13 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             parallaxShadowParams.uv = uv;
         }*/
         
-        StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.pointLightCubemapBufferIndex];
-        StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.spotLightMatrixBufferIndex];
-        StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[perFrameBuffer.directionalLightCascadeBufferIndex];
+        StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[pointLightCubemapBufferDescriptorIndex];
+        StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[spotLightMatrixBufferDescriptorIndex];
+        StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[directionalLightCascadeBufferDescriptorIndex];
         StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
         
-        StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[perFrameBuffer.activeLightIndicesBufferIndex];
-        StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[perFrameBuffer.lightBufferIndex];
+        StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[activeLightIndicesBufferDescriptorIndex];
+        StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
         
         uint clusterIndex = 0; // Which light cluster this fragment belongs to
         uint clusterLightCount = 0; // Number of lights in the cluster

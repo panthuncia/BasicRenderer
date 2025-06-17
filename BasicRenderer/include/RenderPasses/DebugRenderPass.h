@@ -11,7 +11,7 @@ class DebugRenderPass : public RenderPass {
 public:
     DebugRenderPass() {}
 
-    void Setup() override {
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		CreateDebugRootSignature();
 		CreateDebugPSO();
 		m_vertexBufferView = CreateFullscreenTriangleVertexBuffer(DeviceManager::GetInstance().GetDevice().Get());

@@ -3,6 +3,7 @@
 #include <vector>
 #include <directx/d3d12.h>
 #include <wrl/client.h>
+#include <unordered_set>
 
 #include "Resources/Resource.h"
 #include "Render/RenderContext.h"
@@ -10,6 +11,9 @@
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
 #include "Resources/ResourceStateTracker.h"
+#include "Resources/ResourceIdentifier.h"
+#include "Render/ResourceRegistry.h"
+#include "../../../generated/BuiltinResources.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;
@@ -17,14 +21,17 @@ struct ComputePassParameters {
 	std::vector<ResourceAndRange> unorderedAccessViews;
 	std::vector<ResourceAndRange> indirectArgumentBuffers;
 
+	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> identifierSet;
 	std::vector<ResourceRequirement> resourceRequirements;
 };
+
+class ComputePassBuilder;
 
 class ComputePass {
 public:
 	virtual ~ComputePass() = default;
 
-	virtual void Setup() = 0;
+	virtual void Setup(const ResourceRegistryView& resourceRegistryView) = 0;
 	virtual void Update() {};
 	virtual PassReturn Execute(RenderContext& context) = 0;
 	virtual void Cleanup(RenderContext& context) = 0;
@@ -34,4 +41,7 @@ public:
 
 protected:
 	bool invalidated = true;
+	virtual void DeclareResourceUsages(ComputePassBuilder* builder) {};
+
+	friend class ComputePassBuilder;
 };

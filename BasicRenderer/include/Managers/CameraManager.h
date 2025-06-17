@@ -9,6 +9,7 @@
 
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Interfaces/IResourceProvider.h"
+#include "Resources/ResourceIdentifier.h"
 
 class IndirectCommandBufferManager;
 class ResourceGroup;
@@ -17,10 +18,6 @@ class CameraManager : public IResourceProvider {
 public:
 	static std::unique_ptr<CameraManager> CreateUnique() {
 		return std::unique_ptr<CameraManager>(new CameraManager());
-	}
-
-	unsigned int GetCameraBufferSRVIndex() const {
-		return m_pCameraBuffer->GetSRVInfo(0).index;
 	}
 
 	Components::RenderView AddCamera(CameraInfo& camera);
@@ -46,14 +43,6 @@ public:
 		return m_meshletCullingBitfieldGroup;
 	}
 
-	const std::shared_ptr<ResourceGroup>& GetMeshInstanceMeshletCullingBitfieldGroup() const {
-		return m_meshInstanceMeshletCullingBitfieldGroup;
-	}
-
-	const std::shared_ptr<ResourceGroup>& GetMeshInstanceOcclusionCullingBitfieldGroup() const {
-		return m_meshInstanceOcclusionCullingBitfieldGroup;
-	}
-
 	void SetNumMeshInstances(unsigned int numMeshInstances);
 
 	void SetDepthBufferForCamera(Components::RenderView view, Components::DepthMap, bool isArray = false, unsigned int arrayIndex = 0);
@@ -63,6 +52,7 @@ public:
 
 private:
 	CameraManager();
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
 	std::mutex m_cameraUpdateMutex;
 	std::atomic<uint64_t> m_viewIDCounter = 0;

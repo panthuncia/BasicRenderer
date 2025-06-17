@@ -20,11 +20,23 @@ public:
 	}
 	~DebugSpherePass() {
 	}
-	void Setup() override {
+
+	void DeclareResourceUsages(RenderPassBuilder* builder) {
+		builder->WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::CameraBuffer)
+			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+			.IsGeometryPass();
+	}
+
+	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+	
+		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		m_objectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -45,7 +57,7 @@ public:
 
 		// Set the render target
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -71,8 +83,8 @@ public:
 		constants.center[2] = 0.0;
 		constants.radius = 1.0;
 		constants.perObjectIndex = 0;
-		constants.cameraBufferIndex = context.cameraManager->GetCameraBufferSRVIndex();
-		constants.objectBufferIndex = context.objectManager->GetPerObjectBufferSRVIndex();
+		constants.cameraBufferIndex = m_cameraBufferSRVIndex;
+		constants.objectBufferIndex = m_objectBufferSRVIndex;
 
 		commandList->SetGraphicsRoot32BitConstants(0, 8, &constants, 0);
 
@@ -227,6 +239,12 @@ private:
 	ComPtr<ID3D12RootSignature> m_debugRootSignature;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 	bool m_wireframe;
+
+	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
+
+	int m_cameraBufferSRVIndex = -1;
+	int m_objectBufferSRVIndex = -1;
+
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;

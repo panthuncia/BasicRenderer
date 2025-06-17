@@ -20,8 +20,12 @@
 
 class ShadowPass : public RenderPass {
 public:
-    ShadowPass(bool wireframe, bool meshShaders, bool indirect, bool clearDepths)
-        : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect), m_clearDepths(clearDepths) {
+    ShadowPass(bool wireframe, bool meshShaders, bool indirect, bool drawBlendShadows, bool clearDepths)
+        : m_wireframe(wireframe),
+        m_meshShaders(meshShaders), 
+        m_indirect(indirect),
+		m_drawBlendShadows(drawBlendShadows),
+        m_clearDepths(clearDepths) {
         auto& settingsManager = SettingsManager::GetInstance();
         getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
         getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
@@ -30,12 +34,55 @@ public:
     ~ShadowPass() {
     }
 
-    void Setup() override {
+    void DeclareResourceUsages(RenderPassBuilder* builder) {
+        builder->WithShaderResource(Builtin::PerObjectBuffer,
+            Builtin::NormalMatrixBuffer,
+            Builtin::PerMeshBuffer,
+            Builtin::PerMeshInstanceBuffer,
+            Builtin::PostSkinningVertices,
+            Builtin::CameraBuffer,
+            Builtin::Light::ViewResourceGroup,
+            Builtin::Light::InfoBuffer,
+            Builtin::Light::PointLightCubemapBuffer,
+            Builtin::Light::DirectionalLightCascadeBuffer,
+            Builtin::Light::SpotLightMatrixBuffer)
+            .WithRenderTarget(Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
+            .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
+            .IsGeometryPass();
+        if (m_meshShaders) {
+            builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::MeshletCullingBitfieldGroup)
+                .WithIndirectArguments(Builtin::IndirectCommandBuffers::Opaque,
+                    Builtin::IndirectCommandBuffers::AlphaTest);
+            if (m_drawBlendShadows) {
+                builder->WithIndirectArguments(Builtin::IndirectCommandBuffers::Blend);
+            }
+        }
+    }
+
+    void Setup(const ResourceRegistryView& resourceRegistryView) override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+    
+        m_normalMatrixBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
+        m_postSkinningVertexBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
+        m_perObjectBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+        m_cameraBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+        m_perMeshInstanceBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
+        m_perMeshBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
+
+        m_lightBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::InfoBuffer)->GetSRVInfo(0).index;
+        m_pointLightCubemapBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::PointLightCubemapBuffer)->GetSRVInfo(0).index;
+        m_spotLightMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::SpotLightMatrixBuffer)->GetSRVInfo(0).index;
+        m_directionalLightCascadeBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::DirectionalLightCascadeBuffer)->GetSRVInfo(0).index;
+    
+        if (m_meshShaders) {
+            m_meshletOffsetBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
+            m_meshletVertexIndexBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
+            m_meshletTriangleBufferIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
+        }
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -95,15 +142,20 @@ private:
         auto& cameraManager = context.cameraManager;
 
         unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[NormalMatrixBufferDescriptorIndex] = objectManager->GetNormalMatrixBufferSRVIndex();
-        staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = meshManager->GetPostSkinningVertexBufferSRVIndex();
-        staticBufferIndices[MeshletBufferDescriptorIndex] = meshManager->GetMeshletOffsetBufferSRVIndex();
-        staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = meshManager->GetMeshletVertexIndexBufferSRVIndex();
-        staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = meshManager->GetMeshletTriangleBufferSRVIndex();
-        staticBufferIndices[PerObjectBufferDescriptorIndex] = objectManager->GetPerObjectBufferSRVIndex();
-        staticBufferIndices[CameraBufferDescriptorIndex] = cameraManager->GetCameraBufferSRVIndex();
-        staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = meshManager->GetPerMeshInstanceBufferSRVIndex();
-        staticBufferIndices[PerMeshBufferDescriptorIndex] = meshManager->GetPerMeshBufferSRVIndex();
+        staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferIndex;
+        staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferIndex;
+        staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferIndex;
+        staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferIndex;
+        staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferIndex;
+        staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferIndex;
+        staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferIndex;
+        staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferIndex;
+        staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferIndex;
+
+        staticBufferIndices[LightBufferDescriptorIndex] = m_lightBufferSRVIndex;
+        staticBufferIndices[PointLightCubemapBufferDescriptorIndex] = m_pointLightCubemapBufferSRVIndex;
+        staticBufferIndices[SpotLightMatrixBufferDescriptorIndex] = m_spotLightMatrixBufferSRVIndex;
+        staticBufferIndices[DirectionalLightCascadeBufferDescriptorIndex] = m_directionalLightCascadeBufferSRVIndex;
 
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
     }
@@ -159,25 +211,27 @@ private:
                 });
 
             // Blend objects
-            m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
-                auto& meshes = blendMeshes.meshInstances;
+            if (m_drawBlendShadows) {
+                m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
+                    auto& meshes = blendMeshes.meshInstances;
 
-                commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+                    commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
 
-                for (auto& pMesh : meshes) {
-                    auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    commandList->SetPipelineState(pso.Get());
+                    for (auto& pMesh : meshes) {
+                        auto& mesh = *pMesh->GetMesh();
+                        auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+                        commandList->SetPipelineState(pso.Get());
 
-                    auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-                    commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+                        auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                        commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
 
-                    D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-                    commandList->IASetIndexBuffer(&indexBufferView);
+                        D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
+                        commandList->IASetIndexBuffer(&indexBufferView);
 
-                    commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+                        commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+                    }
+                    });
                 }
-                });
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
@@ -489,9 +543,25 @@ private:
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
+    bool m_drawBlendShadows;
 	bool m_clearDepths;
 
     float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
+
+    int m_normalMatrixBufferIndex = -1;
+    int m_postSkinningVertexBufferIndex = -1;
+    int m_meshletOffsetBufferIndex = -1;
+    int m_meshletVertexIndexBufferIndex = -1;
+    int m_meshletTriangleBufferIndex = -1;
+    int m_perObjectBufferIndex = -1;
+    int m_cameraBufferIndex = -1;
+    int m_perMeshInstanceBufferIndex = -1;
+    int m_perMeshBufferIndex = -1;
+
+    int m_lightBufferSRVIndex = -1;
+    int m_pointLightCubemapBufferSRVIndex = -1;
+    int m_spotLightMatrixBufferSRVIndex = -1;
+    int m_directionalLightCascadeBufferSRVIndex = -1;
 
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<uint16_t()> getShadowResolution;

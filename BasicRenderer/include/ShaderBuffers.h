@@ -9,9 +9,13 @@ struct CameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX viewInverse;
-    DirectX::XMMATRIX projection;
+    DirectX::XMMATRIX jitteredProjection;
     DirectX::XMMATRIX projectionInverse;
 	DirectX::XMMATRIX viewProjection;
+
+    DirectX::XMMATRIX prevView;
+    DirectX::XMMATRIX unjitteredProjection;
+
 	ClippingPlane clippingPlanes[6];
 
 	float fov;
@@ -34,19 +38,20 @@ struct PerFrameCB {
     DirectX::XMVECTOR shadowCascadeSplits;
 
 	unsigned int mainCameraIndex;
-	unsigned int activeLightIndicesBufferIndex;
-    unsigned int lightBufferIndex;
+	//unsigned int activeLightIndicesBufferIndex;
+    //unsigned int lightBufferIndex;
     unsigned int numLights;
 
-    unsigned int pointLightCubemapBufferIndex;
-    unsigned int spotLightMatrixBufferIndex;
-    unsigned int directionalLightCascadeBufferIndex;
+    //unsigned int pointLightCubemapBufferIndex;
+    //unsigned int spotLightMatrixBufferIndex;
+    //unsigned int directionalLightCascadeBufferIndex;
 	unsigned int numShadowCascades;
 
     unsigned int activeEnvironmentIndex;
-    unsigned int environmentBufferDescriptorIndex;
-	unsigned int environmentBRDFLUTIndex;
-	unsigned int environmentBRDFLUTSamplerIndex;
+    //unsigned int environmentBufferDescriptorIndex;
+	
+    //unsigned int environmentBRDFLUTIndex;
+	//unsigned int environmentBRDFLUTSamplerIndex;
 
     unsigned int outputType;
     unsigned int screenResX;
@@ -294,7 +299,14 @@ enum StaticBufferRootConstants {
 	AlbedoTextureDescriptorIndex,
 	MetallicRoughnessTextureDescriptorIndex,
 	EmissiveTextureDescriptorIndex,
-    NumStaticBufferRootConstants,
+
+    ActiveLightIndicesBufferDescriptorIndex,
+    LightBufferDescriptorIndex,
+    PointLightCubemapBufferDescriptorIndex,
+    SpotLightMatrixBufferDescriptorIndex,
+    DirectionalLightCascadeBufferDescriptorIndex,
+    EnvironmentBufferDescriptorIndex,
+    NumStaticBufferRootConstants
 };
 
 enum VariableBufferRootConstants {
