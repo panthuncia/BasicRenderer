@@ -917,10 +917,6 @@ void DX12Renderer::Render() {
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
     m_context.rtvHeap = rtvHeap.Get();
-    m_context.renderTargets = renderTargets.data();
-    auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
-	m_context.pPrimaryDepthBuffer = depth->depthMap.get();
-	m_context.pLinearDepthBuffer = depth->linearDepthMap.get();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
@@ -934,7 +930,6 @@ void DX12Renderer::Render() {
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
 	m_context.drawStats = *drawStats;
-    m_context.pHDRTarget = m_coreResourceProvider.m_HDRColorTarget;
 
     unsigned int globalPSOFlags = 0;
     if (m_imageBasedLighting) {

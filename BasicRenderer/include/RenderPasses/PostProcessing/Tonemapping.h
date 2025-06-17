@@ -22,6 +22,7 @@ public:
     }
 
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -36,8 +37,7 @@ public:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.xRes, context.yRes);
@@ -52,7 +52,7 @@ public:
 
 
 		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[0] = context.pHDRTarget->GetSRVInfo(0).index;
+		misc[0] = m_pHDRTarget->GetSRVInfo(0).index;
 
 		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
@@ -67,7 +67,8 @@ public:
 private:
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-	// Define the vertices for the full-screen triangle
+
+	std::shared_ptr<PixelBuffer> m_pHDRTarget;
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;

@@ -40,6 +40,7 @@ public:
 
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
         m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<spdConstants>(1, L"Downsample constants");
+		m_pLinearDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -90,7 +91,7 @@ public:
 			spdlog::error("Downsample pass: No constants buffer view for primary depth map");
         }
         downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).index;
-        downsampleRootConstants[UintRootConstant1] = context.pLinearDepthBuffer->GetSRVInfo(0).index;
+        downsampleRootConstants[UintRootConstant1] = m_pLinearDepthBuffer->GetSRVInfo(0).index;
 		downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).index;
         downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
@@ -162,6 +163,7 @@ private:
     unsigned int m_numDirectionalCascades = 0;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
+    std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer = nullptr;
 
     ComPtr<ID3D12PipelineState> downsamplePassPSO;
 	ComPtr<ID3D12PipelineState> downsampleArrayPSO;

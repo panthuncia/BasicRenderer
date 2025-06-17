@@ -29,15 +29,11 @@ public:
     ID3D12DescriptorHeap* textureDescriptorHeap;
     ID3D12DescriptorHeap* samplerDescriptorHeap;
     ID3D12DescriptorHeap* rtvHeap;
-    Microsoft::WRL::ComPtr<ID3D12Resource> *renderTargets;
-    PixelBuffer* pPrimaryDepthBuffer;
-    PixelBuffer* pLinearDepthBuffer;
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;
     UINT frameIndex;
 	UINT64 frameFenceValue;
     UINT xRes;
     UINT yRes;
-	std::shared_ptr<PixelBuffer> pHDRTarget;
     unsigned int globalPSOFlags;
 };

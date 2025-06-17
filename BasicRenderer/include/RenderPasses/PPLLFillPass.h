@@ -50,6 +50,7 @@ public:
 				Builtin::Light::SpotLightMatrixBuffer,
 				Builtin::Light::DirectionalLightCascadeBuffer,
 				Builtin::Shadows::ShadowMaps)
+			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
 			.IsGeometryPass();
 
 		if (m_gtaoEnabled) {
@@ -71,6 +72,7 @@ public:
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		
+		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_PPLLHeadPointerTexture = resourceRegistryView.Request<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
 		//m_primaryCameraMeshletFrustrumCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		if (m_indirect) {
@@ -170,7 +172,7 @@ private:
 		commandList->RSSetScissorRects(1, &scissorRect);
 
 		// Set the render target
-		auto dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		auto dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -315,6 +317,7 @@ private:
 
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraBlendIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_meshletCullingBitfieldBuffer;
+	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
 
 	int m_PPLLBufferUAVIndex = -1;
 	int m_normalMatrixBufferSRVIndex = -1;

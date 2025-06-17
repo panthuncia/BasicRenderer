@@ -55,14 +55,10 @@ public:
 	}
 
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
-		//m_normalMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
-		//m_postSkinningVertexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
-		//m_meshletOffsetBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletOffsets)->GetSRVInfo(0).index;
-		//m_meshletVertexIndexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletVertexIndices)->GetSRVInfo(0).index;
-		//m_meshletTriangleBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletTriangles)->GetSRVInfo(0).index;
-		//m_perObjectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
-		//m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
 		
 		if (m_clusteredLightingEnabled) {
 			m_lightClusterBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetSRVInfo(0).index;
@@ -100,8 +96,8 @@ public:
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
 		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
+		auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.xRes, context.yRes);
@@ -177,14 +173,10 @@ private:
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
 
-	//int m_normalMatrixBufferSRVIndex = -1;
-	//int m_postSkinningVertexBufferSRVIndex = -1;
-	//int m_meshletOffsetBufferSRVIndex = -1;
-	//int m_meshletVertexIndexBufferSRVIndex = -1;
-	//int m_meshletTriangleBufferSRVIndex = -1;
-	//int m_perObjectBufferSRVIndex = -1;
+	std::shared_ptr<PixelBuffer> m_pHDRTarget;
+	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
+
 	int m_cameraBufferSRVIndex = -1;
-	//int m_perMeshBufferSRVIndex = -1;
 	int m_lightClusterBufferSRVIndex = -1;
 	int m_lightPagesBufferSRVIndex = -1;
 

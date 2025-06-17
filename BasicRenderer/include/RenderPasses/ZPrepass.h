@@ -75,6 +75,8 @@ public:
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
     
+		m_pLinearDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
+		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
         m_pNormals = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Normals);
 		m_pMotionVectors = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
 
@@ -116,8 +118,8 @@ public:
             auto& rtvHandle = m_pNormals->GetRTVInfo(0).cpuHandle;
             const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
             commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-			auto& rtvHandle1 = context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle;
-			auto& clearColor1 = context.pLinearDepthBuffer->GetClearColor();
+			auto& rtvHandle1 = m_pLinearDepthBuffer->GetRTVInfo(0).cpuHandle;
+			auto& clearColor1 = m_pLinearDepthBuffer->GetClearColor();
 			D3D12_RECT clearRect = { 0, 0, static_cast<LONG>(context.xRes), static_cast<LONG>(context.yRes) };
 			commandList->ClearRenderTargetView(rtvHandle1, clearColor1.data(), 1, &clearRect);
 
@@ -134,7 +136,7 @@ public:
                 commandList->ClearRenderTargetView(rtvHandle3, clearColor, 0, nullptr);
             }
 
-            auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+            auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
             commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
         }
 
@@ -177,14 +179,14 @@ private:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         // Render targets
-		auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
         if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[6] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pMotionVectors->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle, m_pAlbedo->GetRTVInfo(0).cpuHandle, m_pMetallicRoughness->GetRTVInfo(0).cpuHandle, m_pEmissive->GetRTVInfo(0).cpuHandle};
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[6] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pMotionVectors->GetRTVInfo(0).cpuHandle, m_pLinearDepthBuffer->GetRTVInfo(0).cpuHandle, m_pAlbedo->GetRTVInfo(0).cpuHandle, m_pMetallicRoughness->GetRTVInfo(0).cpuHandle, m_pEmissive->GetRTVInfo(0).cpuHandle};
             commandList->OMSetRenderTargets(6, rtvHandles, FALSE, &dsvHandle);
         }
         else {
-			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[3] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pMotionVectors->GetRTVInfo(0).cpuHandle, context.pLinearDepthBuffer->GetRTVInfo(0).cpuHandle };
+			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[3] = { m_pNormals->GetRTVInfo(0).cpuHandle, m_pMotionVectors->GetRTVInfo(0).cpuHandle, m_pLinearDepthBuffer->GetRTVInfo(0).cpuHandle };
 			commandList->OMSetRenderTargets(3, rtvHandles, FALSE, &dsvHandle);
         }
 
@@ -379,6 +381,8 @@ private:
     bool m_clearGbuffer = true;
 	bool m_deferred = false;
 
+	std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer;
+	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
 	std::shared_ptr<PixelBuffer> m_pNormals;
 	std::shared_ptr<PixelBuffer> m_pMotionVectors;
 	std::shared_ptr<PixelBuffer> m_pAlbedo;

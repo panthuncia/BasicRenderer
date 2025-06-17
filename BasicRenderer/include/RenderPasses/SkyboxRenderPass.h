@@ -23,6 +23,9 @@ public:
         CreateSkyboxRootSignature();
         CreateSkyboxPSO();
 
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+
         m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
     }
 
@@ -44,11 +47,11 @@ public:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = context.pHDRTarget->GetRTVInfo(0).cpuHandle;
-        auto& dsvHandle = context.pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
+        auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
         // Clear HDR target
-        auto& clearColor = context.pHDRTarget->GetClearColor();
+        auto& clearColor = m_pHDRTarget->GetClearColor();
         commandList->ClearRenderTargetView(rtvHandle, &clearColor[0], 0, nullptr);
 
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
@@ -78,6 +81,9 @@ private:
 
     ComPtr<ID3D12RootSignature> skyboxRootSignature;
     ComPtr<ID3D12PipelineState> skyboxPSO;
+
+	std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
+    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
 
 	int m_environmentBufferDescriptorIndex = -1;
 
