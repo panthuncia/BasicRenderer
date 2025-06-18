@@ -22,17 +22,17 @@ public:
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
         if (!m_isUpsample) {
-            builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex, 1 }))
-                .WithRenderTarget(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex + 1, 1 }));
+            builder->WithShaderResource(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex, 1 }))
+                .WithRenderTarget(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex + 1, 1 }));
         }
         else {
-            builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex + 1, 1 }))
-                .WithRenderTarget(Subresources(Builtin::Color::HDRColorTarget, Mip{ m_mipIndex, 1 }));
+            builder->WithShaderResource(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex + 1, 1 }))
+                .WithRenderTarget(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex, 1 }));
         }
     }
 
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
-		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -215,12 +215,12 @@ public:
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
-        builder->WithShaderResource(Subresources(Builtin::Color::HDRColorTarget, Mip{ 1, 1 }))
-            .WithUnorderedAccess(Subresources(Builtin::Color::HDRColorTarget, Mip{ 0, 1 }));
+        builder->WithShaderResource(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ 1, 1 }))
+            .WithUnorderedAccess(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ 0, 1 }));
     }
 
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
-        m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     PassReturn Execute(RenderContext& context) override {

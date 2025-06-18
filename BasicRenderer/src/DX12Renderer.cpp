@@ -46,6 +46,7 @@
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "RenderPasses/PostProcessing/Bloom.h"
+#include "RenderPasses/PostProcessing/Upscaling.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -150,11 +151,12 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_yInternalRes = y_res;
     CreateAdapter();
     CheckDLSSSupport();
-    InitDLSS();
 
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
+    settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { m_xInternalRes, m_yInternalRes });
+    settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { m_xOutputRes, m_yOutputRes });
     LoadPipeline(hwnd, x_res, y_res);
     SetSettings();
     ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
@@ -168,7 +170,6 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	StatisticsManager::GetInstance().Initialize();
     CreateTextures();
     CreateGlobalResources();
-
 
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
@@ -325,8 +326,6 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
-	settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { m_xInternalRes, m_yInternalRes });
-    settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { m_xOutputRes, m_yOutputRes });
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -559,6 +558,8 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
             IID_PPV_ARGS(&device)));
     }
 
+    InitDLSS();
+
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
         GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.
@@ -708,6 +709,7 @@ void DX12Renderer::CheckDLSSSupport() {
         }
         else
         {
+            m_dlssSupported = true;
         }
     }
 }
@@ -726,19 +728,13 @@ void DX12Renderer::InitDLSS() {
     // Now let's check what should our rendering resolution be
     if (SL_FAILED(result, slDLSSGetOptimalSettings(dlssOptions, dlssSettings)))
     {
-        // Handle error here
+        spdlog::error("DLSSGetOptimalSettings failed!");
     }
     // Setup rendering based on the provided values in the sl::DLSSSettings structure
     m_xInternalRes = dlssSettings.optimalRenderWidth;
     m_yInternalRes = dlssSettings.optimalRenderHeight;
 
 	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")({ m_xInternalRes, m_yInternalRes });
-
-	m_frameTokens.resize(m_numFramesInFlight);
-    for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
-		slGetNewFrameToken(m_frameTokens[i], &i);
-    }
-
 }
 
 void DX12Renderer::CreateTextures() {
@@ -751,7 +747,7 @@ void DX12Renderer::CreateTextures() {
     hdrDesc.hasRTV = true;
     hdrDesc.hasUAV = false;
     hdrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT; // HDR format
-    hdrDesc.generateMipMaps = true; // For bloom downsampling
+    hdrDesc.generateMipMaps = false; // For bloom downsampling
     hdrDesc.hasUAV = true;
     ImageDimensions dims;
     dims.height = resolution.y;
@@ -760,6 +756,14 @@ void DX12Renderer::CreateTextures() {
     auto hdrColorTarget = PixelBuffer::Create(hdrDesc);
     hdrColorTarget->SetName(L"Primary Camera HDR Color Target");
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
+
+    auto outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+    hdrDesc.imageDimensions[0].width = outputResolution.x;
+    hdrDesc.imageDimensions[0].height = outputResolution.y;
+    hdrDesc.generateMipMaps = true;
+	auto upscaledHDRColorTarget = PixelBuffer::Create(hdrDesc);
+	upscaledHDRColorTarget->SetName(L"Upscaled HDR Color Target");
+	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
 
     TextureDescription motionVectors;
     motionVectors.arraySize = 1;
@@ -780,25 +784,7 @@ void DX12Renderer::CreateTextures() {
 void DX12Renderer::TagDLSSResources(ID3D12Resource* pDepthTexture) {
     if (!m_dlssSupported) return; // Do not tag DLSS resources if not supported
     
-	sl::Extent myExtent = { m_xInternalRes, m_yInternalRes };
-	sl::Extent fullExtent = { m_xOutputRes, m_yOutputRes };
 
-    for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
-        sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)m_coreResourceProvider.m_HDRColorTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
-        sl::Resource colorOut = { sl::ResourceType::eTex2d, renderTargets[i].Get(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
-        sl::Resource depth = { sl::ResourceType::eTex2d, pDepthTexture, nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-        sl::Resource mvec = { sl::ResourceType::eTex2d, m_coreResourceProvider.m_gbufferMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-        //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
-
-        sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
-        sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eOnlyValidNow, &fullExtent };
-        sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &myExtent };
-        sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
-        //sl::ResourceTag exposureTag = sl::ResourceTag{ &exposure, sl::kBufferTypeExposure, sl::ResourceLifecycle::eOnlyValidNow, &my1x1Extent };
-
-        sl::ResourceTag inputs[] = { colorInTag, colorOutTag, depthTag, mvecTag };
-        //slSetTagForFrame(*m_frameTokens[i], viewport, inputs, _countof(inputs), cmdList);
-    }
 }
 
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
@@ -921,8 +907,8 @@ void DX12Renderer::Render() {
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
     m_context.frameFenceValue = m_currentFrameFenceValue;
-    m_context.xRes = m_xInternalRes;
-    m_context.yRes = m_yInternalRes;
+    m_context.renderResolution = { m_xInternalRes, m_yInternalRes };
+	m_context.outputResolution = { m_xOutputRes, m_yOutputRes };
 	m_context.cameraManager = m_pCameraManager.get();
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
@@ -1257,6 +1243,10 @@ void DX12Renderer::CreateRenderGraph() {
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
 
     BuildPPLLPipeline(newGraph.get());
+
+	// Start of post-processing passes
+    newGraph->BuildRenderPass("UpscalingPass")
+		.Build<UpscalingPass>();
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());

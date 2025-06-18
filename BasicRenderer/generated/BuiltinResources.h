@@ -75,6 +75,9 @@ struct Builtin {
   inline static constexpr std::string_view PerMeshBuffer = "Builtin::PerMeshBuffer";
   inline static constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
   inline static constexpr std::string_view PerObjectBuffer = "Builtin::PerObjectBuffer";
+  struct PostProcessing {
+    inline static constexpr std::string_view UpscaledHDR = "Builtin::PostProcessing::UpscaledHDR";
+  };
   inline static constexpr std::string_view PostSkinningVertices = "Builtin::PostSkinningVertices";
   inline static constexpr std::string_view PreSkinningVertices = "Builtin::PreSkinningVertices";
   struct PrimaryCamera {
@@ -126,6 +129,9 @@ REFL_AUTO(
 );
 REFL_AUTO(
   type(Builtin::PPLL)
+);
+REFL_AUTO(
+  type(Builtin::PostProcessing)
 );
 REFL_AUTO(
   type(Builtin::PrimaryCamera)

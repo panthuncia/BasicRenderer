@@ -41,8 +41,8 @@ public:
 
         // Dispatch
         // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)
-		unsigned int x = (context.xRes + 16 - 1) / 16;
-		unsigned int y = (context.yRes + 16 - 1) / 16;
+		unsigned int x = (context.renderResolution.x + 16 - 1) / 16;
+		unsigned int y = (context.renderResolution.y + 16 - 1) / 16;
 		commandList->Dispatch(x, y, 1);
 
         return {};

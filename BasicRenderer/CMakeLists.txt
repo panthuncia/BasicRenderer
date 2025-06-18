@@ -218,6 +218,16 @@ add_symlink_or_copy_per_config(
     "sl_interposer_dll"
 )
 
+set(NVSL_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/NVSL")
+set(NVSL_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/NVSL")
+
+add_symlink_or_copy_per_config(
+    "${NVSL_DIR}"
+    "${NVSL_FILE}"
+    FALSE  # IS_DIRECTORY
+    "NVSL_DIR"
+)
+
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 
 # Heck off Microsoft

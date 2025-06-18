@@ -371,24 +371,6 @@ void RenderGraph::Setup() {
 	statisticsManager.RegisterQueue(manager.GetComputeQueue());
 	statisticsManager.SetupQueryHeap();
 
-    for (auto& pass : passes) {
-        switch (pass.type) {
-        case PassType::Render: {
-            auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
-			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
-            renderPass.pass->Setup(view);
-			renderPass.pass->RegisterCommandLists(m_graphicsCommandLists);
-            break;
-        }
-        case PassType::Compute: {
-            auto& computePass = std::get<ComputePassAndResources>(pass.pass);
-			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
-            computePass.pass->Setup(view);
-			computePass.pass->RegisterCommandLists(m_computeCommandLists);
-            break;
-        }
-        }
-    }
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
 
@@ -413,6 +395,25 @@ void RenderGraph::Setup() {
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_graphicsQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_computeQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameStartSyncFence));
+
+	for (auto& pass : passes) {
+		switch (pass.type) {
+		case PassType::Render: {
+			auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
+			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
+			renderPass.pass->Setup(view);
+			renderPass.pass->RegisterCommandLists(m_graphicsCommandLists);
+			break;
+		}
+		case PassType::Compute: {
+			auto& computePass = std::get<ComputePassAndResources>(pass.pass);
+			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
+			computePass.pass->Setup(view);
+			computePass.pass->RegisterCommandLists(m_computeCommandLists);
+			break;
+		}
+		}
+	}
 
 	// Perform initial resource transitions
 	//ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&initialTransitionCommandAllocator)));

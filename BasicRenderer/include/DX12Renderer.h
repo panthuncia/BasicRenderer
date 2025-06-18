@@ -87,7 +87,6 @@ private:
 	ComPtr<ID3D12CommandQueue> computeQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
-	std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;
@@ -209,6 +208,7 @@ private:
         std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
+		std::shared_ptr<PixelBuffer> m_upscaledHDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
 
 		std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override { // TODO: don't use ifs
@@ -224,6 +224,8 @@ private:
 				return m_currentDebugTexture;
 			if (key.ToString() == Builtin::PrimaryCamera::MeshletBitfield)
 				return m_primaryCameraMeshletBitfield;
+            if (key.ToString() == Builtin::PostProcessing::UpscaledHDR)
+				return m_upscaledHDRColorTarget;
 		
 			spdlog::error("CoreResourceProvider: ProvideResource called with unknown key: {}", key.ToString());
 			return nullptr;
@@ -237,6 +239,7 @@ private:
                 Builtin::Shadows::LinearShadowMaps,
                 Builtin::DebugTexture,
                 Builtin::PrimaryCamera::MeshletBitfield,
+				Builtin::PostProcessing::UpscaledHDR,
 			};
         }
 

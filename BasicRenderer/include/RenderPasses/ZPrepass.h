@@ -120,7 +120,7 @@ public:
             commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 			auto& rtvHandle1 = m_pLinearDepthBuffer->GetRTVInfo(0).cpuHandle;
 			auto& clearColor1 = m_pLinearDepthBuffer->GetClearColor();
-			D3D12_RECT clearRect = { 0, 0, static_cast<LONG>(context.xRes), static_cast<LONG>(context.yRes) };
+			D3D12_RECT clearRect = { 0, 0, static_cast<LONG>(context.renderResolution.x), static_cast<LONG>(context.renderResolution.y) };
 			commandList->ClearRenderTargetView(rtvHandle1, clearColor1.data(), 1, &clearRect);
 
 			if (m_pMotionVectors) {
@@ -173,8 +173,8 @@ private:
         };
         commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.xRes, context.yRes);
-        CD3DX12_RECT scissorRect(0, 0, context.xRes, context.yRes);
+        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.renderResolution.x, context.renderResolution.y);
+        CD3DX12_RECT scissorRect(0, 0, context.renderResolution.x, context.renderResolution.y);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
 

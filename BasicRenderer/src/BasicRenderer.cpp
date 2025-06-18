@@ -256,17 +256,20 @@ bool InitSL() {
     sl::Preferences pref{};
     pref.showConsole = true; // for debugging, set to false in production
     pref.logLevel = sl::LogLevel::eDefault;
-    pref.pathsToPlugins = {}; // change this if Streamline plugins are not located next to the executable
-    pref.numPathsToPlugins = 0; // change this if Streamline plugins are not located next to the executable
+    auto path = GetExePath() + L"\\NVSL";
+    const wchar_t* path_wchar = path.c_str();
+    pref.pathsToPlugins = { &path_wchar }; // change this if Streamline plugins are not located next to the executable
+    pref.numPathsToPlugins = 1; // change this if Streamline plugins are not located next to the executable
     pref.pathToLogsAndData = {}; // change this to enable logging to a file
     pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
-    pref.applicationId = 0; // Provided by NVDA, required if using NGX components (DLSS 2/3)
     pref.engine = sl::EngineType::eCustom; // If using UE or Unity
     pref.engineVersion = "0.0.1"; // Optional version
-    pref.projectId = 0; // Optional project id
+    pref.projectId = "72a89ee2-1139-4cc5-8daa-d27189bed781"; // Optional project id
     sl::Feature myFeatures[] = { sl::kFeatureDLSS };
     pref.featuresToLoad = myFeatures;
     pref.numFeaturesToLoad = _countof(myFeatures);
+    pref.renderAPI = sl::RenderAPI::eD3D12;
+    pref.flags |= sl::PreferenceFlags::eUseFrameBasedResourceTagging;
     if (SL_FAILED(res, slInit(pref)))
     {
         // Handle error, check the logs
@@ -281,6 +284,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
+
+    InitSL();
 
     HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
 
