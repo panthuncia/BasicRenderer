@@ -18,12 +18,13 @@ public:
 	ClearIndirectDrawCommandUAVsPass(bool clearBlend) : m_clearBlend(clearBlend) {}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithCopyDest(Builtin::IndirectCommandBuffers::Opaque, Builtin::IndirectCommandBuffers::AlphaTest);
+		builder->WithCopyDest(Builtin::IndirectCommandBuffers::Opaque, 
+			Builtin::IndirectCommandBuffers::AlphaTest);
 		if (m_clearBlend) {
 			builder->WithCopyDest(Builtin::IndirectCommandBuffers::Blend);
 		}
 	}
-
+  
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -47,18 +48,18 @@ public:
 
 		// Opaque buffer
 		for (auto& child : m_opaqueIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
 			if (!resource) continue;
-			auto counterOffset = resource->GetUAVCounterOffset();
+			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 		}
 
 		// Alpha test buffer
 		for (auto& child : m_alphaTestIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
 			if (!resource) continue;
-			auto counterOffset = resource->GetUAVCounterOffset();
+			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 		}
@@ -66,9 +67,9 @@ public:
 		// Blend buffer
 		if (!m_clearBlend) return {};
 		for (auto& child : m_blendIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
 			if (!resource) continue;
-			auto counterOffset = resource->GetUAVCounterOffset();
+			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 		}
@@ -118,9 +119,9 @@ public:
 
 		// Meshlet frustrum culling buffer
 		for (auto& child : m_meshletCullingCommandBuffers->GetChildren()) {
-			std::shared_ptr<Buffer> resource = std::dynamic_pointer_cast<Buffer>(child);
+			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
 			if (!resource) continue;
-			auto counterOffset = resource->GetUAVCounterOffset();
+			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
 		}

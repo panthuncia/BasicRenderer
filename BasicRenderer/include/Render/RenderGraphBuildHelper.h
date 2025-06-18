@@ -82,7 +82,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
-        .Build<ClearIndirectDrawCommandUAVsPass>(true);
+        .Build<ClearIndirectDrawCommandUAVsPass>(false);
 
     graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass0") // Clear meshlet culling reset command buffers from last frame
         .Build<ClearMeshletCullingCommandUAVsPass>();
@@ -142,7 +142,7 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
 	bool meshletCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshletCulling")();
 
     graph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
-        .Build<ClearIndirectDrawCommandUAVsPass>(false);
+        .Build<ClearIndirectDrawCommandUAVsPass>(true);
 
     graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass1") // Clear meshlet culling reset command buffers from prepass
         .Build<ClearMeshletCullingCommandUAVsPass>();

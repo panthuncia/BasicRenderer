@@ -87,9 +87,6 @@ void RenderGraph::ProcessResourceRequirements(
 			throw(std::runtime_error("Resource referenced is not managed by this graph"));
 		}
 
-		if (resourceRequirement.state.access & D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ && resourceRequirement.state.layout == ResourceLayout::LAYOUT_SHADER_RESOURCE) {
-			spdlog::error("Resource {} has depth stencil read access but is in shader resource layout");
-		}
 		const auto& id = resourceRequirement.resourceAndRange.resource->GetGlobalResourceID();
 
 		AddTransition(compileContext, batchIndex, currentBatch, isCompute, resourceRequirement);
@@ -380,12 +377,14 @@ void RenderGraph::Setup() {
             auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
 			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
             renderPass.pass->Setup(view);
+			renderPass.pass->RegisterCommandLists(m_graphicsCommandLists);
             break;
         }
         case PassType::Compute: {
             auto& computePass = std::get<ComputePassAndResources>(pass.pass);
 			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
             computePass.pass->Setup(view);
+			computePass.pass->RegisterCommandLists(m_computeCommandLists);
             break;
         }
         }
@@ -546,7 +545,7 @@ void RenderGraph::Execute(RenderContext& context) {
 	auto& graphicsCommandList = m_graphicsCommandLists[context.frameIndex];
 	auto& graphicsCommandAllocator = m_graphicsCommandAllocators[context.frameIndex];
 
-	bool useAsyncCompute = false;
+	bool useAsyncCompute = true;
 	auto computeQueue = graphicsQueue;//manager.GetComputeQueue();
 	auto computeCommandList = graphicsCommandList;//m_computeCommandLists[context.frameIndex];
 	auto computeCommandAllocator = graphicsCommandAllocator;//m_computeCommandAllocators[context.frameIndex];
@@ -791,7 +790,7 @@ void RenderGraph::ComputeResourceLoops() {
 		tracker->Apply(
 			whole, // covers all mips & slices
 			pRes.get(),
-			flushState,    // the state we’re flushing to
+			flushState,    // the state weÂ’re flushing to
 			loopBatch.renderTransitions            // collects all transitions
 		);
 	}
@@ -831,9 +830,6 @@ void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resour
 
 std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
 	// If it's already in our registry, return it
-	if (rid.hasPrefix("Builtin::MeshResources")) {
-		spdlog::info("here");
-	}
 	auto cached = _registry.Request(rid);
 	if (cached) {
 		return cached;
