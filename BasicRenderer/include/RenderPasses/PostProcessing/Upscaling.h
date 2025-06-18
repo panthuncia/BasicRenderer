@@ -10,9 +10,32 @@
 #include "Scene/Scene.h"
 #include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Utilities/MathUtils.h"
 #include <ThirdParty/Streamline/sl.h>
 #include <ThirdParty/Streamline/sl_consts.h>
 #include <ThirdParty/Streamline/sl_dlss.h>
+#include <ThirdParty/Streamline/sl_matrix_helpers.h>
+
+
+inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target)
+{
+    DirectX::XMStoreFloat4(
+        reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[0]),
+        m.r[0]
+    );
+    DirectX::XMStoreFloat4(
+        reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[1]),
+        m.r[1]
+    );
+    DirectX::XMStoreFloat4(
+        reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[2]),
+        m.r[2]
+    );
+    DirectX::XMStoreFloat4(
+        reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[3]),
+        m.r[3]
+    );
+}
 
 class UpscalingPass : public RenderPass {
 public:
@@ -89,12 +112,54 @@ public:
     PassReturn Execute(RenderContext& context) override {
 		auto frameToken = m_frameTokens[context.frameIndex];
 		auto myViewport = sl::ViewportHandle(0); // 0 is the default viewport
+
         sl::Constants consts = {};
+
+        auto camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
+		DirectX::XMMATRIX unjitteredProjectionInverse = XMMatrixInverse(nullptr, camera->info.unjitteredProjection);
+        sl::float4x4 cameraViewToWorld;
+		StoreFloat4x4(camera->info.viewInverse, cameraViewToWorld);
+        sl::float4x4 cameraViewToWorldPrev;
+		DirectX::XMMATRIX viewPrevInverse = XMMatrixInverse(nullptr, camera->info.prevView);
+		StoreFloat4x4(viewPrevInverse, cameraViewToWorldPrev);
+        sl::float4x4 cameraViewToPrevCameraView;
+        sl::calcCameraToPrevCamera(cameraViewToPrevCameraView, cameraViewToWorld, cameraViewToWorldPrev);
+		sl::float4x4 clipToPrevCameraView;
+
+		StoreFloat4x4(camera->info.unjitteredProjection, consts.cameraViewToClip); // Projection matrix
+		StoreFloat4x4(unjitteredProjectionInverse, consts.clipToCameraView); // Inverse projection matrix
+
+        sl::matrixMul(clipToPrevCameraView, consts.clipToCameraView, cameraViewToPrevCameraView);
+
+        sl::float4x4 cameraViewToClipPrev;
+        StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
+		sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
+		sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
+        consts.jitterOffset.x = camera->jitterPixelSpace.x;
+		consts.jitterOffset.y = camera->jitterPixelSpace.y;
+
         // Set motion vector scaling based on your setup
-        consts.mvecScale = { 1,1 }; // Values in eMotionVectors are in [-1,1] range
+        //consts.mvecScale = { 1,1 }; // Values in eMotionVectors are in [-1,1] range
         consts.mvecScale = { 1.0f / m_renderRes.x,1.0f / m_renderRes.y }; // Values in eMotionVectors are in pixel space
+        consts.cameraPinholeOffset = { 0, 0 };
         //consts.mvecScale = myCustomScaling; // Custom scaling to ensure values end up in [-1,1] range
-        // Set all other constants here
+         
+        consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };
+
+		auto basisVectors = GetBasisVectors3f(camera->info.view);
+        consts.cameraUp = { basisVectors.Up.x, basisVectors.Up.y, basisVectors.Up.z };
+		consts.cameraRight = { basisVectors.Right.x, basisVectors.Right.y, basisVectors.Right.z };
+		consts.cameraFwd = { basisVectors.Forward.x, basisVectors.Forward.y, basisVectors.Forward.z };
+
+        consts.cameraNear = camera->info.zNear;
+        consts.cameraFar = camera->info.zFar;
+        consts.cameraFOV = camera->info.fov;
+        consts.cameraAspectRatio = camera->info.aspectRatio;
+        consts.depthInverted = sl::Boolean::eFalse;
+        consts.cameraMotionIncluded = sl::Boolean::eTrue;
+		consts.motionVectors3D = sl::Boolean::eFalse;
+		consts.reset = sl::Boolean::eFalse;
+        
         if (SL_FAILED(result, slSetConstants(consts, *frameToken, myViewport))) // constants are changing per frame so frame index is required
         {
 			spdlog::error("Failed to set DLSS constants");

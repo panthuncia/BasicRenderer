@@ -237,9 +237,12 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
                 unsigned int sequenceLength = 16;
 				unsigned int sequenceIndex = m_frameIndex % sequenceLength;
 				auto sequenceOffset = hammersley(sequenceIndex, sequenceLength);
+				camera->jitterPixelSpace = sequenceOffset;
+				sequenceOffset.x = (sequenceOffset.x - 0.5) * 2.0f; // Scale to [-1, 1] range
+				sequenceOffset.y = (sequenceOffset.y - 0.5) * 2.0f; // Scale to [-1, 1] range
                 DirectX::XMFLOAT2 jitterNDC = {
-                    (sequenceOffset.x - 0.5f) * (2.0f / m_xInternalRes),
-                    (sequenceOffset.y - 0.5f) * (2.0f / m_yInternalRes)
+                    (sequenceOffset.x / m_xInternalRes),
+                    (sequenceOffset.y / m_yInternalRes)
                 };
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
 				projection = XMMatrixMultiply(projection, jitterMatrix); // Apply jitter to projection matrix
