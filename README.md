@@ -15,14 +15,15 @@ Feature development is driven purely by what I'm interested in at the moment.
 - Skinned meshes
 - Order-independent transparency using a per-pixel linked-list
 - SSAO with XeGTAO
+- Downsample/upsample bloom
 
 ## Technical features
 
-- GPU-driven rendering with frustrum culling & ExecuteIndirect
-- Per-meshlet frustrum culling
+- GPU-driven rendering with compute culling & ExecuteIndirect
+- Per-meshlet occlusion & frustrum culling
 - Forward+ and Deferred rendering
 - Clustered lighting with a paged linked-list
-- A render graph for automatic resource transitions and queue synchronization
+- A render graph for automatic resource transitions and queue synchronization, supporting symbolic subresoruce ranges
 - Async-compute
 - Compute-based skinning
 - Meshlets & mesh shaders
@@ -50,6 +51,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [assimp](https://github.com/assimp/assimp)
 - [flecs](https://www.flecs.dev/flecs/)
 - [XeGTAO](https://github.com/GameTechDev/XeGTAO)
+- [FidelityFX SPD](https://gpuopen.com/fidelityfx-spd/)
   
 ## Notable sources for development ideas
 
@@ -58,5 +60,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 [LearnOpenGL.com](https://learnopengl.com/)
 
 [Erik Svjannson](https://www.youtube.com/watch?v=EtX7WnFhxtQ)'s talk on GPU-driven rendering and mesh shaders
+
+[Medium article on occlusion culling](https://medium.com/@mil_kru/two-pass-occlusion-culling-4100edcad501)
 
 

@@ -790,7 +790,7 @@ void RenderGraph::ComputeResourceLoops() {
 		tracker->Apply(
 			whole, // covers all mips & slices
 			pRes.get(),
-			flushState,    // the state we’re flushing to
+			flushState,    // the state weÂ’re flushing to
 			loopBatch.renderTransitions            // collects all transitions
 		);
 	}

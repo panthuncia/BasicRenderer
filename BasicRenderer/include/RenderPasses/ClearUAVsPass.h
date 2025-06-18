@@ -24,7 +24,7 @@ public:
 			builder->WithCopyDest(Builtin::IndirectCommandBuffers::Blend);
 		}
 	}
-
+  
 	void Setup(const ResourceRegistryView& resourceRegistryView) override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
