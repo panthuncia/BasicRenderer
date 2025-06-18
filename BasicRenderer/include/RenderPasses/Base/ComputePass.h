@@ -32,6 +32,7 @@ public:
 	virtual ~ComputePass() = default;
 
 	virtual void Setup(const ResourceRegistryView& resourceRegistryView) = 0;
+	virtual void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {};
 	virtual void Update() {};
 	virtual PassReturn Execute(RenderContext& context) = 0;
 	virtual void Cleanup(RenderContext& context) = 0;

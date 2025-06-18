@@ -58,32 +58,32 @@ Components::IndirectCommandBuffers IndirectCommandBufferManager::CreateBuffersFo
     auto opaqueBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_opaqueCommandBufferSize, sizeof(DispatchMeshIndirectCommand), false, true, true);
     opaqueBuffer->SetName(L"OpaqueIndirectCommandBuffer ("+std::to_wstring(viewID)+L")");
     std::shared_ptr<DynamicGloballyIndexedResource> pOpaqueDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(opaqueBuffer);
-	m_opaqueResourceGroup->AddResource(opaqueBuffer);
+	m_opaqueResourceGroup->AddResource(pOpaqueDynamicResource);
 
 	auto alphaTestBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_alphaTestCommandBufferSize, sizeof(DispatchMeshIndirectCommand), false, true, true);
 	alphaTestBuffer->SetName(L"AlphaTestIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pAlphaTestDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(alphaTestBuffer);
-	m_alphaTestResourceGroup->AddResource(alphaTestBuffer);
+	m_alphaTestResourceGroup->AddResource(pAlphaTestDynamicResource);
 
 	auto blendBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(DispatchMeshIndirectCommand), false, true, true);
 	blendBuffer->SetName(L"BlendIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pBlendDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(blendBuffer);
-	m_blendResourceGroup->AddResource(blendBuffer);
+	m_blendResourceGroup->AddResource(pBlendDynamicResource);
 
 	auto meshletFrustrumCullingBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true);
 	meshletFrustrumCullingBuffer->SetName(L"MeshletFrustrumCullingIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pMeshletFrustrumCullingDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(meshletFrustrumCullingBuffer);
-	m_meshletCullingCommandResourceGroup->AddResource(meshletFrustrumCullingBuffer);
+	m_meshletCullingCommandResourceGroup->AddResource(pMeshletFrustrumCullingDynamicResource);
 
 	auto meshletOcclusionCullingBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true);
 	meshletOcclusionCullingBuffer->SetName(L"MeshletOcclusionCullingIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pMeshletOcclusionCullingDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(meshletOcclusionCullingBuffer);
-	m_meshletCullingCommandResourceGroup->AddResource(meshletOcclusionCullingBuffer);
+	m_meshletCullingCommandResourceGroup->AddResource(pMeshletOcclusionCullingDynamicResource);
 
 	auto meshletCullingResetBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), false, true, true);
 	meshletCullingResetBuffer->SetName(L"MeshletCullingResetIndirectCommandBuffer (" + std::to_wstring(viewID) + L")");
 	std::shared_ptr<DynamicGloballyIndexedResource> pMeshletFrustrumCullingResetDynamicResource = std::make_shared<DynamicGloballyIndexedResource>(meshletCullingResetBuffer);
-	m_meshletCullingCommandResourceGroup->AddResource(meshletCullingResetBuffer);
+	m_meshletCullingCommandResourceGroup->AddResource(pMeshletFrustrumCullingResetDynamicResource);
 
     Components::IndirectCommandBuffers bufferComponent;
 	bufferComponent.opaqueIndirectCommandBuffer = pOpaqueDynamicResource;
