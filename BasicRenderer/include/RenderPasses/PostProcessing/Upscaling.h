@@ -61,8 +61,8 @@ public:
     }
 
     void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {
-        m_renderExtent = { m_renderRes.x, m_renderRes.y };
-        m_upscaleExtent = { m_outputRes.x, m_outputRes.y };
+        m_renderExtent = { 0, 0, m_renderRes.x, m_renderRes.y };
+        m_upscaleExtent = { 0, 0, m_outputRes.x, m_outputRes.y };
         auto viewport = sl::ViewportHandle(0); // 0 is the default viewport
 
         for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
