@@ -226,15 +226,19 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             if (m_jitter && entity.has<Components::PrimaryCamera>()) {
                 // Apply jitter
                 unsigned int sequenceLength = 16;
-				unsigned int sequenceIndex = m_frameIndex % sequenceLength;
-				auto sequenceOffset = hammersley(sequenceIndex, sequenceLength);
-				camera->jitterPixelSpace = sequenceOffset;
-				sequenceOffset.x = (sequenceOffset.x - 0.5) * 2.0f; // Scale to [-1, 1] range
-				sequenceOffset.y = (sequenceOffset.y - 0.5) * 2.0f; // Scale to [-1, 1] range
+				unsigned int sequenceIndex = m_totalFramesRendered % sequenceLength;
+                DirectX::XMFLOAT2 sequenceOffset = { 
+                    2.0f * Halton(sequenceIndex + 1, 2) - 1.0f, 
+                    2.0f * Halton(sequenceIndex + 1, 3) - 1.0f };
+                camera->jitterPixelSpace = sequenceOffset;
+
+				//sequenceOffset.x = (sequenceOffset.x - 0.5) * 2.0f; // Scale to [-1, 1] range
+				//sequenceOffset.y = (sequenceOffset.y - 0.5) * 2.0f; // Scale to [-1, 1] range
                 DirectX::XMFLOAT2 jitterNDC = {
                     (sequenceOffset.x / m_xInternalRes),
                     (sequenceOffset.y / m_yInternalRes)
                 };
+                camera->jitterPixelSpace = jitterNDC;
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
 				projection = XMMatrixMultiply(projection, jitterMatrix); // Apply jitter to projection matrix
             }
@@ -730,7 +734,7 @@ void DX12Renderer::InitDLSS() {
     sl::DLSSOptimalSettings dlssSettings;
     sl::DLSSOptions dlssOptions;
     // These are populated based on user selection in the UI
-    dlssOptions.mode = sl::DLSSMode::eBalanced;
+    dlssOptions.mode = sl::DLSSMode::eDLAA;
     dlssOptions.outputWidth = m_xOutputRes;
     dlssOptions.outputHeight = m_yOutputRes;
     // Now let's check what should our rendering resolution be
@@ -986,6 +990,7 @@ void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t 
 
 void DX12Renderer::AdvanceFrameIndex() {
     m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
+    m_totalFramesRendered += 1;
 }
 
 void DX12Renderer::FlushCommandQueue() {

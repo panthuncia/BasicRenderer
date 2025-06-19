@@ -65,23 +65,6 @@ public:
         m_upscaleExtent = { 0, 0, m_outputRes.x, m_outputRes.y };
         auto viewport = sl::ViewportHandle(0); // 0 is the default viewport
 
-        for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
-            sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)m_pHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-            sl::Resource colorOut = { sl::ResourceType::eTex2d, m_pUpscaledHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-            sl::Resource depth = { sl::ResourceType::eTex2d, m_pDepthTexture->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-            sl::Resource mvec = { sl::ResourceType::eTex2d, m_pMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-            //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
-
-            sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eOnlyValidNow, &m_renderExtent };
-            sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eOnlyValidNow, &m_upscaleExtent };
-            sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &m_renderExtent };
-            sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &m_renderExtent };
-            //sl::ResourceTag exposureTag = sl::ResourceTag{ &exposure, sl::kBufferTypeExposure, sl::ResourceLifecycle::eOnlyValidNow, &my1x1Extent };
-
-            sl::ResourceTag inputs[] = { colorInTag, colorOutTag, depthTag, mvecTag };
-            //slSetTagForFrame(*m_frameTokens[i], viewport, inputs, _countof(inputs), commandLists[i].Get());
-        }
-
         sl::DLSSOptions dlssOptions = {};
         // Set preferred Render Presets per Perf Quality Mode. These are typically set one time
         // and established while evaluating DLSS SR Image Quality for your Application.

@@ -14,6 +14,7 @@ BoundingSphere ComputeConeBoundingSphere(const DirectX::XMVECTOR& origin, const 
 unsigned int GetNextPowerOfTwo(unsigned int value);
 inline uint32_t DivRoundUp(uint32_t num, uint32_t den) { return (num + den - 1) / den; }
 DirectX::XMFLOAT2 hammersley(uint i, float numSamples);
+float Halton(uint32_t i, uint32_t b);
 struct BasisVectors
 {
     DirectX::XMVECTOR Right;

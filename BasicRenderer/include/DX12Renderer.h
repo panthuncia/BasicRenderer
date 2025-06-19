@@ -95,6 +95,7 @@ private:
     UINT rtvDescriptorSize;
     UINT dsvDescriptorSize;
     uint8_t m_frameIndex = 0;
+    uint64_t m_totalFramesRendered = 0;
 	uint8_t m_numFramesInFlight = 0;
     ComPtr<ID3D12Fence> m_frameFence;
     std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
