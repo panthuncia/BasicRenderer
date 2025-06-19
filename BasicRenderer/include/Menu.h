@@ -197,7 +197,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.FontGlobalScale = 1.2f;
-	io.DisplaySize = ImVec2(3420.0f, 3080.0f);
+
+	DirectX::XMUINT2 renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+	DirectX::XMUINT2 outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+	io.DisplaySize = ImVec2(outputResolution.x, outputResolution.y);
 
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();

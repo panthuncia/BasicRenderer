@@ -14,7 +14,8 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     float4 prevPos;
     if (flags & VERTEX_SKINNED)
     {
-        prevPos = (LoadFloat3(prevBlockByteOffset + index * vertexSize, buffer), 1.0);
+        uint prevByteOffset = prevBlockByteOffset + index * vertexSize;
+        prevPos = float4(LoadFloat3(prevByteOffset, buffer), 1.0);
     }
     else
     {
@@ -72,7 +73,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     float4 viewPosition = mul(worldPosition, mainCamera.view);
     result.positionViewSpace = viewPosition;
     result.position = mul(viewPosition, mainCamera.projection);
-    result.clipPosition = result.position;
+    result.clipPosition = mul(viewPosition, mainCamera.unjitteredProjection);
     
     float4 prevPosition = mul(prevPos, objectBuffer.model);
     prevPosition = mul(prevPosition, mainCamera.prevView);

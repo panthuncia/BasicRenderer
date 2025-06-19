@@ -17,23 +17,24 @@
 #include <ThirdParty/Streamline/sl_matrix_helpers.h>
 
 
-inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target)
+inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool transpose = false)
 {
+	DirectX::XMMATRIX mTransposed = transpose ? DirectX::XMMatrixTranspose(m) : m;
     DirectX::XMStoreFloat4(
         reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[0]),
-        m.r[0]
+        mTransposed.r[0]
     );
     DirectX::XMStoreFloat4(
         reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[1]),
-        m.r[1]
+        mTransposed.r[1]
     );
     DirectX::XMStoreFloat4(
         reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[2]),
-        m.r[2]
+        mTransposed.r[2]
     );
     DirectX::XMStoreFloat4(
         reinterpret_cast<DirectX::XMFLOAT4*>(&target.row[3]),
-        m.r[3]
+        mTransposed.r[3]
     );
 }
 
@@ -117,12 +118,12 @@ public:
         StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
 		sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
 		sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
-        consts.jitterOffset.x = camera->jitterPixelSpace.x;
-		consts.jitterOffset.y = camera->jitterPixelSpace.y;
+        consts.jitterOffset.x = camera->jitterNDC.x;
+		consts.jitterOffset.y = -camera->jitterNDC.y;
 
         // Set motion vector scaling based on your setup
         //consts.mvecScale = { 1,1 }; // Values in eMotionVectors are in [-1,1] range
-        consts.mvecScale = { 1.0f / m_renderRes.x,1.0f / m_renderRes.y }; // Values in eMotionVectors are in pixel space
+        consts.mvecScale = { 1.0f / m_renderRes.x, 1.0f / m_renderRes.y }; // Values in eMotionVectors are in pixel space
         consts.cameraPinholeOffset = { 0, 0 };
         //consts.mvecScale = myCustomScaling; // Custom scaling to ensure values end up in [-1,1] range
          

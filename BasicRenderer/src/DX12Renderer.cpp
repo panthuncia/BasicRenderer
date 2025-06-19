@@ -238,7 +238,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
                     (sequenceOffset.x / m_xInternalRes),
                     (sequenceOffset.y / m_yInternalRes)
                 };
-                camera->jitterPixelSpace = jitterNDC;
+				camera->jitterNDC = jitterNDC;
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
 				projection = XMMatrixMultiply(projection, jitterMatrix); // Apply jitter to projection matrix
             }
@@ -734,7 +734,7 @@ void DX12Renderer::InitDLSS() {
     sl::DLSSOptimalSettings dlssSettings;
     sl::DLSSOptions dlssOptions;
     // These are populated based on user selection in the UI
-    dlssOptions.mode = sl::DLSSMode::eDLAA;
+    dlssOptions.mode = sl::DLSSMode::eBalanced;
     dlssOptions.outputWidth = m_xOutputRes;
     dlssOptions.outputHeight = m_yOutputRes;
     // Now let's check what should our rendering resolution be

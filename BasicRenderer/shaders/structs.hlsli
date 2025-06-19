@@ -51,19 +51,10 @@ struct PerFrameBuffer {
     float4 shadowCascadeSplits;
     
     uint mainCameraIndex;
-    //uint activeLightIndicesBufferIndex;
-    //uint lightBufferIndex;
     uint numLights;
-    
-    //uint pointLightCubemapBufferIndex;
-    //uint spotLightMatrixBufferIndex;
-    //uint directionalLightCascadeBufferIndex;
     uint numShadowCascades;
     
     unsigned int activeEnvironmentIndex;
-    //unsigned int environmentBufferDescriptorIndex;
-    //uint environmentBRDFLUTIndex;
-    //uint environmentBRDFLUTSamplerIndex;
     
     uint outputType;
     uint screenResX;

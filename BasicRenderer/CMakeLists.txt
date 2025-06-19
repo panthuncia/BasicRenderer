@@ -224,7 +224,7 @@ set(NVSL_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/NVSL")
 add_symlink_or_copy_per_config(
     "${NVSL_DIR}"
     "${NVSL_FILE}"
-    FALSE  # IS_DIRECTORY
+    TRUE  # IS_DIRECTORY
     "NVSL_DIR"
 )
 
