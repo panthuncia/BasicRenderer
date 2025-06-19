@@ -50,8 +50,7 @@ public:
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
-        builder->WithShaderResource(Builtin::Color::HDRColorTarget, Builtin::GBuffer::MotionVectors, Builtin::PrimaryCamera::DepthTexture);
-		builder->WithUnorderedAccess(Builtin::PostProcessing::UpscaledHDR);
+        builder->WithLegacyInterop(Builtin::Color::HDRColorTarget, Builtin::GBuffer::MotionVectors, Builtin::PrimaryCamera::DepthTexture, Builtin::PostProcessing::UpscaledHDR);
     }
 
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
@@ -62,25 +61,25 @@ public:
     }
 
     void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {
-        sl::Extent myExtent = { m_renderRes.x, m_renderRes.y };
-        sl::Extent fullExtent = { m_outputRes.x, m_outputRes.y };
+        m_renderExtent = { m_renderRes.x, m_renderRes.y };
+        m_upscaleExtent = { m_outputRes.x, m_outputRes.y };
         auto viewport = sl::ViewportHandle(0); // 0 is the default viewport
 
         for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
             sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)m_pHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-            sl::Resource colorOut = { sl::ResourceType::eTex2d, m_pUpscaledHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
-            sl::Resource depth = { sl::ResourceType::eTex2d, m_pDepthTexture->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+            sl::Resource colorOut = { sl::ResourceType::eTex2d, m_pUpscaledHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+            sl::Resource depth = { sl::ResourceType::eTex2d, m_pDepthTexture->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
             sl::Resource mvec = { sl::ResourceType::eTex2d, m_pMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
             //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
 
-            sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
-            sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eOnlyValidNow, &fullExtent };
-            sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &myExtent };
-            sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
+            sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eOnlyValidNow, &m_renderExtent };
+            sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eOnlyValidNow, &m_upscaleExtent };
+            sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &m_renderExtent };
+            sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &m_renderExtent };
             //sl::ResourceTag exposureTag = sl::ResourceTag{ &exposure, sl::kBufferTypeExposure, sl::ResourceLifecycle::eOnlyValidNow, &my1x1Extent };
 
             sl::ResourceTag inputs[] = { colorInTag, colorOutTag, depthTag, mvecTag };
-            slSetTagForFrame(*m_frameTokens[i], viewport, inputs, _countof(inputs), commandLists[i].Get());
+            //slSetTagForFrame(*m_frameTokens[i], viewport, inputs, _countof(inputs), commandLists[i].Get());
         }
 
         sl::DLSSOptions dlssOptions = {};
@@ -165,7 +164,19 @@ public:
 			spdlog::error("Failed to set DLSS constants");
         }
 
-        const sl::BaseStructure* inputs[] = { &myViewport };
+        sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)m_pHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        sl::Resource colorOut = { sl::ResourceType::eTex2d, m_pUpscaledHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        sl::Resource depth = { sl::ResourceType::eTex2d, m_pDepthTexture->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        sl::Resource mvec = { sl::ResourceType::eTex2d, m_pMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+        //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
+
+        sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &m_renderExtent };
+        sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &m_upscaleExtent };
+        sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &m_renderExtent };
+        sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &m_renderExtent };
+
+        const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
+
         if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context.commandList)))
         {
             spdlog::error("DLSS evaluation failed!");
@@ -194,6 +205,10 @@ private:
 
     DirectX::XMUINT2 m_renderRes;
     DirectX::XMUINT2 m_outputRes;
+
+    sl::Extent m_renderExtent;
+    sl::Extent m_upscaleExtent;
+
     uint8_t m_numFramesInFlight;
 
 };

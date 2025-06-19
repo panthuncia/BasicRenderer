@@ -28,13 +28,14 @@
 #include "Render/PSOFlags.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Import/ModelLoader.h"
-#include "slHooks.h"
+#include <slHooks.h>
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
 PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
 PFunCreateDXGIFactory2 slCreateDXGIFactory2 = nullptr;
 PFunDXGIGetDebugInterface1 slDXGIGetDebugInterface1 = nullptr;
 PFunD3D12CreateDevice slD3D12CreateDevice = nullptr;
+decltype(&slUpgradeInterface) slGetUpgradeInterface = nullptr;
 
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
@@ -251,6 +252,9 @@ bool InitSL() {
         slCreateDXGIFactory2 = reinterpret_cast<PFunCreateDXGIFactory2>(GetProcAddress(mod, "CreateDXGIFactory2"));
         slDXGIGetDebugInterface1 = reinterpret_cast<PFunDXGIGetDebugInterface1>(GetProcAddress(mod, "DXGIGetDebugInterface1"));
         slD3D12CreateDevice = reinterpret_cast<PFunD3D12CreateDevice>(GetProcAddress(mod, "D3D12CreateDevice"));
+        slGetUpgradeInterface =
+            reinterpret_cast<decltype(&slUpgradeInterface)>(
+                GetProcAddress(mod, "slUpgradeInterface"));
     }
 
     sl::Preferences pref{};
@@ -269,7 +273,7 @@ bool InitSL() {
     pref.featuresToLoad = myFeatures;
     pref.numFeaturesToLoad = _countof(myFeatures);
     pref.renderAPI = sl::RenderAPI::eD3D12;
-    pref.flags |= sl::PreferenceFlags::eUseFrameBasedResourceTagging;
+    pref.flags |= sl::PreferenceFlags::eUseManualHooking;
     if (SL_FAILED(res, slInit(pref)))
     {
         // Handle error, check the logs

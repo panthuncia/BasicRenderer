@@ -136,7 +136,6 @@ private:
 
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
 
-    void CreateAdapter();
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
 	void CheckDLSSSupport();
     void InitDLSS();

@@ -20,6 +20,7 @@ struct ComputePassParameters {
 	std::vector<ResourceAndRange> constantBuffers;
 	std::vector<ResourceAndRange> unorderedAccessViews;
 	std::vector<ResourceAndRange> indirectArgumentBuffers;
+	std::vector<ResourceAndRange> legacyInteropResources;
 
 	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> identifierSet;
 	std::vector<ResourceRequirement> resourceRequirements;

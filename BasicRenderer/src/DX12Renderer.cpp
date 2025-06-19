@@ -99,15 +99,8 @@ void D3D12DebugCallback(
     }
 }
 
-ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
+ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
 {
-    ComPtr<IDXGIFactory6> factory;
-    HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
-    if (FAILED(hr))
-    {
-        throw std::runtime_error("Failed to create DXGI factory.");
-    }
-
     ComPtr<IDXGIAdapter1> adapter;
     ComPtr<IDXGIAdapter1> bestAdapter;
     SIZE_T maxDedicatedVideoMemory = 0;
@@ -149,8 +142,6 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_yOutputRes = y_res;
 	m_xInternalRes = x_res;
 	m_yInternalRes = y_res;
-    CreateAdapter();
-    CheckDLSSSupport();
 
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
@@ -516,11 +507,6 @@ void EnableShaderBasedValidation() {
     spDebugController1->SetEnableGPUBasedValidation(true);
 }
 
-void DX12Renderer::CreateAdapter() {
-    ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
-    m_currentAdapter = bestAdapter;
-}
-
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
@@ -534,12 +520,23 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 #endif
 
     // Create DXGI factory
-    if (slCreateDXGIFactory2 != nullptr) {
-		ThrowIfFailed(slCreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-    }
-    else {
+  //  if (slCreateDXGIFactory2 != nullptr) {
+		//ThrowIfFailed(slCreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+  //  }
+  //  else {
         ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-    }
+    //}
+		IDXGIFactory7* proxyFactory = factory.Get();
+        if (SL_FAILED(result, slUpgradeInterface((void**) & proxyFactory)))
+        {
+            spdlog::error("SL factory upgrade failed!");
+        }
+        else {
+            factory = proxyFactory;
+		}
+
+    m_currentAdapter = GetMostPowerfulAdapter(factory.Get());
+    CheckDLSSSupport();
 
     // Create device
 
@@ -548,17 +545,26 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 #endif
 
 
-    if (slD3D12CreateDevice != nullptr) {
-        ThrowIfFailed(slD3D12CreateDevice(
-            m_currentAdapter.Get(),
-            D3D_FEATURE_LEVEL_12_0,
-			IID_PPV_ARGS(&device)));
-    }
-    else {
+   // if (slD3D12CreateDevice != nullptr) {
+   //     ThrowIfFailed(slD3D12CreateDevice(
+   //         m_currentAdapter.Get(),
+   //         D3D_FEATURE_LEVEL_12_0,
+			//IID_PPV_ARGS(&device)));
+   // }
+   // else {
         ThrowIfFailed(D3D12CreateDevice(
             m_currentAdapter.Get(),
             D3D_FEATURE_LEVEL_12_0,
             IID_PPV_ARGS(&device)));
+    //}
+
+    ID3D12Device10* proxyDevice = device.Get();
+    if (SL_FAILED(result, slUpgradeInterface((void**) & proxyDevice)))
+    {
+        spdlog::error("SL device upgrade failed!");
+    }
+    else {
+        device = proxyDevice;
     }
 
     InitDLSS();
@@ -596,7 +602,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
     {
         D3D12_INFO_QUEUE_FILTER filter = {};
-        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists, ps output type mismatch
+        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328 }; // Barrier-only command lists, ps output type mismatch
         filter.DenyList.NumIDs = _countof(blockedIDs);
         filter.DenyList.pIDList = blockedIDs;
 
@@ -720,7 +726,6 @@ void DX12Renderer::CheckDLSSSupport() {
 void DX12Renderer::InitDLSS() {
 	if (!m_dlssSupported) return; // Do not initialize DLSS if not supported
     slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
-    
 
     sl::DLSSOptimalSettings dlssSettings;
     sl::DLSSOptions dlssOptions;
