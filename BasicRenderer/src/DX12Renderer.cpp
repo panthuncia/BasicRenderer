@@ -189,7 +189,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         .with<Components::Active>()
         .term_at(3).parent().cascade()
         .cached().cache_kind(flecs::QueryCacheAll)
-        .each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
+        .each([&, res](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
         XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
         XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
         XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
