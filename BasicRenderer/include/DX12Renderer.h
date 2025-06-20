@@ -114,11 +114,6 @@ private:
     std::shared_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool rebuildRenderGraph = true;
 
-    UINT m_xOutputRes;
-	UINT m_yOutputRes;
-    UINT m_xInternalRes;
-    UINT m_yInternalRes;
-
     RenderContext m_context;
 
 	std::string m_environmentName;
@@ -138,8 +133,6 @@ private:
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
-	void CheckDLSSSupport();
-    void InitDLSS();
     void CreateTextures();
 	void TagDLSSResources(ID3D12Resource* pDepthTexture);
     void MoveForward();

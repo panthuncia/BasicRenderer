@@ -67,6 +67,7 @@
 #include "../generated/BuiltinResources.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/RenderGraphBuildHelper.h"
+#include "Managers/Singletons/UpscalingManager.h"
 #include "slHooks.h"
 
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
@@ -138,16 +139,12 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
 }
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
-    m_xOutputRes = x_res;
-    m_yOutputRes = y_res;
-	m_xInternalRes = x_res;
-	m_yInternalRes = y_res;
 
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
-    settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { m_xInternalRes, m_yInternalRes });
-    settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { m_xOutputRes, m_yOutputRes });
+    settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
+    settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
     LoadPipeline(hwnd, x_res, y_res);
     SetSettings();
     ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
@@ -159,6 +156,9 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
 	StatisticsManager::GetInstance().Initialize();
+
+    UpscalingManager::GetInstance().Setup();
+
     CreateTextures();
     CreateGlobalResources();
 
@@ -182,6 +182,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
 	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
+	auto res = settingsManager.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
     m_hierarchySystem =
         world.system<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
@@ -235,8 +236,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 				//sequenceOffset.x = (sequenceOffset.x - 0.5) * 2.0f; // Scale to [-1, 1] range
 				//sequenceOffset.y = (sequenceOffset.y - 0.5) * 2.0f; // Scale to [-1, 1] range
                 DirectX::XMFLOAT2 jitterNDC = {
-                    (sequenceOffset.x / m_xInternalRes),
-                    (sequenceOffset.y / m_yInternalRes)
+                    (sequenceOffset.x / res.x),
+                    (sequenceOffset.y / res.y)
                 };
 				camera->jitterNDC = jitterNDC;
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
@@ -524,23 +525,21 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 #endif
 
     // Create DXGI factory
-  //  if (slCreateDXGIFactory2 != nullptr) {
-		//ThrowIfFailed(slCreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-  //  }
-  //  else {
-        ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-    //}
-		IDXGIFactory7* proxyFactory = factory.Get();
-        if (SL_FAILED(result, slUpgradeInterface((void**) & proxyFactory)))
-        {
-            spdlog::error("SL factory upgrade failed!");
-        }
-        else {
-            factory = proxyFactory;
-		}
+
+    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+
+	IDXGIFactory7* proxyFactory = factory.Get();
+    if (SL_FAILED(result, slUpgradeInterface((void**) & proxyFactory)))
+    {
+        spdlog::error("SL factory upgrade failed!");
+    }
+    else {
+        factory = proxyFactory;
+	}
 
     m_currentAdapter = GetMostPowerfulAdapter(factory.Get());
-    CheckDLSSSupport();
+    
+    UpscalingManager::GetInstance().InitializeAdapter(m_currentAdapter);
 
     // Create device
 
@@ -548,19 +547,10 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     m_gpuCrashTracker.Initialize();
 #endif
 
-
-   // if (slD3D12CreateDevice != nullptr) {
-   //     ThrowIfFailed(slD3D12CreateDevice(
-   //         m_currentAdapter.Get(),
-   //         D3D_FEATURE_LEVEL_12_0,
-			//IID_PPV_ARGS(&device)));
-   // }
-   // else {
-        ThrowIfFailed(D3D12CreateDevice(
-            m_currentAdapter.Get(),
-            D3D_FEATURE_LEVEL_12_0,
-            IID_PPV_ARGS(&device)));
-    //}
+    ThrowIfFailed(D3D12CreateDevice(
+        m_currentAdapter.Get(),
+        D3D_FEATURE_LEVEL_12_0,
+        IID_PPV_ARGS(&device)));
 
     ID3D12Device10* proxyDevice = device.Get();
     if (SL_FAILED(result, slUpgradeInterface((void**) & proxyDevice)))
@@ -571,7 +561,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         device = proxyDevice;
     }
 
-    InitDLSS();
+	UpscalingManager::GetInstance().SetDevice(device);
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
@@ -701,54 +691,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
 }
 
-void DX12Renderer::CheckDLSSSupport() {
-    DXGI_ADAPTER_DESC desc{};
-    if (SUCCEEDED(m_currentAdapter->GetDesc(&desc)))
-    {
-        sl::AdapterInfo adapterInfo{};
-        adapterInfo.deviceLUID = (uint8_t*)&desc.AdapterLuid;
-        adapterInfo.deviceLUIDSizeInBytes = sizeof(LUID);
-        if (SL_FAILED(result, slIsFeatureSupported(sl::kFeatureDLSS, adapterInfo)))
-        {
-            // Requested feature is not supported on the system, fallback to the default method
-            switch (result)
-            {
-            case sl::Result::eErrorOSOutOfDate:         // inform user to update OS
-            case sl::Result::eErrorDriverOutOfDate:     // inform user to update driver
-            case sl::Result::eErrorAdapterNotSupported:  // cannot use this adapter (older or non-NVDA GPU etc)
-				m_dlssSupported = false; // Do not initialize DLSS
-				return;
-            };
-        }
-        else
-        {
-            m_dlssSupported = true;
-        }
-    }
-}
-
-void DX12Renderer::InitDLSS() {
-	if (!m_dlssSupported) return; // Do not initialize DLSS if not supported
-    slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
-
-    sl::DLSSOptimalSettings dlssSettings;
-    sl::DLSSOptions dlssOptions;
-    // These are populated based on user selection in the UI
-    dlssOptions.mode = sl::DLSSMode::eBalanced;
-    dlssOptions.outputWidth = m_xOutputRes;
-    dlssOptions.outputHeight = m_yOutputRes;
-    // Now let's check what should our rendering resolution be
-    if (SL_FAILED(result, slDLSSGetOptimalSettings(dlssOptions, dlssSettings)))
-    {
-        spdlog::error("DLSSGetOptimalSettings failed!");
-    }
-    // Setup rendering based on the provided values in the sl::DLSSSettings structure
-    m_xInternalRes = dlssSettings.optimalRenderWidth;
-    m_yInternalRes = dlssSettings.optimalRenderHeight;
-
-	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")({ m_xInternalRes, m_yInternalRes });
-}
-
 void DX12Renderer::CreateTextures() {
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     // Create HDR color target
@@ -793,16 +735,8 @@ void DX12Renderer::CreateTextures() {
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
 
-void DX12Renderer::TagDLSSResources(ID3D12Resource* pDepthTexture) {
-    if (!m_dlssSupported) return; // Do not tag DLSS resources if not supported
-    
-
-}
-
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     if (!device) return;
-	m_xInternalRes = newWidth;
-	m_yInternalRes = newHeight;
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
 
@@ -829,6 +763,11 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
         device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
         rtvHandle.Offset(1, rtvDescriptorSize);
     }
+
+	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("outputResolution")({ newWidth, newHeight });
+
+    UpscalingManager::GetInstance().Shutdown();
+	UpscalingManager::GetInstance().Setup();
 
     CreateTextures();
 
@@ -888,7 +827,8 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { m_xInternalRes, m_yInternalRes }, m_lightClusterSize, m_frameIndex);
+    auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, m_frameIndex);
 
 	currentRenderGraph->Update();
 
@@ -907,6 +847,8 @@ void DX12Renderer::Render() {
 
 	auto& world = ECSManager::GetInstance().GetWorld();
 	const Components::DrawStats* drawStats = world.get<Components::DrawStats>();
+    auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
 
     m_context.currentScene = currentScene.get();
 	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
@@ -919,8 +861,8 @@ void DX12Renderer::Render() {
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
     m_context.frameFenceValue = m_currentFrameFenceValue;
-    m_context.renderResolution = { m_xInternalRes, m_yInternalRes };
-	m_context.outputResolution = { m_xOutputRes, m_yOutputRes };
+    m_context.renderResolution = { renderRes.x, renderRes.y };
+	m_context.outputResolution = { outputRes.x, outputRes.y };
 	m_context.cameraManager = m_pCameraManager.get();
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();

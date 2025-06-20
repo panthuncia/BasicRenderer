@@ -150,6 +150,25 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
         nullptr
     );
 
+    HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+
+    MONITORINFO mi = { sizeof(mi) };
+    GetMonitorInfo(hMon, &mi);
+
+    // mi.rcMonitor is the *entire* display area, including taskbar‐covered parts
+    int monX = mi.rcMonitor.left;
+    int monY = mi.rcMonitor.top;
+    int monWidth = mi.rcMonitor.right - mi.rcMonitor.left;
+    int monHeight = mi.rcMonitor.bottom - mi.rcMonitor.top;
+
+    SetWindowPos(
+        hwnd,
+        HWND_TOP,           // or HWND_TOPMOST if you want to stay above every other window
+        monX, monY,        // top-left corner of the monitor
+        monWidth, monHeight,  // exactly fill it
+        SWP_NOACTIVATE      // don’t steal focus, or add SWP_SHOWWINDOW if needed
+    );
+
     if (hwnd == nullptr) {
         MessageBox(nullptr, L"Failed to create window", L"Error", MB_OK);
         throw std::runtime_error("Failed to create window.");
@@ -285,6 +304,7 @@ bool InitSL() {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
@@ -357,9 +377,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//tigerScene->GetRoot().transform.setLocalPosition({ 0.0, 0.0, 0.0 });
 	//tigerScene->GetRoot().m_name = L"tigerRoot";
 
-    auto phoenixScene = LoadModel("models/phoenix.glb");
-    phoenixScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
-    phoenixScene->GetRoot().set<Components::Position>({ -1.0, 0.0, 0.0 });
+    //auto phoenixScene = LoadModel("models/phoenix.glb");
+    //phoenixScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+    //phoenixScene->GetRoot().set<Components::Position>({ -1.0, 0.0, 0.0 });
 
     auto carScene = LoadModel("models/porche.glb");
     carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
@@ -374,9 +394,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
 
-    auto cubeScene = LoadModel("models/sphere.glb");
-    cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
-    cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
+    //auto cubeScene = LoadModel("models/sphere.glb");
+    //cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
+    //cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
     
     //auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto bistro = LoadModel("models/bistro.glb");
@@ -412,7 +432,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //mountainScene->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
@@ -426,9 +446,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
    //     for (auto& object : tigerScene->GetOpaqueRenderableObjectIDMap()) {
 			//object.second->SetAnimationSpeed(animationSpeed);
    //     }
-	    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+	    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 		auto point = randomPointInSphere(80.0);
-        cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
+        //cubeScene->GetRoot().set<Components::Position>({ point.x, point.y, point.z});
 	}
 
     //renderer.GetCurrentScene()->AppendScene(phoenixScene->Clone());

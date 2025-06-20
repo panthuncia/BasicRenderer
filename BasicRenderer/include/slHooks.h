@@ -1,5 +1,6 @@
 #pragma once
 
+#include <d3d12.h>
 #include <ThirdParty/Streamline/sl.h>
 #include <ThirdParty/Streamline/sl_consts.h>
 #include <ThirdParty/Streamline/sl_dlss.h>

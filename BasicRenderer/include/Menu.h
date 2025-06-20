@@ -201,6 +201,8 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	DirectX::XMUINT2 renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	DirectX::XMUINT2 outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
 	io.DisplaySize = ImVec2(outputResolution.x, outputResolution.y);
+    io.DisplayFramebufferScale = ImVec2(
+        2.0, 2.0);
 
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
@@ -417,6 +419,16 @@ inline void Menu::Render(const RenderContext& context) {
     m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	auto heap = g_pd3dSrvDescHeap.Get();
     m_commandList->SetDescriptorHeaps(1, &heap);
+
+
+    // set viewport to cover the entire buffer
+    auto& io = ImGui::GetIO();
+    D3D12_VIEWPORT vp{ 0,0, io.DisplaySize.x, io.DisplaySize.y, 0.0f, 1.0f };
+    m_commandList->RSSetViewports(1, &vp);
+
+    // set scissor to the full buffer
+    D3D12_RECT rc{ 0, 0, (LONG)io.DisplaySize.x, (LONG)io.DisplaySize.y };
+    m_commandList->RSSetScissorRects(1, &rc);
 
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
 
