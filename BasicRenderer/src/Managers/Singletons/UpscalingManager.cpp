@@ -4,6 +4,8 @@
 #include <flecs.h>
 
 #include "ThirdParty/Streamline/sl.h"
+//#include "ThirdParty/FFX/host/ffx_types.h"
+#include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
 #include "slHooks.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -11,6 +13,35 @@
 #include "Resources/PixelBuffer.h"
 #include "Scene/Scene.h"
 #include "Utilities/MathUtils.h"
+#include "Utilities/Utilities.h"
+
+#include <ThirdParty/Streamline/sl.h>
+#include <ThirdParty/Streamline/sl_consts.h>
+#include <ThirdParty/Streamline/sl_dlss.h>
+#include <ThirdParty/Streamline/sl_security.h>
+#include <slHooks.h>
+
+PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
+PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
+PFunCreateDXGIFactory2 slCreateDXGIFactory2 = nullptr;
+PFunDXGIGetDebugInterface1 slDXGIGetDebugInterface1 = nullptr;
+PFunD3D12CreateDevice slD3D12CreateDevice = nullptr;
+decltype(&slUpgradeInterface) slGetUpgradeInterface = nullptr;
+
+void SlLogMessageCallback(sl::LogType level, const char* message) {
+    spdlog::info("Streamline Log: {}", message);
+}
+
+ffxFunctions ffxModule;
+
+FfxApiResource getFFXResource(Resource* resource, const wchar_t* name, FfxApiResourceState state) {
+	//auto desc = ffx::ApiGetResourceDescriptionDX12(resource->GetAPIResource(), FFX_API_RESOURCE_USAGE_READ_ONLY);
+	auto ffxResource = ffxApiGetResourceDX12(resource->GetAPIResource(), state);
+    if (ffxResource.resource == nullptr) {
+        spdlog::error("Failed to get FFX resource for resource");
+	}
+    return ffxResource;
+}
 
 bool CheckDLSSSupport(IDXGIAdapter1* adapter) {
     DXGI_ADAPTER_DESC desc{};
@@ -73,33 +104,168 @@ void UpscalingManager::InitializeAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1>& 
 	}
 }
 
-void UpscalingManager::SetDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device) {
+ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device) {
     switch (m_upscalingMode)
     {
-        case UpscalingMode::DLSS:
+    case UpscalingMode::DLSS: {
+        ID3D12Device10* proxyDevice = device.Get();
+        if (SL_FAILED(result, slUpgradeInterface((void**)&proxyDevice)))
+        {
+            spdlog::error("SL device upgrade failed!");
+        }
+        else {
+            device = proxyDevice;
+        }
         slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
-		break;
+		return proxyDevice;
+        break;
     }
+    case UpscalingMode::FSR3: {
+        return device.Get();
+        break;
+    }
+    }
+}
+
+IDXGIFactory7* UpscalingManager::ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory) {
+    IDXGIFactory7* proxyFactory = factory.Get();
+    if (SL_FAILED(result, slUpgradeInterface((void**)&proxyFactory)))
+    {
+        spdlog::error("SL factory upgrade failed!");
+    }
+    return proxyFactory;
+}
+
+bool UpscalingManager::InitFFX() {
+	auto module = LoadLibrary(L"FFX/amd_fidelityfx_dx12.dll");
+    if (module) {
+        ffxLoadFunctions(&ffxModule, module);
+		return true;
+    }
+	return false;
+}
+
+DirectX::XMFLOAT2 UpscalingManager::GetJitter(unsigned int frameNumber) {
+
+    switch (m_upscalingMode)
+    {
+    case UpscalingMode::DLSS: {
+        unsigned int sequenceLength = 16;
+        unsigned int sequenceIndex = frameNumber % sequenceLength;
+        DirectX::XMFLOAT2 sequenceOffset = {
+            2.0f * Halton(sequenceIndex + 1, 2) - 1.0f,
+            2.0f * Halton(sequenceIndex + 1, 3) - 1.0f };
+        return sequenceOffset;
+        break;
+    }
+    case UpscalingMode::FSR3: {
+        auto displayWidth = m_getOutputRes().x;
+        auto renderWidth = m_getRenderRes().x;
+        float jitterX = 0.0f, jitterY = 0.0f;
+        ffx::ReturnCode                     retCode;
+        int32_t                             jitterPhaseCount;
+        ffx::QueryDescUpscaleGetJitterPhaseCount getJitterPhaseDesc{};
+        getJitterPhaseDesc.displayWidth = displayWidth;
+        getJitterPhaseDesc.renderWidth = renderWidth;
+        getJitterPhaseDesc.pOutPhaseCount = &jitterPhaseCount;
+        retCode = ffx::Query(m_fsrUpscalingContext, getJitterPhaseDesc);
+
+        ffx::QueryDescUpscaleGetJitterOffset getJitterOffsetDesc{};
+        getJitterOffsetDesc.index = frameNumber % jitterPhaseCount;
+        getJitterOffsetDesc.phaseCount = jitterPhaseCount;
+        getJitterOffsetDesc.pOutX = &jitterX;
+        getJitterOffsetDesc.pOutY = &jitterY;
+
+        retCode = ffx::Query(m_fsrUpscalingContext, getJitterOffsetDesc);
+
+        return { jitterX, jitterY };
+    }
+    }
+}
+
+bool UpscalingManager::InitSL() {
+
+    // IMPORTANT: Always securely load SL library, see source/core/sl.security/secureLoadLibrary for more details
+// Always secure load SL modules
+    if (!sl::security::verifyEmbeddedSignature(L"sl.interposer.dll"))
+    {
+        // SL module not signed, disable SL
+    }
+    else
+    {
+        auto mod = LoadLibrary(L"sl.interposer.dll");
+
+        if (!mod) {
+            spdlog::error("Failed to load sl.interposer.dll, ensure it is in the correct directory.");
+            return false;
+        }
+
+        // Map functions from SL and use them instead of standard DXGI/D3D12 API
+        slCreateDXGIFactory = reinterpret_cast<PFunCreateDXGIFactory>(GetProcAddress(mod, "CreateDXGIFactory"));
+        slCreateDXGIFactory1 = reinterpret_cast<PFunCreateDXGIFactory1>(GetProcAddress(mod, "CreateDXGIFactory1"));
+        slCreateDXGIFactory2 = reinterpret_cast<PFunCreateDXGIFactory2>(GetProcAddress(mod, "CreateDXGIFactory2"));
+        slDXGIGetDebugInterface1 = reinterpret_cast<PFunDXGIGetDebugInterface1>(GetProcAddress(mod, "DXGIGetDebugInterface1"));
+        slD3D12CreateDevice = reinterpret_cast<PFunD3D12CreateDevice>(GetProcAddress(mod, "D3D12CreateDevice"));
+        slGetUpgradeInterface =
+            reinterpret_cast<decltype(&slUpgradeInterface)>(
+                GetProcAddress(mod, "slUpgradeInterface"));
+    }
+
+    sl::Preferences pref{};
+    pref.showConsole = true; // for debugging, set to false in production
+    pref.logLevel = sl::LogLevel::eDefault;
+    auto path = GetExePath() + L"\\NVSL";
+    const wchar_t* path_wchar = path.c_str();
+    pref.pathsToPlugins = { &path_wchar }; // change this if Streamline plugins are not located next to the executable
+    pref.numPathsToPlugins = 1; // change this if Streamline plugins are not located next to the executable
+    pref.pathToLogsAndData = {}; // change this to enable logging to a file
+    pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
+    pref.engine = sl::EngineType::eCustom; // If using UE or Unity
+    pref.engineVersion = "0.0.1"; // Optional version
+    pref.projectId = "72a89ee2-1139-4cc5-8daa-d27189bed781"; // Optional project id
+    sl::Feature myFeatures[] = { sl::kFeatureDLSS };
+    pref.featuresToLoad = myFeatures;
+    pref.numFeaturesToLoad = _countof(myFeatures);
+    pref.renderAPI = sl::RenderAPI::eD3D12;
+    pref.flags |= sl::PreferenceFlags::eUseManualHooking;
+    if (SL_FAILED(res, slInit(pref)))
+    {
+        // Handle error, check the logs
+        if (res == sl::Result::eErrorDriverOutOfDate) { /* inform user */ }
+        // and so on ...
+        return false;
+    }
+    return true;
 }
 
 void UpscalingManager::Setup() {
     m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
 	m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
-
+	auto outputRes = m_getOutputRes();
+	auto renderRes = m_getRenderRes();
     m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     m_frameTokens.resize(m_numFramesInFlight);
     for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
         slGetNewFrameToken(m_frameTokens[i], &i);
     }
 
+    ffx::CreateBackendDX12Desc backendDesc{};
+    backendDesc.device = DeviceManager::GetInstance().GetDevice().Get();
+
+    ffx::CreateContextDescUpscale createUpscaling;
+    createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
+    createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
+    createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
+
+    ffx::ReturnCode retCode = ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+
     switch (m_upscalingMode)
     {
-    case UpscalingMode::DLSS:
-		auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+    case UpscalingMode::DLSS: {
         sl::DLSSOptimalSettings dlssSettings;
         sl::DLSSOptions dlssOptions = {};
         // These are populated based on user selection in the UI
-        dlssOptions.mode = sl::DLSSMode::eMaxPerformance;
+        dlssOptions.mode = sl::DLSSMode::eBalanced;
         dlssOptions.outputWidth = outputRes.x;
         dlssOptions.outputHeight = outputRes.y;
         // Now let's check what should our rendering resolution be
@@ -136,6 +302,23 @@ void UpscalingManager::Setup() {
 
         break;
     }
+    case UpscalingMode::FSR3: {
+        DirectX::XMUINT2 optimalRenderRes = {};
+        ffxQueryDescUpscaleGetRenderResolutionFromQualityMode queryDesc{};
+        queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
+        queryDesc.qualityMode = FFX_UPSCALE_QUALITY_MODE_BALANCED;
+		queryDesc.displayHeight = outputRes.y;
+		queryDesc.displayWidth = outputRes.x;
+        queryDesc.pOutRenderWidth = &optimalRenderRes.x;
+        queryDesc.pOutRenderHeight = &optimalRenderRes.y;
+
+		ffx::ReturnCode retCode = ffx::Query(m_fsrUpscalingContext, queryDesc);
+
+        SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(optimalRenderRes);
+        
+        break;
+    }
+    }
 }
 
 void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
@@ -166,15 +349,15 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
     StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
-    consts.jitterOffset.x = camera->jitterNDC.x;
-    consts.jitterOffset.y = -camera->jitterNDC.y;
+    consts.jitterOffset.x = camera->jitterPixelSpace.x;
+    consts.jitterOffset.y = -camera->jitterPixelSpace.y;
 
     // Set motion vector scaling based on your setup
-    //consts.mvecScale = { 1,1 }; // Values in eMotionVectors are in [-1,1] range
-    consts.mvecScale = { 1.0f / renderRes.x, 1.0f / renderRes.y }; // Values in eMotionVectors are in pixel space
-    consts.cameraPinholeOffset = { 0, 0 };
+    //consts.mvecScale = { -1,1 }; // Values in eMotionVectors are in [-1,1] range
+	consts.mvecScale = { -1.0f / renderRes.x, 1.0f / renderRes.y }; // Values in eMotionVectors are in pixel space // TODO: I don't think this is right, but {-1, 1} looks more wrong
     //consts.mvecScale = myCustomScaling; // Custom scaling to ensure values end up in [-1,1] range
 
+    consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };
 
     auto basisVectors = GetBasisVectors3f(camera->info.view);
@@ -223,6 +406,60 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
     }
 }
 
+void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    ffx::DispatchDescUpscale dispatchUpscale{};
+
+    auto camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
+
+    dispatchUpscale.commandList = context.commandList;
+
+    dispatchUpscale.color = getFFXResource(pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
+	dispatchUpscale.depth = getFFXResource(pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
+	dispatchUpscale.motionVectors = getFFXResource(pMotionVectors, L"UpscaleMotionVectors", FFX_API_RESOURCE_STATE_COMMON);
+	dispatchUpscale.output = getFFXResource(pUpscaledHDRTarget, L"UpscaleColorOut", FFX_API_RESOURCE_STATE_COMMON);
+    //dispatchUpscale.reactive;
+    //dispatchUpscale.transparencyAndComposition;
+
+	auto renderRes = m_getRenderRes();
+	auto outputRes = m_getOutputRes();
+
+    // Jitter is calculated earlier in the frame using a callback from the camera update
+    dispatchUpscale.jitterOffset.x = camera->jitterPixelSpace.x;
+    dispatchUpscale.jitterOffset.y = -camera->jitterPixelSpace.y;
+	dispatchUpscale.motionVectorScale.x = -renderRes.x; // FFX expects left-handed, we use right-handed
+    dispatchUpscale.motionVectorScale.y = renderRes.y;
+    dispatchUpscale.reset = false;
+    dispatchUpscale.enableSharpening = false;
+    //dispatchUpscale.sharpness = m_Sharpness;
+
+    // Engine keeps time in seconds, but FSR expects milliseconds
+    dispatchUpscale.frameTimeDelta = static_cast<float>(context.deltaTime * 1000.f);
+
+    //dispatchUpscale.preExposure = GetScene()->GetSceneExposure();
+    dispatchUpscale.renderSize.width = renderRes.x;
+    dispatchUpscale.renderSize.height = renderRes.y;
+    dispatchUpscale.upscaleSize.width = outputRes.x;
+    dispatchUpscale.upscaleSize.height = outputRes.y;
+
+    // Setup camera params as required
+    dispatchUpscale.cameraFovAngleVertical = camera->fov;
+
+    bool s_InvertedDepth = false;
+    if (s_InvertedDepth) // TODO: FFX docs says this is preferred. Why?
+    {
+        dispatchUpscale.cameraFar = camera->zNear;
+        dispatchUpscale.cameraNear = FLT_MAX;
+    }
+    else
+    {
+        dispatchUpscale.cameraFar = camera->zFar;
+        dispatchUpscale.cameraNear = camera->zNear;
+    }
+
+    ffx::ReturnCode retCode = ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
+}
+
+
 void UpscalingManager::Evaluate(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     switch (m_upscalingMode)
     {
@@ -230,7 +467,7 @@ void UpscalingManager::Evaluate(const RenderContext& context, PixelBuffer* pHDRT
 			EvaluateDLSS(context, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
             break;
         case UpscalingMode::FSR3:
-            // FSR3 evaluation
+			EvaluateFSR3(context, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
             break;
 	}
 }

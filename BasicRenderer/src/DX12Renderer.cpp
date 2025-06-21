@@ -145,6 +145,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
+	UpscalingManager::GetInstance().InitSL(); // Must be called before LoadPipeline to initialize SL hooks
+    UpscalingManager::GetInstance().InitFFX();
     LoadPipeline(hwnd, x_res, y_res);
     SetSettings();
     ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
@@ -226,18 +228,11 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 			DirectX::XMMATRIX projection = camera->info.unjitteredProjection;
             if (m_jitter && entity.has<Components::PrimaryCamera>()) {
                 // Apply jitter
-                unsigned int sequenceLength = 16;
-				unsigned int sequenceIndex = m_totalFramesRendered % sequenceLength;
-                DirectX::XMFLOAT2 sequenceOffset = { 
-                    2.0f * Halton(sequenceIndex + 1, 2) - 1.0f, 
-                    2.0f * Halton(sequenceIndex + 1, 3) - 1.0f };
-                camera->jitterPixelSpace = sequenceOffset;
-
-				//sequenceOffset.x = (sequenceOffset.x - 0.5) * 2.0f; // Scale to [-1, 1] range
-				//sequenceOffset.y = (sequenceOffset.y - 0.5) * 2.0f; // Scale to [-1, 1] range
+                auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
+                camera->jitterPixelSpace = jitterPixelSpace;
                 DirectX::XMFLOAT2 jitterNDC = {
-                    (sequenceOffset.x / res.x),
-                    (sequenceOffset.y / res.y)
+                    (jitterPixelSpace.x / res.x),
+                    (jitterPixelSpace.y / res.y)
                 };
 				camera->jitterNDC = jitterNDC;
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
@@ -528,18 +523,15 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
 
-	IDXGIFactory7* proxyFactory = factory.Get();
-    if (SL_FAILED(result, slUpgradeInterface((void**) & proxyFactory)))
-    {
-        spdlog::error("SL factory upgrade failed!");
-    }
-    else {
-        factory = proxyFactory;
-	}
+	auto proxyFactory = UpscalingManager::GetInstance().ProxyFactory(factory);
 
     m_currentAdapter = GetMostPowerfulAdapter(factory.Get());
     
     UpscalingManager::GetInstance().InitializeAdapter(m_currentAdapter);
+
+    if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS) {
+        factory = proxyFactory;
+	}
 
     // Create device
 
@@ -552,16 +544,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         D3D_FEATURE_LEVEL_12_0,
         IID_PPV_ARGS(&device)));
 
-    ID3D12Device10* proxyDevice = device.Get();
-    if (SL_FAILED(result, slUpgradeInterface((void**) & proxyDevice)))
-    {
-        spdlog::error("SL device upgrade failed!");
-    }
-    else {
-        device = proxyDevice;
-    }
-
-	UpscalingManager::GetInstance().SetDevice(device);
+	UpscalingManager::GetInstance().ProxyDevice(device);
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
@@ -841,6 +824,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 }
 
 void DX12Renderer::Render() {
+    auto deltaTime = m_frameTimer.tick();
     // Record all the commands we need to render the scene into the command list
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
     auto& commandList = m_commandLists[m_frameIndex];
@@ -870,6 +854,7 @@ void DX12Renderer::Render() {
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
 	m_context.drawStats = *drawStats;
+	m_context.deltaTime = deltaTime;
 
     unsigned int globalPSOFlags = 0;
     if (m_imageBasedLighting) {

@@ -228,6 +228,26 @@ add_symlink_or_copy_per_config(
     "NVSL_DIR"
 )
 
+set(FFX_BIN_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/amd_fidelityfx_dx12.dll")
+set(FFX_BIN_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/amd_fidelityfx_dx12.dll")
+
+add_symlink_or_copy_per_config(
+    "${FFX_BIN_DIR}"
+    "${FFX_BIN_FILE}"
+    FALSE  # IS_DIRECTORY
+    "FFX_dx12"
+)
+
+set(FFX_BACKEND_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_backend_dx12_x64.dll")
+set(FFX_BACKEND_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_backend_dx12_x64.dll")
+
+add_symlink_or_copy_per_config(
+    "${FFX_BACKEND_DIR}"
+    "${FFX_BACKEND_FILE}"
+    FALSE  # IS_DIRECTORY
+    "FFX_backend_dx12"
+)
+
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 
 # Heck off Microsoft
@@ -266,4 +286,4 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 # Find and link DirectX 12
-target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib")
+target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/amd_fidelityfx_dx12.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_backend_dx12_x64.lib")

@@ -36,6 +36,7 @@
 #include "Scene/MovementState.h"
 #include "Scene/Components.h"
 #include "../generated/BuiltinResources.h"
+#include "Utilities/Timer.h"
 
 using namespace Microsoft::WRL;
 
@@ -131,6 +132,7 @@ private:
     flecs::system m_hierarchySystem;
 
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
+    FrameTimer m_frameTimer;
 
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
     void CreateTextures();

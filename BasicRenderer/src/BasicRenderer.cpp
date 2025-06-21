@@ -12,11 +12,6 @@
 #include <imgui.h>
 #include <random>
 
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
-#include <ThirdParty/Streamline/sl_security.h>
-
 #include "ThirdParty/pix/pix3.h"
 #include "Mesh/Mesh.h"
 #include "DX12Renderer.h"
@@ -28,14 +23,6 @@
 #include "Render/PSOFlags.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Import/ModelLoader.h"
-#include <slHooks.h>
-
-PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
-PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
-PFunCreateDXGIFactory2 slCreateDXGIFactory2 = nullptr;
-PFunDXGIGetDebugInterface1 slDXGIGetDebugInterface1 = nullptr;
-PFunD3D12CreateDevice slD3D12CreateDevice = nullptr;
-decltype(&slUpgradeInterface) slGetUpgradeInterface = nullptr;
 
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
@@ -244,72 +231,11 @@ int main() {
     return 0;
 }
 
-void SlLogMessageCallback(sl::LogType level, const char* message) {
-	spdlog::info("Streamline Log: {}", message);
-}
-
-bool InitSL() {
-
-    // IMPORTANT: Always securely load SL library, see source/core/sl.security/secureLoadLibrary for more details
-// Always secure load SL modules
-    if (!sl::security::verifyEmbeddedSignature(L"sl.interposer.dll"))
-    {
-        // SL module not signed, disable SL
-    }
-    else
-    {
-        auto mod = LoadLibrary(L"sl.interposer.dll");
-
-        if (!mod) {
-            spdlog::error("Failed to load sl.interposer.dll, ensure it is in the correct directory.");
-            return false;
-		}
-
-        // Map functions from SL and use them instead of standard DXGI/D3D12 API
-        slCreateDXGIFactory = reinterpret_cast<PFunCreateDXGIFactory>(GetProcAddress(mod, "CreateDXGIFactory"));
-        slCreateDXGIFactory1 = reinterpret_cast<PFunCreateDXGIFactory1>(GetProcAddress(mod, "CreateDXGIFactory1"));
-        slCreateDXGIFactory2 = reinterpret_cast<PFunCreateDXGIFactory2>(GetProcAddress(mod, "CreateDXGIFactory2"));
-        slDXGIGetDebugInterface1 = reinterpret_cast<PFunDXGIGetDebugInterface1>(GetProcAddress(mod, "DXGIGetDebugInterface1"));
-        slD3D12CreateDevice = reinterpret_cast<PFunD3D12CreateDevice>(GetProcAddress(mod, "D3D12CreateDevice"));
-        slGetUpgradeInterface =
-            reinterpret_cast<decltype(&slUpgradeInterface)>(
-                GetProcAddress(mod, "slUpgradeInterface"));
-    }
-
-    sl::Preferences pref{};
-    pref.showConsole = true; // for debugging, set to false in production
-    pref.logLevel = sl::LogLevel::eDefault;
-    auto path = GetExePath() + L"\\NVSL";
-    const wchar_t* path_wchar = path.c_str();
-    pref.pathsToPlugins = { &path_wchar }; // change this if Streamline plugins are not located next to the executable
-    pref.numPathsToPlugins = 1; // change this if Streamline plugins are not located next to the executable
-    pref.pathToLogsAndData = {}; // change this to enable logging to a file
-    pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
-    pref.engine = sl::EngineType::eCustom; // If using UE or Unity
-    pref.engineVersion = "0.0.1"; // Optional version
-    pref.projectId = "72a89ee2-1139-4cc5-8daa-d27189bed781"; // Optional project id
-    sl::Feature myFeatures[] = { sl::kFeatureDLSS };
-    pref.featuresToLoad = myFeatures;
-    pref.numFeaturesToLoad = _countof(myFeatures);
-    pref.renderAPI = sl::RenderAPI::eD3D12;
-    pref.flags |= sl::PreferenceFlags::eUseManualHooking;
-    if (SL_FAILED(res, slInit(pref)))
-    {
-        // Handle error, check the logs
-        if (res == sl::Result::eErrorDriverOutOfDate) { /* inform user */ }
-        // and so on ...
-		return false;
-    }
-	return true;
-}
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
-
-    InitSL();
 
     HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
 
@@ -320,11 +246,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Aftermath
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
-    HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
-    if (!pixLoaded) {
-        // Print the error code for debugging purposes
-        spdlog::warn("Could not load PIX! Error: ", GetLastError());
-    }
+    //HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
+    //if (!pixLoaded) {
+    //    // Print the error code for debugging purposes
+    //    spdlog::warn("Could not load PIX! Error: ", GetLastError());
+    //}
 #endif
 
     SetDllDirectoryA(".\\D3D\\");
@@ -342,26 +268,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.Initialize(hwnd, x_res, y_res);
     spdlog::info("Renderer initialized.");
     renderer.SetInputMode(InputMode::wasd);
-
-    //std::vector<std::byte> vertices = {
-    //{{-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-    //{{1.0f,  -1.0f, -1.0f}, {1.0f,  -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-    //{{ 1.0f,  1.0f, -1.0f}, {-1.0f, -1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-    //{{ -1.0f, 1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-    //{{-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-    //{{1.0f,  -1.0f,  1.0f}, {1.0f,  -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},
-    //{{ 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}},
-    //{{ -1.0f, 1.0f,  1.0f}, { -1.0f, 1.0f,  1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    //};
-
-    std::vector<UINT32> indices = {
-        3, 1, 0, 2, 1, 3,
-        2, 5, 1, 6, 5, 2,
-        6, 4, 5, 7, 4, 6,
-        7, 0, 4, 3, 0, 7,
-        7, 2, 3, 6, 2, 7,
-        0, 5, 4, 1, 5, 0
-    };
 
     auto baseScene = std::make_shared<Scene>();
     //auto dragonScene1 = loadGLB("models/dragon.glb");
@@ -405,23 +311,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//cubeScene->GetRoot().set<Components::Scale>({ 0.1, 0.1, 0.1 });
     //cubeScene->DisableShadows();
     //cubeScene->GetRoot().transform.setLocalRotationFromEuler({45.0, 45.0, 45.0});
-    //auto heightMap = loadTextureFromFileSTBI("textures/height.jpg");
-    //for (auto& pair : cubeScene->GetOpaqueRenderableObjectIDMap()) {
-    //    auto& renderable = pair.second;
-    //    for (auto& mesh : renderable->GetOpaqueMeshes()) {
-    //        mesh->material->SetHeightmap(heightMap);
-    //        mesh->material->SetHeightmapScale(0.1);
-    //        mesh->material->SetTextureScale(2.0);
-    //    }
-    //}
-    //for (auto& pair : cubeScene->GetAlphaTestRenderableObjectIDMap()) {
-    //    auto& renderable = pair.second;
-    //    for (auto& mesh : renderable->GetAlphaTestMeshes()) {
-    //        mesh->material->SetHeightmap(heightMap);
-    //        mesh->material->SetHeightmapScale(0.1);
-    //        mesh->material->SetTextureScale(2.0);
-    //    }
-    //}
 
 	//auto sanMiguel = LoadModel("models/SanMiguel.fbx");
 	//sanMiguel->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
@@ -492,27 +381,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     aspectRatio = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
     auto& scene = renderer.GetCurrentScene();
     scene->SetCamera(lookAt, up, fov, aspectRatio, zNear, zFar);
-
-    //auto cubeMaterial = std::make_shared<Material>("cubeMaterial", MaterialFlags::MATERIAL_FLAGS_NONE, PSOFlags::PSO_FLAGS_NONE);
-    //auto cubeMesh = Mesh::CreateShared(vertices, indices, cubeMaterial, VertexFlags::VERTEX_COLORS);
-    //std::vector<std::shared_ptr<Mesh>> vec = { cubeMesh };
-    //std::shared_ptr<RenderableObject> cubeObject = std::make_shared<RenderableObject>(L"CubeObject", vec);
-    //auto cubeScaleNode = std::make_shared<SceneNode>();
-    //cubeScaleNode->transform.setLocalScale({ 0.1, 0.1, 0.1 });
-    //cubeScaleNode->AddChild(cubeObject);
-    //scene->AddNode(cubeScaleNode);
-    //scene->AddObject(cubeObject);
-
-    auto animation = std::make_shared<AnimationClip>();
-    animation->addPositionKeyframe(0, { -2, 2, -2 });
-    animation->addPositionKeyframe(2, { 2, 2, -2 });
-    animation->addPositionKeyframe(4, { 2, 2, 2 });
-    animation->addPositionKeyframe(6, { -2, 2, 2 });
-    animation->addPositionKeyframe(8, { -2, 2, -2 });
-    //animation->addRotationKeyframe(0, DirectX::XMQuaternionRotationRollPitchYaw(0, 0, 0));
-    //animation->addRotationKeyframe(1, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PIDIV2, DirectX::XM_PIDIV2)); // 90 degrees
-    //animation->addRotationKeyframe(2, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_PI, DirectX::XM_PI)); // 180 degrees
-    //animation->addRotationKeyframe(4, DirectX::XMQuaternionRotationRollPitchYaw(0, DirectX::XM_2PI, DirectX::XM_2PI)); // 360 degrees
     
 	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 10.0, XMFLOAT3(0, -1, -1));
     //auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 10, 3), XMFLOAT3(1, 1, 1), 2000.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);

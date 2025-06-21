@@ -36,4 +36,5 @@ public:
     DirectX::XMUINT2 renderResolution;
 	DirectX::XMUINT2 outputResolution;
     unsigned int globalPSOFlags;
+	float deltaTime;
 };
