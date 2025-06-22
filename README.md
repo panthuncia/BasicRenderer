@@ -16,7 +16,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 - Order-independent transparency using a per-pixel linked-list
 - SSAO with XeGTAO
 - Downsample/upsample bloom
-
+- TAA/upscaling with DLSS/FSR
+  
 ## Technical features
 
 - GPU-driven rendering with compute culling & ExecuteIndirect
