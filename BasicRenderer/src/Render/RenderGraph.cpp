@@ -371,36 +371,17 @@ void RenderGraph::Setup() {
 	statisticsManager.RegisterQueue(manager.GetComputeQueue());
 	statisticsManager.SetupQueryHeap();
 
-    for (auto& pass : passes) {
-        switch (pass.type) {
-        case PassType::Render: {
-            auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
-			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
-            renderPass.pass->Setup(view);
-			renderPass.pass->RegisterCommandLists(m_graphicsCommandLists);
-            break;
-        }
-        case PassType::Compute: {
-            auto& computePass = std::get<ComputePassAndResources>(pass.pass);
-			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
-            computePass.pass->Setup(view);
-			computePass.pass->RegisterCommandLists(m_computeCommandLists);
-            break;
-        }
-        }
-    }
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
-
-    uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-    for (int i = 0; i < numFramesInFlight; i++) {
-        ComPtr<ID3D12CommandAllocator> allocator;
-        ComPtr<ID3D12GraphicsCommandList7> commandList;
-        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-        commandList->Close();
-        m_graphicsCommandAllocators.push_back(allocator);
-        m_graphicsCommandLists.push_back(commandList);
+  uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+  for (int i = 0; i < numFramesInFlight; i++) {
+      ComPtr<ID3D12CommandAllocator> allocator;
+      ComPtr<ID3D12GraphicsCommandList7> commandList;
+      ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+      ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+      commandList->Close();
+      m_graphicsCommandAllocators.push_back(allocator);
+      m_graphicsCommandLists.push_back(commandList);
 
 		ComPtr<ID3D12CommandAllocator> computeAllocator;
 		ComPtr<ID3D12GraphicsCommandList7> computeCommandList;
@@ -409,10 +390,29 @@ void RenderGraph::Setup() {
 		computeCommandList->Close();
 		m_computeCommandAllocators.push_back(computeAllocator);
 		m_computeCommandLists.push_back(computeCommandList);
-    }
+  }
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_graphicsQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_computeQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameStartSyncFence));
+
+	for (auto& pass : passes) {
+		switch (pass.type) {
+		case PassType::Render: {
+			auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
+			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
+			renderPass.pass->Setup(view);
+			renderPass.pass->RegisterCommandLists(m_graphicsCommandLists);
+			break;
+		}
+		case PassType::Compute: {
+			auto& computePass = std::get<ComputePassAndResources>(pass.pass);
+			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
+			computePass.pass->Setup(view);
+			computePass.pass->RegisterCommandLists(m_computeCommandLists);
+			break;
+		}
+		}
+	}
 
 	// Perform initial resource transitions
 	//ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&initialTransitionCommandAllocator)));

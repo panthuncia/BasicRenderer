@@ -8,6 +8,7 @@
 template<typename T>
 class Setting : public ISetting {
 public:
+	using ObserverFn = std::function<void(const T&)>;
 	Setting(T initialValue) : value(initialValue) {}
 
 	// Return type information for this setting
@@ -30,21 +31,25 @@ public:
 		};
 	}
 
-	void addObserver(const std::function<void(const T&)>& observer) {
-		observers.push_back(observer);
+	size_t addObserver(ObserverFn obs) {
+		const size_t id = ++_nextId;
+		_observers.emplace_back(id, std::move(obs));
+		return id;
 	}
-
-	void removeObserver(const std::function<void(const T&)>& observer) {
-		observers.erase(std::remove(observers.begin(), observers.end(), observer), observers.end());
+	void removeObserver(size_t id) {
+		_observers.erase(
+			std::remove_if(_observers.begin(), _observers.end(),
+				[id](auto& e) { return e.first == id; }),
+			_observers.end());
 	}
 
 private:
 	T value;
-	std::vector<std::function<void(const T&)>> observers;
+	size_t _nextId = 0;
+	std::vector<std::pair<size_t, ObserverFn>> _observers;
 
 	void notifyObservers() {
-		for (const auto& observer : observers) {
-			observer(value);
-		}
+		for (auto& [id, fn] : _observers)
+			fn(value);
 	}
 };

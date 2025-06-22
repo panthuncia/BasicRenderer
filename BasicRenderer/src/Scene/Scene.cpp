@@ -40,6 +40,10 @@ Scene::Scene(){
 		.set<Components::Name>("Scene Root");
 	ECSSceneRoot = ECSSceneRoot;
     world.set_pipeline(world.get<Components::GameScene>()->pipeline);
+
+	m_renderResSubscription = SettingsManager::GetInstance().addObserver<DirectX::XMUINT2>("renderResolution", [this](const DirectX::XMUINT2& renderRes) {
+		UpdateMainCameraDepths();
+		});
 }
 
 flecs::entity Scene::CreateDirectionalLightECS(std::wstring name, XMFLOAT3 color, float intensity, XMFLOAT3 direction, bool shadowCasting){
@@ -247,6 +251,12 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 	entity.set<Components::DepthMap>(depth);
 
 	entity.add<Components::PrimaryCamera>();
+}
+
+void Scene::UpdateMainCameraDepths() {
+	if (m_primaryCamera.is_alive()) {
+		ActivateCamera(m_primaryCamera);
+	}
 }
 
 void Scene::ProcessEntitySkins(bool overrideExistingSkins) {

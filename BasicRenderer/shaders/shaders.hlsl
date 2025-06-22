@@ -40,7 +40,8 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     float4 prevPos;
     if (vertexFlags & VERTEX_SKINNED)
     {
-        prevPos = (LoadFloat3(prevPostSkinningBufferOffset + vertexID * meshBuffer.vertexByteSize, vertexBuffer), 1.0);
+        uint prevByteOffset = prevPostSkinningBufferOffset + vertexID * meshBuffer.vertexByteSize;
+        prevPos = float4(LoadFloat3(prevByteOffset, vertexBuffer), 1.0);
     }
     else
     {
@@ -101,7 +102,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     float4 viewPosition = mul(worldPosition, mainCamera.view);
     output.positionViewSpace = viewPosition;
     output.position = mul(viewPosition, mainCamera.projection);
-    output.clipPosition = output.position;
+    output.clipPosition = mul(viewPosition, mainCamera.unjitteredProjection);
         
     float4 prevPosition = mul(prevPos, objectBuffer.model);
     prevPosition = mul(prevPosition, mainCamera.prevView);

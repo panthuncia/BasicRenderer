@@ -117,6 +117,8 @@ inline unsigned int ResourceAccessGetNumReadStates(ResourceAccessType access) {
 
 inline ResourceLayout AccessToLayout(ResourceAccessType access, bool directQueue) {
 	// most-specific first:
+	if (access & ResourceAccessType::COMMON)
+		return ResourceLayout::LAYOUT_COMMON;
 	if (access & ResourceAccessType::UNORDERED_ACCESS) 
 		return ResourceLayout::LAYOUT_UNORDERED_ACCESS;
 	if (access & ResourceAccessType::RENDER_TARGET)      

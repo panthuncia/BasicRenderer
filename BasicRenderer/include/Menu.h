@@ -23,6 +23,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/TonemapTypes.h"
 #include "Managers/Singletons/StatisticsManager.h"
+#include "Managers/Singletons/UpscalingManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -63,6 +64,8 @@ private:
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
+    void DrawUpscalingCombo();
+    void DrawUpscalingQualityCombo();
     void DrawTonemapTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
@@ -151,6 +154,14 @@ private:
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
 
+	UpscalingMode m_currentUpscalingMode = UpscalingMode::None;
+	std::function<UpscalingMode()> getUpscalingMode;
+	std::function<void(UpscalingMode)> setUpscalingMode;
+
+	UpscaleQualityMode m_currentUpscalingQualityMode = UpscaleQualityMode::Balanced;
+	std::function<UpscaleQualityMode()> getUpscalingQualityMode;
+    std::function<void(UpscaleQualityMode)> setUpscalingQualityMode;
+
 	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
 };
 
@@ -197,7 +208,12 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
     io.FontGlobalScale = 1.2f;
-	io.DisplaySize = ImVec2(3420.0f, 3080.0f);
+
+	DirectX::XMUINT2 renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+	DirectX::XMUINT2 outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+	io.DisplaySize = ImVec2(outputResolution.x, outputResolution.y);
+    io.DisplayFramebufferScale = ImVec2(
+        2.0, 2.0);
 
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
@@ -283,6 +299,14 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
 	m_collectPipelineStatistics = getCollectPipelineStatistics();
+
+    getUpscalingMode = settingsManager.getSettingGetter<UpscalingMode>("upscalingMode");
+    setUpscalingMode = settingsManager.getSettingSetter<UpscalingMode>("upscalingMode");
+    m_currentUpscalingMode = getUpscalingMode();
+
+	getUpscalingQualityMode = settingsManager.getSettingGetter<UpscaleQualityMode>("upscalingQualityMode");
+    setUpscalingQualityMode = settingsManager.getSettingSetter<UpscaleQualityMode>("upscalingQualityMode");
+    m_currentUpscalingQualityMode = getUpscalingQualityMode();
 
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
@@ -380,6 +404,8 @@ inline void Menu::Render(const RenderContext& context) {
 		if (ImGui::Checkbox("Collect Pipeline Statistics", &m_collectPipelineStatistics)) {
 			setCollectPipelineStatistics(m_collectPipelineStatistics);
 		}
+        DrawUpscalingCombo();
+        DrawUpscalingQualityCombo();
         DrawTonemapTypeDropdown();
 
         DrawEnvironmentsDropdown();
@@ -414,6 +440,16 @@ inline void Menu::Render(const RenderContext& context) {
     m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	auto heap = g_pd3dSrvDescHeap.Get();
     m_commandList->SetDescriptorHeaps(1, &heap);
+
+
+    // set viewport to cover the entire buffer
+    auto& io = ImGui::GetIO();
+    D3D12_VIEWPORT vp{ 0,0, io.DisplaySize.x, io.DisplaySize.y, 0.0f, 1.0f };
+    m_commandList->RSSetViewports(1, &vp);
+
+    // set scissor to the full buffer
+    D3D12_RECT rc{ 0, 0, (LONG)io.DisplaySize.x, (LONG)io.DisplaySize.y };
+    m_commandList->RSSetScissorRects(1, &rc);
 
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
 
@@ -495,6 +531,28 @@ inline void Menu::DrawOutputTypeDropdown() {
 		}
 		ImGui::EndCombo();
 
+    }
+}
+
+inline void Menu::DrawUpscalingCombo()
+{
+    int modeIdx = static_cast<int>(m_currentUpscalingMode);
+
+    if (ImGui::Combo("Upscaling Mode", &modeIdx, UpscalingModeNames, UpscalingModeCount))
+    {
+        m_currentUpscalingMode = static_cast<UpscalingMode>(modeIdx);
+		setUpscalingMode(m_currentUpscalingMode);
+    }
+}
+
+inline void Menu::DrawUpscalingQualityCombo()
+{
+    int modeIdx = static_cast<int>(m_currentUpscalingQualityMode);
+
+    if (ImGui::Combo("Upscaling Quality", &modeIdx, UpscaleQualityModeNames, UpscaleQualityModeCount))
+    {
+        m_currentUpscalingQualityMode = static_cast<UpscaleQualityMode>(modeIdx);
+        setUpscalingQualityMode(m_currentUpscalingQualityMode);
     }
 }
 

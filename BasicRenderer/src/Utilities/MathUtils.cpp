@@ -93,3 +93,18 @@ DirectX::XMFLOAT2 hammersley(uint i, float numSamples)
     bits = ((bits & 0x00FF00FF) << 8) | ((bits & 0xFF00FF00) >> 8);
     return {i / numSamples, bits / exp2(32.f)};
 }
+
+float Halton(uint32_t i, uint32_t b)
+{
+    float f = 1.0f;
+    float r = 0.0f;
+
+    while (i > 0)
+    {
+        f /= static_cast<float>(b);
+        r = r + f * static_cast<float>(i % b);
+        i = static_cast<uint32_t>(floorf(static_cast<float>(i) / static_cast<float>(b)));
+    }
+
+    return r;
+}

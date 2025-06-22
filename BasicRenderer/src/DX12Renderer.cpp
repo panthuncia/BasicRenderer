@@ -46,6 +46,7 @@
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "RenderPasses/PostProcessing/Bloom.h"
+#include "RenderPasses/PostProcessing/Upscaling.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -66,6 +67,7 @@
 #include "../generated/BuiltinResources.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/RenderGraphBuildHelper.h"
+#include "Managers/Singletons/UpscalingManager.h"
 #include "slHooks.h"
 
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
@@ -98,15 +100,8 @@ void D3D12DebugCallback(
     }
 }
 
-ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
+ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
 {
-    ComPtr<IDXGIFactory6> factory;
-    HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
-    if (FAILED(hr))
-    {
-        throw std::runtime_error("Failed to create DXGI factory.");
-    }
-
     ComPtr<IDXGIAdapter1> adapter;
     ComPtr<IDXGIAdapter1> bestAdapter;
     SIZE_T maxDedicatedVideoMemory = 0;
@@ -144,18 +139,15 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter()
 }
 
 void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
-    m_xOutputRes = x_res;
-    m_yOutputRes = y_res;
-	m_xInternalRes = x_res;
-	m_yInternalRes = y_res;
-    CreateAdapter();
-    CheckDLSSSupport();
-    InitDLSS();
 
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
+    settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
+    settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
+	UpscalingManager::GetInstance().InitSL(); // Must be called before LoadPipeline to initialize SL hooks
     LoadPipeline(hwnd, x_res, y_res);
+    UpscalingManager::GetInstance().InitFFX(); // Needs device
     SetSettings();
     ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
     PSOManager::GetInstance().initialize();
@@ -166,9 +158,11 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
 	StatisticsManager::GetInstance().Initialize();
+
+    UpscalingManager::GetInstance().Setup();
+
     CreateTextures();
     CreateGlobalResources();
-
 
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
@@ -190,13 +184,14 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
 	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
+	auto res = settingsManager.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
     m_hierarchySystem =
         world.system<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
         .with<Components::Active>()
         .term_at(3).parent().cascade()
         .cached().cache_kind(flecs::QueryCacheAll)
-        .each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
+        .each([&, res](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
         XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
         XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
         XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
@@ -233,13 +228,13 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 			DirectX::XMMATRIX projection = camera->info.unjitteredProjection;
             if (m_jitter && entity.has<Components::PrimaryCamera>()) {
                 // Apply jitter
-                unsigned int sequenceLength = 16;
-				unsigned int sequenceIndex = m_frameIndex % sequenceLength;
-				auto sequenceOffset = hammersley(sequenceIndex, sequenceLength);
+                auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
+                camera->jitterPixelSpace = jitterPixelSpace;
                 DirectX::XMFLOAT2 jitterNDC = {
-                    (sequenceOffset.x - 0.5f) * (2.0f / m_xInternalRes),
-                    (sequenceOffset.y - 0.5f) * (2.0f / m_yInternalRes)
+                    (jitterPixelSpace.x / res.x),
+                    (jitterPixelSpace.y / res.y)
                 };
+				camera->jitterNDC = jitterNDC;
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
 				projection = XMMatrixMultiply(projection, jitterMatrix); // Apply jitter to projection matrix
             }
@@ -325,8 +320,6 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
-	settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { m_xInternalRes, m_yInternalRes });
-    settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { m_xOutputRes, m_yOutputRes });
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
         return currentScene->GetRoot();
@@ -345,6 +338,8 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
         return AppendScene(scene);
         });
+	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
+    settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -363,75 +358,108 @@ void DX12Renderer::SetSettings() {
 	getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 
 
-    settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
         rebuildRenderGraph = true;
-        });
-	settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
 		SetEnvironmentInternal(s2ws(newValue));
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
-		});
-	settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetTonemapType(newValue);
-		});
-	settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
 		ToggleMeshShaders(newValue);
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableWireframe", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableWireframe", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableIndirectDraws", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableIndirectDraws", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("allowTearing", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("allowTearing", [this](const bool& newValue) {
 		m_allowTearing = newValue;
-		});
-	settingsManager.addObserver<bool>("drawBoundingSpheres", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("drawBoundingSpheres", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableClusteredLighting", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableClusteredLighting", [this](const bool& newValue) {
 		m_clusteredLighting = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableImageBasedLighting", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableImageBasedLighting", [this](const bool& newValue) {
 		m_imageBasedLighting = newValue;
-		});
-	settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
 		m_gtaoEnabled = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
 		m_deferredRendering = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableOcclusionCulling", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableOcclusionCulling", [this](const bool& newValue) {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
 		m_meshletCulling = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableBloom", [this](const bool& newValue) {
-		m_bloom = newValue;
-		rebuildRenderGraph = true;
-		});
-    settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableBloom", [this](const bool& newValue) {
+        m_bloom = newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
         m_jitter = newValue;
-        });
-	settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
 		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
 		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
         settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
-        });
-	settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
 		ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
-		});
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscalingMode>("upscalingMode", [this](const UpscalingMode& newValue) {
+
+        m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().SetUpscalingMode(newValue);
+
+            if (newValue != UpscalingMode::DLSS) {
+                device = nativeDevice;
+                factory = nativeFactory;
+            }
+            else {
+                device = slProxyDevice;
+                factory = slProxyFactory;
+            }
+
+            DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue); // Re-init device manager with correct device 
+
+            UpscalingManager::GetInstance().Setup();
+
+            CreateTextures();
+            rebuildRenderGraph = true;
+            });
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscaleQualityMode>("upscalingQualityMode", [this](const UpscaleQualityMode& newValue) {
+
+        m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().SetUpscalingQualityMode(newValue);
+            UpscalingManager::GetInstance().Setup();
+            CreateTextures();
+            rebuildRenderGraph = true;
+            });
+        }));
     m_numFramesInFlight = getNumFramesInFlight();
 }
 
@@ -514,11 +542,6 @@ void EnableShaderBasedValidation() {
     spDebugController1->SetEnableGPUBasedValidation(true);
 }
 
-void DX12Renderer::CreateAdapter() {
-    ComPtr<IDXGIAdapter1> bestAdapter = GetMostPowerfulAdapter();
-    m_currentAdapter = bestAdapter;
-}
-
 void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
@@ -532,12 +555,18 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 #endif
 
     // Create DXGI factory
-    if (slCreateDXGIFactory2 != nullptr) {
-		ThrowIfFailed(slCreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-    }
-    else {
-        ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-    }
+
+    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+    nativeFactory = factory;
+	slProxyFactory = UpscalingManager::GetInstance().ProxyFactory(factory);
+
+    m_currentAdapter = GetMostPowerfulAdapter(factory.Get());
+    
+    UpscalingManager::GetInstance().InitializeAdapter(m_currentAdapter);
+
+    if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS) {
+        factory = slProxyFactory;
+	}
 
     // Create device
 
@@ -545,18 +574,15 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     m_gpuCrashTracker.Initialize();
 #endif
 
+    ThrowIfFailed(D3D12CreateDevice(
+        m_currentAdapter.Get(),
+        D3D_FEATURE_LEVEL_12_0,
+        IID_PPV_ARGS(&device)));
 
-    if (slD3D12CreateDevice != nullptr) {
-        ThrowIfFailed(slD3D12CreateDevice(
-            m_currentAdapter.Get(),
-            D3D_FEATURE_LEVEL_12_0,
-			IID_PPV_ARGS(&device)));
-    }
-    else {
-        ThrowIfFailed(D3D12CreateDevice(
-            m_currentAdapter.Get(),
-            D3D_FEATURE_LEVEL_12_0,
-            IID_PPV_ARGS(&device)));
+    nativeDevice = device;
+	slProxyDevice = UpscalingManager::GetInstance().ProxyDevice(device);
+    if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS) {
+        device = slProxyDevice;
     }
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
@@ -592,7 +618,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
     {
         D3D12_INFO_QUEUE_FILTER filter = {};
-        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356 }; // Barrier-only command lists, ps output type mismatch
+        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328 }; // Barrier-only command lists, ps output type mismatch
         filter.DenyList.NumIDs = _countof(blockedIDs);
         filter.DenyList.pIDList = blockedIDs;
 
@@ -687,60 +713,6 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
 }
 
-void DX12Renderer::CheckDLSSSupport() {
-    DXGI_ADAPTER_DESC desc{};
-    if (SUCCEEDED(m_currentAdapter->GetDesc(&desc)))
-    {
-        sl::AdapterInfo adapterInfo{};
-        adapterInfo.deviceLUID = (uint8_t*)&desc.AdapterLuid;
-        adapterInfo.deviceLUIDSizeInBytes = sizeof(LUID);
-        if (SL_FAILED(result, slIsFeatureSupported(sl::kFeatureDLSS, adapterInfo)))
-        {
-            // Requested feature is not supported on the system, fallback to the default method
-            switch (result)
-            {
-            case sl::Result::eErrorOSOutOfDate:         // inform user to update OS
-            case sl::Result::eErrorDriverOutOfDate:     // inform user to update driver
-            case sl::Result::eErrorAdapterNotSupported:  // cannot use this adapter (older or non-NVDA GPU etc)
-				m_dlssSupported = false; // Do not initialize DLSS
-				return;
-            };
-        }
-        else
-        {
-        }
-    }
-}
-
-void DX12Renderer::InitDLSS() {
-	if (!m_dlssSupported) return; // Do not initialize DLSS if not supported
-    slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
-    
-
-    sl::DLSSOptimalSettings dlssSettings;
-    sl::DLSSOptions dlssOptions;
-    // These are populated based on user selection in the UI
-    dlssOptions.mode = sl::DLSSMode::eBalanced;
-    dlssOptions.outputWidth = m_xOutputRes;
-    dlssOptions.outputHeight = m_yOutputRes;
-    // Now let's check what should our rendering resolution be
-    if (SL_FAILED(result, slDLSSGetOptimalSettings(dlssOptions, dlssSettings)))
-    {
-        // Handle error here
-    }
-    // Setup rendering based on the provided values in the sl::DLSSSettings structure
-    m_xInternalRes = dlssSettings.optimalRenderWidth;
-    m_yInternalRes = dlssSettings.optimalRenderHeight;
-
-	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")({ m_xInternalRes, m_yInternalRes });
-
-	m_frameTokens.resize(m_numFramesInFlight);
-    for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
-		slGetNewFrameToken(m_frameTokens[i], &i);
-    }
-
-}
-
 void DX12Renderer::CreateTextures() {
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     // Create HDR color target
@@ -751,7 +723,7 @@ void DX12Renderer::CreateTextures() {
     hdrDesc.hasRTV = true;
     hdrDesc.hasUAV = false;
     hdrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT; // HDR format
-    hdrDesc.generateMipMaps = true; // For bloom downsampling
+    hdrDesc.generateMipMaps = false; // For bloom downsampling
     hdrDesc.hasUAV = true;
     ImageDimensions dims;
     dims.height = resolution.y;
@@ -760,6 +732,14 @@ void DX12Renderer::CreateTextures() {
     auto hdrColorTarget = PixelBuffer::Create(hdrDesc);
     hdrColorTarget->SetName(L"Primary Camera HDR Color Target");
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
+
+    auto outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+    hdrDesc.imageDimensions[0].width = outputResolution.x;
+    hdrDesc.imageDimensions[0].height = outputResolution.y;
+    hdrDesc.generateMipMaps = true;
+	auto upscaledHDRColorTarget = PixelBuffer::Create(hdrDesc);
+	upscaledHDRColorTarget->SetName(L"Upscaled HDR Color Target");
+	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
 
     TextureDescription motionVectors;
     motionVectors.arraySize = 1;
@@ -777,34 +757,8 @@ void DX12Renderer::CreateTextures() {
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
 
-void DX12Renderer::TagDLSSResources(ID3D12Resource* pDepthTexture) {
-    if (!m_dlssSupported) return; // Do not tag DLSS resources if not supported
-    
-	sl::Extent myExtent = { m_xInternalRes, m_yInternalRes };
-	sl::Extent fullExtent = { m_xOutputRes, m_yOutputRes };
-
-    for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
-        sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)m_coreResourceProvider.m_HDRColorTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
-        sl::Resource colorOut = { sl::ResourceType::eTex2d, renderTargets[i].Get(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
-        sl::Resource depth = { sl::ResourceType::eTex2d, pDepthTexture, nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-        sl::Resource mvec = { sl::ResourceType::eTex2d, m_coreResourceProvider.m_gbufferMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-        //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
-
-        sl::ResourceTag colorInTag = sl::ResourceTag{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
-        sl::ResourceTag colorOutTag = sl::ResourceTag{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eOnlyValidNow, &fullExtent };
-        sl::ResourceTag depthTag = sl::ResourceTag{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &myExtent };
-        sl::ResourceTag mvecTag = sl::ResourceTag{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &myExtent };
-        //sl::ResourceTag exposureTag = sl::ResourceTag{ &exposure, sl::kBufferTypeExposure, sl::ResourceLifecycle::eOnlyValidNow, &my1x1Extent };
-
-        sl::ResourceTag inputs[] = { colorInTag, colorOutTag, depthTag, mvecTag };
-        //slSetTagForFrame(*m_frameTokens[i], viewport, inputs, _countof(inputs), cmdList);
-    }
-}
-
 void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
     if (!device) return;
-	m_xInternalRes = newWidth;
-	m_yInternalRes = newHeight;
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
 
@@ -831,6 +785,11 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
         device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
         rtvHandle.Offset(1, rtvDescriptorSize);
     }
+
+	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("outputResolution")({ newWidth, newHeight });
+
+    UpscalingManager::GetInstance().Shutdown();
+	UpscalingManager::GetInstance().Setup();
 
     CreateTextures();
 
@@ -890,7 +849,8 @@ void DX12Renderer::Update(double elapsedSeconds) {
 
     ThrowIfFailed(commandAllocator->Reset());
     auto& resourceManager = ResourceManager::GetInstance();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { m_xInternalRes, m_yInternalRes }, m_lightClusterSize, m_frameIndex);
+    auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, m_frameIndex);
 
 	currentRenderGraph->Update();
 
@@ -903,12 +863,15 @@ void DX12Renderer::Update(double elapsedSeconds) {
 }
 
 void DX12Renderer::Render() {
+    auto deltaTime = m_frameTimer.tick();
     // Record all the commands we need to render the scene into the command list
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
     auto& commandList = m_commandLists[m_frameIndex];
 
 	auto& world = ECSManager::GetInstance().GetWorld();
 	const Components::DrawStats* drawStats = world.get<Components::DrawStats>();
+    auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
 
     m_context.currentScene = currentScene.get();
 	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
@@ -921,8 +884,8 @@ void DX12Renderer::Render() {
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
     m_context.frameFenceValue = m_currentFrameFenceValue;
-    m_context.xRes = m_xInternalRes;
-    m_context.yRes = m_yInternalRes;
+    m_context.renderResolution = { renderRes.x, renderRes.y };
+	m_context.outputResolution = { outputRes.x, outputRes.y };
 	m_context.cameraManager = m_pCameraManager.get();
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
@@ -930,6 +893,7 @@ void DX12Renderer::Render() {
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
 	m_context.drawStats = *drawStats;
+	m_context.deltaTime = deltaTime;
 
     unsigned int globalPSOFlags = 0;
     if (m_imageBasedLighting) {
@@ -992,6 +956,7 @@ void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t 
 
 void DX12Renderer::AdvanceFrameIndex() {
     m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
+    m_totalFramesRendered += 1;
 }
 
 void DX12Renderer::FlushCommandQueue() {
@@ -1041,6 +1006,7 @@ void DX12Renderer::Cleanup() {
 	m_pMeshManager.reset();
 	m_pObjectManager.reset();
     m_hierarchySystem.destruct();
+    m_settingsSubscriptions.clear();
     DeletionManager::GetInstance().Cleanup();
 }
 
@@ -1257,6 +1223,10 @@ void DX12Renderer::CreateRenderGraph() {
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
 
     BuildPPLLPipeline(newGraph.get());
+
+	// Start of post-processing passes
+    newGraph->BuildRenderPass("UpscalingPass")
+		.Build<UpscalingPass>();
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());

@@ -92,6 +92,8 @@ namespace Components {
 		float fov;
 		float zNear;
 		float zFar;
+		DirectX::XMFLOAT2 jitterPixelSpace; // Jitter in pixel space for temporal anti-aliasing
+		DirectX::XMFLOAT2 jitterNDC; // Jitter in normalized device coordinates
 		CameraInfo info;
 	};
 

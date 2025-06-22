@@ -36,6 +36,7 @@
 #include "Scene/MovementState.h"
 #include "Scene/Components.h"
 #include "../generated/BuiltinResources.h"
+#include "Utilities/Timer.h"
 
 using namespace Microsoft::WRL;
 
@@ -81,13 +82,17 @@ public:
 private:
     ComPtr<IDXGIAdapter1> m_currentAdapter;
     ComPtr<IDXGIFactory7> factory;
+    ComPtr<IDXGIFactory7> nativeFactory;
+    ComPtr<IDXGIFactory7> slProxyFactory;
     ComPtr<ID3D12Device10> device;
+    ComPtr<ID3D12Device10> nativeDevice;
+    ComPtr<ID3D12Device10> slProxyDevice;
+
     ComPtr<IDXGISwapChain4> swapChain;
     ComPtr<ID3D12CommandQueue> graphicsQueue;
 	ComPtr<ID3D12CommandQueue> computeQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
-	std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;
@@ -96,6 +101,7 @@ private:
     UINT rtvDescriptorSize;
     UINT dsvDescriptorSize;
     uint8_t m_frameIndex = 0;
+    uint64_t m_totalFramesRendered = 0;
 	uint8_t m_numFramesInFlight = 0;
     ComPtr<ID3D12Fence> m_frameFence;
     std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
@@ -114,11 +120,6 @@ private:
     std::shared_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool rebuildRenderGraph = true;
 
-    UINT m_xOutputRes;
-	UINT m_yOutputRes;
-    UINT m_xInternalRes;
-    UINT m_yInternalRes;
-
     RenderContext m_context;
 
 	std::string m_environmentName;
@@ -136,11 +137,9 @@ private:
     flecs::system m_hierarchySystem;
 
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
+    FrameTimer m_frameTimer;
 
-    void CreateAdapter();
     void LoadPipeline(HWND hwnd, UINT x_res, UINT y_res);
-	void CheckDLSSSupport();
-    void InitDLSS();
     void CreateTextures();
 	void TagDLSSResources(ID3D12Resource* pDepthTexture);
     void MoveForward();
@@ -195,6 +194,8 @@ private:
     std::function<bool()> getDrawBoundingSpheres;
 	std::function<bool()> getImageBasedLightingEnabled;
 
+	std::vector<SettingsManager::Subscription> m_settingsSubscriptions;
+
     GpuCrashTracker::MarkerMap m_markerMap;
     // Nsight Aftermath instrumentation
     GFSDK_Aftermath_ContextHandle m_hAftermathCommandListContext;
@@ -209,6 +210,7 @@ private:
         std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
+		std::shared_ptr<PixelBuffer> m_upscaledHDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
 
 		std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override { // TODO: don't use ifs
@@ -224,6 +226,8 @@ private:
 				return m_currentDebugTexture;
 			if (key.ToString() == Builtin::PrimaryCamera::MeshletBitfield)
 				return m_primaryCameraMeshletBitfield;
+            if (key.ToString() == Builtin::PostProcessing::UpscaledHDR)
+				return m_upscaledHDRColorTarget;
 		
 			spdlog::error("CoreResourceProvider: ProvideResource called with unknown key: {}", key.ToString());
 			return nullptr;
@@ -237,6 +241,7 @@ private:
                 Builtin::Shadows::LinearShadowMaps,
                 Builtin::DebugTexture,
                 Builtin::PrimaryCamera::MeshletBitfield,
+				Builtin::PostProcessing::UpscaledHDR,
 			};
         }
 

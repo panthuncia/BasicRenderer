@@ -448,6 +448,12 @@ public:
         return *this;
     }
 
+    template<typename... Args>
+    RenderPassBuilder& WithLegacyInterop(Args&&... args)& {
+        (addLegacyInterop(std::forward<Args>(args)), ...);
+        return *this;
+    }
+
     // Second set, callable on temporaries
     template<typename... Args>
     RenderPassBuilder WithShaderResource(Args&&... args) && {
@@ -500,6 +506,12 @@ public:
     template<typename... Args>
     RenderPassBuilder WithIndirectArguments(Args&&... args) && {
         (addIndirectArguments(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    RenderPassBuilder WithLegacyInterop(Args&&... args)&& {
+        (addLegacyInterop(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
@@ -660,6 +672,18 @@ private:
 		return *this;
 	}
 
+    // Legacy interop resources
+    template<typename T>
+    RenderPassBuilder& addLegacyInterop(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
+        auto ranges = processResourceArguments(std::forward<T>(x), graph);
+        for (auto& r : ranges) {
+            if (!r.resource) continue;
+            params.legacyInteropResources.push_back(r);
+        }
+        return *this;
+    }
+
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("RenderPassBuilder::Build() may only be called once");
     }
@@ -696,6 +720,7 @@ private:
         accumulate(params.copySources,             ResourceAccessType::COPY_SOURCE);
         accumulate(params.copyTargets,             ResourceAccessType::COPY_DEST);
         accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
+        accumulate(params.legacyInteropResources,  ResourceAccessType::COMMON);
 
         // Build a tracker for each resource, applying each (range->state)
         constexpr ResourceState initialState{
@@ -739,7 +764,7 @@ private:
             auto pRes = ptrMap[id];
             for(auto const& seg : tracker.GetSegments()) {
                 if (seg.state.access == ResourceAccessType::COMMON && seg.state.layout == ResourceLayout::LAYOUT_COMMON) {
-                    continue; // TODO: Will we ever need explicit transitions to common for declared resources?
+                    //continue; // TODO: Will we ever need explicit transitions to common for declared resources?
                 }
                 // build a ResourceAndRange for this segment
                 ResourceAndRange rr(pRes);
@@ -796,6 +821,12 @@ public:
         return *this;
     }
 
+    template<typename... Args>
+    ComputePassBuilder& WithLegacyInterop(Args&&... args)& {
+        (addLegacyInterop(std::forward<Args>(args)), ...);
+        return *this;
+    }
+
     // Second set, callable on temporaries
     template<typename... Args>
     ComputePassBuilder WithShaderResource(Args&&... args) && {
@@ -818,6 +849,12 @@ public:
     template<typename... Args>
     ComputePassBuilder WithIndirectArguments(Args&&... args) && {
         (addIndirectArguments(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    template<typename... Args>
+    ComputePassBuilder WithLegacyInterop(Args&&... args)&& {
+        (addLegacyInterop(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
@@ -909,6 +946,18 @@ private:
 		return *this;
 	}
 
+    // Legacy interop resources
+    template<typename T>
+    RenderPassBuilder& addLegacyInterop(T&& x) {
+        detail::extractId(_declaredIds, std::forward<T>(x));
+        auto ranges = processResourceArguments(std::forward<T>(x), graph);
+        for (auto& r : ranges) {
+            if (!r.resource) continue;
+            params.legacyInteropResources.push_back(r);
+        }
+        return *this;
+    }
+
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");
     }
@@ -934,6 +983,7 @@ private:
         accumulate(params.constantBuffers,         ResourceAccessType::CONSTANT_BUFFER);
         accumulate(params.unorderedAccessViews,    ResourceAccessType::UNORDERED_ACCESS);
         accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
+        accumulate(params.legacyInteropResources,  ResourceAccessType::COMMON);
 
         // Build a tracker for each resource, applying each (range->state)
         constexpr ResourceState initialState{

@@ -33,7 +33,8 @@ public:
 	UINT dsvDescriptorSize;
     UINT frameIndex;
 	UINT64 frameFenceValue;
-    UINT xRes;
-    UINT yRes;
+    DirectX::XMUINT2 renderResolution;
+	DirectX::XMUINT2 outputResolution;
     unsigned int globalPSOFlags;
+	float deltaTime;
 };

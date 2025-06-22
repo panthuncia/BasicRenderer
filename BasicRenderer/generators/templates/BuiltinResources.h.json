@@ -62,6 +62,9 @@
       "MetallicRoughness": {},
       "Emissive": {}
     },
+    "PostProcessing": {
+      "UpscaledHDR": {}
+    },
     "GTAO": {
       "WorkingDepths": {},
       "WorkingEdges": {},
