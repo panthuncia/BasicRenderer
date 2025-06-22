@@ -63,12 +63,15 @@ private:
     std::function<float()> getMaxShadowDistance;
 	std::function<bool()> getMeshShadersEnabled;
 
+	SettingsManager::Subscription m_renderResSubscription;
+
     void MakeResident();
 	void MakeNonResident();
     flecs::entity CreateLightECS(std::wstring name, Components::LightType type, DirectX::XMFLOAT3 position, DirectX::XMFLOAT3 color, float intensity, DirectX::XMFLOAT3 attenuation = { 0, 0, 0 }, DirectX::XMFLOAT3 direction = { 0, 0, 0 }, float innerConeAngle = 0, float outerConeAngle = 0, bool shadowCasting = false);
     void ActivateRenderable(flecs::entity& entity);
 	void ActivateLight(flecs::entity& entity);
 	void ActivateCamera(flecs::entity& entity);
+    void UpdateMainCameraDepths();
 
 	void ActivateAllAnimatedEntities();
 };

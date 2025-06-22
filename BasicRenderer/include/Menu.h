@@ -23,6 +23,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/TonemapTypes.h"
 #include "Managers/Singletons/StatisticsManager.h"
+#include "Managers/Singletons/UpscalingManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -63,6 +64,7 @@ private:
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
+    void DrawUpscalingCombo();
     void DrawTonemapTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
@@ -150,6 +152,11 @@ private:
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> getCollectPipelineStatistics;
     std::function<void(bool)> setCollectPipelineStatistics;
+
+	UpscalingMode m_currentUpscalingMode = UpscalingMode::None;
+	std::function<UpscalingMode()> getUpscalingMode;
+	std::function<void(UpscalingMode)> setUpscalingMode;
+
 
 	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
 };
@@ -289,6 +296,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
 	m_collectPipelineStatistics = getCollectPipelineStatistics();
 
+    getUpscalingMode = settingsManager.getSettingGetter<UpscalingMode>("upscalingMode");
+    setUpscalingMode = settingsManager.getSettingSetter<UpscalingMode>("upscalingMode");
+    m_currentUpscalingMode = getUpscalingMode();
+
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
@@ -385,6 +396,7 @@ inline void Menu::Render(const RenderContext& context) {
 		if (ImGui::Checkbox("Collect Pipeline Statistics", &m_collectPipelineStatistics)) {
 			setCollectPipelineStatistics(m_collectPipelineStatistics);
 		}
+        DrawUpscalingCombo();
         DrawTonemapTypeDropdown();
 
         DrawEnvironmentsDropdown();
@@ -510,6 +522,17 @@ inline void Menu::DrawOutputTypeDropdown() {
 		}
 		ImGui::EndCombo();
 
+    }
+}
+
+inline void Menu::DrawUpscalingCombo()
+{
+    int modeIdx = static_cast<int>(m_currentUpscalingMode);
+
+    if (ImGui::Combo("Upscaling Mode", &modeIdx, UpscalingModeNames, UpscalingModeCount))
+    {
+        m_currentUpscalingMode = static_cast<UpscalingMode>(modeIdx);
+		setUpscalingMode(m_currentUpscalingMode);
     }
 }
 

@@ -113,9 +113,6 @@ ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Devic
         {
             spdlog::error("SL device upgrade failed!");
         }
-        else {
-            device = proxyDevice;
-        }
         slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
 		return proxyDevice;
         break;
@@ -137,9 +134,24 @@ IDXGIFactory7* UpscalingManager::ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactor
 }
 
 bool UpscalingManager::InitFFX() {
+    m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
+    m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
+    auto outputRes = m_getOutputRes();
+    auto renderRes = m_getRenderRes();
 	auto module = LoadLibrary(L"FFX/amd_fidelityfx_dx12.dll");
     if (module) {
         ffxLoadFunctions(&ffxModule, module);
+
+        ffx::CreateBackendDX12Desc backendDesc{};
+        backendDesc.device = DeviceManager::GetInstance().GetDevice().Get();
+
+        ffx::CreateContextDescUpscale createUpscaling;
+        createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
+        createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
+        createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
+
+        ffx::ReturnCode retCode = ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+
 		return true;
     }
 	return false;
@@ -235,32 +247,26 @@ bool UpscalingManager::InitSL() {
         // and so on ...
         return false;
     }
-    return true;
-}
 
-void UpscalingManager::Setup() {
-    m_getRenderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution");
-	m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
-	auto outputRes = m_getOutputRes();
-	auto renderRes = m_getRenderRes();
     m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     m_frameTokens.resize(m_numFramesInFlight);
     for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
         slGetNewFrameToken(m_frameTokens[i], &i);
     }
 
-    ffx::CreateBackendDX12Desc backendDesc{};
-    backendDesc.device = DeviceManager::GetInstance().GetDevice().Get();
+    return true;
+}
 
-    ffx::CreateContextDescUpscale createUpscaling;
-    createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
-    createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
-    createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
-
-    ffx::ReturnCode retCode = ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
-
+void UpscalingManager::Setup() {
+    auto outputRes = m_getOutputRes();
+    auto renderRes = m_getRenderRes();
     switch (m_upscalingMode)
     {
+    case UpscalingMode::None: {
+        // No upscaling, just set the render resolution to the output resolution
+        SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(outputRes);
+        break;
+	}
     case UpscalingMode::DLSS: {
         sl::DLSSOptimalSettings dlssSettings;
         sl::DLSSOptions dlssOptions = {};

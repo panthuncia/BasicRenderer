@@ -82,7 +82,12 @@ public:
 private:
     ComPtr<IDXGIAdapter1> m_currentAdapter;
     ComPtr<IDXGIFactory7> factory;
+    ComPtr<IDXGIFactory7> nativeFactory;
+    ComPtr<IDXGIFactory7> slProxyFactory;
     ComPtr<ID3D12Device10> device;
+    ComPtr<ID3D12Device10> nativeDevice;
+    ComPtr<ID3D12Device10> slProxyDevice;
+
     ComPtr<IDXGISwapChain4> swapChain;
     ComPtr<ID3D12CommandQueue> graphicsQueue;
 	ComPtr<ID3D12CommandQueue> computeQueue;
@@ -188,6 +193,8 @@ private:
 	std::function<uint8_t()> getNumFramesInFlight;
     std::function<bool()> getDrawBoundingSpheres;
 	std::function<bool()> getImageBasedLightingEnabled;
+
+	std::vector<SettingsManager::Subscription> m_settingsSubscriptions;
 
     GpuCrashTracker::MarkerMap m_markerMap;
     // Nsight Aftermath instrumentation

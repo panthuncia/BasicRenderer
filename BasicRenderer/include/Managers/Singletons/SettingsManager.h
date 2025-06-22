@@ -49,23 +49,63 @@ public:
         };
     }
 
-    // Adds an observer to a specific setting
+    class Subscription {
+    public:
+        Subscription() = default;
+		Subscription(Subscription&& o) noexcept // Move constructor
+            : _unsubscribe(std::move(o._unsubscribe))
+        {
+            o._unsubscribe = nullptr;
+        }
+        Subscription& operator=(Subscription&& o) noexcept {
+            if (this != &o) {
+                cancel();
+                _unsubscribe = std::move(o._unsubscribe);
+                o._unsubscribe = nullptr;
+            }
+            return *this;
+        }
+        ~Subscription() { cancel(); }
+
+        void cancel() {
+            if (_unsubscribe) {
+                _unsubscribe();
+                _unsubscribe = nullptr;
+            }
+        }
+
+        // no copies
+        Subscription(const Subscription&) = delete;
+        Subscription& operator=(const Subscription&) = delete;
+
+    private:
+        explicit Subscription(std::function<void()> unsub)
+            : _unsubscribe(std::move(unsub))
+        {
+        }
+
+        std::function<void()> _unsubscribe;
+
+
+        friend class SettingsManager;
+    };
+
     template<typename T>
-    void addObserver(const std::string& name, const std::function<void(const T&)>& observer) {
-        auto& setting = getSettingByName(name);
+    Subscription addObserver(const std::string& name,
+        std::function<void(const T&)> obs)
+    {
+        auto& s = dynamic_cast<Setting<T>&>(getSettingByName(name));
+        size_t id = s.addObserver(std::move(obs));
+        // capture everything we need to remove it later
+        return Subscription([this, name, id]() {
+            removeObserver<T>(name, id);
+            });
+    }
 
-        if (setting.getType() != typeid(T)) {
-            throw std::runtime_error("Type mismatch for setting: " + name);
-        }
-
-        // Cast the setting to Setting<T> and add the observer
-        auto typedSetting = dynamic_cast<Setting<T>*>(&setting);
-        if (typedSetting) {
-            typedSetting->addObserver(observer);
-        }
-        else {
-            throw std::runtime_error("Failed to add observer for setting: " + name);
-        }
+    template<typename T>
+    void removeObserver(const std::string& name, size_t id) {
+        auto& s = dynamic_cast<Setting<T>&>(getSettingByName(name));
+        s.removeObserver(id);
     }
 
 private:

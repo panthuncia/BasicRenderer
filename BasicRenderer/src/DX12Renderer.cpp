@@ -146,8 +146,8 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
 	UpscalingManager::GetInstance().InitSL(); // Must be called before LoadPipeline to initialize SL hooks
-    UpscalingManager::GetInstance().InitFFX();
     LoadPipeline(hwnd, x_res, y_res);
+    UpscalingManager::GetInstance().InitFFX(); // Needs device
     SetSettings();
     ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
     PSOManager::GetInstance().initialize();
@@ -338,6 +338,7 @@ void DX12Renderer::SetSettings() {
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
         return AppendScene(scene);
         });
+	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -356,75 +357,98 @@ void DX12Renderer::SetSettings() {
 	getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 
 
-    settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
         rebuildRenderGraph = true;
-        });
-	settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::string>("environmentName", [this](const std::string& newValue) {
 		SetEnvironmentInternal(s2ws(newValue));
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
-		});
-	settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetTonemapType(newValue);
-		});
-	settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
 		ToggleMeshShaders(newValue);
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableWireframe", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableWireframe", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableIndirectDraws", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableIndirectDraws", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("allowTearing", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("allowTearing", [this](const bool& newValue) {
 		m_allowTearing = newValue;
-		});
-	settingsManager.addObserver<bool>("drawBoundingSpheres", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("drawBoundingSpheres", [this](const bool& newValue) {
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableClusteredLighting", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableClusteredLighting", [this](const bool& newValue) {
 		m_clusteredLighting = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableImageBasedLighting", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableImageBasedLighting", [this](const bool& newValue) {
 		m_imageBasedLighting = newValue;
-		});
-	settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableGTAO", [this](const bool& newValue) {
 		m_gtaoEnabled = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
 		m_deferredRendering = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableOcclusionCulling", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableOcclusionCulling", [this](const bool& newValue) {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
 		m_meshletCulling = newValue;
 		rebuildRenderGraph = true;
-		});
-	settingsManager.addObserver<bool>("enableBloom", [this](const bool& newValue) {
-		m_bloom = newValue;
-		rebuildRenderGraph = true;
-		});
-    settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableBloom", [this](const bool& newValue) {
+        m_bloom = newValue;
+        rebuildRenderGraph = true;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
         m_jitter = newValue;
-        });
-	settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
 		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
 		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
         settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
-        });
-	settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
 		ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
-		});
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscalingMode>("upscalingMode", [this](const UpscalingMode& newValue) {
+
+        m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().SetUpscalingMode(newValue);
+
+            if (newValue != UpscalingMode::DLSS) {
+                device = nativeDevice;
+                factory = nativeFactory;
+            }
+            else {
+                device = slProxyDevice;
+                factory = slProxyFactory;
+            }
+
+            DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue); // Re-init device manager with correct device 
+
+            UpscalingManager::GetInstance().Setup();
+
+            CreateTextures();
+            rebuildRenderGraph = true;
+            });
+		}));
     m_numFramesInFlight = getNumFramesInFlight();
 }
 
@@ -522,15 +546,15 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // Create DXGI factory
 
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-
-	auto proxyFactory = UpscalingManager::GetInstance().ProxyFactory(factory);
+    nativeFactory = factory;
+	slProxyFactory = UpscalingManager::GetInstance().ProxyFactory(factory);
 
     m_currentAdapter = GetMostPowerfulAdapter(factory.Get());
     
     UpscalingManager::GetInstance().InitializeAdapter(m_currentAdapter);
 
     if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS) {
-        factory = proxyFactory;
+        factory = slProxyFactory;
 	}
 
     // Create device
@@ -544,7 +568,11 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         D3D_FEATURE_LEVEL_12_0,
         IID_PPV_ARGS(&device)));
 
-	UpscalingManager::GetInstance().ProxyDevice(device);
+    nativeDevice = device;
+	slProxyDevice = UpscalingManager::GetInstance().ProxyDevice(device);
+    if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS) {
+        device = slProxyDevice;
+    }
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
@@ -967,6 +995,7 @@ void DX12Renderer::Cleanup() {
 	m_pMeshManager.reset();
 	m_pObjectManager.reset();
     m_hierarchySystem.destruct();
+    m_settingsSubscriptions.clear();
     DeletionManager::GetInstance().Cleanup();
 }
 

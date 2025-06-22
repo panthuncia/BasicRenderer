@@ -24,6 +24,13 @@ enum class UpscalingMode {
     DLSS
 };
 
+static constexpr const char* UpscalingModeNames[] = {
+    "None",
+    "FSR3",
+    "DLSS",
+};
+static constexpr int UpscalingModeCount = ARRAYSIZE(UpscalingModeNames);
+
 class PixelBuffer;
 class RenderContext;
 
@@ -41,6 +48,7 @@ public:
 	bool InitFFX();
     DirectX::XMFLOAT2 GetJitter(unsigned int frameNumber);
 	UpscalingMode GetCurrentUpscalingMode() const { return m_upscalingMode; }
+    void SetUpscalingMode(UpscalingMode mode) { m_upscalingMode = mode; }
 
 private:
     UpscalingManager() = default;
