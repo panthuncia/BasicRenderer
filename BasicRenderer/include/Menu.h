@@ -65,6 +65,7 @@ private:
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
     void DrawUpscalingCombo();
+    void DrawUpscalingQualityCombo();
     void DrawTonemapTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
@@ -157,6 +158,9 @@ private:
 	std::function<UpscalingMode()> getUpscalingMode;
 	std::function<void(UpscalingMode)> setUpscalingMode;
 
+	UpscaleQualityMode m_currentUpscalingQualityMode = UpscaleQualityMode::Balanced;
+	std::function<UpscaleQualityMode()> getUpscalingQualityMode;
+    std::function<void(UpscaleQualityMode)> setUpscalingQualityMode;
 
 	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
 };
@@ -300,6 +304,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
     setUpscalingMode = settingsManager.getSettingSetter<UpscalingMode>("upscalingMode");
     m_currentUpscalingMode = getUpscalingMode();
 
+	getUpscalingQualityMode = settingsManager.getSettingGetter<UpscaleQualityMode>("upscalingQualityMode");
+    setUpscalingQualityMode = settingsManager.getSettingSetter<UpscaleQualityMode>("upscalingQualityMode");
+    m_currentUpscalingQualityMode = getUpscalingQualityMode();
+
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
@@ -397,6 +405,7 @@ inline void Menu::Render(const RenderContext& context) {
 			setCollectPipelineStatistics(m_collectPipelineStatistics);
 		}
         DrawUpscalingCombo();
+        DrawUpscalingQualityCombo();
         DrawTonemapTypeDropdown();
 
         DrawEnvironmentsDropdown();
@@ -533,6 +542,17 @@ inline void Menu::DrawUpscalingCombo()
     {
         m_currentUpscalingMode = static_cast<UpscalingMode>(modeIdx);
 		setUpscalingMode(m_currentUpscalingMode);
+    }
+}
+
+inline void Menu::DrawUpscalingQualityCombo()
+{
+    int modeIdx = static_cast<int>(m_currentUpscalingQualityMode);
+
+    if (ImGui::Combo("Upscaling Quality", &modeIdx, UpscaleQualityModeNames, UpscaleQualityModeCount))
+    {
+        m_currentUpscalingQualityMode = static_cast<UpscaleQualityMode>(modeIdx);
+        setUpscalingQualityMode(m_currentUpscalingQualityMode);
     }
 }
 

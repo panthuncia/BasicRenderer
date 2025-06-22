@@ -339,6 +339,7 @@ void DX12Renderer::SetSettings() {
         return AppendScene(scene);
         });
 	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
+    settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -449,6 +450,16 @@ void DX12Renderer::SetSettings() {
             rebuildRenderGraph = true;
             });
 		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscaleQualityMode>("upscalingQualityMode", [this](const UpscaleQualityMode& newValue) {
+
+        m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().SetUpscalingQualityMode(newValue);
+            UpscalingManager::GetInstance().Setup();
+            CreateTextures();
+            rebuildRenderGraph = true;
+            });
+        }));
     m_numFramesInFlight = getNumFramesInFlight();
 }
 

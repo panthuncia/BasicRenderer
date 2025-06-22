@@ -161,6 +161,11 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(unsigned int frameNumber) {
 
     switch (m_upscalingMode)
     {
+    case UpscalingMode::None: {
+        // No upscaling, no jitter
+        return { 0.0f, 0.0f };
+		break;
+    }
     case UpscalingMode::DLSS: {
         unsigned int sequenceLength = 16;
         unsigned int sequenceIndex = frameNumber % sequenceLength;
@@ -271,7 +276,7 @@ void UpscalingManager::Setup() {
         sl::DLSSOptimalSettings dlssSettings;
         sl::DLSSOptions dlssOptions = {};
         // These are populated based on user selection in the UI
-        dlssOptions.mode = sl::DLSSMode::eBalanced;
+        dlssOptions.mode = ToSLQualityMode(m_upscaleQualityMode);
         dlssOptions.outputWidth = outputRes.x;
         dlssOptions.outputHeight = outputRes.y;
         // Now let's check what should our rendering resolution be
@@ -312,7 +317,7 @@ void UpscalingManager::Setup() {
         DirectX::XMUINT2 optimalRenderRes = {};
         ffxQueryDescUpscaleGetRenderResolutionFromQualityMode queryDesc{};
         queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
-        queryDesc.qualityMode = FFX_UPSCALE_QUALITY_MODE_BALANCED;
+        queryDesc.qualityMode = ToFFXQualityMode(m_upscaleQualityMode);
 		queryDesc.displayHeight = outputRes.y;
 		queryDesc.displayWidth = outputRes.x;
         queryDesc.pOutRenderWidth = &optimalRenderRes.x;
@@ -355,8 +360,8 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
     StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
-    consts.jitterOffset.x = camera->jitterPixelSpace.x;
-    consts.jitterOffset.y = -camera->jitterPixelSpace.y;
+	consts.jitterOffset.x = camera->jitterNDC.x; // Docs say this should be pixel space, but that causes screen shaking. Not sure what's wrong.
+    consts.jitterOffset.y = -camera->jitterNDC.y;
 
     // Set motion vector scaling based on your setup
     //consts.mvecScale = { -1,1 }; // Values in eMotionVectors are in [-1,1] range
@@ -465,10 +470,41 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
     ffx::ReturnCode retCode = ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
 }
 
+void UpscalingManager::EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+	
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+    srcLoc.pResource = pHDRTarget->GetAPIResource();
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    srcLoc.SubresourceIndex = 0;
+
+    UINT mipSlice = 0;
+    UINT arraySlice = 0;
+    UINT dstSubresource = D3D12CalcSubresource(
+        /*MipSlice=*/mipSlice,
+        /*ArraySlice=*/arraySlice,
+        /*PlaneSlice=*/0,
+        /*TotalMipCount=*/pUpscaledHDRTarget->GetNumSRVMipLevels(),
+        /*ArraySize=*/1);
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+    dstLoc.pResource = pUpscaledHDRTarget->GetAPIResource();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstLoc.SubresourceIndex = dstSubresource;
+
+    context.commandList->CopyTextureRegion(
+        &dstLoc,
+        /*dstX=*/0, /*dstY=*/0, /*dstZ=*/0,
+        &srcLoc,
+        /*pSrcBox=*/nullptr
+    );
+}
 
 void UpscalingManager::Evaluate(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     switch (m_upscalingMode)
     {
+	    case UpscalingMode::None:
+            EvaluateNone(context, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
+			break;
         case UpscalingMode::DLSS:
 			EvaluateDLSS(context, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
             break;
