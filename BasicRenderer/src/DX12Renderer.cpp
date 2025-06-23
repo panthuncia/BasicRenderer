@@ -48,6 +48,7 @@
 #include "RenderPasses/PostProcessing/Bloom.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
 #include "RenderPasses/brdfIntegrationPass.h"
+#include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -69,6 +70,7 @@
 #include "Resources/ResourceIdentifier.h"
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
+#include "Managers/Singletons/FFXManager.h"
 #include "slHooks.h"
 
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
@@ -149,6 +151,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	UpscalingManager::GetInstance().InitSL(); // Must be called before LoadPipeline to initialize SL hooks
     LoadPipeline(hwnd, x_res, y_res);
     UpscalingManager::GetInstance().InitFFX(); // Needs device
+    FFXManager::GetInstance().InitFFX();
     SetSettings();
     ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
     PSOManager::GetInstance().initialize();
@@ -227,6 +230,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
 			auto view = XMMatrixInverse(nullptr, cameraModel);
 			DirectX::XMMATRIX projection = camera->info.unjitteredProjection;
+			camera->info.prevJitteredProjection = camera->info.jitteredProjection; // Save previous jittered projection matrix
             if (m_jitter && entity.has<Components::PrimaryCamera>()) {
                 // Apply jitter
                 auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
@@ -1228,6 +1232,9 @@ void DX12Renderer::CreateRenderGraph() {
     BuildPPLLPipeline(newGraph.get());
 
 	// Start of post-processing passes
+
+    BuildSSRPass(newGraph.get());
+
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
 

@@ -77,6 +77,7 @@ struct Builtin {
   inline static constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
   inline static constexpr std::string_view PerObjectBuffer = "Builtin::PerObjectBuffer";
   struct PostProcessing {
+    inline static constexpr std::string_view ScreenSpaceReflections = "Builtin::PostProcessing::ScreenSpaceReflections";
     inline static constexpr std::string_view UpscaledHDR = "Builtin::PostProcessing::UpscaledHDR";
   };
   inline static constexpr std::string_view PostSkinningVertices = "Builtin::PostSkinningVertices";

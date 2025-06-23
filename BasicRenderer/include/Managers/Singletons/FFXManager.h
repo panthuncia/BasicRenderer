@@ -23,8 +23,15 @@ class Buffer;
 class FFXManager {
 public:
     static FFXManager& GetInstance();
-    void Setup();
-    void Evaluate(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+    void EvaluateSSSR(const RenderContext& context, 
+        PixelBuffer* pHDRTarget, 
+        PixelBuffer* pDepthTexture, 
+        PixelBuffer* pNormals, 
+        PixelBuffer* pMetallicRoughness, 
+        PixelBuffer* pMotionVectors, 
+        PixelBuffer* pEnvironmentCubemap, 
+        PixelBuffer* pBRDFLUT, 
+        PixelBuffer* pReflectionsTarget);
     void Shutdown();
 
     bool InitFFX();
@@ -34,9 +41,9 @@ private:
     uint8_t m_numFramesInFlight;
     std::function<DirectX::XMUINT2()> m_getRenderRes;
     std::function<DirectX::XMUINT2()> m_getOutputRes;
-    std::shared_ptr<Buffer> m_scratchMemory;
     FfxInterface m_backendInterface;
 	FfxSssrContext m_sssrContext;
+	void* m_pScratchMemory = nullptr;
 };
 
 inline FFXManager& FFXManager::GetInstance() {

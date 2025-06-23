@@ -14,6 +14,8 @@ struct CameraInfo {
 	DirectX::XMMATRIX viewProjection;
 
     DirectX::XMMATRIX prevView;
+	DirectX::XMMATRIX prevJitteredProjection;
+
     DirectX::XMMATRIX unjitteredProjection;
 
 	ClippingPlane clippingPlanes[6];

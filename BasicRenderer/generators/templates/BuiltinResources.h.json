@@ -63,7 +63,8 @@
       "Emissive": {}
     },
     "PostProcessing": {
-      "UpscaledHDR": {}
+      "UpscaledHDR": {},
+      "ScreenSpaceReflections": {}
     },
     "GTAO": {
       "WorkingDepths": {},

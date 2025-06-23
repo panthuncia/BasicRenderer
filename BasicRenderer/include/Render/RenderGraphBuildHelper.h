@@ -12,8 +12,9 @@ void CreateGBufferResources(RenderGraph* graph) {
     normalsWorldSpaceDesc.arraySize = 1;
     normalsWorldSpaceDesc.channels = 3;
     normalsWorldSpaceDesc.isCubemap = false;
+    normalsWorldSpaceDesc.format = DXGI_FORMAT_R32G32B32A32_TYPELESS;
     normalsWorldSpaceDesc.hasRTV = true;
-    normalsWorldSpaceDesc.format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	normalsWorldSpaceDesc.rtvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
     normalsWorldSpaceDesc.generateMipMaps = false;
     normalsWorldSpaceDesc.hasSRV = true;
     normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -443,4 +444,26 @@ void BuildBloomPipeline(RenderGraph* graph) {
     // Upsample and blend the first mip with the HDR color target
 	graph->BuildRenderPass("BloomUpsampleAndBlendPass")
 		.Build<BloomBlendPass>();
+}
+
+void BuildSSRPass(RenderGraph* graph) {
+	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+
+    TextureDescription ssrDesc;
+    ssrDesc.arraySize = 1;
+    ssrDesc.channels = 4;
+    ssrDesc.isCubemap = false;
+    ssrDesc.hasRTV = true;
+    ssrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ssrDesc.generateMipMaps = false;
+    ssrDesc.hasSRV = true;
+    ssrDesc.srvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
+    ssrDesc.imageDimensions.push_back(dims);
+    auto ssrTexture = PixelBuffer::Create(ssrDesc);
+    ssrTexture->SetName(L"SSR Texture");
+	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
+
+    graph->BuildRenderPass("Screen-Space Reflections Pass")
+		.Build<ScreenSpaceReflectionsPass>();
 }
