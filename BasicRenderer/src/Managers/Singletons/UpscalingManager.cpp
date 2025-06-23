@@ -4,7 +4,6 @@
 #include <flecs.h>
 
 #include "ThirdParty/Streamline/sl.h"
-//#include "ThirdParty/FFX/host/ffx_types.h"
 #include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
 #include "slHooks.h"
 #include "Managers/Singletons/SettingsManager.h"

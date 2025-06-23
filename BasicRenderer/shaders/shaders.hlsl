@@ -128,7 +128,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
 
 struct PrePassPSOutput
 {
-    float4 signedOctEncodedNormal;
+    float4 normal;
     float2 motionVector;
     float linearDepth;
 #if defined(PSO_DEFERRED)
@@ -150,10 +150,10 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     }
 #endif    
 
-    float3 outNorm = SignedOctEncode(fragmentInfo.normalWS);
+    //float3 outNorm = SignedOctEncode(fragmentInfo.normalWS);
     
     PrePassPSOutput output;
-    output.signedOctEncodedNormal = float4(0, outNorm.x, outNorm.y, outNorm.z);
+    output.normal = float4(fragmentInfo.normalWS, 1.0);
     output.linearDepth = -input.positionViewSpace.z;
     
     // Motion vector

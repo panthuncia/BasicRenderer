@@ -11,6 +11,7 @@ struct Builtin {
     inline static constexpr std::string_view Blend = "Builtin::ActiveDrawSetIndices::Blend";
     inline static constexpr std::string_view Opaque = "Builtin::ActiveDrawSetIndices::Opaque";
   };
+  inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
   inline static constexpr std::string_view CameraBuffer = "Builtin::CameraBuffer";
   struct Color {
     inline static constexpr std::string_view HDRColorTarget = "Builtin::Color::HDRColorTarget";

@@ -47,6 +47,7 @@
 #include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "RenderPasses/PostProcessing/Bloom.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
+#include "RenderPasses/brdfIntegrationPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1171,6 +1172,8 @@ void DX12Renderer::CreateRenderGraph() {
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
         useMeshShaders = false;
     }
+
+    BuildBRDFIntegrationPass(newGraph.get());
 
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")

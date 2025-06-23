@@ -226,7 +226,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     if (psoFlags & PSO_DEFERRED) {
         psoDesc.NumRenderTargets = 6;
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+        psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
 		psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // Motion vector
 		psoDesc.RTVFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
         psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
@@ -235,7 +235,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
 	}
 	else {
 		psoDesc.NumRenderTargets = 3;
-		psoDesc.RTVFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM;
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT;
 		psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // Motion vector
         psoDesc.RTVFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
 	}
@@ -527,7 +527,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     D3D12_RT_FORMAT_ARRAY rtvFormats = {};
     if (psoFlags & PSO_DEFERRED) {
         rtvFormats.NumRenderTargets = 6;
-        rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+        rtvFormats.RTFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
         rtvFormats.RTFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // motion vector
 		rtvFormats.RTFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
         rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
@@ -536,7 +536,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
 	}
 	else {
         rtvFormats.NumRenderTargets = 3;
-        rtvFormats.RTFormats[0] = DXGI_FORMAT_R10G10B10A2_UNORM; // Normals
+        rtvFormats.RTFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
 		rtvFormats.RTFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // motion vector
 		rtvFormats.RTFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
 	}

@@ -10,13 +10,13 @@ void CreateGBufferResources(RenderGraph* graph) {
 
     TextureDescription normalsWorldSpaceDesc;
     normalsWorldSpaceDesc.arraySize = 1;
-    normalsWorldSpaceDesc.channels = 4;
+    normalsWorldSpaceDesc.channels = 3;
     normalsWorldSpaceDesc.isCubemap = false;
     normalsWorldSpaceDesc.hasRTV = true;
-    normalsWorldSpaceDesc.format = DXGI_FORMAT_R10G10B10A2_UNORM;
+    normalsWorldSpaceDesc.format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     normalsWorldSpaceDesc.generateMipMaps = false;
     normalsWorldSpaceDesc.hasSRV = true;
-    normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+    normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
@@ -72,6 +72,28 @@ void CreateGBufferResources(RenderGraph* graph) {
         emissive->SetName(L"Emissive");
         graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
     }
+}
+
+void BuildBRDFIntegrationPass(RenderGraph* graph) {
+	TextureDescription brdfDesc;
+    brdfDesc.arraySize = 1;
+    brdfDesc.channels = 1;
+    brdfDesc.isCubemap = false;
+    brdfDesc.hasRTV = true;
+    brdfDesc.format = DXGI_FORMAT_R16G16_FLOAT;
+    brdfDesc.generateMipMaps = false;
+    brdfDesc.hasSRV = true;
+    brdfDesc.srvFormat = DXGI_FORMAT_R16G16_FLOAT;
+	brdfDesc.hasUAV = true;
+	brdfDesc.uavFormat = DXGI_FORMAT_R16G16_FLOAT;
+    ImageDimensions dims = { 512, 512, 0, 0 };
+    brdfDesc.imageDimensions.push_back(dims);
+    auto brdfIntegrationTexture = PixelBuffer::Create(brdfDesc);
+    brdfIntegrationTexture->SetName(L"BRDF Integration Texture");
+	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
+
+    graph->BuildRenderPass("BRDF Integration Pass")
+		.Build<BRDFIntegrationPass>();
 }
 
 void BuildOcclusionCullingPipeline(RenderGraph* graph) {
