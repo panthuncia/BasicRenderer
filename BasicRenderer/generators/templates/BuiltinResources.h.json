@@ -46,7 +46,8 @@
       "PrefilteredCubemapsGroup": {},
       "WorkingHDRIGroup": {},
       "WorkingCubemapGroup": {},
-      "CurrentCubemap": {}
+      "CurrentCubemap": {},
+      "CurrentPrefilteredCubemap": {}
     },
     "IndirectCommandBuffers": {
       "Opaque": {},

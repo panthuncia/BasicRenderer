@@ -4,6 +4,7 @@
 #include "constants.hlsli"
 #include "cbuffers.hlsli"
 #include "PBRUtilites.hlsli"
+#include "PBR.hlsli"
 
 float3 irradianceSH(float3 n, in const uint environmentIndex, in const uint environmentBufferIndex)
 {
@@ -109,7 +110,7 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     
     StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
     
-    float3 Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
+    //float3 Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
 
     float3 diffuseIrradiance = max(irradianceSH(normalize(normal + bentNormal), environmentIndex, environmentBufferDescriptorIndex), 0.0) * Fd_Lambert();
     float3 Fd = diffuseColor * diffuseIrradiance * (1.0 - E) * diffuseAO;
@@ -118,12 +119,23 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     
     multiBounceAO(diffuseAO, diffuseColor, Fd);
     
+    //float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);
+    //multiBounceSpecularAO(specularAO, F0, Fr);
+    
+    combineDiffuseAndSpecular(normal, E, Fd, 0.0f, color);
+    debugDiffuse = Fd;
+    debugSpecular = 0.0f; //Fr;
+}
+
+float3 evaluateSpecularIBLFromSSR(float3 specularSample, float3 normal, float3 bentNormal, float diffuseAO, float3 F0, float roughness, float perceptualRoughness, float NdotV)
+{
+    float3 E = mx_ggx_dir_albedo_analytic(NdotV, roughness, F0, float3(1.0, 1.0, 1.0));
+    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    //float3 r = getReflectedVector(reflection, normal, roughness);
+    float3 Fr = E * specularSample; //prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
     float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);
     multiBounceSpecularAO(specularAO, F0, Fr);
-    
-    combineDiffuseAndSpecular(normal, E, Fd, Fr, color);
-    debugDiffuse = Fd;
-    debugSpecular = Fr;
+    return Fr;
 }
 
 #endif // __IBL_HLSLI__

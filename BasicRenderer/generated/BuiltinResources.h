@@ -20,6 +20,7 @@ struct Builtin {
   inline static constexpr std::string_view DebugTexture = "Builtin::DebugTexture";
   struct Environment {
     inline static constexpr std::string_view CurrentCubemap = "Builtin::Environment::CurrentCubemap";
+    inline static constexpr std::string_view CurrentPrefilteredCubemap = "Builtin::Environment::CurrentPrefilteredCubemap";
     inline static constexpr std::string_view InfoBuffer = "Builtin::Environment::InfoBuffer";
     inline static constexpr std::string_view PrefilteredCubemapsGroup = "Builtin::Environment::PrefilteredCubemapsGroup";
     inline static constexpr std::string_view WorkingCubemapGroup = "Builtin::Environment::WorkingCubemapGroup";

@@ -300,8 +300,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
 
-    //auto cubeScene = LoadModel("models/sphere.glb");
-    //cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
+    auto cubeScene = LoadModel("models/sphere.glb");
+    cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
     //cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
     
     //auto bistro = LoadModel("models/BistroExterior.fbx");
@@ -321,7 +321,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //mountainScene->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());

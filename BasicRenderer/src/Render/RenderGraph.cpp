@@ -105,7 +105,7 @@ void RenderGraph::ProcessResourceRequirements(
 void RenderGraph::Compile() {
     batches.clear();
 
-	//Check if any of the resource groups we have have Nth children that wa also manage directly
+	//Check if any of the resource groups we have have Nth children that we also manage directly
 	for (auto& resourceGroup : resourceGroups) {
 		auto children = resourceGroup->GetChildIDs();
 		for (auto& childID : children) {
@@ -115,6 +115,7 @@ void RenderGraph::Compile() {
 					resourcesFromGroupToManageIndependantly[resourceGroup->GetGlobalResourceID()] = {};
 				}
 				resourcesFromGroupToManageIndependantly[resourceGroup->GetGlobalResourceID()].push_back(childID);
+				independantlyManagedResourceToGroup[childID] = resourceGroup->GetGlobalResourceID();
 			}
 		}
 	}
@@ -193,7 +194,12 @@ void RenderGraph::Compile() {
 
 		if (isCompute) {
 			auto& pass = std::get<ComputePassAndResources>(pr.pass);
-			if (IsNewBatchNeeded(pass.resources.resourceRequirements, currentBatch.passBatchTrackers, renderUAVs)) {
+			if (IsNewBatchNeeded(pass.resources.resourceRequirements, 
+				pass.resources.internalTransitions, 
+				currentBatch.passBatchTrackers, 
+				currentBatch.internallyTransitionedResources, 
+				currentBatch.allResources,
+				renderUAVs)) {
 				//for (auto& [id, st] : currentBatch.resourceAccessTypes)
 				//	finalResourceAccessTypes[id] = st;
 				//for (auto& [id, st] : currentBatch.resourceLayouts)
@@ -208,7 +214,12 @@ void RenderGraph::Compile() {
 			}
 		} else {
 			auto& pass = std::get<RenderPassAndResources>(pr.pass);
-			if (IsNewBatchNeeded(pass.resources.resourceRequirements, currentBatch.passBatchTrackers, computeUAVs)) {
+			if (IsNewBatchNeeded(pass.resources.resourceRequirements,
+				pass.resources.internalTransitions,
+				currentBatch.passBatchTrackers,
+				currentBatch.internallyTransitionedResources,
+				currentBatch.allResources,
+				computeUAVs)) {
 				//for (auto& [id, st] : currentBatch.resourceAccessTypes)
 				//	finalResourceAccessTypes[id] = st;
 				//for (auto& [id, st] : currentBatch.resourceLayouts)
@@ -234,7 +245,14 @@ void RenderGraph::Compile() {
 				currentBatchIndex,
 				currentBatch);
 			currentBatch.computePasses.push_back(pass);
-			//UpdateDesiredResourceStates(currentBatch, pass, computeUAVs);
+			for (auto& exit : pass.resources.internalTransitions) { // If this pass transitions internally, update to the exit state
+				std::vector<ResourceTransition> _; // Ignored
+				exit.first.resource->GetStateTracker()->Apply(exit.first.range, exit.first.resource.get(), exit.second, _);
+				currentBatch.internallyTransitionedResources.insert(exit.first.resource->GetGlobalResourceID());
+			}
+			for (auto& req : pass.resources.resourceRequirements) {
+				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
+			}
 		} else {
 			auto& pass = std::get<RenderPassAndResources>(pr.pass);
 			ProcessResourceRequirements(
@@ -245,7 +263,14 @@ void RenderGraph::Compile() {
 				currentBatchIndex,
 				currentBatch);
 			currentBatch.renderPasses.push_back(pass);
-			//UpdateDesiredResourceStates(currentBatch, pass, renderUAVs);
+			for (auto& exit : pass.resources.internalTransitions) {
+				std::vector<ResourceTransition> _;
+				exit.first.resource->GetStateTracker()->Apply(exit.first.range, exit.first.resource.get(), exit.second, _);
+				currentBatch.internallyTransitionedResources.insert(exit.first.resource->GetGlobalResourceID());
+			}
+			for (auto& req : pass.resources.resourceRequirements) {
+				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
+			}
 		}
 
 		if (isCompute) {
@@ -570,6 +595,7 @@ void RenderGraph::Execute(RenderContext& context) {
 
 	auto& statisticsManager = StatisticsManager::GetInstance();
 
+	unsigned int burrentBatchIndex = 0;
     for (auto& batch : batches) {
 
 		// Compute queue
@@ -735,18 +761,42 @@ void RenderGraph::Execute(RenderContext& context) {
         if (batch.renderCompletionSignal) {
             graphicsQueue->Signal(m_graphicsQueueFence.Get(), currentGraphicsQueueFenceOffset+batch.renderCompletionFenceValue);
         }
+
+		burrentBatchIndex++;
     }
 }
 
 bool RenderGraph::IsNewBatchNeeded(
 	const std::vector<ResourceRequirement>& reqs,
+	const std::vector<std::pair<ResourceAndRange, ResourceState>> passInternalTransitions,
 	const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
+	const std::unordered_set<uint64_t>& currentBatchInternallyTransitionedResources,
+	const std::unordered_set<uint64_t>& currentBatchAllResources,
 	const std::unordered_set<uint64_t>& otherQueueUAVs)
 {
+	// For each internally modified resource
+	for (auto const& r : passInternalTransitions) {
+		auto id = r.first.resource->GetGlobalResourceID();
+		// If this resource is used in the current batch, we need a new one
+		if (currentBatchAllResources.contains(id)) {
+			return true;
+		}
+		// If this resource is part of a resource group, and this batch uses that group, we need a new batch
+		if (independantlyManagedResourceToGroup.contains(id) && currentBatchAllResources.contains(independantlyManagedResourceToGroup[id])) {
+			return true;
+		}
+	}
+
 	// For each subresource requirement in this pass:
 	for (auto const &r : reqs) {
 
 		uint64_t id = r.resourceAndRange.resource->GetGlobalResourceID();
+
+		// If this resource is internally modified in the current batch, we need a new one
+		if (currentBatchInternallyTransitionedResources.count(id)) {
+			return true;
+		}
+
 		ResourceState wantState{ r.state.access, r.state.layout, r.state.sync };
 
 		// Changing state?

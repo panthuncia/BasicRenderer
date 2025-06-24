@@ -49,6 +49,7 @@
 #include "RenderPasses/PostProcessing/Upscaling.h"
 #include "RenderPasses/brdfIntegrationPass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
+#include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -623,7 +624,10 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
     {
         D3D12_INFO_QUEUE_FILTER filter = {};
-        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328 }; // Barrier-only command lists, ps output type mismatch
+        D3D12_MESSAGE_ID blockedIDs[] = { 
+            (D3D12_MESSAGE_ID)1356, // Barrier-only command lists
+			(D3D12_MESSAGE_ID)1328, // ps output type mismatch
+            (D3D12_MESSAGE_ID)1008 }; // RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS
         filter.DenyList.NumIDs = _countof(blockedIDs);
         filter.DenyList.pIDList = blockedIDs;
 
@@ -1223,6 +1227,7 @@ void DX12Renderer::CreateRenderGraph() {
 	
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
+        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap());
         newGraph->BuildRenderPass("SkyboxPass")
             .Build<SkyboxRenderPass>();
     }
@@ -1233,7 +1238,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 	// Start of post-processing passes
 
-    BuildSSRPass(newGraph.get());
+    BuildSSRPasses(newGraph.get());
 
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();

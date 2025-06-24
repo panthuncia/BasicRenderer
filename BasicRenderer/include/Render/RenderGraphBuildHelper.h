@@ -446,7 +446,7 @@ void BuildBloomPipeline(RenderGraph* graph) {
 		.Build<BloomBlendPass>();
 }
 
-void BuildSSRPass(RenderGraph* graph) {
+void BuildSSRPasses(RenderGraph* graph) {
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 
     TextureDescription ssrDesc;
@@ -458,6 +458,9 @@ void BuildSSRPass(RenderGraph* graph) {
     ssrDesc.generateMipMaps = false;
     ssrDesc.hasSRV = true;
     ssrDesc.srvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	ssrDesc.hasUAV = true;
+	ssrDesc.uavFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	ssrDesc.hasNonShaderVisibleUAV = true; // For ClearUnorderedAccessView
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     ssrDesc.imageDimensions.push_back(dims);
     auto ssrTexture = PixelBuffer::Create(ssrDesc);
@@ -466,4 +469,7 @@ void BuildSSRPass(RenderGraph* graph) {
 
     graph->BuildRenderPass("Screen-Space Reflections Pass")
 		.Build<ScreenSpaceReflectionsPass>();
+
+    graph->BuildRenderPass("Specular IBL & SSR Composite Pass")
+		.Build<SpecularIBLPass>();
 }

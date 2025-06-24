@@ -25,9 +25,11 @@ public:
             Builtin::GBuffer::Normals,
             Builtin::GBuffer::MetallicRoughness,
             Builtin::GBuffer::MotionVectors,
-            Builtin::Environment::CurrentCubemap,
+            Builtin::Environment::CurrentPrefilteredCubemap,
             Builtin::BRDFLUT,
             Builtin::PostProcessing::ScreenSpaceReflections);
+
+        builder->WithInternalTransition({ Builtin::PostProcessing::ScreenSpaceReflections, {} }, {ResourceAccessType::COMMON, ResourceLayout::LAYOUT_COMMON, ResourceSyncState::ALL});
     }
 
     void Setup(const ResourceRegistryView& resourceRegistryView) override {
@@ -37,7 +39,7 @@ public:
 		m_pNormals = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Normals);
         m_pMetallicRoughness = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
 		m_pMotionVectors = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-		m_pEnvironmentCubemap = resourceRegistryView.Request<PixelBuffer>(Builtin::Environment::CurrentCubemap);
+		m_pEnvironmentCubemap = resourceRegistryView.Request<Texture>(Builtin::Environment::CurrentPrefilteredCubemap);
         m_pBRDFLUT = resourceRegistryView.Request<PixelBuffer>(Builtin::BRDFLUT);
 		m_pSSSROutput = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
     }
@@ -47,6 +49,39 @@ public:
 
 
     PassReturn Execute(RenderContext& context) override {
+
+		// Clear the render target of the SSSR output
+        //context.commandList->ClearRenderTargetView(
+        //    m_pSSSROutput->GetRTVInfo(0).cpuHandle,
+        //    &m_pSSSROutput->GetClearColor()[0],
+        //    0,
+        //    nullptr
+        //);
+
+        ID3D12DescriptorHeap* descriptorHeaps[] = {
+            context.textureDescriptorHeap,
+            context.samplerDescriptorHeap,
+        };
+        context.commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+		// Transition SSSR output to UAV state
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_pSSSROutput->GetAPIResource(),
+            D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+		);
+		context.commandList->ResourceBarrier(1, &barrier);
+
+        // Clear as UAV
+        context.commandList->ClearUnorderedAccessViewFloat(
+            m_pSSSROutput->GetUAVShaderVisibleInfo(0).gpuHandle,
+            m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).cpuHandle,
+            m_pSSSROutput->GetAPIResource(),
+            &m_pSSSROutput->GetClearColor()[0],
+            0,
+            nullptr
+		);
+
         FFXManager::GetInstance().EvaluateSSSR(
             context,
             m_pHDRTarget.get(),
@@ -54,10 +89,21 @@ public:
 			m_pNormals.get(),
 			m_pMetallicRoughness.get(),
 			m_pMotionVectors.get(),
-            m_pEnvironmentCubemap.get(),
+            m_pEnvironmentCubemap->GetBuffer().get(),
 			m_pBRDFLUT.get(),
             m_pSSSROutput.get()
 		);
+
+		// All resources must exit in COMMON state for legacy interop
+
+		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_pSSSROutput->GetAPIResource(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_COMMON
+        );
+
+		context.commandList->ResourceBarrier(1, &barrier);
+
         return {};
     }
 
@@ -72,7 +118,7 @@ private:
     std::shared_ptr<PixelBuffer> m_pDepthTexture;
 	std::shared_ptr<PixelBuffer> m_pNormals;
 	std::shared_ptr<PixelBuffer> m_pMetallicRoughness;
-	std::shared_ptr<PixelBuffer> m_pEnvironmentCubemap;
+	std::shared_ptr<Texture> m_pEnvironmentCubemap;
 	std::shared_ptr<PixelBuffer> m_pBRDFLUT;
 	std::shared_ptr<PixelBuffer> m_pSSSROutput;
 };
