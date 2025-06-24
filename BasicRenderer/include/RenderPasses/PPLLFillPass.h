@@ -247,6 +247,8 @@ private:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
+				auto globalFlags = context.globalPSOFlags;
+				globalFlags &= ~PSOFlags::PSO_SCREENSPACE_REFLECTIONS; // Disable SSR for transparencies for now
 				auto pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
 				commandList->SetPipelineState(pso.Get());
 

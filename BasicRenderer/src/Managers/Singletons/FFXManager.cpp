@@ -90,9 +90,9 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
 	sssrDesc.roughnessChannel = 1; // metallic roughness texture, roughness is in channel 1
     sssrDesc.isRoughnessPerceptual = false;
 	sssrDesc.temporalStabilityFactor = 0.7f; // TODO: make everything below configurable
-    sssrDesc.iblFactor = 0.2f;
+    sssrDesc.iblFactor = 0.4f;
 	sssrDesc.depthBufferThickness = 0.015f;
-	sssrDesc.roughnessThreshold = 0.6f;
+	sssrDesc.roughnessThreshold = 0.4f;
 	sssrDesc.varianceThreshold = 0.1f;
 	sssrDesc.maxTraversalIntersections = 128;
     sssrDesc.minTraversalOccupancy = 4;

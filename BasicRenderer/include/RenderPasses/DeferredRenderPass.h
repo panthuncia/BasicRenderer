@@ -154,11 +154,6 @@ public:
 
 		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
-		unsigned int localPSOFlags = 0;
-		if (getImageBasedLightingEnabled()) {
-			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
-		}
-
 		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}

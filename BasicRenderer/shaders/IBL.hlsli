@@ -109,9 +109,10 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     float3 r = getReflectedVector(reflection, normal, roughness);
     
     StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
-    
-    //float3 Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
-
+    float3 Fr = float3(0, 0, 0);
+#if defined (PSO_SPECULAR_IBL)
+    Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
+#endif
     float3 diffuseIrradiance = max(irradianceSH(normalize(normal + bentNormal), environmentIndex, environmentBufferDescriptorIndex), 0.0) * Fd_Lambert();
     float3 Fd = diffuseColor * diffuseIrradiance * (1.0 - E) * diffuseAO;
     
@@ -119,12 +120,13 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     
     multiBounceAO(diffuseAO, diffuseColor, Fd);
     
-    //float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);
-    //multiBounceSpecularAO(specularAO, F0, Fr);
-    
-    combineDiffuseAndSpecular(normal, E, Fd, 0.0f, color);
+#if defined (PSO_SPECULAR_IBL)
+    float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);
+    multiBounceSpecularAO(specularAO, F0, Fr);
+#endif
+    combineDiffuseAndSpecular(normal, E, Fd, Fr, color);
     debugDiffuse = Fd;
-    debugSpecular = 0.0f; //Fr;
+    debugSpecular = Fr;
 }
 
 float3 evaluateSpecularIBLFromSSR(float3 specularSample, float3 normal, float3 bentNormal, float diffuseAO, float3 F0, float roughness, float perceptualRoughness, float NdotV)

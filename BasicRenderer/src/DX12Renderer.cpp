@@ -346,6 +346,7 @@ void DX12Renderer::SetSettings() {
         });
 	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
+	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -466,6 +467,10 @@ void DX12Renderer::SetSettings() {
             rebuildRenderGraph = true;
             });
         }));
+	m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableScreenSpaceReflections", [this](const bool& newValue) {
+		m_screenSpaceReflections = newValue;
+		rebuildRenderGraph = true;
+		}));
     m_numFramesInFlight = getNumFramesInFlight();
 }
 
@@ -914,6 +919,9 @@ void DX12Renderer::Render() {
 	if (m_deferredRendering) {
 		globalPSOFlags |= PSOFlags::PSO_DEFERRED;
 	}
+    if (!m_screenSpaceReflections) {
+        globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
+    }
 	m_context.globalPSOFlags = globalPSOFlags;
 
     // Indicate that the back buffer will be used as a render target
@@ -1238,7 +1246,9 @@ void DX12Renderer::CreateRenderGraph() {
 
 	// Start of post-processing passes
 
-    BuildSSRPasses(newGraph.get());
+    if (m_screenSpaceReflections) {
+        BuildSSRPasses(newGraph.get());
+    }
 
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
