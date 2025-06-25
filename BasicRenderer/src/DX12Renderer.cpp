@@ -453,6 +453,9 @@ void DX12Renderer::SetSettings() {
 
             UpscalingManager::GetInstance().Setup();
 
+            FFXManager::GetInstance().Shutdown();
+            FFXManager::GetInstance().InitFFX();
+
             CreateTextures();
             rebuildRenderGraph = true;
             });
@@ -463,6 +466,8 @@ void DX12Renderer::SetSettings() {
             UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().SetUpscalingQualityMode(newValue);
             UpscalingManager::GetInstance().Setup();
+            FFXManager::GetInstance().Shutdown();
+            FFXManager::GetInstance().InitFFX();
             CreateTextures();
             rebuildRenderGraph = true;
             });

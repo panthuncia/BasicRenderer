@@ -50,6 +50,14 @@ bool FFXManager::InitFFX() {
     return true;
 }
 
+void FFXManager::Shutdown() {
+	ffxSssrContextDestroy(&m_sssrContext);
+    if (m_pScratchMemory) {
+        free(m_pScratchMemory);
+        m_pScratchMemory = nullptr;
+    }
+}
+
 void FFXManager::EvaluateSSSR(const RenderContext& context,
     PixelBuffer* pHDRTarget,
     PixelBuffer* pDepthTexture,
