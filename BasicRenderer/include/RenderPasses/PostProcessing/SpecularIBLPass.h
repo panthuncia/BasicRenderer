@@ -24,7 +24,9 @@ public:
             Builtin::GBuffer::Normals,
             Builtin::GBuffer::Albedo,
             Builtin::GBuffer::Emissive,
-            Builtin::GBuffer::MetallicRoughness)
+            Builtin::GBuffer::MetallicRoughness,
+            Builtin::PrimaryCamera::DepthTexture,
+            Builtin::CameraBuffer)
             .WithRenderTarget(Builtin::Color::HDRColorTarget);
 
         if (m_gtaoEnabled) {
@@ -44,6 +46,8 @@ public:
         m_albedoTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Albedo)->GetSRVInfo(0).index;
         m_metallicRoughnessTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::MetallicRoughness)->GetSRVInfo(0).index;
         m_emissiveTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Emissive)->GetSRVInfo(0).index;
+        m_depthBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).index;
+		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -60,8 +64,8 @@ public:
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_pHDRTarget->GetRTVInfo(0).cpuHandle);
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.outputResolution.x, context.outputResolution.y);
-        CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.outputResolution.x, context.outputResolution.y);
+        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.renderResolution.x, context.renderResolution.y);
+        CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.renderResolution.x, context.renderResolution.y);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
 
@@ -71,19 +75,25 @@ public:
         auto rootSignature = psoManager.GetRootSignature();
         commandList->SetGraphicsRootSignature(rootSignature.Get());
 
+        unsigned int settings[NumSettingsRootConstants] = {};
+        settings[EnableGTAO] = m_gtaoEnabled;
+        commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+
         unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[EnvironmentBufferDescriptorIndex] = m_environmentBufferDescriptorIndex; // May not need this
+        staticBufferIndices[EnvironmentBufferDescriptorIndex] = m_environmentBufferDescriptorIndex;
         staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureSRVIndex;
         staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureSRVIndex;
         staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureSRVIndex;
         staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureSRVIndex;
         staticBufferIndices[EmissiveTextureDescriptorIndex] = m_emissiveTextureSRVIndex;
+		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
 
         commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
 
         unsigned int misc[NumMiscUintRootConstants] = {};
         //misc[0] = m_pHDRTarget->GetUAVShaderVisibleInfo(0).index;
-		misc[0] = m_pScreenSpaceReflections->GetSRVInfo(0).index;
+		misc[UintRootConstant0] = m_pScreenSpaceReflections->GetSRVInfo(0).index;
+		misc[UintRootConstant1] = m_depthBufferSRVIndex;
 
         commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
@@ -108,6 +118,8 @@ private:
     int m_albedoTextureSRVIndex = -1;
     int m_metallicRoughnessTextureSRVIndex = -1;
     int m_emissiveTextureSRVIndex = -1;
+    int m_depthBufferSRVIndex = -1;
+	int m_cameraBufferSRVIndex = -1;
 
     bool m_gtaoEnabled = true;
 

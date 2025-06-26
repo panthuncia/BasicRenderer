@@ -924,7 +924,7 @@ void DX12Renderer::Render() {
 	if (m_deferredRendering) {
 		globalPSOFlags |= PSOFlags::PSO_DEFERRED;
 	}
-    if (!m_screenSpaceReflections) {
+    if (m_screenSpaceReflections) {
         globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
     }
 	m_context.globalPSOFlags = globalPSOFlags;

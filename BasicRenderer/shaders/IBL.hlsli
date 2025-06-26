@@ -129,10 +129,19 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     debugSpecular = Fr;
 }
 
+float3 evaluateSpecularIBL(float3 normal, float3 bentNormal, float diffuseAO, float3 F0, float3 reflection, float roughness, float perceptualRoughness, float NdotV, in const uint environmentIndex)
+{
+    float3 E = mx_ggx_dir_albedo_analytic(NdotV, roughness, F0, float3(1.0, 1.0, 1.0));
+    float3 r = getReflectedVector(reflection, normal, roughness);
+    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    float3 Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
+    return Fr;
+} 
+
 float3 evaluateSpecularIBLFromSSR(float3 specularSample, float3 normal, float3 bentNormal, float diffuseAO, float3 F0, float roughness, float perceptualRoughness, float NdotV)
 {
     float3 E = mx_ggx_dir_albedo_analytic(NdotV, roughness, F0, float3(1.0, 1.0, 1.0));
-    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    //StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
     //float3 r = getReflectedVector(reflection, normal, roughness);
     float3 Fr = E * specularSample; //prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
     float specularAO = computeSpecularAO(NdotV, diffuseAO, roughness);

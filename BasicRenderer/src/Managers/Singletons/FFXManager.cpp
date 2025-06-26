@@ -90,15 +90,15 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
 	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invView), camera->info.viewInverse);
     DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.prevViewProjection), prevViewProjection);
     sssrDesc.commandList = context.commandList;
-
-    sssrDesc.renderSize = { m_getRenderRes().x, m_getRenderRes().y };
-	sssrDesc.motionVectorScale = { -0.5, 0.5 };
+    auto renderSize = m_getRenderRes();
+    sssrDesc.renderSize = { renderSize.x, renderSize.y };
+	sssrDesc.motionVectorScale = { -0.5f, 0.5f };
     sssrDesc.normalUnPackMul = 1.0f;
 	sssrDesc.normalUnPackAdd = 0.0f;
 	sssrDesc.roughnessChannel = 1; // metallic roughness texture, roughness is in channel 1
-    sssrDesc.isRoughnessPerceptual = false;
+    sssrDesc.isRoughnessPerceptual = true;
 	sssrDesc.temporalStabilityFactor = 0.7f; // TODO: make everything below configurable
-    sssrDesc.iblFactor = 0.4f;
+    sssrDesc.iblFactor = 1.0f;
 	sssrDesc.depthBufferThickness = 0.015f;
 	sssrDesc.roughnessThreshold = 0.4f;
 	sssrDesc.varianceThreshold = 0.1f;

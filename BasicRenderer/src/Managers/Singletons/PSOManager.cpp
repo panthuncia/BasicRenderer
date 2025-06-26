@@ -761,7 +761,7 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
 		macro.Name = L"PSO_DEFERRED";
 		defines.insert(defines.begin(), macro);
 	}
-    if (psoFlags & PSOFlags::PSO_SCREENSPACE_REFLECTIONS) {
+    if (!(psoFlags & PSOFlags::PSO_SCREENSPACE_REFLECTIONS)) {
         DxcDefine macro;
         macro.Value = L"1";
         macro.Name = L"PSO_SPECULAR_IBL";

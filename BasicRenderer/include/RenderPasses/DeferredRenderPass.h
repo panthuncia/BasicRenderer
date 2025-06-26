@@ -111,7 +111,10 @@ public:
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-		unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
+		unsigned int settings[NumSettingsRootConstants] = {};
+		settings[EnableShadows] = getShadowsEnabled();
+		settings[EnablePunctualLights] = getPunctualLightingEnabled();
+		settings[EnableGTAO] = m_gtaoEnabled;
 		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
 		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
@@ -150,7 +153,7 @@ public:
 		commandList->SetGraphicsRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, &lightClusterInfo, 0);
 
 		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[0] = m_depthBufferSRVIndex;
+		misc[UintRootConstant0] = m_depthBufferSRVIndex;
 
 		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 
