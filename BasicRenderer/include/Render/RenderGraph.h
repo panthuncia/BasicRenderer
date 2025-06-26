@@ -102,6 +102,12 @@ private:
         std::vector<ResourceTransition> computeTransitions; // Transitions needed to reach desired states on the compute queue
 		std::vector<ResourceTransition> passEndTransitions; // A special case to deal with resources that need to be used by the compute queue, but are in graphics-queue-only states
 
+		// Resources that passes in this batch transition internally
+		// Cannot be batched with other passes which use these resources
+		// Ideally, would be tracked per-subresource, but that sounds hard to implement
+		std::unordered_set<uint64_t> internallyTransitionedResources;
+		std::unordered_set<uint64_t> allResources; // All resources used in this batch, including those that are not transitioned internally
+
 		// For each queue, we need to allow a fence to wait on before transitioning, in case a previous batch is still using a resource
 		// Also, we need to allow a separate fence to wait on before *executing* the batch, in case the compute and render queue use the same resource in this batch
 		bool renderQueueWaitOnComputeQueueBeforeTransition = false;
@@ -165,7 +171,7 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
-	std::unordered_set<uint64_t> resourcesInGroups;
+	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
 
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
@@ -210,7 +216,10 @@ private:
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(
 		const std::vector<ResourceRequirement>& reqs,
+		const std::vector<std::pair<ResourceAndRange, ResourceState>> passInternalTransitions,
 		const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
+		const std::unordered_set<uint64_t>& currentBatchInternallyTransitionedResources,
+		const std::unordered_set<uint64_t>& currentBatchAllResources,
 		const std::unordered_set<uint64_t>& otherQueueUAVs);
 	
 

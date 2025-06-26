@@ -46,7 +46,8 @@
       "PrefilteredCubemapsGroup": {},
       "WorkingHDRIGroup": {},
       "WorkingCubemapGroup": {},
-      "CurrentCubemap": {}
+      "CurrentCubemap": {},
+      "CurrentPrefilteredCubemap": {}
     },
     "IndirectCommandBuffers": {
       "Opaque": {},
@@ -63,7 +64,8 @@
       "Emissive": {}
     },
     "PostProcessing": {
-      "UpscaledHDR": {}
+      "UpscaledHDR": {},
+      "ScreenSpaceReflections": {}
     },
     "GTAO": {
       "WorkingDepths": {},
@@ -90,6 +92,7 @@
       "AlphaTest": {},
       "Blend": {}
     },
+    "BRDFLUT": {},
     "DebugTexture": {}
   }
 }

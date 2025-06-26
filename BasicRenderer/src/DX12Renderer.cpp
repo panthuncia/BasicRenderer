@@ -47,6 +47,9 @@
 #include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "RenderPasses/PostProcessing/Bloom.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
+#include "RenderPasses/brdfIntegrationPass.h"
+#include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
+#include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -68,6 +71,7 @@
 #include "Resources/ResourceIdentifier.h"
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
+#include "Managers/Singletons/FFXManager.h"
 #include "slHooks.h"
 
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
@@ -148,6 +152,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	UpscalingManager::GetInstance().InitSL(); // Must be called before LoadPipeline to initialize SL hooks
     LoadPipeline(hwnd, x_res, y_res);
     UpscalingManager::GetInstance().InitFFX(); // Needs device
+    FFXManager::GetInstance().InitFFX();
     SetSettings();
     ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
     PSOManager::GetInstance().initialize();
@@ -226,6 +231,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
 			auto view = XMMatrixInverse(nullptr, cameraModel);
 			DirectX::XMMATRIX projection = camera->info.unjitteredProjection;
+			camera->info.prevJitteredProjection = camera->info.jitteredProjection; // Save previous jittered projection matrix
             if (m_jitter && entity.has<Components::PrimaryCamera>()) {
                 // Apply jitter
                 auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
@@ -340,6 +346,7 @@ void DX12Renderer::SetSettings() {
         });
 	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
+	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -446,6 +453,9 @@ void DX12Renderer::SetSettings() {
 
             UpscalingManager::GetInstance().Setup();
 
+            FFXManager::GetInstance().Shutdown();
+            FFXManager::GetInstance().InitFFX();
+
             CreateTextures();
             rebuildRenderGraph = true;
             });
@@ -456,10 +466,16 @@ void DX12Renderer::SetSettings() {
             UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().SetUpscalingQualityMode(newValue);
             UpscalingManager::GetInstance().Setup();
+            FFXManager::GetInstance().Shutdown();
+            FFXManager::GetInstance().InitFFX();
             CreateTextures();
             rebuildRenderGraph = true;
             });
         }));
+	m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableScreenSpaceReflections", [this](const bool& newValue) {
+		m_screenSpaceReflections = newValue;
+		rebuildRenderGraph = true;
+		}));
     m_numFramesInFlight = getNumFramesInFlight();
 }
 
@@ -618,7 +634,10 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
     {
         D3D12_INFO_QUEUE_FILTER filter = {};
-        D3D12_MESSAGE_ID blockedIDs[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328 }; // Barrier-only command lists, ps output type mismatch
+        D3D12_MESSAGE_ID blockedIDs[] = { 
+            (D3D12_MESSAGE_ID)1356, // Barrier-only command lists
+			(D3D12_MESSAGE_ID)1328, // ps output type mismatch
+            (D3D12_MESSAGE_ID)1008 }; // RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS
         filter.DenyList.NumIDs = _countof(blockedIDs);
         filter.DenyList.pIDList = blockedIDs;
 
@@ -905,6 +924,9 @@ void DX12Renderer::Render() {
 	if (m_deferredRendering) {
 		globalPSOFlags |= PSOFlags::PSO_DEFERRED;
 	}
+    if (m_screenSpaceReflections) {
+        globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
+    }
 	m_context.globalPSOFlags = globalPSOFlags;
 
     // Indicate that the back buffer will be used as a render target
@@ -1172,6 +1194,8 @@ void DX12Renderer::CreateRenderGraph() {
         useMeshShaders = false;
     }
 
+    BuildBRDFIntegrationPass(newGraph.get());
+
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
@@ -1216,6 +1240,7 @@ void DX12Renderer::CreateRenderGraph() {
 	
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
+        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap());
         newGraph->BuildRenderPass("SkyboxPass")
             .Build<SkyboxRenderPass>();
     }
@@ -1225,6 +1250,11 @@ void DX12Renderer::CreateRenderGraph() {
     BuildPPLLPipeline(newGraph.get());
 
 	// Start of post-processing passes
+
+    if (m_screenSpaceReflections) {
+        BuildSSRPasses(newGraph.get());
+    }
+
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
 

@@ -11,6 +11,7 @@ struct Builtin {
     inline static constexpr std::string_view Blend = "Builtin::ActiveDrawSetIndices::Blend";
     inline static constexpr std::string_view Opaque = "Builtin::ActiveDrawSetIndices::Opaque";
   };
+  inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
   inline static constexpr std::string_view CameraBuffer = "Builtin::CameraBuffer";
   struct Color {
     inline static constexpr std::string_view HDRColorTarget = "Builtin::Color::HDRColorTarget";
@@ -19,6 +20,7 @@ struct Builtin {
   inline static constexpr std::string_view DebugTexture = "Builtin::DebugTexture";
   struct Environment {
     inline static constexpr std::string_view CurrentCubemap = "Builtin::Environment::CurrentCubemap";
+    inline static constexpr std::string_view CurrentPrefilteredCubemap = "Builtin::Environment::CurrentPrefilteredCubemap";
     inline static constexpr std::string_view InfoBuffer = "Builtin::Environment::InfoBuffer";
     inline static constexpr std::string_view PrefilteredCubemapsGroup = "Builtin::Environment::PrefilteredCubemapsGroup";
     inline static constexpr std::string_view WorkingCubemapGroup = "Builtin::Environment::WorkingCubemapGroup";
@@ -76,6 +78,7 @@ struct Builtin {
   inline static constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
   inline static constexpr std::string_view PerObjectBuffer = "Builtin::PerObjectBuffer";
   struct PostProcessing {
+    inline static constexpr std::string_view ScreenSpaceReflections = "Builtin::PostProcessing::ScreenSpaceReflections";
     inline static constexpr std::string_view UpscaledHDR = "Builtin::PostProcessing::UpscaledHDR";
   };
   inline static constexpr std::string_view PostSkinningVertices = "Builtin::PostSkinningVertices";

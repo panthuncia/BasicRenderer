@@ -10,13 +10,14 @@ void CreateGBufferResources(RenderGraph* graph) {
 
     TextureDescription normalsWorldSpaceDesc;
     normalsWorldSpaceDesc.arraySize = 1;
-    normalsWorldSpaceDesc.channels = 4;
+    normalsWorldSpaceDesc.channels = 3;
     normalsWorldSpaceDesc.isCubemap = false;
+    normalsWorldSpaceDesc.format = DXGI_FORMAT_R32G32B32A32_TYPELESS;
     normalsWorldSpaceDesc.hasRTV = true;
-    normalsWorldSpaceDesc.format = DXGI_FORMAT_R10G10B10A2_UNORM;
+	normalsWorldSpaceDesc.rtvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
     normalsWorldSpaceDesc.generateMipMaps = false;
     normalsWorldSpaceDesc.hasSRV = true;
-    normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+    normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
@@ -72,6 +73,28 @@ void CreateGBufferResources(RenderGraph* graph) {
         emissive->SetName(L"Emissive");
         graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
     }
+}
+
+void BuildBRDFIntegrationPass(RenderGraph* graph) {
+	TextureDescription brdfDesc;
+    brdfDesc.arraySize = 1;
+    brdfDesc.channels = 1;
+    brdfDesc.isCubemap = false;
+    brdfDesc.hasRTV = true;
+    brdfDesc.format = DXGI_FORMAT_R16G16_FLOAT;
+    brdfDesc.generateMipMaps = false;
+    brdfDesc.hasSRV = true;
+    brdfDesc.srvFormat = DXGI_FORMAT_R16G16_FLOAT;
+	brdfDesc.hasUAV = true;
+	brdfDesc.uavFormat = DXGI_FORMAT_R16G16_FLOAT;
+    ImageDimensions dims = { 512, 512, 0, 0 };
+    brdfDesc.imageDimensions.push_back(dims);
+    auto brdfIntegrationTexture = PixelBuffer::Create(brdfDesc);
+    brdfIntegrationTexture->SetName(L"BRDF Integration Texture");
+	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
+
+    graph->BuildRenderPass("BRDF Integration Pass")
+		.Build<BRDFIntegrationPass>();
 }
 
 void BuildOcclusionCullingPipeline(RenderGraph* graph) {
@@ -421,4 +444,32 @@ void BuildBloomPipeline(RenderGraph* graph) {
     // Upsample and blend the first mip with the HDR color target
 	graph->BuildRenderPass("BloomUpsampleAndBlendPass")
 		.Build<BloomBlendPass>();
+}
+
+void BuildSSRPasses(RenderGraph* graph) {
+	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+
+    TextureDescription ssrDesc;
+    ssrDesc.arraySize = 1;
+    ssrDesc.channels = 4;
+    ssrDesc.isCubemap = false;
+    ssrDesc.hasRTV = true;
+    ssrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ssrDesc.generateMipMaps = false;
+    ssrDesc.hasSRV = true;
+    ssrDesc.srvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	ssrDesc.hasUAV = true;
+	ssrDesc.uavFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	ssrDesc.hasNonShaderVisibleUAV = true; // For ClearUnorderedAccessView
+    ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
+    ssrDesc.imageDimensions.push_back(dims);
+    auto ssrTexture = PixelBuffer::Create(ssrDesc);
+    ssrTexture->SetName(L"SSR Texture");
+	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
+
+    graph->BuildRenderPass("Screen-Space Reflections Pass")
+		.Build<ScreenSpaceReflectionsPass>();
+
+    graph->BuildRenderPass("Specular IBL & SSR Composite Pass")
+		.Build<SpecularIBLPass>();
 }

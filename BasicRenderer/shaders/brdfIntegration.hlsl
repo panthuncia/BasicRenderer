@@ -1,14 +1,4 @@
-struct VS_OUTPUT {
-    float4 position : SV_POSITION;
-    float2 uv : TEXCOORD1;
-};
-
-VS_OUTPUT VSMain(float3 pos : POSITION, float2 uv : TEXCOORD0) {
-    VS_OUTPUT output;
-    output.position = float4(pos, 1.0);
-    output.uv = uv;
-    return output;
-}
+#include "fullscreenVS.hlsli"
 
 // https://learnopengl.com/PBR/IBL/Specular-IBL
 static const float PI = 3.14159265359;
@@ -35,60 +25,82 @@ float3 ImportanceSampleGGX(float2 Xi, float3 N, float roughness)
     return normalize(sampleVec);
 }
 
-float2 hammersley(uint i, float numSamples)
+float RadicalInverse_VdC(uint bits)
 {
-    uint bits = i;
-    bits = (bits << 16) | (bits >> 16);
-    bits = ((bits & 0x55555555) << 1) | ((bits & 0xAAAAAAAA) >> 1);
-    bits = ((bits & 0x33333333) << 2) | ((bits & 0xCCCCCCCC) >> 2);
-    bits = ((bits & 0x0F0F0F0F) << 4) | ((bits & 0xF0F0F0F0) >> 4);
-    bits = ((bits & 0x00FF00FF) << 8) | ((bits & 0xFF00FF00) >> 8);
-    return float2(i / numSamples, bits / exp2(32));
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+}
+// ----------------------------------------------------------------------------
+float2 Hammersley(uint i, uint N)
+{
+    return float2(float(i) / float(N), RadicalInverse_VdC(i));
 }
 
-float GDFG(float NoV, float NoL, float a)
+float GeometrySchlickGGX(float NdotV, float roughness)
 {
-    float a2 = a * a;
-    float GGXL = NoV * sqrt((-NoL * a2 + NoL) * NoL + a2);
-    float GGXV = NoL * sqrt((-NoV * a2 + NoV) * NoV + a2);
-    return (2 * NoL) / (GGXV + GGXL);
+    float a = roughness;
+    float k = (a * a) / 2.0;
+
+    float nom = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+
+    return nom / denom;
+}
+// ----------------------------------------------------------------------------
+float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
+{
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+
+    return ggx1 * ggx2;
 }
 
-float2 IntegrateBRDF(float NoV, float a) {
-    const uint sampleCount = 1024u;
-    const float3 N = float3(0.0f, 0.0f, 1.0f); // Normal vector
+float2 IntegrateBRDF(float NdotV, float roughness)
+{
     float3 V;
-    V.x = sqrt(1.0f - NoV * NoV);
-    V.y = 0.0f;
-    V.z = NoV;
+    V.x = sqrt(1.0 - NdotV * NdotV);
+    V.y = 0.0;
+    V.z = NdotV;
 
-    float2 r = 0.0f;
-    for (uint i = 0; i < sampleCount; i++)
+    float A = 0.0;
+    float B = 0.0;
+
+    float3 N = float3(0.0, 0.0, 1.0);
+
+    const uint SAMPLE_COUNT = 1024u;
+    for (uint i = 0u; i < SAMPLE_COUNT; ++i)
     {
-        float2 Xi = hammersley(i, sampleCount);
-        float3 H = ImportanceSampleGGX(Xi, N, a);
-        float3 L = 2.0f * dot(V, H) * H - V;
+        float2 Xi = Hammersley(i, SAMPLE_COUNT);
+        float3 H = ImportanceSampleGGX(Xi, N, roughness);
+        float3 L = normalize(2.0 * dot(V, H) * H - V);
 
-        float VoH = saturate(dot(V, H));
-        float NoL = saturate(L.z);
-        float NoH = saturate(H.z);
+        float NdotL = max(L.z, 0.0);
+        float NdotH = max(H.z, 0.0);
+        float VdotH = max(dot(V, H), 0.0);
 
-        if (NoL > 0.0f)
+        if (NdotL > 0.0)
         {
-            float G = GDFG(NoV, NoL, a);
-            float Gv = G * VoH / NoH;
-            float Fc = pow(1 - VoH, 5.0f);
-            r.x += Gv * Fc;
-            r.y += Gv;
+            float G = GeometrySmith(N, V, L, roughness);
+            float G_Vis = (G * VdotH) / (NdotH * NdotV);
+            float Fc = pow(1.0 - VdotH, 5.0);
+
+            A += (1.0 - Fc) * G_Vis;
+            B += Fc * G_Vis;
         }
     }
-    return r * (1.0f / sampleCount);
-    
-    
-    
+    A /= float(SAMPLE_COUNT);
+    B /= float(SAMPLE_COUNT);
+    return float2(A, B);
 }
 
-float2 PSMain(VS_OUTPUT input) : SV_TARGET {
-    float2 integratedBRDF = IntegrateBRDF(input.uv.x, 1.0-input.uv.y);
+float2 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_TARGET
+{
+    float2 integratedBRDF = IntegrateBRDF(input.uv.x, input.uv.y);
     return integratedBRDF;
 }

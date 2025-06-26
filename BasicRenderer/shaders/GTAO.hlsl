@@ -54,9 +54,9 @@ float3 LoadNormal(int2 pos, uint normalsDescriptorIndex) {
 //    uint packedInput = g_srcNormalmap.Load(int3(pos, 0)).x;
 //    float3 unpackedOutput = XeGTAO_R11G11B10_UNORM_to_FLOAT3(packedInput);
 //    float3 normal = normalize(unpackedOutput * 2.0.xxx - 1.0.xxx);
-    float4 inNorm = g_srcNormalmap.Load(int3(pos, 0));
-    float3 decoded = SignedOctDecode(inNorm.yzw); // 10, 10, 2 bits
-    float3 normal = normalize(decoded.xyz);
+    float3 normal = g_srcNormalmap.Load(int3(pos, 0)).xyz;
+    //float3 decoded = SignedOctDecode(inNorm.yzw); // 10, 10, 2 bits
+    //float3 normal = normalize(decoded.xyz);
 #else 
     // example of a different encoding
     float3 encodedNormal = g_srcNormalmap.Load(int3(pos, 0)).xyz;

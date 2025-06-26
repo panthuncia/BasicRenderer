@@ -16,6 +16,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - Order-independent transparency using a per-pixel linked-list
 - SSAO with XeGTAO
 - Downsample/upsample bloom
+- Screen-space reflections with FidelityFX SSSR
 - TAA/upscaling with DLSS/FSR
   
 ## Technical features
@@ -36,6 +37,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ![Bistro example](images/Bistro.png)
 
+![SSR example](images/SSR.png)]
+
 ![Meshlets example](images/meshlets.png)
 
 ![Meshlet culling example](images/culling.png)
@@ -53,6 +56,9 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [flecs](https://www.flecs.dev/flecs/)
 - [XeGTAO](https://github.com/GameTechDev/XeGTAO)
 - [FidelityFX SPD](https://gpuopen.com/fidelityfx-spd/)
+- [FidelityFX SSSR](https://gpuopen.com/fidelityfx-sssr/)
+- [FSR](https://www.amd.com/en/products/graphics/technologies/fidelityfx/super-resolution.html)
+- [DLSS](https://www.nvidia.com/en-us/geforce/technologies/dlss/)
   
 ## Notable sources for development ideas
 

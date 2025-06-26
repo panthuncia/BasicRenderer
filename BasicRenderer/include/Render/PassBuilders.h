@@ -454,6 +454,14 @@ public:
         return *this;
     }
 
+    RenderPassBuilder& WithInternalTransition(
+        ResourceIdentifierAndRange rar,
+        ResourceState exitState) &
+    {
+        addInternalTransition(rar, exitState);
+        return *this;
+    }
+
     // Second set, callable on temporaries
     template<typename... Args>
     RenderPassBuilder WithShaderResource(Args&&... args) && {
@@ -512,6 +520,14 @@ public:
     template<typename... Args>
     RenderPassBuilder WithLegacyInterop(Args&&... args)&& {
         (addLegacyInterop(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    RenderPassBuilder WithInternalTransition(
+        ResourceIdentifierAndRange rar,
+        ResourceState exitState) &&
+    {
+        addInternalTransition(rar, exitState);
         return std::move(*this);
     }
 
@@ -684,6 +700,18 @@ private:
         return *this;
     }
 
+    RenderPassBuilder& addInternalTransition(
+        ResourceIdentifierAndRange rar,
+        ResourceState exitState)&
+    {
+        auto ranges = processResourceArguments(rar, graph);
+        for (auto& r : ranges) {
+            if (!r.resource) continue;
+            params.internalTransitions.emplace_back(r, exitState);
+        }
+        return *this;
+    }
+
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("RenderPassBuilder::Build() may only be called once");
     }
@@ -827,6 +855,14 @@ public:
         return *this;
     }
 
+    ComputePassBuilder& WithInternalTransition(
+        ResourceIdentifierAndRange rar,
+        ResourceState exitState) &
+    {
+        addInternalTransition(rar, exitState);
+        return *this;
+    }
+
     // Second set, callable on temporaries
     template<typename... Args>
     ComputePassBuilder WithShaderResource(Args&&... args) && {
@@ -855,6 +891,14 @@ public:
     template<typename... Args>
     ComputePassBuilder WithLegacyInterop(Args&&... args)&& {
         (addLegacyInterop(std::forward<Args>(args)), ...);
+        return std::move(*this);
+    }
+
+    ComputePassBuilder WithInternalTransition(
+        ResourceIdentifierAndRange rar,
+        ResourceState exitState) &&
+    {
+		addInternalTransition(rar, exitState);
         return std::move(*this);
     }
 
@@ -948,7 +992,7 @@ private:
 
     // Legacy interop resources
     template<typename T>
-    RenderPassBuilder& addLegacyInterop(T&& x) {
+    ComputePassBuilder& addLegacyInterop(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
         auto ranges = processResourceArguments(std::forward<T>(x), graph);
         for (auto& r : ranges) {
@@ -957,6 +1001,18 @@ private:
         }
         return *this;
     }
+
+    ComputePassBuilder& addInternalTransition(
+        ResourceIdentifierAndRange rar,
+        ResourceState exitState) &
+    {
+		auto ranges = processResourceArguments(rar, graph);
+        for (auto& r : ranges) {
+            if (!r.resource) continue;
+            params.internalTransitions.emplace_back(r, exitState);
+		}
+        return *this;
+	}
 
     void ensureNotBuilt() const {
         if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");

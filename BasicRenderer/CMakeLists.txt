@@ -238,14 +238,34 @@ add_symlink_or_copy_per_config(
     "FFX_dx12"
 )
 
-set(FFX_BACKEND_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_backend_dx12_x64.dll")
-set(FFX_BACKEND_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_backend_dx12_x64.dll")
+set(FFX_BACKEND_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_backend_dx12_x64drel.dll")
+set(FFX_BACKEND_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_backend_dx12_x64drel.dll")
 
 add_symlink_or_copy_per_config(
     "${FFX_BACKEND_DIR}"
     "${FFX_BACKEND_FILE}"
     FALSE  # IS_DIRECTORY
     "FFX_backend_dx12"
+)
+
+set(FFX_SSSR_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_sssr_x64drel.dll")
+set(FFX_SSSR_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_sssr_x64drel.dll")
+
+add_symlink_or_copy_per_config(
+    "${FFX_SSSR_DIR}"
+    "${FFX_SSSR_FILE}"
+    FALSE  # IS_DIRECTORY
+    "FFX_sssr_dx12"
+)
+
+set(FFX_DENOISER_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_denoiser_x64drel.dll")
+set(FFX_DENOISER_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_denoiser_x64drel.dll")
+
+add_symlink_or_copy_per_config(
+    "${FFX_DENOISER_DIR}"
+    "${FFX_DENOISER_FILE}"
+    FALSE  # IS_DIRECTORY
+    "FFX_denoiser_dx12"
 )
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
@@ -286,4 +306,23 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 # Find and link DirectX 12
-target_link_libraries(${PROJECT_NAME} PRIVATE d3dcompiler.lib dxgi.lib spdlog::spdlog Microsoft::DirectXTex imgui::imgui meshoptimizer::meshoptimizer Microsoft::DirectX-Headers Microsoft::DirectX12-Agility assimp::assimp flecs::flecs flecs::flecs_static "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/amd_fidelityfx_dx12.lib" "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_backend_dx12_x64.lib")
+target_link_libraries(${PROJECT_NAME} 
+PRIVATE 
+    d3dcompiler.lib 
+    dxgi.lib 
+    spdlog::spdlog 
+    Microsoft::DirectXTex 
+    imgui::imgui 
+    meshoptimizer::meshoptimizer 
+    Microsoft::DirectX-Headers 
+    Microsoft::DirectX12-Agility 
+    assimp::assimp 
+    flecs::flecs 
+    flecs::flecs_static 
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/amd_fidelityfx_dx12.lib" 
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_backend_dx12_x64drel.lib"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_sssr_x64drel.lib"
+)

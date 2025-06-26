@@ -297,11 +297,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 	//mountainScene->GetRoot().m_name = L"mountainRoot";
 
+	//auto chessScene = LoadModel("models/Chess/scene.gltf");
+
 	//auto sponza = LoadModel("models/sponza.glb");
     //auto street = LoadModel("models/street.obj");
 
-    //auto cubeScene = LoadModel("models/sphere.glb");
-    //cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
+    auto cubeScene = LoadModel("models/sphere.glb");
+    cubeScene->GetRoot().set<Components::Position>({0, 5, 3});
     //cubeScene->GetRoot().set<Components::Rotation>(QuaternionFromAxisAngle({1, 1, 1}));
     
     //auto bistro = LoadModel("models/BistroExterior.fbx");
@@ -317,11 +319,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.SetCurrentScene(baseScene);
     
+	//renderer.GetCurrentScene()->AppendScene(chessScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(sanMiguel->Clone());
 
     //mountainScene->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(cubeScene->Clone());
 
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());

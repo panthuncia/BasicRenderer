@@ -26,6 +26,7 @@ struct RenderPassParameters {
 	std::vector<ResourceAndRange> copySources;
 	std::vector<ResourceAndRange> indirectArgumentBuffers;
 	std::vector<ResourceAndRange> legacyInteropResources;
+	std::vector<std::pair<ResourceAndRange, ResourceState>> internalTransitions;
 
 	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> identifierSet;
 	std::vector<ResourceRequirement> resourceRequirements;

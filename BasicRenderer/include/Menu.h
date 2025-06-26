@@ -146,6 +146,10 @@ private:
 	std::function<bool()> getBloomEnabled;
 	std::function<void(bool)> setBloomEnabled;
 
+	bool m_screenSpaceReflectionsEnabled = true;
+	std::function<bool()> getScreenSpaceReflectionsEnabled;
+	std::function<void(bool)> setScreenSpaceReflectionsEnabled;
+
     bool m_jitterEnabled = true;
     std::function<bool()> getJitterEnabled;
     std::function<void(bool)> setJitterEnabled;
@@ -292,6 +296,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 	getBloomEnabled = settingsManager.getSettingGetter<bool>("enableBloom");
 	m_bloomEnabled = getBloomEnabled();
 
+	setScreenSpaceReflectionsEnabled = settingsManager.getSettingSetter<bool>("enableScreenSpaceReflections");
+	getScreenSpaceReflectionsEnabled = settingsManager.getSettingGetter<bool>("enableScreenSpaceReflections");
+	m_screenSpaceReflectionsEnabled = getScreenSpaceReflectionsEnabled();
+
     setJitterEnabled = settingsManager.getSettingSetter<bool>("enableJitter");
     getJitterEnabled = settingsManager.getSettingGetter<bool>("enableJitter");
     m_jitterEnabled = getJitterEnabled();
@@ -397,6 +405,9 @@ inline void Menu::Render(const RenderContext& context) {
 		}
 		if (ImGui::Checkbox("Enable Bloom", &m_bloomEnabled)) {
 			setBloomEnabled(m_bloomEnabled);
+		}
+        if (ImGui::Checkbox("Enable Screen Space Reflections", &m_screenSpaceReflectionsEnabled)) {
+            setScreenSpaceReflectionsEnabled(m_screenSpaceReflectionsEnabled);
 		}
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);

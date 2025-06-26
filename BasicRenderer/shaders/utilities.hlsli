@@ -200,7 +200,7 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
     }
     
     ret.albedo = baseColor.rgb;
-    ret.normalWS = normalWS;
+    ret.normalWS = normalWS.xyz;
     ret.emissive = emissive;
     ret.metallic = metallic;
     ret.roughness = roughness;
@@ -232,8 +232,8 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     Texture2D<float4> normalsTexture = ResourceDescriptorHeap[normalsTextureDescriptorIndex];
     
     // Load values
-    float4 encodedNormal = normalsTexture[pixelCoordinates];
-    ret.normalWS = SignedOctDecode(encodedNormal.yzw);
+    ret.normalWS = normalsTexture[pixelCoordinates].xyz;
+    //ret.normalWS = SignedOctDecode(encodedNormal.yzw);
     
     Texture2D<float4> albedoTexture = ResourceDescriptorHeap[albedoTextureDescriptorIndex];
     float4 baseColorSample = albedoTexture[pixelCoordinates];
