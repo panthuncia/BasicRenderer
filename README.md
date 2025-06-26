@@ -37,7 +37,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 ![Bistro example](images/Bistro.png)
 
-![SSR example](images/SSR.png)]
+![SSR example](images/SSR.png)
 
 ![Meshlets example](images/meshlets.png)
 
