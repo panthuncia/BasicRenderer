@@ -395,6 +395,9 @@ inline void Menu::Render(const RenderContext& context) {
         if (occlusionCulling) {
             ImGui::Text("Deferred rendering cannot be disabled if occlusion culling is on");
         }
+        else if (m_screenSpaceReflectionsEnabled) {
+            ImGui::Text("Deferred rendering cannot be disabled if SSR is on");
+        }
         else {
             if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
                 setDeferredRenderingEnabled(deferredRendering);
@@ -408,6 +411,10 @@ inline void Menu::Render(const RenderContext& context) {
 		}
         if (ImGui::Checkbox("Enable Screen Space Reflections", &m_screenSpaceReflectionsEnabled)) {
             setScreenSpaceReflectionsEnabled(m_screenSpaceReflectionsEnabled);
+            if (!deferredRendering) { // SSR requires deferred rendering
+                setDeferredRenderingEnabled(true);
+                deferredRendering = true;
+            }
 		}
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);

@@ -1251,7 +1251,7 @@ void DX12Renderer::CreateRenderGraph() {
 
 	// Start of post-processing passes
 
-    if (m_screenSpaceReflections) {
+	if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
         BuildSSRPasses(newGraph.get());
     }
 
