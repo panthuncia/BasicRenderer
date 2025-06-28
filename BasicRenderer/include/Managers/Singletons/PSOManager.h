@@ -4,6 +4,7 @@
 #include <wrl.h>
 #include <unordered_map>
 #include <string>
+#include <filesystem>
 
 #include "ThirdParty/DirectX/dxcapi.h"
 #include "Materials/BlendState.h"
@@ -43,6 +44,7 @@ namespace std {
 
 class PSOManager {
 public:
+
     static PSOManager& GetInstance();
 
     void initialize();
@@ -68,6 +70,20 @@ public:
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
 
 private:
+    struct ShaderCompileOptions
+    {
+        std::wstring entryPoint;
+        std::wstring target;
+        std::vector<DxcDefine> defines;
+        bool enableDebugInfo = false;
+        bool warningsAsErrors = true;
+    };
+
+    struct SourceData {
+        DxcBuffer                  buffer;
+        Microsoft::WRL::ComPtr<IDxcBlobEncoding> blob;
+    };
+
     PSOManager() = default;
     ComPtr<ID3D12RootSignature> rootSignature;
 	ComPtr<ID3D12RootSignature> computeRootSignature;
@@ -107,6 +123,29 @@ private:
 
     void createRootSignature();
     D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
+
+    void LoadSource(const std::filesystem::path& path, PSOManager::SourceData& sd);
+
+    ComPtr<IDxcIncludeHandler> CreateIncludeHandler();
+
+    std::vector<LPCWSTR> BuildArguments(
+        const ShaderCompileOptions& opts,
+        const std::filesystem::path& shaderDir);
+
+    ComPtr<IDxcResult> InvokeCompile(
+        const DxcBuffer& srcBuffer,
+        std::vector<LPCWSTR>& arguments,
+        IDxcIncludeHandler* includeHandler);
+
+    ComPtr<IDxcBlob> ExtractObject(
+        IDxcResult* result,
+        const std::wstring& filename,
+        bool writeDebugArtifacts);
+
+    void WriteDebugArtifacts(
+        IDxcResult* result,
+        const std::filesystem::path& outDir,
+        const std::wstring& baseName);
 };
 
 inline PSOManager& PSOManager::GetInstance() {

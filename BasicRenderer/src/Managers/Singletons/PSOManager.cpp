@@ -2,7 +2,7 @@
 
 #include <fstream>
 #include <spdlog/spdlog.h>
-#include <filesystem>
+#include <slang.h>
 
 #include <directx/d3dx12.h>
 #include "Utilities/Utilities.h"
@@ -771,155 +771,194 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
     return defines;
 }
 
-void PSOManager::CompileShader(const std::wstring& filename, const std::wstring& entryPoint, const std::wstring& target, std::vector<DxcDefine> defines, Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob) {
-    ComPtr<IDxcBlobEncoding> sourceBlob;
-    ComPtr<IDxcResult> result;
-    ComPtr<IDxcIncludeHandler> includeHandler;
+void PSOManager::CompileShader(
+    const std::wstring& filename,
+    const std::wstring& entryPoint, 
+    const std::wstring& target, 
+    std::vector<DxcDefine> defines,
+    Microsoft::WRL::ComPtr<ID3DBlob>& outBlob)
+{
+    auto exePath = std::filesystem::path(GetExePath());
+    auto fullPath = exePath / filename;
+    auto shaderDir = exePath / L"shaders";
 
-    UINT32 codePage = CP_UTF8;
-    pUtils->LoadFile((std::filesystem::path(GetExePath()) / filename).c_str(), &codePage, &sourceBlob);
+    PSOManager::SourceData srcBuf;
+    LoadSource(fullPath, srcBuf);
+    auto includeHandler = CreateIncludeHandler();
 
-    HRESULT hr = pUtils->CreateDefaultIncludeHandler(&includeHandler);
-    if (FAILED(hr)) {
-        spdlog::error("Failed to create include handler.");
-        ThrowIfFailed(hr);
-        return;
-    }
-
-    DxcBuffer sourceBuffer;
-    sourceBuffer.Ptr = sourceBlob->GetBufferPointer();
-    sourceBuffer.Size = sourceBlob->GetBufferSize();
-    sourceBuffer.Encoding = 0;
-
-    std::vector<LPCWSTR> arguments;
-    // -E for the entry point
-    arguments.push_back(L"-E");
-    arguments.push_back(entryPoint.c_str());
-
-    // -T for the target profile (eg. ps_6_6)
-    arguments.push_back(L"-T");
-    arguments.push_back(target.c_str());
-
-    arguments.push_back(DXC_ARG_WARNINGS_ARE_ERRORS); //-WX
+    ShaderCompileOptions opts;
+	opts.entryPoint = entryPoint;
+	opts.target = target;
+	opts.defines = std::move(defines);
 #if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
-    arguments.push_back(DXC_ARG_DEBUG); //-Zi
-    arguments.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE); //-Zss
-    arguments.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
+	opts.enableDebugInfo = true;
 #endif
+    opts.warningsAsErrors = true;
 
-    for (const auto& define : defines)
-    {
-        arguments.push_back(L"-D");
-        arguments.push_back(define.Name);
+    auto args = BuildArguments(opts, shaderDir);
+
+	args.push_back(L"-P"); // Preprocess only
+	auto preProcessedResult = InvokeCompile(
+        srcBuf.buffer, args, includeHandler.Get()
+	);
+
+    ComPtr<IDxcBlobUtf8> ppBlob;
+    preProcessedResult->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&ppBlob), nullptr);
+
+    DxcBuffer ppBuffer;
+    ppBuffer.Ptr = ppBlob->GetBufferPointer();
+    ppBuffer.Size = ppBlob->GetBufferSize();
+    ppBuffer.Encoding = 0;
+
+    // remove -P
+    args.pop_back();
+    auto result = InvokeCompile(ppBuffer, args, includeHandler.Get());
+
+    auto obj = ExtractObject(result.Get(), filename, opts.enableDebugInfo);
+
+    ThrowIfFailed(
+        result->GetResult(reinterpret_cast<IDxcBlob**>(outBlob.GetAddressOf()))
+    );
+}
+
+void PSOManager::LoadSource(const std::filesystem::path& path, PSOManager::SourceData& sd) {
+    UINT32 codePage = CP_UTF8;
+    ThrowIfFailed(pUtils->LoadFile(
+        path.c_str(), &codePage, &sd.blob
+    ));
+    sd.buffer.Ptr = sd.blob->GetBufferPointer();
+    sd.buffer.Size = sd.blob->GetBufferSize();
+    sd.buffer.Encoding = 0; // see below
+}
+
+
+ComPtr<IDxcIncludeHandler> PSOManager::CreateIncludeHandler()
+{
+    ComPtr<IDxcIncludeHandler> handler;
+    ThrowIfFailed(pUtils->CreateDefaultIncludeHandler(&handler));
+    return handler;
+}
+
+std::vector<LPCWSTR> PSOManager::BuildArguments(
+    const ShaderCompileOptions& opts,
+    const std::filesystem::path& shaderDir)
+{
+    std::vector<LPCWSTR> args;
+
+    args.push_back(L"-E"); args.push_back(opts.entryPoint.c_str());
+    args.push_back(L"-T"); args.push_back(opts.target.c_str());
+
+    if (opts.warningsAsErrors)
+        args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS);
+
+    if (opts.enableDebugInfo) {
+        args.push_back(DXC_ARG_DEBUG);
+        args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
+        args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
     }
 
-    std::wstring includePath = (std::filesystem::path(GetExePath()) / L"shaders").wstring();
-    arguments.push_back(L"-I");
-    arguments.push_back(includePath.c_str());
-
-    print("Compiling with arguments: ");
-    for (auto& arg : arguments) {
-        std::wcout << arg << " ";
+    for (auto& def : opts.defines) {
+        args.push_back(L"-D");
+        args.push_back(def.Name);
     }
-    std::wcout << std::endl;
 
-    // Compile the shader
-    hr = pCompiler->Compile(
-        &sourceBuffer,
+    // always include shaders folder
+    args.push_back(L"-I");
+    args.push_back(shaderDir.c_str());
+
+    return args;
+}
+
+ComPtr<IDxcResult> PSOManager::InvokeCompile(
+    const DxcBuffer& src,
+    std::vector<LPCWSTR>& arguments,
+    IDxcIncludeHandler* includeHandler)
+{
+    ComPtr<IDxcResult> result;
+    HRESULT hr = pCompiler->Compile(
+        &src,
         arguments.data(),
-        arguments.size(),
-        includeHandler.Get(),
-        IID_PPV_ARGS(result.GetAddressOf()));
+        (UINT)arguments.size(),
+        includeHandler,
+        IID_PPV_ARGS(result.GetAddressOf())
+    );
 
+    // on failure or errors, pull DXC_OUT_ERRORS and log
     if (FAILED(hr)) {
-        ComPtr<IDxcBlobUtf8> pErrors;
-        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
-        if (pErrors && pErrors->GetStringLength() > 0) {
-            spdlog::error("Shader compilation failed: {}", pErrors->GetStringPointer());
-        }
+        ComPtr<IDxcBlobUtf8> errs;
+        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
+        if (errs && errs->GetStringLength())
+            spdlog::error("Shader compile error: {}", errs->GetStringPointer());
         ThrowIfFailed(hr);
-        return;
     }
 
-    // Check for errors in the result
-    ComPtr<IDxcBlobUtf8> pErrors;
-    result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(pErrors.GetAddressOf()), nullptr);
-    if (pErrors && pErrors->GetStringLength() > 0) {
-        spdlog::error("Shader compilation warnings/errors: {}", pErrors->GetStringPointer());
-
-        if (strstr(pErrors->GetStringPointer(), "error") != nullptr) {
-            // If errors exist, treat this as a failure
-            return;
+    {
+        ComPtr<IDxcBlobUtf8> errs;
+        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errs.GetAddressOf()), nullptr);
+        if (errs && errs->GetStringLength()) {
+            spdlog::error("Shader compile warnings: {}", errs->GetStringPointer());
+            if (strstr(errs->GetStringPointer(), "error"))
+                ThrowIfFailed(E_FAIL);
         }
     }
 
+    return result;
+}
+
+ComPtr<IDxcBlob> PSOManager::ExtractObject(
+    IDxcResult* result,
+    const std::wstring& filename,
+    bool writeDebugArtifacts)
+{
     ComPtr<IDxcBlob> objectBlob;
-    hr = result->GetOutput(
+    ThrowIfFailed(result->GetOutput(
         DXC_OUT_OBJECT,
         IID_PPV_ARGS(objectBlob.GetAddressOf()),
-        nullptr);
-    ThrowIfFailed(hr);
+        nullptr));
 
-#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+    if (writeDebugArtifacts) {
+        auto exePath = std::filesystem::path(GetExePath());
+        auto outDir = exePath / L"CompiledShaders";
+        std::filesystem::create_directories(outDir);
 
-    // Retrieve the separate PDB debug info
+        // derive a base name from the suggested pdb path
+        ComPtr<IDxcBlobUtf16> pdbPathBlob;
+        ComPtr<IDxcBlob>     pdbBlob;
+        ThrowIfFailed(result->GetOutput(
+            DXC_OUT_PDB,
+            IID_PPV_ARGS(pdbBlob.GetAddressOf()),
+            pdbPathBlob.GetAddressOf()));
 
+        auto suggested = pdbPathBlob->GetStringPointer();
+        auto baseName = std::filesystem::path(suggested).stem().wstring();
+
+        WriteDebugArtifacts(result, outDir, baseName);
+    }
+
+    return objectBlob;
+}
+
+void PSOManager::WriteDebugArtifacts(
+    IDxcResult* result,
+    const std::filesystem::path& outDir,
+    const std::wstring& baseName)
+{
+    // write .bin
     ComPtr<IDxcBlob> pdbBlob;
-	ComPtr<IDxcBlobUtf16> pdbPathBlob;
-    hr = result->GetOutput(
-        DXC_OUT_PDB,
-        IID_PPV_ARGS(pdbBlob.GetAddressOf()),
-        pdbPathBlob.GetAddressOf());
-    ThrowIfFailed(hr);
+    ComPtr<IDxcBlob> objBlob;
+    ThrowIfFailed(result->GetOutput(
+        DXC_OUT_PDB, IID_PPV_ARGS(pdbBlob.GetAddressOf()), nullptr));
+    ThrowIfFailed(result->GetOutput(
+        DXC_OUT_OBJECT, IID_PPV_ARGS(objBlob.GetAddressOf()), nullptr));
 
-    const wchar_t* suggestedPdbPath = pdbPathBlob->GetStringPointer();
-    std::filesystem::path pdbFs(suggestedPdbPath);
+    auto write = [&](const std::filesystem::path& path, IDxcBlob* blob) {
+        std::ofstream f(path, std::ios::binary);
+        if (!f) spdlog::error("Failed to open {} for writing", path.string());
+        else    f.write((char*)blob->GetBufferPointer(), blob->GetBufferSize());
+        };
 
-    auto hashedFileName = pdbFs.stem();    
-
-    // Derive a base name and ensure output folder exists
-    namespace fs = std::filesystem;
-    fs::path exePath(GetExePath());
-    fs::path outDir = exePath / L"CompiledShaders";
-    fs::create_directories(outDir);
-
-    fs::path shaderPath(filename);
-    std::wstring baseName = hashedFileName;
-
-    // Write out the full shader binary
-    fs::path binPath = outDir / (baseName + L".bin");
-    {
-        std::ofstream binFile(binPath, std::ios::binary);
-        if (!binFile) {
-            spdlog::error("Failed to open {} for writing shader binary", 
-                binPath.string());
-        } else {
-            binFile.write(
-                reinterpret_cast<const char*>(objectBlob->GetBufferPointer()),
-                objectBlob->GetBufferSize());
-            //spdlog::info("Wrote shader binary: {}", binPath.string());
-        }
-    }
-
-    // Write out the separate PDB
-    fs::path pdbPath = outDir / (baseName + L".pdb");
-    {
-        std::ofstream pdbFile(pdbPath, std::ios::binary);
-        if (!pdbFile) {
-            spdlog::error("Failed to open {} for writing shader PDB", 
-                pdbPath.string());
-        } else {
-            pdbFile.write(
-                reinterpret_cast<const char*>(pdbBlob->GetBufferPointer()),
-                pdbBlob->GetBufferSize());
-            //spdlog::info("Wrote shader PDB: {}", pdbPath.string());
-        }
-    }
-#endif
-
-    // hand back the runtime blob for PSO creation
-    ThrowIfFailed(result->GetResult(
-        reinterpret_cast<IDxcBlob**>(shaderBlob.GetAddressOf())));
+    write(outDir / (baseName + L".bin"), objBlob.Get());
+    write(outDir / (baseName + L".pdb"), pdbBlob.Get());
 }
 
 void PSOManager::createRootSignature() {
