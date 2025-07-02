@@ -140,7 +140,7 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/skinning.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+		PSOManager::GetInstance().CompileShader(L"shaders/skinning.brsl", L"CSMain", L"cs_6_6", {}, computeShader);
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;

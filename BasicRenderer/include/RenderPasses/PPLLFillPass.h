@@ -33,7 +33,7 @@ public:
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithUnorderedAccess(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::Buffer, Builtin::PPLL::Counter)
+		builder->WithUnorderedAccess(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::DataBuffer, Builtin::PPLL::Counter)
 			.WithShaderResource(Builtin::Light::BufferGroup,
 				Builtin::PostSkinningVertices,
 				Builtin::PerObjectBuffer,
@@ -81,7 +81,7 @@ public:
 				m_meshletCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 			}
 		}
-		m_PPLLBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PPLL::Buffer)->GetUAVShaderVisibleInfo(0).index;
+		m_PPLLBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PPLL::DataBuffer)->GetUAVShaderVisibleInfo(0).index;
 		m_PPLLCounter = resourceRegistryView.Request<Buffer>(Builtin::PPLL::Counter);
 		m_normalMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
 		m_postSkinningVertexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetSRVInfo(0).index;
