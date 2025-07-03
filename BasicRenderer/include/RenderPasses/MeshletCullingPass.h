@@ -259,7 +259,11 @@ private:
 			occlusionDefine.Value = L"1";
 			defines.push_back(occlusionDefine);
 		}
-		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6", defines, computeShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6" };
+		shaderInfoBundle.defines = defines;
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		computeShader = compiledBundle.computeShader;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
@@ -284,7 +288,9 @@ private:
 		//pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 		//ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_occlusionCullingPSO)));
 
-		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6", {}, computeShader);
+		shaderInfoBundle.computeShader = { L"shaders/culling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6" };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		computeShader = compiledBundle.computeShader;
 
 		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_clearPSO)));

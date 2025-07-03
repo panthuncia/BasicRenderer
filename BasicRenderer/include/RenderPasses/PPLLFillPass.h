@@ -250,7 +250,7 @@ private:
 				auto globalFlags = context.globalPSOFlags;
 				//globalFlags &= ~PSOFlags::PSO_SCREENSPACE_REFLECTIONS; // Disable SSR for transparencies for now
 				auto pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
-				commandList->SetPipelineState(pso.Get());
+				commandList->SetPipelineState(pso.GetAPIPipelineState());
 
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
 				perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -276,7 +276,7 @@ private:
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
 				auto pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
-				commandList->SetPipelineState(pso.Get());
+				commandList->SetPipelineState(pso.GetAPIPipelineState());
 
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
 				perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -295,7 +295,7 @@ private:
 		}
 		auto& psoManager = PSOManager::GetInstance();
 		auto pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST,  BLEND_STATE_BLEND, m_wireframe);
-		commandList->SetPipelineState(pso.Get());
+		commandList->SetPipelineState(pso.GetAPIPipelineState());
 
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 

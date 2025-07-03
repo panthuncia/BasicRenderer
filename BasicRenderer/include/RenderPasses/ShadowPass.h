@@ -173,7 +173,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    commandList->SetPipelineState(pso.Get());
+                    commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -196,7 +196,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    commandList->SetPipelineState(pso.Get());
+                    commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -220,7 +220,7 @@ private:
                     for (auto& pMesh : meshes) {
                         auto& mesh = *pMesh->GetMesh();
                         auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                        commandList->SetPipelineState(pso.Get());
+                        commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                         auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
                         commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
@@ -302,7 +302,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    commandList->SetPipelineState(pso.Get());
+                    commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -322,7 +322,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    commandList->SetPipelineState(pso.Get());
+                    commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -342,7 +342,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    commandList->SetPipelineState(pso.Get());
+                    commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -434,21 +434,21 @@ private:
             auto numOpaque = context.drawStats.numOpaqueDraws;
             if (numOpaque != 0) {
                 auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
-                commandList->SetPipelineState(pso.Get());
+                commandList->SetPipelineState(pso.GetAPIPipelineState());
                 commandList->ExecuteIndirect(commandSignature, numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
             }
 
             auto numAlphaTest = context.drawStats.numAlphaTestDraws;
             if (numAlphaTest != 0) {
                 auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST | PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_MASK, false);
-                commandList->SetPipelineState(pso.Get());
+                commandList->SetPipelineState(pso.GetAPIPipelineState());
                 commandList->ExecuteIndirect(commandSignature, numAlphaTest, alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset);
             }
 
             auto numBlend = context.drawStats.numBlendDraws;
             if (numBlend != 0) {
                 auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
-                commandList->SetPipelineState(pso.Get());
+                commandList->SetPipelineState(pso.GetAPIPipelineState());
                 commandList->ExecuteIndirect(commandSignature, numBlend, blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset);
             }
             };

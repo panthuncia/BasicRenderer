@@ -175,8 +175,13 @@ private:
 		Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
 		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
-		manager.CompileShader(L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6", {}, meshShader);
-		manager.CompileShader(L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6", {}, pixelShader);
+		//manager.CompileShader(L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6", {}, meshShader);
+		//manager.CompileShader(L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6", {}, pixelShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.meshShader = { L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6" };
+		shaderInfoBundle.pixelShader = { L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6" };
+		auto compiledBundle = manager.CompileShaders(shaderInfoBundle);
+		meshShader = compiledBundle.meshShader;
 
 		CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 		rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;

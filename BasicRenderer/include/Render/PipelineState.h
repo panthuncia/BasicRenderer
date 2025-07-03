@@ -14,6 +14,7 @@ public:
 		m_resourceIDsHash(resourceIDsHash), 
 		m_pso(pso),
 		m_resourceDescriptorSlotMap(resourceDescriptorSlotMap){}
+	PipelineState() = default;
 	ID3D12PipelineState* GetAPIPipelineState() const {
 		return m_pso.Get();
 	}

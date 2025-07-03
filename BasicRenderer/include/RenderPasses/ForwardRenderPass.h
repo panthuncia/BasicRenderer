@@ -234,7 +234,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-                commandList->SetPipelineState(pso.Get());
+                commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -256,7 +256,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-                commandList->SetPipelineState(pso.Get());
+                commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -285,7 +285,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-                commandList->SetPipelineState(pso.Get());
+                commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -306,7 +306,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-                commandList->SetPipelineState(pso.Get());
+                commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -331,7 +331,7 @@ private:
 
             auto opaqueIndirectBuffer = m_primaryCameraOpaqueIndirectCommandBuffer;
             auto pso = psoManager.GetMeshPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
-            commandList->SetPipelineState(pso.Get());
+            commandList->SetPipelineState(pso.GetAPIPipelineState());
 
             auto apiResource = opaqueIndirectBuffer->GetAPIResource();
             commandList->ExecuteIndirect(
@@ -350,7 +350,7 @@ private:
             auto alphaTestIndirectBuffer = m_primaryCameraAlphaTestIndirectCommandBuffer;
             auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
                 BlendState::BLEND_STATE_MASK, m_wireframe);
-            commandList->SetPipelineState(pso.Get());
+            commandList->SetPipelineState(pso.GetAPIPipelineState());
 
             auto apiResource = alphaTestIndirectBuffer->GetAPIResource();
             commandList->ExecuteIndirect(

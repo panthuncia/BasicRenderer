@@ -80,7 +80,11 @@ private:
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/clustering.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+		//PSOManager::GetInstance().CompileShader(L"shaders/clustering.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/clustering.hlsl", L"CSMain", L"cs_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		computeShader = compiledBundle.computeShader;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;

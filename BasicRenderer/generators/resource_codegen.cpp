@@ -49,23 +49,7 @@ static std::string recurse_structs_hlsl(
     std::string out;
     for (auto& [key, child] : node.items()) {
         std::string full = prefix + "::" + key;
-        if (child.is_object() && !child.empty()) {
-            // record this struct type
-            types.push_back(full);
-
-            // emit the struct declaration
-            out += indent + "struct " + key + " {\n";
-            // recurse into children with increased indent
-            out += recurse_structs_hlsl(child, full, indent + "  ", types);
-            out += indent + "};\n";
-        }
-        else {
-            // leaf: emit a static constexpr string_view member
-            out += indent
-                + "string "
-                + key
-                + " = \"" + full + "\";\n";
-        }
+        out += "#define " + full +" "+full+"\n";
     }
     return out;
 }
@@ -166,7 +150,7 @@ int main(int argc, char* argv[]) {
 
 	generate_cpp(data, argv[2]);
 
-	generate_hlsl(data, argv[3]);
+	//generate_hlsl(data, argv[3]);
 
     return 0;
 }

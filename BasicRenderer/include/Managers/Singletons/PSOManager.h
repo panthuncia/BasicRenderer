@@ -164,6 +164,7 @@ private:
     void CompileShaderForSlot(
         const std::optional<ShaderInfo>& slot,
         const std::vector<DxcDefine>& defines,
+		const DxcBuffer& buffer,
         Microsoft::WRL::ComPtr<ID3DBlob>& outBlob);
     void CompileShader(const std::wstring& filename, 
         const std::wstring& entryPoint, 
@@ -197,6 +198,30 @@ private:
         IDxcResult* result,
         const std::filesystem::path& outDir,
         const std::wstring& baseName);
+
+    template<typename BlobT>
+    void PreprocessShaderSlot(
+        const std::optional<ShaderInfo>& slot,
+        const std::vector<DxcDefine>& defines,
+        Microsoft::WRL::ComPtr<BlobT>& outBlob,
+        DxcBuffer& outBuf)
+    {
+        if (!slot)
+            return;
+
+        GetPreprocessedBlob(
+            slot->filename,
+            slot->entryPoint,
+            slot->target,
+            defines,
+            outBlob
+        );
+
+        outBuf.Ptr = outBlob->GetBufferPointer();
+        outBuf.Size = outBlob->GetBufferSize();
+        outBuf.Encoding = 0;
+    }
+
 };
 
 inline PSOManager& PSOManager::GetInstance() {

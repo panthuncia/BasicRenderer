@@ -280,7 +280,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bo
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PPLLFillPS", L"ps_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
     auto compiledBundle = CompileShaders(shaderInfoBundle);
     vertexShader = compiledBundle.vertexShader;
@@ -342,8 +342,8 @@ PipelineState PSOManager::CreateMeshPSO(
     shaderInfoBundle.defines = defines;
     auto compiledBundle = CompileShaders(shaderInfoBundle);
     amplificationShader = compiledBundle.amplificationShader;
-	amplificationShader = compiledBundle.amplificationShader;
 	meshShader = compiledBundle.meshShader;
+	pixelShader = compiledBundle.pixelShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -431,8 +431,8 @@ PipelineState PSOManager::CreateShadowMeshPSO(
     shaderInfoBundle.defines = defines;
     auto compiledBundle = CompileShaders(shaderInfoBundle);
     amplificationShader = compiledBundle.amplificationShader;
-    amplificationShader = compiledBundle.amplificationShader;
     meshShader = compiledBundle.meshShader;
+	pixelShader = compiledBundle.pixelShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -517,8 +517,8 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     shaderInfoBundle.defines = defines;
     auto compiledBundle = CompileShaders(shaderInfoBundle);
     amplificationShader = compiledBundle.amplificationShader;
-    amplificationShader = compiledBundle.amplificationShader;
     meshShader = compiledBundle.meshShader;
+	pixelShader = compiledBundle.pixelShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -614,8 +614,8 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     shaderInfoBundle.defines = defines;
     auto compiledBundle = CompileShaders(shaderInfoBundle);
     amplificationShader = compiledBundle.amplificationShader;
-    amplificationShader = compiledBundle.amplificationShader;
     meshShader = compiledBundle.meshShader;
+	pixelShader = compiledBundle.pixelShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -1161,31 +1161,7 @@ void PSOManager::GetPreprocessedBlob(
         srcBuf.buffer, args, includeHandler.Get()
     );
 
-    ComPtr<IDxcBlobUtf8> ppBlob;
-    preProcessedResult->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&ppBlob), nullptr);
-}
-
-template<typename BlobT>
-void preprocessShaderSlot(
-    const std::optional<ShaderInfo>& slot,
-    const std::vector<DxcDefine>& defines,
-    Microsoft::WRL::ComPtr<BlobT>& outBlob,
-    DxcBuffer& outBuf)
-{
-    if (!slot)
-        return;
-
-    GetPreprocessedBlob(
-        slot->filename,
-        slot->entryPoint,
-        slot->target,
-        defines,
-        outBlob
-    );
-
-    outBuf.Ptr = outBlob->GetBufferPointer();
-    outBuf.Size = outBlob->GetBufferSize();
-    outBuf.Encoding = 0;
+    preProcessedResult->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&outBlob), nullptr);
 }
 
 void parseBRSLResourceIdentifiersForSlot(
@@ -1220,18 +1196,19 @@ void rewriteResourceDescriptorIndexCallsForSlot(
 void PSOManager::CompileShaderForSlot(
     const std::optional<ShaderInfo>& slot,
     const std::vector<DxcDefine>& defines,
+    const DxcBuffer& buffer,
     Microsoft::WRL::ComPtr<ID3DBlob>& outBlob)
 {
     if (!slot)
         return;
-    DxcBuffer ppBuffer = {};
-    Microsoft::WRL::ComPtr<ID3DBlob> preprocessedBlob;
-    preprocessShaderSlot(slot, defines, preprocessedBlob, ppBuffer);
+    //DxcBuffer ppBuffer = {};
+    //Microsoft::WRL::ComPtr<ID3DBlob> preprocessedBlob;
+    //PreprocessShaderSlot(slot, defines, preprocessedBlob, ppBuffer);
     CompileShader(
         slot->filename,
         slot->entryPoint,
         slot->target,
-        ppBuffer,
+        buffer,
         defines,
         outBlob
     );
@@ -1274,11 +1251,11 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
 	Microsoft::WRL::ComPtr<ID3DBlob> preprocessedComputeShader;
 	DxcBuffer computeBuffer = {};
 
-    preprocessShaderSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer);
-    preprocessShaderSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer);
-    preprocessShaderSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer);
-    preprocessShaderSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer);
-    preprocessShaderSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer);
+    PreprocessShaderSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer);
+    PreprocessShaderSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer);
+    PreprocessShaderSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer);
+    PreprocessShaderSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer);
+    PreprocessShaderSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer);
 
 	std::unordered_set<std::string> usedResourceIDs;
     parseBRSLResourceIdentifiersForSlot(info.amplificationShader, info.defines, &amplificationBuffer, usedResourceIDs);
@@ -1303,12 +1280,11 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     rewriteResourceDescriptorIndexCallsForSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer, replacementMap);
 	rewriteResourceDescriptorIndexCallsForSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer, replacementMap);
 
-	ShaderBundle bundle = {};
-	CompileShaderForSlot(info.amplificationShader, info.defines, bundle.amplificationShader);
-	CompileShaderForSlot(info.meshShader, info.defines, bundle.meshShader);
-	CompileShaderForSlot(info.pixelShader, info.defines, bundle.pixelShader);
-	CompileShaderForSlot(info.vertexShader, info.defines, bundle.vertexShader);
-    CompileShaderForSlot(info.computeShader, info.defines, bundle.computeShader);
+	CompileShaderForSlot(info.amplificationShader, info.defines, amplificationBuffer, bundle.amplificationShader);
+	CompileShaderForSlot(info.meshShader, info.defines, meshBuffer, bundle.meshShader);
+	CompileShaderForSlot(info.pixelShader, info.defines, pixelBuffer, bundle.pixelShader);
+	CompileShaderForSlot(info.vertexShader, info.defines, vertexBuffer, bundle.vertexShader);
+    CompileShaderForSlot(info.computeShader, info.defines, computeBuffer, bundle.computeShader);
 
 	bundle.resourceIDsHash = hash_list(usedResourceIDsVec);
 

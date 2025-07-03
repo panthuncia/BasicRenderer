@@ -180,7 +180,11 @@ private:
         psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
         Microsoft::WRL::ComPtr<ID3DBlob> downsample;
-        PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", {}, downsample);
+        //PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", {}, downsample);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		downsample = compiledBundle.computeShader;
         psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsample.Get());
         ThrowIfFailed(device->CreateComputePipelineState(
             &psoDesc, IID_PPV_ARGS(&downsamplePassPSO)));
@@ -190,7 +194,11 @@ private:
 		define.Value = L"1";
 
         Microsoft::WRL::ComPtr<ID3DBlob> downsampleArray;
-        PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", { define }, downsampleArray);
+        //PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", { define }, downsampleArray);
+		shaderInfoBundle.computeShader = { L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6" };
+		shaderInfoBundle.defines = { define };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		downsampleArray = compiledBundle.computeShader;
         psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsampleArray.Get());
         ThrowIfFailed(device->CreateComputePipelineState(
             &psoDesc, IID_PPV_ARGS(&downsampleArrayPSO)));
