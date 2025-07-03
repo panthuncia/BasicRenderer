@@ -35,7 +35,7 @@ void PSOManager::initialize() {
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(pCompiler.GetAddressOf()));
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_psoCache.find(key) == m_psoCache.end()) {
         m_psoCache[key] = CreatePSO(psoFlags, blendState, wireframe);
@@ -43,7 +43,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPSO(UINT psoFlags, Bl
     return m_psoCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_shadowPSOCache.find(key) == m_shadowPSOCache.end()) {
         m_shadowPSOCache[key] = CreateShadowPSO(psoFlags, blendState, wireframe);
@@ -51,7 +51,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetShadowPSO(UINT psoFla
     return m_shadowPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_shadowMeshPSOCache.find(key) == m_shadowMeshPSOCache.end()) {
         m_shadowMeshPSOCache[key] = CreateShadowMeshPSO(psoFlags, blendState, wireframe);
@@ -59,7 +59,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetShadowMeshPSO(UINT ps
     return m_shadowMeshPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_prePassPSOCache.find(key) == m_prePassPSOCache.end()) {
         m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, blendState, wireframe);
@@ -67,7 +67,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPrePassPSO(UINT psoFl
     return m_prePassPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPrePassPSOCache.find(key) == m_meshPrePassPSOCache.end()) {
         m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, blendState, wireframe);
@@ -75,7 +75,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPrePassPSO(UINT p
     return m_meshPrePassPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_PPLLPSOCache.find(key) == m_PPLLPSOCache.end()) {
         m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, blendState, wireframe);
@@ -83,7 +83,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetPPLLPSO(UINT psoFlags
     return m_PPLLPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPSOCache.find(key) == m_meshPSOCache.end()) {
         m_meshPSOCache[key] = CreateMeshPSO(psoFlags, blendState, wireframe);
@@ -91,7 +91,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPSO(UINT psoFlags
     return m_meshPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPPLLPSOCache.find(key) == m_meshPPLLPSOCache.end()) {
         m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, blendState, wireframe);
@@ -99,22 +99,28 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetMeshPPLLPSO(UINT psoF
     return m_meshPPLLPSOCache[key];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::GetDeferredPSO(UINT psoFlags) {
+PipelineState PSOManager::GetDeferredPSO(UINT psoFlags) {
     if (m_deferredPSOCache.find(psoFlags) == m_deferredPSOCache.end()) {
         m_deferredPSOCache[psoFlags] = CreateDeferredPSO(psoFlags);
     }
     return m_deferredPSOCache[psoFlags];
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
-    CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
+
+	ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
+	shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
+	shaderInfoBundle.defines = defines;
+	auto compiledBundle = CompileShaders(shaderInfoBundle);
+	vertexShader = compiledBundle.vertexShader;
+	pixelShader = compiledBundle.pixelShader;
 
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -150,18 +156,24 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePSO(UINT psoFlags,
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
-    CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+	vertexShader = compiledBundle.vertexShader;
+	pixelShader = compiledBundle.pixelShader;
 
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -194,19 +206,25 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowPSO(UINT pso
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
-    CompileShader(L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6", defines, pixelShader);
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+	vertexShader = compiledBundle.vertexShader;
+	pixelShader = compiledBundle.pixelShader;
 
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -249,18 +267,24 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePrePassPSO(UINT ps
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
 
     // Compile shaders
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    CompileShader(L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6", defines, vertexShader);
-    CompileShader(L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6", defines, pixelShader);
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PPLLFillPS", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    vertexShader = compiledBundle.vertexShader;
+    pixelShader = compiledBundle.pixelShader;
 
     // Create the pipeline state object
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -298,10 +322,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreatePPLLPSO(UINT psoFl
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
+PipelineState PSOManager::CreateMeshPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
@@ -311,11 +335,15 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
-	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
-    CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
-    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-        CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
-    //}
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
+	shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    amplificationShader = compiledBundle.amplificationShader;
+	amplificationShader = compiledBundle.amplificationShader;
+	meshShader = compiledBundle.meshShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -383,10 +411,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
+PipelineState PSOManager::CreateShadowMeshPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
@@ -396,11 +424,15 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
-	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
-    CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
-    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-    CompileShader(L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6", defines, pixelShader);
-    //}
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    amplificationShader = compiledBundle.amplificationShader;
+    amplificationShader = compiledBundle.amplificationShader;
+    meshShader = compiledBundle.meshShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -465,10 +497,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateShadowMeshPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
+PipelineState PSOManager::CreateMeshPrePassPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
@@ -478,11 +510,15 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
-	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
-    CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
-    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-    CompileShader(L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6", defines, pixelShader);
-    //}
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    amplificationShader = compiledBundle.amplificationShader;
+    amplificationShader = compiledBundle.amplificationShader;
+    meshShader = compiledBundle.meshShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -558,10 +594,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPrePassPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
+PipelineState PSOManager::CreateMeshPPLLPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
@@ -571,11 +607,15 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
     
-	CompileShader(L"shaders/mesh.hlsl", L"ASMain", L"as_6_6", defines, amplificationShader);
-    CompileShader(L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6", defines, meshShader);
-    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-    CompileShader(L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6", defines, pixelShader);
-    //}
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    amplificationShader = compiledBundle.amplificationShader;
+    amplificationShader = compiledBundle.amplificationShader;
+    meshShader = compiledBundle.meshShader;
 
     // Create rasterizer state
     CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -633,17 +673,23 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateMeshPPLLPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT psoFlags) {
+PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags) {
     auto defines = GetShaderDefines(psoFlags);
 
 
     Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-    PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", defines, vertexShader);
-    PSOManager::GetInstance().CompileShader(L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6", defines, pixelShader);
+
+	ShaderInfoBundle shaderInfoBundle;
+	shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+	shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6" };
+	shaderInfoBundle.defines = defines;
+	auto compiledBundle = CompileShaders(shaderInfoBundle);
+	vertexShader = compiledBundle.vertexShader;
+	pixelShader = compiledBundle.pixelShader;
 
     D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
     inputLayoutDesc.pInputElementDescs = nullptr;
@@ -710,7 +756,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOManager::CreateDeferredPSO(UINT p
     if (FAILED(hr)) {
         throw std::runtime_error("Failed to create debug PSO");
     }
-    return pso;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
 }
 
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
@@ -823,7 +869,7 @@ void BuildFunctionDefs(std::unordered_map<std::string, TSNode>& functionDefs, co
     }
 }
 
-void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outIdentifiers, DxcBuffer* pBuffer, const std::string& entryPointName) {
+void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outIdentifiers, const DxcBuffer* pBuffer, const std::string& entryPointName) {
     const char* preprocessedSource = static_cast<const char*>(pBuffer->Ptr);
     size_t sourceSize = pBuffer->Size;
 
@@ -1084,13 +1130,13 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
     return out;
 }
 
-void PSOManager::CompileShader(
+void PSOManager::GetPreprocessedBlob(
     const std::wstring& filename,
-    const std::wstring& entryPoint, 
-    const std::wstring& target, 
+    const std::wstring& entryPoint,
+    const std::wstring& target,
     std::vector<DxcDefine> defines,
-    Microsoft::WRL::ComPtr<ID3DBlob>& outBlob)
-{
+    Microsoft::WRL::ComPtr<ID3DBlob>& outBlob) {
+
     auto exePath = std::filesystem::path(GetExePath());
     auto fullPath = exePath / filename;
     auto shaderDir = exePath / L"shaders";
@@ -1100,37 +1146,205 @@ void PSOManager::CompileShader(
     auto includeHandler = CreateIncludeHandler();
 
     ShaderCompileOptions opts;
-	opts.entryPoint = entryPoint;
-	opts.target = target;
-	opts.defines = std::move(defines);
+    opts.entryPoint = entryPoint;
+    opts.target = target;
+    opts.defines = std::move(defines);
 #if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
-	opts.enableDebugInfo = true;
+    opts.enableDebugInfo = true;
 #endif
     opts.warningsAsErrors = true;
 
     auto args = BuildArguments(opts, shaderDir);
 
-	args.push_back(L"-P"); // Preprocess only
-	auto preProcessedResult = InvokeCompile(
+    args.push_back(L"-P"); // Preprocess only
+    auto preProcessedResult = InvokeCompile(
         srcBuf.buffer, args, includeHandler.Get()
-	);
+    );
 
     ComPtr<IDxcBlobUtf8> ppBlob;
     preProcessedResult->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&ppBlob), nullptr);
+}
 
-    DxcBuffer ppBuffer;
-    ppBuffer.Ptr = ppBlob->GetBufferPointer();
-    ppBuffer.Size = ppBlob->GetBufferSize();
-    ppBuffer.Encoding = 0;
+template<typename BlobT>
+void preprocessShaderSlot(
+    const std::optional<ShaderInfo>& slot,
+    const std::vector<DxcDefine>& defines,
+    Microsoft::WRL::ComPtr<BlobT>& outBlob,
+    DxcBuffer& outBuf)
+{
+    if (!slot)
+        return;
 
-    // Check if filename ends with .brsl
-    if (fullPath.extension() == L".brsl") {
-        // Parse the BRSL file to replace ResourceDescriptorIndex calls
-        ParseBRSL(&ppBuffer, ws2s(entryPoint));
-	}
+    GetPreprocessedBlob(
+        slot->filename,
+        slot->entryPoint,
+        slot->target,
+        defines,
+        outBlob
+    );
 
-    // remove -P
-    args.pop_back();
+    outBuf.Ptr = outBlob->GetBufferPointer();
+    outBuf.Size = outBlob->GetBufferSize();
+    outBuf.Encoding = 0;
+}
+
+void parseBRSLResourceIdentifiersForSlot(
+    const std::optional<ShaderInfo>& slot,
+    const std::vector<DxcDefine>& defines,
+	const DxcBuffer* preprocessedBuffer,
+    std::unordered_set<std::string>& outUsedIDs)
+{
+    if (!slot)
+        return;
+    
+    ParseBRSLResourceIdentifiers(outUsedIDs, preprocessedBuffer, ws2s(slot->entryPoint));
+}
+
+void rewriteResourceDescriptorIndexCallsForSlot(
+    const std::optional<ShaderInfo>& slot,
+    const std::vector<DxcDefine>& defines,
+    Microsoft::WRL::ComPtr<ID3DBlob>& outBlob,
+    DxcBuffer& outBuf,
+    const std::unordered_map<std::string, std::string>& replacementMap)
+{
+    if (!slot)
+        return;
+    rewriteResourceDescriptorCalls(
+        static_cast<const char*>(outBuf.Ptr),
+        outBuf.Size,
+        ws2s(slot->entryPoint),
+        replacementMap
+	);
+}
+
+void PSOManager::CompileShaderForSlot(
+    const std::optional<ShaderInfo>& slot,
+    const std::vector<DxcDefine>& defines,
+    Microsoft::WRL::ComPtr<ID3DBlob>& outBlob)
+{
+    if (!slot)
+        return;
+    DxcBuffer ppBuffer = {};
+    Microsoft::WRL::ComPtr<ID3DBlob> preprocessedBlob;
+    preprocessShaderSlot(slot, defines, preprocessedBlob, ppBuffer);
+    CompileShader(
+        slot->filename,
+        slot->entryPoint,
+        slot->target,
+        ppBuffer,
+        defines,
+        outBlob
+    );
+}
+
+uint64_t hash_list(const std::vector<std::string>& list) {
+    const uint64_t FNV_offset = 146527ULL;
+    const uint64_t FNV_prime = 1099511628211ULL;
+    uint64_t h = FNV_offset;
+    for (auto& s : list) {
+        uint32_t L = uint32_t(s.size());
+        // mix in the length
+        for (int i = 0; i < 4; ++i) {
+            h ^= (uint8_t)(L >> (i * 8));
+            h *= FNV_prime;
+        }
+        // mix in each character
+        for (unsigned char c : s) {
+            h ^= c;
+            h *= FNV_prime;
+        }
+    }
+    return h;
+}
+
+ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
+    if (info.vertexShader && info.meshShader) 
+		throw std::runtime_error("Cannot compile both vertex and mesh shaders in the same bundle");
+	if (info.computeShader && (info.meshShader || info.amplificationShader || info.vertexShader || info.pixelShader))
+		throw std::runtime_error("Cannot compile compute shader with other shader types in the same bundle");
+
+	Microsoft::WRL::ComPtr<ID3DBlob> preprocessedAmplificationShader;
+	DxcBuffer amplificationBuffer = {};
+	Microsoft::WRL::ComPtr<ID3DBlob> preprocessedMeshShader;
+	DxcBuffer meshBuffer = {};
+	Microsoft::WRL::ComPtr<ID3DBlob> preprocessedPixelShader;
+	DxcBuffer pixelBuffer = {};
+	Microsoft::WRL::ComPtr<ID3DBlob> preprocessedVertexShader;
+	DxcBuffer vertexBuffer = {};
+	Microsoft::WRL::ComPtr<ID3DBlob> preprocessedComputeShader;
+	DxcBuffer computeBuffer = {};
+
+    preprocessShaderSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer);
+    preprocessShaderSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer);
+    preprocessShaderSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer);
+    preprocessShaderSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer);
+    preprocessShaderSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer);
+
+	std::unordered_set<std::string> usedResourceIDs;
+    parseBRSLResourceIdentifiersForSlot(info.amplificationShader, info.defines, &amplificationBuffer, usedResourceIDs);
+	parseBRSLResourceIdentifiersForSlot(info.meshShader, info.defines, &meshBuffer, usedResourceIDs);
+    parseBRSLResourceIdentifiersForSlot(info.pixelShader, info.defines, &pixelBuffer, usedResourceIDs);
+    parseBRSLResourceIdentifiersForSlot(info.vertexShader, info.defines, &vertexBuffer, usedResourceIDs);
+    parseBRSLResourceIdentifiersForSlot(info.computeShader, info.defines, &computeBuffer, usedResourceIDs);
+
+	std::unordered_map<std::string, std::string> replacementMap;
+	uint32_t nextIndex = 0;
+    ShaderBundle bundle = {};
+    std::vector<std::string> usedResourceIDsVec;
+    for (std::string entry : usedResourceIDs) {
+		bundle.resourceDescriptorSlotMap[entry] = nextIndex;
+		replacementMap[entry] = "UintRootConstant" + std::to_string(nextIndex++);
+		usedResourceIDsVec.push_back(entry);
+    }
+
+	rewriteResourceDescriptorIndexCallsForSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer, replacementMap);
+    rewriteResourceDescriptorIndexCallsForSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer, replacementMap);
+    rewriteResourceDescriptorIndexCallsForSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer, replacementMap);
+    rewriteResourceDescriptorIndexCallsForSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer, replacementMap);
+	rewriteResourceDescriptorIndexCallsForSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer, replacementMap);
+
+	ShaderBundle bundle = {};
+	CompileShaderForSlot(info.amplificationShader, info.defines, bundle.amplificationShader);
+	CompileShaderForSlot(info.meshShader, info.defines, bundle.meshShader);
+	CompileShaderForSlot(info.pixelShader, info.defines, bundle.pixelShader);
+	CompileShaderForSlot(info.vertexShader, info.defines, bundle.vertexShader);
+    CompileShaderForSlot(info.computeShader, info.defines, bundle.computeShader);
+
+	bundle.resourceIDsHash = hash_list(usedResourceIDsVec);
+
+	return bundle;
+}
+
+void PSOManager::CompileShader(
+    const std::wstring& filename,
+    const std::wstring& entryPoint, 
+    const std::wstring& target, 
+	const DxcBuffer& ppBuffer,
+    std::vector<DxcDefine> defines,
+    Microsoft::WRL::ComPtr<ID3DBlob>& outBlob)
+{
+    auto exePath = std::filesystem::path(GetExePath());
+    auto fullPath = exePath / filename;
+    auto shaderDir = exePath / L"shaders";
+
+    ShaderCompileOptions opts;
+    opts.entryPoint = entryPoint;
+    opts.target = target;
+    opts.defines = std::move(defines);
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+    opts.enableDebugInfo = true;
+#endif
+    opts.warningsAsErrors = true;
+
+    auto args = BuildArguments(opts, shaderDir);
+
+    ComPtr<IDxcIncludeHandler> includeHandler;
+    HRESULT hr = pUtils->CreateDefaultIncludeHandler(&includeHandler);
+    if (FAILED(hr)) {
+        spdlog::error("Failed to create include handler.");
+        ThrowIfFailed(hr);
+        return;
+    }
     auto result = InvokeCompile(ppBuffer, args, includeHandler.Get());
 
     auto obj = ExtractObject(result.Get(), filename, opts.enableDebugInfo);
