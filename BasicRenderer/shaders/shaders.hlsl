@@ -11,14 +11,14 @@
 
 PSInput VSMain(uint vertexID : SV_VertexID) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex];
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     
-    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
             
     uint vertexFlags = meshBuffer.vertexFlags;
@@ -51,7 +51,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     PSInput output;
     float4 worldPosition = mul(pos, objectBuffer.model);
 
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
@@ -61,13 +61,13 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     }
     
 #if defined(PSO_SHADOW)
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
-            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[pointLightCubemapBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
             uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -75,7 +75,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
             break;
         }
         case 1: { // Spot light
-            StructuredBuffer<unsigned int> spotLightMatrixIndexBuffer = ResourceDescriptorHeap[spotLightMatrixBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> spotLightMatrixIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
             uint lightCameraIndex = spotLightMatrixIndexBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -83,7 +83,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
             break;
         }
         case 2: { // Directional light
-            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[directionalLightCascadeBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::DirectionalLightCascadeBuffer)];
             uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -112,7 +112,7 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
         output.normalWorldSpace = normalize(input.normal);
     }
     else {
-        StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
+        StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
         float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
         output.normalWorldSpace = normalize(mul(input.normal, normalMatrix));
     }
@@ -178,7 +178,7 @@ float4
 PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 {
 
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
@@ -205,14 +205,14 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
     
     FragmentInfo fragmentInfo;
     GetFragmentInfoDirect(input, viewDir, enableGTAO, false, isFrontFace, fragmentInfo);
 
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, environmentBufferDescriptorIndex, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::EnvironmentInfo::InfoBuffer), isFrontFace);
     
     float3 lighting = lightingOutput.lighting;
     
@@ -263,7 +263,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     
     Texture2D<float> depthTexture = ResourceDescriptorHeap[UintRootConstant0];
@@ -291,7 +291,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     FragmentInfo fragmentInfo;
     GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
     
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, environmentBufferDescriptorIndex, true);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::EnvironmentInfo::InfoBuffer), true);
 
     
     float3 lighting = lightingOutput.lighting;

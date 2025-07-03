@@ -42,15 +42,15 @@ void CSMain(uint3 groupID : SV_GroupID,
     // Compute the global index for the cluster.
     uint index = groupID.x * 128 + threadID.x;
     
-    StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[activeLightIndicesBufferDescriptorIndex];
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
+    StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ActiveLightIndices)];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     uint lightCount = perFrameBuffer.numLights;
     
     RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
     Cluster cluster = clusters[index];
     
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera primaryCamera = cameras[perFrameBuffer.mainCameraIndex];
 
     // Light pages, clusters index into linked list

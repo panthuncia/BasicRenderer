@@ -158,8 +158,8 @@ void MSMain(
     if (uGroupThreadID < 42) {
         
         ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
-        StructuredBuffer<PerObjectBuffer> objects = ResourceDescriptorHeap[objectBufferDescriptorIndex];
+        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+        StructuredBuffer<PerObjectBuffer> objects = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         
         PerObjectBuffer object = objects[objectBufferIndex];
         Camera camera = cameras[perFrameBuffer.mainCameraIndex];

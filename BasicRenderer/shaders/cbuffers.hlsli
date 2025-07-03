@@ -29,33 +29,7 @@ cbuffer Settings : register(b4) {
     bool enableGTAO;
 }
 
-cbuffer StaticBufferInfo : register(b5) {
-    uint perMeshBufferDescriptorIndex;
-    uint normalMatrixBufferDescriptorIndex;
-    uint preSkinningVertexBufferDescriptorIndex;
-    uint postSkinningVertexBufferDescriptorIndex;
-    uint meshletBufferDescriptorIndex;
-    uint meshletVerticesBufferDescriptorIndex;
-    uint meshletTrianglesBufferDescriptorIndex;
-    uint perObjectBufferDescriptorIndex;
-    uint cameraBufferDescriptorIndex;
-    uint perMeshInstanceBufferDescriptorIndex; // Used by skinned meshes for skinning
-    uint drawSetCommandBufferDescriptorIndex;
-    uint normalsTextureDescriptorIndex;
-    uint aoTextureDescriptorIndex;
-    uint albedoTextureDescriptorIndex;
-    uint metallicRoughnessTextureDescriptorIndex;
-    uint emissiveTextureDescriptorIndex;
-    
-    uint activeLightIndicesBufferDescriptorIndex;
-    uint lightBufferDescriptorIndex;
-    uint pointLightCubemapBufferDescriptorIndex;
-    uint spotLightMatrixBufferDescriptorIndex;
-    uint directionalLightCascadeBufferDescriptorIndex;
-    uint environmentBufferDescriptorIndex;
-}
-
-cbuffer variableBufferInfo : register(b6) {
+cbuffer variableBufferInfo : register(b5) {
     uint activeDrawSetIndicesBufferDescriptorIndex;
     uint indirectCommandBufferDescriptorIndex;
     uint meshletFrustrumCullingIndirectCommandBufferDescriptorIndex;
@@ -63,21 +37,21 @@ cbuffer variableBufferInfo : register(b6) {
     uint maxDrawIndex;
 }
 
-cbuffer transparencyInfo : register(b7) {
+cbuffer transparencyInfo : register(b6) {
     uint PPLLHeadsDescriptorIndex;
     uint PPLLNodesDescriptorIndex;
     uint PPLLNodesCounterDescriptorIndex;
     uint PPLLNodePoolSize;
 }
 
-cbuffer LightClusterInfo : register(b8) {
+cbuffer LightClusterInfo : register(b7) {
     uint lightClusterBufferDescriptorIndex;
     uint lightPagesBufferDescriptorIndex;
     uint lightPagesCounterDescriptorIndex;
     uint lightPagesPoolSize;
 }
 
-cbuffer MiscUintRootConstants : register(b9) { // Used for pass-specific one-off constants
+cbuffer MiscUintRootConstants : register(b8) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
     uint UintRootConstant1;
     uint UintRootConstant2;
@@ -86,12 +60,12 @@ cbuffer MiscUintRootConstants : register(b9) { // Used for pass-specific one-off
     uint UintRootConstant5;
 }
 
-cbuffer MiscFloatRootConstants : register(b10) { // Used for pass-specific one-off constants
+cbuffer MiscFloatRootConstants : register(b9) { // Used for pass-specific one-off constants
     float FloatRootConstant0;
     float FloatRootConstant1;
 }
 
-cbuffer ResourceDescriptorIndices : register(b11) {
+cbuffer ResourceDescriptorIndices : register(b10) {
     uint ResourceDescriptorIndex0;
     uint ResourceDescriptorIndex1;
 };

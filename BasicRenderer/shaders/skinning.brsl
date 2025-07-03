@@ -4,23 +4,22 @@
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 dtid : SV_DispatchThreadID) {
-    //StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     uint vertexOffsetInMesh = dtid.x;
     if (vertexOffsetInMesh >= meshBuffer.numVertices) {
         return;
     }
     
-    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
     
-    ByteAddressBuffer preSkinningVertexBuffer = ResourceDescriptorHeap[preSkinningVertexBufferDescriptorIndex];
-    RWByteAddressBuffer postSkinningVertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex];
+    ByteAddressBuffer preSkinningVertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PreSkinningVertices)];
+    RWByteAddressBuffer postSkinningVertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     
-    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
+    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
     
     uint preSkinnedByteOffset = meshBuffer.vertexBufferOffset + vertexOffsetInMesh * meshBuffer.skinningVertexByteSize;
     uint postSkinnedByteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset;

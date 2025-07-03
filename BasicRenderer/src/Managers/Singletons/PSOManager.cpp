@@ -1493,7 +1493,7 @@ void PSOManager::WriteDebugArtifacts(
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[11] = {};
+    D3D12_ROOT_PARAMETER1 parameters[10] = {};
 
     // PerObject buffer index
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -1523,51 +1523,44 @@ void PSOManager::createRootSignature() {
     parameters[3].Constants.Num32BitValues = NumSettingsRootConstants;
     parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-	// Static buffer indices
-	parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	parameters[4].Constants.ShaderRegister = 5;
-	parameters[4].Constants.RegisterSpace = 0;
-	parameters[4].Constants.Num32BitValues = NumStaticBufferRootConstants;
-	parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
     // Variable buffer indices
+    parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[4].Constants.ShaderRegister = 5;
+    parameters[4].Constants.RegisterSpace = 0;
+    parameters[4].Constants.Num32BitValues = NumVariableBufferRootConstants;
+    parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // transparency info
     parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[5].Constants.ShaderRegister = 6;
     parameters[5].Constants.RegisterSpace = 0;
-    parameters[5].Constants.Num32BitValues = NumVariableBufferRootConstants;
+    parameters[5].Constants.Num32BitValues = NumTransparencyInfoRootConstants;
     parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    // transparency info
-    parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[6].Constants.ShaderRegister = 7;
-    parameters[6].Constants.RegisterSpace = 0;
-    parameters[6].Constants.Num32BitValues = NumTransparencyInfoRootConstants;
-    parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
     // Light clustering info
+	parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	parameters[6].Constants.ShaderRegister = 7;
+	parameters[6].Constants.RegisterSpace = 0;
+	parameters[6].Constants.Num32BitValues = NumLightClusterRootConstants;
+	parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
 	parameters[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[7].Constants.ShaderRegister = 8;
 	parameters[7].Constants.RegisterSpace = 0;
-	parameters[7].Constants.Num32BitValues = NumLightClusterRootConstants;
+	parameters[7].Constants.Num32BitValues = NumMiscUintRootConstants;
 	parameters[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
 	parameters[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[8].Constants.ShaderRegister = 9;
 	parameters[8].Constants.RegisterSpace = 0;
-	parameters[8].Constants.Num32BitValues = NumMiscUintRootConstants;
+	parameters[8].Constants.Num32BitValues = NumMiscFloatRootConstants;
 	parameters[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
 	parameters[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[9].Constants.ShaderRegister = 10;
 	parameters[9].Constants.RegisterSpace = 0;
-	parameters[9].Constants.Num32BitValues = NumMiscFloatRootConstants;
+	parameters[9].Constants.Num32BitValues = NumResourceDescriptorIndicesRootConstants;
 	parameters[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-	parameters[10].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	parameters[10].Constants.ShaderRegister = 11;
-	parameters[10].Constants.RegisterSpace = 0;
-	parameters[10].Constants.Num32BitValues = NumResourceDescriptorIndicesRootConstants;
-	parameters[10].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
 

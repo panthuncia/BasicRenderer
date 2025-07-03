@@ -94,7 +94,7 @@ struct MaterialInputs
 
 void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
 {
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
@@ -115,7 +115,7 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
     if (materialFlags & MATERIAL_PARALLAX)
     {
         ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
         Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
         float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
         Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
@@ -229,23 +229,23 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.fragPosWorldSpace = fragPosWorldSpace;
     
     // Gather textures
-    Texture2D<float4> normalsTexture = ResourceDescriptorHeap[normalsTextureDescriptorIndex];
+    Texture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
     
     // Load values
     ret.normalWS = normalsTexture[pixelCoordinates].xyz;
     //ret.normalWS = SignedOctDecode(encodedNormal.yzw);
     
-    Texture2D<float4> albedoTexture = ResourceDescriptorHeap[albedoTextureDescriptorIndex];
+    Texture2D<float4> albedoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Albedo)];
     float4 baseColorSample = albedoTexture[pixelCoordinates];
     ret.albedo = baseColorSample.xyz;
     
-    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[emissiveTextureDescriptorIndex];
+    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Gbuffer::Emissive)];
     float4 emissive = emissiveTexture[pixelCoordinates];
     ret.emissive = emissive.xyz;
     
     if (enableGTAO)
     {
-        Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
+        Texture2D<uint> aoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GTAO::OutputAOTerm)];
         ret.diffuseAmbientOcclusion = min(baseColorSample.w, float(aoTexture[pixelCoordinates].x) / 255.0);
     }
     else
@@ -253,7 +253,7 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
         ret.diffuseAmbientOcclusion = baseColorSample.w; // AO stored in alpha channel
     }
     
-    Texture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[metallicRoughnessTextureDescriptorIndex];
+    Texture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
     float2 metallicRoughness = metallicRoughnessTexture[pixelCoordinates];
     
     float perceptualRoughness = metallicRoughness.y;
@@ -328,7 +328,7 @@ void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, 
         ret.alpha = 1.0; // Opaque objects
         if (enableGTAO) {
             float2 pixelCoordinates = input.position.xy;
-            Texture2D<uint> aoTexture = ResourceDescriptorHeap[aoTextureDescriptorIndex];
+            Texture2D<uint> aoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GTAO::OutputAOTerm)];
             ret.diffuseAmbientOcclusion = min(materialInfo.ambientOcclusion, float(aoTexture[pixelCoordinates].x) / 255.0);
         } else {
             ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion;

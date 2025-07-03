@@ -285,33 +285,6 @@ enum SettingsRootConstants {
 	NumSettingsRootConstants
 };
 
-enum StaticBufferRootConstants {
-    PerMeshBufferDescriptorIndex,
-    NormalMatrixBufferDescriptorIndex,
-    PreSkinningVertexBufferDescriptorIndex,
-    PostSkinningVertexBufferDescriptorIndex,
-    MeshletBufferDescriptorIndex,
-    MeshletVerticesBufferDescriptorIndex,
-    MeshletTrianglesBufferDescriptorIndex,
-    PerObjectBufferDescriptorIndex,
-    CameraBufferDescriptorIndex,
-    PerMeshInstanceBufferDescriptorIndex,
-    DrawSetCommandBufferDescriptorIndex,
-	NormalsTextureDescriptorIndex,
-    AOTextureDescriptorIndex,
-	AlbedoTextureDescriptorIndex,
-	MetallicRoughnessTextureDescriptorIndex,
-	EmissiveTextureDescriptorIndex,
-
-    ActiveLightIndicesBufferDescriptorIndex,
-    LightBufferDescriptorIndex,
-    PointLightCubemapBufferDescriptorIndex,
-    SpotLightMatrixBufferDescriptorIndex,
-    DirectionalLightCascadeBufferDescriptorIndex,
-    EnvironmentBufferDescriptorIndex,
-    NumStaticBufferRootConstants
-};
-
 enum VariableBufferRootConstants {
     ActiveDrawSetIndicesBufferDescriptorIndex,
     IndirectCommandBufferDescriptorIndex,

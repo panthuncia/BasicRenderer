@@ -192,13 +192,13 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             parallaxShadowParams.uv = uv;
         }*/
         
-        StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[pointLightCubemapBufferDescriptorIndex];
-        StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[spotLightMatrixBufferDescriptorIndex];
-        StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[directionalLightCascadeBufferDescriptorIndex];
-        StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+        StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
+        StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
+        StructuredBuffer<unsigned int> directionalShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::DirectionalLightCascadeBuffer)];
+        StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
         
-        StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[activeLightIndicesBufferDescriptorIndex];
-        StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
+        StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ActiveLightIndices)];
+        StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
         
         uint clusterIndex = 0; // Which light cluster this fragment belongs to
         uint clusterLightCount = 0; // Number of lights in the cluster

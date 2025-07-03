@@ -1,5 +1,0 @@
-#ifndef __PBR_UTILITIES_HLSLI__
-#define __PBR_UTILITIES_HLSLI__
-
-
-#endif // __PBR_UTILITIES_HLSLI__

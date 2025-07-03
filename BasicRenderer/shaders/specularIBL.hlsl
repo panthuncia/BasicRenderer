@@ -20,7 +20,7 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
     float3 reflectionColor = screenSpaceReflection[screenAddress].xyz;
     
     // Basically another deferred pass
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     
     Texture2D<float> depthTexture = ResourceDescriptorHeap[UintRootConstant1];

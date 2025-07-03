@@ -25,20 +25,20 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     float4 worldPosition = mul(pos, objectBuffer.model);
     PSInput result;
 
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
 
     if (flags & VERTEX_TEXCOORDS) {
         result.texcoord = vertex.texcoord;
     }
     
 #if defined(PSO_SHADOW)
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
     LightInfo light = lights[currentLightID];
     matrix lightMatrix;
     matrix viewMatrix;
     switch(light.type) {
         case 0: { // Point light
-            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[pointLightCubemapBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> pointLightCubemapIndicesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
             uint lightCameraIndex = pointLightCubemapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -46,7 +46,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             break;
         }
         case 1: { // Spot light
-            StructuredBuffer<unsigned int> spotLightMapIndicesBuffer = ResourceDescriptorHeap[spotLightMatrixBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> spotLightMapIndicesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
             uint lightCameraIndex = spotLightMapIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -54,7 +54,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
             break;
         }
         case 2: { // Directional light
-            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[directionalLightCascadeBufferDescriptorIndex];
+            StructuredBuffer<unsigned int> directionalLightCascadeIndicesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::DirectionalLightCascadeBuffer)];
             uint lightCameraIndex = directionalLightCascadeIndicesBuffer[lightViewIndex];
             Camera lightCamera = cameras[lightCameraIndex];
             lightMatrix = lightCamera.viewProjection;
@@ -83,7 +83,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
         result.normalWorldSpace = normalize(vertex.normal);
     }
     else {
-        StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[normalMatrixBufferDescriptorIndex];
+        StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
         float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
         result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
     }
@@ -133,13 +133,13 @@ groupshared Payload s_Payload;
 [NumThreads(AS_GROUP_SIZE, 1, 1)]
 void ASMain(uint uGroupThreadID : SV_GroupThreadID, uint uDispatchThreadID : SV_DispatchThreadID, uint uGroupID : SV_GroupID)
 {
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     
     ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
     unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + uDispatchThreadID;
  
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
     // Culling handled in compute shader
     bool visible = uDispatchThreadID < meshBuffer.numMeshlets && !GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
@@ -164,7 +164,7 @@ void MSMain(
 
     uint meshletIndex = payload.MeshletIndices[vGroupID];
     
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
     if (meshletIndex >= meshBuffer.numMeshlets) // Can this happen?
     {
@@ -172,19 +172,19 @@ void MSMain(
     }
     
     // Test if this meshlet is culled
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[perMeshInstanceBufferDescriptorIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
     ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
     unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + meshletIndex;
     
     //bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
     
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[postSkinningVertexBufferDescriptorIndex]; // Base vertex buffer
-    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[meshletBufferDescriptorIndex]; // Meshlets, containing vertex & primitive offset & num
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[meshletVerticesBufferDescriptorIndex]; // Meshlet vertices, as indices into base vertex buffer
-    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[meshletTrianglesBufferDescriptorIndex]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)]; // Base vertex buffer
+    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)]; // Meshlets, containing vertex & primitive offset & num
+    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)]; // Meshlet vertices, as indices into base vertex buffer
+    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)]; // meshlet triangles, as local offsets from the current vertex_offset, indexing into meshletVerticesBuffer
     
-    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[perObjectBufferDescriptorIndex];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer objectBuffer = perObjectBuffer[perObjectBufferIndex];
     
     uint meshletOffset = meshBuffer.meshletBufferOffset;

@@ -36,7 +36,7 @@ VS_OUTPUT VSMain(float3 pos : POSITION)
 
 float4 PSMain(VS_OUTPUT input) : SV_TARGET {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<EnvironmentInfo> environmentInfo = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    StructuredBuffer<EnvironmentInfo> environmentInfo = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::EnvironmentInfo::InfoBuffer)];
     EnvironmentInfo envInfo = environmentInfo[perFrameBuffer.activeEnvironmentIndex];
     TextureCube<float4> skyboxTexture = ResourceDescriptorHeap[envInfo.cubeMapDescriptorIndex];
     float3 color = skyboxTexture.Sample(g_linearClamp, input.direction.xyz).xyz;

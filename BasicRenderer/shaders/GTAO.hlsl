@@ -50,7 +50,7 @@ RWTexture2D<uint> g_outFinalAOTerm : register(u0); // final AO term - just 'visi
 float3 LoadNormal(int2 pos, uint normalsDescriptorIndex) {
 #if 1
     // special decoding for external normals stored in 11_11_10 unorm - modify appropriately to support your own encoding 
-    Texture2D<float4> g_srcNormalmap = ResourceDescriptorHeap[normalsDescriptorIndex];
+    Texture2D<float4> g_srcNormalmap = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
 //    uint packedInput = g_srcNormalmap.Load(int3(pos, 0)).x;
 //    float3 unpackedOutput = XeGTAO_R11G11B10_UNORM_to_FLOAT3(packedInput);
 //    float3 normal = normalize(unpackedOutput * 2.0.xxx - 1.0.xxx);
@@ -65,7 +65,7 @@ float3 LoadNormal(int2 pos, uint normalsDescriptorIndex) {
 
 #if 1 // compute worldspace to viewspace here if your engine stores normals in worldspace; if generating normals from depth here, they're already in viewspace
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     normal = normalize(mul(normal, (float3x3) mainCamera.view));
     normal.z = -normal.z; // flip Z axis to match convention XeGTAO wants

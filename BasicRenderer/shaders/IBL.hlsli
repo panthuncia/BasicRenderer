@@ -108,7 +108,7 @@ void evaluateIBL(inout float3 color, inout float3 debugDiffuse, inout float3 deb
     float3 E = mx_ggx_dir_albedo_analytic(NdotV, roughness, F0, float3(1.0, 1.0, 1.0));
     float3 r = getReflectedVector(reflection, normal, roughness);
     
-    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Environment::InfoBuffer)];
     float3 Fr = float3(0, 0, 0);
 #if defined (PSO_SPECULAR_IBL)
     Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
@@ -133,7 +133,7 @@ float3 evaluateSpecularIBL(float3 normal, float3 bentNormal, float diffuseAO, fl
 {
     float3 E = mx_ggx_dir_albedo_analytic(NdotV, roughness, F0, float3(1.0, 1.0, 1.0));
     float3 r = getReflectedVector(reflection, normal, roughness);
-    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    StructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::EnvironmentInfo::InfoBuffer)];
     float3 Fr = E * prefilteredRadiance(r, perceptualRoughness, environments[environmentIndex].prefilteredCubemapDescriptorIndex);
     return Fr;
 } 
