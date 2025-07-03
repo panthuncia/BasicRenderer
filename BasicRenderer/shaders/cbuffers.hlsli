@@ -91,6 +91,11 @@ cbuffer MiscFloatRootConstants : register(b10) { // Used for pass-specific one-o
     float FloatRootConstant1;
 }
 
+cbuffer ResourceDescriptorIndices : register(b11) {
+    uint ResourceDescriptorIndex0;
+    uint ResourceDescriptorIndex1;
+};
+
 
 
 #endif // __CBUFFERS_HLSL__

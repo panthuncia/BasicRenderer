@@ -1072,8 +1072,8 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
                         std::string identifier = std::move(rawText);
                         if (replacementMap.count(identifier)) {
                             replacements.push_back({
-                            start,
-                            end,
+                            ts_node_start_byte(node),
+                            ts_node_end_byte(node),
                             replacementMap.at(identifier)
                             });
                         }
@@ -1176,7 +1176,7 @@ void parseBRSLResourceIdentifiersForSlot(
     ParseBRSLResourceIdentifiers(outUsedIDs, preprocessedBuffer, ws2s(slot->entryPoint));
 }
 
-void rewriteResourceDescriptorIndexCallsForSlot(
+std::string rewriteResourceDescriptorIndexCallsForSlot(
     const std::optional<ShaderInfo>& slot,
     const std::vector<DxcDefine>& defines,
     Microsoft::WRL::ComPtr<ID3DBlob>& outBlob,
@@ -1184,8 +1184,8 @@ void rewriteResourceDescriptorIndexCallsForSlot(
     const std::unordered_map<std::string, std::string>& replacementMap)
 {
     if (!slot)
-        return;
-    rewriteResourceDescriptorCalls(
+        return "";
+    return rewriteResourceDescriptorCalls(
         static_cast<const char*>(outBuf.Ptr),
         outBuf.Size,
         ws2s(slot->entryPoint),
@@ -1270,15 +1270,36 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     std::vector<std::string> usedResourceIDsVec;
     for (std::string entry : usedResourceIDs) {
 		bundle.resourceDescriptorSlotMap[entry] = nextIndex;
-		replacementMap[entry] = "UintRootConstant" + std::to_string(nextIndex++);
+		replacementMap[entry] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
 		usedResourceIDsVec.push_back(entry);
     }
 
-	rewriteResourceDescriptorIndexCallsForSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer, replacementMap);
-    rewriteResourceDescriptorIndexCallsForSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer, replacementMap);
-    rewriteResourceDescriptorIndexCallsForSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer, replacementMap);
-    rewriteResourceDescriptorIndexCallsForSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer, replacementMap);
-	rewriteResourceDescriptorIndexCallsForSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer, replacementMap);
+	auto newAmplification = rewriteResourceDescriptorIndexCallsForSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer, replacementMap);
+    auto newMesh = rewriteResourceDescriptorIndexCallsForSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer, replacementMap);
+    auto newPixel = rewriteResourceDescriptorIndexCallsForSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer, replacementMap);
+    auto newVertex = rewriteResourceDescriptorIndexCallsForSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer, replacementMap);
+	auto newCompute = rewriteResourceDescriptorIndexCallsForSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer, replacementMap);
+
+    if (!newAmplification.empty()) {
+        amplificationBuffer.Ptr = newAmplification.data();
+        amplificationBuffer.Size = newAmplification.size();
+	}
+    if (!newMesh.empty()) {
+        meshBuffer.Ptr = newMesh.data();
+        meshBuffer.Size = newMesh.size();
+    }
+    if (!newPixel.empty()) {
+        pixelBuffer.Ptr = newPixel.data();
+        pixelBuffer.Size = newPixel.size();
+    }
+    if (!newVertex.empty()) {
+        vertexBuffer.Ptr = newVertex.data();
+        vertexBuffer.Size = newVertex.size();
+	}
+    if (!newCompute.empty()) {
+        computeBuffer.Ptr = newCompute.data();
+        computeBuffer.Size = newCompute.size();
+	}
 
 	CompileShaderForSlot(info.amplificationShader, info.defines, amplificationBuffer, bundle.amplificationShader);
 	CompileShaderForSlot(info.meshShader, info.defines, meshBuffer, bundle.meshShader);
@@ -1472,7 +1493,7 @@ void PSOManager::WriteDebugArtifacts(
 
 void PSOManager::createRootSignature() {
     // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[10] = {};
+    D3D12_ROOT_PARAMETER1 parameters[11] = {};
 
     // PerObject buffer index
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -1541,6 +1562,12 @@ void PSOManager::createRootSignature() {
 	parameters[9].Constants.RegisterSpace = 0;
 	parameters[9].Constants.Num32BitValues = NumMiscFloatRootConstants;
 	parameters[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+	parameters[10].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	parameters[10].Constants.ShaderRegister = 11;
+	parameters[10].Constants.RegisterSpace = 0;
+	parameters[10].Constants.Num32BitValues = NumResourceDescriptorIndicesRootConstants;
+	parameters[10].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
 

@@ -73,6 +73,15 @@ struct ResourceIdentifier {
     };
 };
 
+namespace std {
+    template<>
+    struct hash<ResourceIdentifier> {
+        size_t operator()(ResourceIdentifier const& id) const noexcept {
+            return ResourceIdentifier::Hasher{}(id);
+        }
+    };
+}
+
 struct ResourceIdentifierAndRange {
     ResourceIdentifierAndRange(const ResourceIdentifier& resource) : identifier(resource) {
         range = {}; // Full range

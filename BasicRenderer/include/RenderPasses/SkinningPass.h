@@ -67,9 +67,14 @@ public:
 		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferUAVIndex;
 		staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
 		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferSRVIndex;
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
+		//staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
 
 		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
+
+		unsigned int resourceDescriptorIndices[NumResourceDescriptorIndicesRootConstants] = {};
+		resourceDescriptorIndices[m_perMeshShaderDescriptorIndex] = m_perMeshBufferSRVIndex;
+
+		commandList->SetComputeRoot32BitConstants(ResourceDescriptorIndicesRootSignatureIndex, NumResourceDescriptorIndicesRootConstants, resourceDescriptorIndices, 0);
 
 		auto meshShadersEnabled = getMeshShadersEnabled();
 
@@ -137,6 +142,8 @@ private:
 	int m_perMeshInstanceBufferSRVIndex = -1;
 	int m_perMeshBufferSRVIndex = -1;
 
+	int m_perMeshShaderDescriptorIndex = -1;
+
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
@@ -144,6 +151,8 @@ private:
 		shaderInfoBundle.computeShader = { L"shaders/skinning.brsl", L"CSMain", L"cs_6_6" };
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
+
+		m_perMeshShaderDescriptorIndex = compiledBundle.resourceDescriptorSlotMap[Builtin::PerMeshBuffer];
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;

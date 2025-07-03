@@ -257,6 +257,7 @@ enum RootSignatureLayout {
 	LightClusterRootSignatureIndex,
 	MiscUintRootSignatureIndex,
 	MiscFloatRootSignatureIndex,
+	ResourceDescriptorIndicesRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -350,4 +351,10 @@ enum MiscFloatRootConstants { // Used for pass-specific one-off constants
 	FloatRootConstant0,
 	FloatRootConstant1,
 	NumMiscFloatRootConstants
+};
+
+enum ResourceDescriptorIndicesRootConstants {
+    ResourceDescriptorIndex0,
+    ResourceDescriptorIndex1,
+    NumResourceDescriptorIndicesRootConstants
 };

@@ -11,6 +11,7 @@
 #include "Materials/BlendState.h"
 #include "Render/PSOFlags.h"
 #include "Render/PipelineState.h"
+#include "Resources/ResourceIdentifier.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -72,7 +73,7 @@ struct ShaderBundle {
     Microsoft::WRL::ComPtr<ID3DBlob> amplificationShader;
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-    std::unordered_map<std::string, unsigned int> resourceDescriptorSlotMap;
+    std::unordered_map<ResourceIdentifier, unsigned int> resourceDescriptorSlotMap;
 	uint64_t resourceIDsHash = 0;
 };
 

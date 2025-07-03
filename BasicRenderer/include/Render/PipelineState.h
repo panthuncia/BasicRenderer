@@ -6,11 +6,13 @@
 #include <unordered_map>
 #include <string>
 
+#include "Resources/ResourceIdentifier.h"
+
 class PipelineState {
 public:
 	PipelineState(Microsoft::WRL::ComPtr<ID3D12PipelineState> pso,
 		uint64_t resourceIDsHash, 
-		std::unordered_map<std::string, unsigned int> resourceDescriptorSlotMap) : 
+		std::unordered_map<ResourceIdentifier, unsigned int> resourceDescriptorSlotMap) :
 		m_resourceIDsHash(resourceIDsHash), 
 		m_pso(pso),
 		m_resourceDescriptorSlotMap(resourceDescriptorSlotMap){}
@@ -25,5 +27,5 @@ private:
 	uint64_t m_resourceIDsHash = 0;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 	std::unordered_map<std::string, unsigned int> m_resourceSlots;
-	std::unordered_map<std::string, unsigned int> m_resourceDescriptorSlotMap;
+	std::unordered_map<ResourceIdentifier, unsigned int> m_resourceDescriptorSlotMap;
 };
