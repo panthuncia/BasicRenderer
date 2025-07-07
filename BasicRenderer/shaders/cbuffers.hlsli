@@ -68,6 +68,20 @@ cbuffer MiscFloatRootConstants : register(b9) { // Used for pass-specific one-of
 cbuffer ResourceDescriptorIndices : register(b10) {
     uint ResourceDescriptorIndex0;
     uint ResourceDescriptorIndex1;
+    uint ResourceDescriptorIndex2;
+    uint ResourceDescriptorIndex3;
+    uint ResourceDescriptorIndex4;
+    uint ResourceDescriptorIndex5;
+    uint ResourceDescriptorIndex6;
+    uint ResourceDescriptorIndex7;
+    uint ResourceDescriptorIndex8;
+    uint ResourceDescriptorIndex9;
+    uint ResourceDescriptorIndex10;
+    uint ResourceDescriptorIndex11;
+    uint ResourceDescriptorIndex12;
+    uint ResourceDescriptorIndex13;
+    uint ResourceDescriptorIndex14;
+    uint ResourceDescriptorIndex15;
 };
 
 

@@ -329,5 +329,19 @@ enum MiscFloatRootConstants { // Used for pass-specific one-off constants
 enum ResourceDescriptorIndicesRootConstants {
     ResourceDescriptorIndex0,
     ResourceDescriptorIndex1,
+	ResourceDescriptorIndex2,
+	ResourceDescriptorIndex3,
+	ResourceDescriptorIndex4,
+	ResourceDescriptorIndex5,
+	ResourceDescriptorIndex6,
+	ResourceDescriptorIndex7,
+	ResourceDescriptorIndex8,
+	ResourceDescriptorIndex9,
+	ResourceDescriptorIndex10,
+	ResourceDescriptorIndex11,
+	ResourceDescriptorIndex12,
+	ResourceDescriptorIndex13,
+	ResourceDescriptorIndex14,
+	ResourceDescriptorIndex15,
     NumResourceDescriptorIndicesRootConstants
 };

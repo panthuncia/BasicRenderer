@@ -103,6 +103,11 @@ public:
         : _global(global) {
     }
 
+	// Move constructor
+    ResourceRegistryView(ResourceRegistryView&& other) noexcept
+        : _global(other._global), _allowedPrefixes(std::move(other._allowedPrefixes)) {
+	}
+
     template<typename T = Resource>
     std::shared_ptr<T> Request(ResourceIdentifier const& id) const {
         // prefix check

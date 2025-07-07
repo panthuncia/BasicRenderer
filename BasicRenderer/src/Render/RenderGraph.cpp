@@ -424,15 +424,15 @@ void RenderGraph::Setup() {
 		switch (pass.type) {
 		case PassType::Render: {
 			auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
-			auto view = ResourceRegistryView(_registry, renderPass.resources.identifierSet);
-			renderPass.pass->Setup(view);
+			renderPass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, renderPass.resources.identifierSet));
+			renderPass.pass->Setup();
 			renderPass.pass->RegisterCommandLists(m_graphicsCommandLists);
 			break;
 		}
 		case PassType::Compute: {
 			auto& computePass = std::get<ComputePassAndResources>(pass.pass);
-			auto view = ResourceRegistryView(_registry, computePass.resources.identifierSet);
-			computePass.pass->Setup(view);
+			computePass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, computePass.resources.identifierSet));
+			computePass.pass->Setup();
 			computePass.pass->RegisterCommandLists(m_computeCommandLists);
 			break;
 		}

@@ -14,6 +14,7 @@
 #include "Resources/ResourceIdentifier.h"
 #include "Render/ResourceRegistry.h"
 #include "../../../generated/BuiltinResources.h"
+#include "ResourceDescriptorIndexHelper.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;
@@ -33,7 +34,11 @@ class ComputePass {
 public:
 	virtual ~ComputePass() = default;
 
-	virtual void Setup(const ResourceRegistryView& resourceRegistryView) = 0;
+	void SetResourceRegistryView(std::shared_ptr<ResourceRegistryView> resourceRegistryView) {
+		m_resourceRegistryView = resourceRegistryView;
+		m_resourceDescriptorIndexHelper = std::make_unique<ResourceDescriptorIndexHelper>(resourceRegistryView);
+	}
+	virtual void Setup() = 0;
 	virtual void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {};
 
 	virtual void Update() {};
@@ -47,5 +52,30 @@ protected:
 	bool invalidated = true;
 	virtual void DeclareResourceUsages(ComputePassBuilder* builder) {};
 
+	void BindResourceDescriptorIndices(ID3D12GraphicsCommandList7* commandList, const std::vector<ResourceIdentifier>& resourceDescriptorIndexBindings) {
+		unsigned int indices[NumResourceDescriptorIndicesRootConstants] = {};
+		for (int i = 0; i < NumResourceDescriptorIndicesRootConstants; ++i) {
+			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(resourceDescriptorIndexBindings[i].hash);
+		}
+		commandList->SetComputeRoot32BitConstants(
+			ResourceDescriptorIndicesRootSignatureIndex,
+			NumResourceDescriptorIndicesRootConstants,
+			indices,
+			0
+		);
+	}
+
+	void RegisterSRV(SRVViewType type, ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {
+		m_resourceDescriptorIndexHelper->RegisterSRV(type, id, mip, slice);
+	}
+	void RegisterSRV(ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {
+		m_resourceDescriptorIndexHelper->RegisterSRV(id, mip, slice);
+	}
+	void RegisterUAV(ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {
+		m_resourceDescriptorIndexHelper->RegisterUAV(id, mip, slice);
+	}
+
+	std::unique_ptr<ResourceDescriptorIndexHelper> m_resourceDescriptorIndexHelper;
+	std::shared_ptr<ResourceRegistryView> m_resourceRegistryView;
 	friend class ComputePassBuilder;
 };

@@ -1269,7 +1269,7 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     ShaderBundle bundle = {};
     std::vector<std::string> usedResourceIDsVec;
     for (std::string entry : usedResourceIDs) {
-		bundle.resourceDescriptorSlotMap[entry] = nextIndex;
+		bundle.resourceDescriptorSlotMap.push_back(entry);
 		replacementMap[entry] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
 		usedResourceIDsVec.push_back(entry);
     }
