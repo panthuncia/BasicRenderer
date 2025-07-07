@@ -17,7 +17,7 @@ public:
             .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
         auto& manager = DeviceManager::GetInstance();
         auto& device = manager.GetDevice();
         uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
@@ -32,7 +32,7 @@ public:
         }
 		CreateXeGTAOComputePSO();
 
-		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+        RegisterSRV(Builtin::CameraBuffer);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -49,10 +49,7 @@ public:
 		commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
 		commandList->SetPipelineState(GTAOHighPSO.Get());
 
-		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
-
-		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
+        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings_High);
 
         unsigned int passConstants[NumMiscUintRootConstants] = {};
         passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
@@ -87,7 +84,7 @@ private:
 
     uint64_t frameIndex = 0;
 
-	int m_cameraBufferSRVIndex = -1;
+    std::vector<ResourceIdentifier> m_resourceDescriptorBindings_High;
 
     void CreateXeGTAOComputePSO() {
         auto device = DeviceManager::GetInstance().GetDevice();
@@ -119,6 +116,8 @@ private:
 		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		CSGTAOHigh = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSGTAOHigh.Get());
+        m_resourceDescriptorBindings_High = compiledBundle.resourceDescriptorSlotMap;
+
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&GTAOHighPSO)));
 		Microsoft::WRL::ComPtr<ID3DBlob> CSGTAOUltra;

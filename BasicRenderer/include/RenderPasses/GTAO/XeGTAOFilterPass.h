@@ -11,7 +11,7 @@ class GTAOFilterPass : public ComputePass {
 public:
     GTAOFilterPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
 		CreateXeGTAOComputePSO();
     }
 

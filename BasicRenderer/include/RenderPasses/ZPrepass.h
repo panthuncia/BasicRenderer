@@ -90,8 +90,7 @@ public:
             m_pPrimaryCameraOpaqueIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
             m_pPrimaryCameraAlphaTestIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
             if (m_meshShaders) {
-                //m_meshletCullingBitfieldBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
-				RegisterSRV(Builtin::PrimaryCamera::MeshletBitfield);
+                m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
             }
         }
 
@@ -202,6 +201,10 @@ private:
     void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+
+        unsigned int misc[NumMiscUintRootConstants] = {};
+        misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
+        commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
     }
 
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -372,6 +375,7 @@ private:
 	std::shared_ptr<PixelBuffer> m_pMetallicRoughness;
     std::shared_ptr<PixelBuffer> m_pEmissive;
 
+    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
 

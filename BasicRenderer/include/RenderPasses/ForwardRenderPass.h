@@ -17,6 +17,7 @@
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
+#include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
 
 class ForwardRenderPass : public RenderPass {
 public:
@@ -113,7 +114,7 @@ public:
         
         if (m_indirect) {
             if (m_meshShaders)
-                RegisterSRV(Builtin::PrimaryCamera::MeshletBitfield);
+                m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
             m_primaryCameraOpaqueIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
             m_primaryCameraAlphaTestIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
         
@@ -180,6 +181,10 @@ private:
     void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+    
+        unsigned int misc[NumMiscUintRootConstants] = {};
+        misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
+        commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
     }
 
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -343,6 +348,7 @@ private:
 	bool m_clusteredLightingEnabled = true;
 	bool m_deferred = false;
 
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraAlphaTestIndirectCommandBuffer = nullptr;

@@ -417,7 +417,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         indirect);
 
     graph->BuildRenderPass("PPLLResolvePass")
-        .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
+        .Build<PPLLResolvePass>();
 }
 
 void BuildBloomPipeline(RenderGraph* graph) {

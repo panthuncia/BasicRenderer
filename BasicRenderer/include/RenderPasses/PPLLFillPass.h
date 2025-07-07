@@ -79,7 +79,7 @@ public:
 		if (m_indirect) {
 			m_primaryCameraBlendIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
 			if (m_meshShaders) {
-				RegisterSRV(Builtin::PrimaryCamera::MeshletBitfield);
+				m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 			}
 		}
 
@@ -197,6 +197,10 @@ private:
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
 		transparencyInfo[PPLLNodePoolSize] = m_numPPLLNodes;
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
+	
+		unsigned int misc[NumMiscUintRootConstants] = {};
+		misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
+		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
 	}
 
 	void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -282,6 +286,7 @@ private:
 	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
 	std::shared_ptr<Buffer> m_PPLLCounter;
 
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraBlendIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_meshletCullingBitfieldBuffer;
 	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
