@@ -1,6 +1,6 @@
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
-#include "constants.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
+#include "include/constants.hlsli"
 
 // Thread-group size: 16×16 threads per face, dispatch Z=6 for the 6 faces
 [numthreads(16, 16, 1)]
@@ -16,7 +16,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
     uint environmentIndex = UintRootConstant3;
 	
     ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
-    RWStructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
+    RWStructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Environment::InfoBuffer)];
     TextureCube<float4> g_envMap = ResourceDescriptorHeap[environments[environmentIndex].cubeMapDescriptorIndex];
 	
     // out-of-bounds guard

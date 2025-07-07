@@ -1,6 +1,6 @@
-#include "vertex.hlsli"
-#include "structs.hlsli"
-#include "cbuffers.hlsli"
+#include "include/vertex.hlsli"
+#include "include/structs.hlsli"
+#include "include/cbuffers.hlsli"
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 dtid : SV_DispatchThreadID) {

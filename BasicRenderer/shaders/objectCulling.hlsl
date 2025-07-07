@@ -1,78 +1,11 @@
-#include "cbuffers.hlsli"
-#include "vertex.hlsli"
-#include "loadingUtils.hlsli"
-#include "Misc/sphereScreenExtents.hlsli"
-#include "utilities.hlsli"
-
-struct DispatchMeshIndirectCommand
-{
-    uint perObjectBufferIndex;
-    uint perMeshBufferIndex;
-    uint perMeshInstanceBufferIndex;
-    uint dispatchMeshX;
-    uint dispatchMeshY;
-    uint dispatchMeshZ;
-};
-
-struct DispatchIndirectCommand
-{
-    uint perObjectBufferIndex;
-    uint perMeshBufferIndex;
-    uint perMeshInstanceBufferIndex;
-    uint dispatchX;
-    uint dispatchY;
-    uint dispatchZ;
-};
-
-void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection)
-{
-    // Occlusion culling
-    float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
-    viewSpaceCenter.y = -viewSpaceCenter.y; // Invert Y for HZB sampling
-    float4 vLBRT;
-
-    if (camera.isOrtho) {
-        viewSpaceCenter.y = -viewSpaceCenter.y;
-        vLBRT = sphere_screen_extents_ortho(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
-    } else {
-        vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
-        vLBRT.x = -vLBRT.x; // TODO: Fix this in sphere_screen_extents
-        vLBRT.z = -vLBRT.z;
-    }
-
-    float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
-    float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
-    float4 vAABB = vUV * vHZB.xyxy; // vHZB = [w, h, l]
-    float2 vExtents = vAABB.zw - vAABB.xy; // In pixels
-    
-    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
-    fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
-    
-    vUV *= camera.UVScaleToNextPowerOf2.xyxy; // Scale to next power of two, because it was padded for downsampling
-    
-    float4 occlusionDepth;
-    if (camera.depthBufferArrayIndex < 0)
-    { // Not a texture array
-        Texture2D<float> depthBuffer = ResourceDescriptorHeap[UintRootConstant2];
-        occlusionDepth = float4(
-            depthBuffer.SampleLevel(g_pointClamp, vUV.xy, fMipLevel),
-            depthBuffer.SampleLevel(g_pointClamp, vUV.zy, fMipLevel),
-            depthBuffer.SampleLevel(g_pointClamp, vUV.zw, fMipLevel),
-            depthBuffer.SampleLevel(g_pointClamp, vUV.xw, fMipLevel));
-    }
-    else
-    {
-        Texture2DArray<float> depthBuffer = ResourceDescriptorHeap[UintRootConstant2];
-        occlusionDepth = float4(
-            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.xy, camera.depthBufferArrayIndex), fMipLevel),
-            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.zy, camera.depthBufferArrayIndex), fMipLevel),
-            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.zw, camera.depthBufferArrayIndex), fMipLevel),
-            depthBuffer.SampleLevel(g_pointClamp, float3(vUV.xw, camera.depthBufferArrayIndex), fMipLevel));
-    }
-    
-    float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
-    fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
-}
+#include "include/cbuffers.hlsli"
+#include "include/vertex.hlsli"
+#include "include/loadingUtils.hlsli"
+#include "include/Misc/sphereScreenExtents.hlsli"
+#include "include/utilities.hlsli"
+#include "include/occlusionCulling.hlsli"
+#include "PerPassRootConstants/objectCullingRootConstants.h"
+#include "include/indirectCommands.hlsli"
 
 [numthreads(64, 1, 1)]
 void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
@@ -82,12 +15,12 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
         return;
     }
 
-    StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[activeDrawSetIndicesBufferDescriptorIndex];
+    StructuredBuffer<unsigned int> activeDrawSetIndicesBuffer = ResourceDescriptorHeap[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX];
     StructuredBuffer<DispatchMeshIndirectCommand> indirectCommandBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::IndirectCommandBuffers::Master)];
     uint index = activeDrawSetIndicesBuffer[dispatchID];
     DispatchMeshIndirectCommand command = indirectCommandBuffer[index];
     
-    RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[UintRootConstant3];
+    RWByteAddressBuffer meshInstanceVisibilityBitfield = ResourceDescriptorHeap[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX];
     bool wasVisibleLastFrame = GetBit(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
     
 #if defined (OCCLUDERS_PASS) && defined(OCCLUSION_CULLING)
@@ -98,9 +31,9 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 #endif
     
     // Per-drawset indirect command buffer
-    AppendStructuredBuffer<DispatchMeshIndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[indirectCommandBufferDescriptorIndex];
+    AppendStructuredBuffer<DispatchMeshIndirectCommand> indirectCommandOutputBuffer = ResourceDescriptorHeap[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX];
     // Meshlets from all drawsets are culled together
-    AppendStructuredBuffer<DispatchIndirectCommand> meshletFrustrumCullingIndirectCommandOutputBuffer = ResourceDescriptorHeap[meshletFrustrumCullingIndirectCommandBufferDescriptorIndex];
+    AppendStructuredBuffer<DispatchIndirectCommand> meshletFrustrumCullingIndirectCommandOutputBuffer = ResourceDescriptorHeap[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     
@@ -208,14 +141,14 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 #endif // OCCLUSION_CULLING
     
     
-        RWByteAddressBuffer meshInstanceIsFrustrumCulledBitfield = ResourceDescriptorHeap[UintRootConstant0];
+    RWByteAddressBuffer meshInstanceIsMeshletFrustrumCulledBitfield = ResourceDescriptorHeap[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX];
     // Meshlet frustrum culling
         if (fullyInside)
         {
-            bool wasPartiallyFrustrumCulledLastFrame = GetBit(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
+        bool wasPartiallyFrustrumCulledLastFrame = GetBit(meshInstanceIsMeshletFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
             if (wasPartiallyFrustrumCulledLastFrame)
             { // Meshlet bitfield needs to be cleared, or this object may be missing meshlets
-                AppendStructuredBuffer<DispatchIndirectCommand> meshletCullingResetCommandBuffer = ResourceDescriptorHeap[UintRootConstant1];
+            AppendStructuredBuffer<DispatchIndirectCommand> meshletCullingResetCommandBuffer = ResourceDescriptorHeap[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX];
                 DispatchIndirectCommand meshletFrustrumCullingResetCommand;
                 meshletFrustrumCullingResetCommand.dispatchX = command.dispatchMeshX;
                 meshletFrustrumCullingResetCommand.dispatchY = command.dispatchMeshY;
@@ -226,9 +159,9 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
             
                 meshletCullingResetCommandBuffer.Append(meshletFrustrumCullingResetCommand);
             
-            // Mark as not meshlet culled
-                ClearBitAtomic(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
-            }
+                // Mark as not meshlet culled
+                ClearBitAtomic(meshInstanceIsMeshletFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
+        }
         // If the object is fully inside the frustrum, we can skip the meshlet culling
 #if defined (OCCLUSION_CULLING)
 //#if !defined (OCCLUDERS_PASS) // Except for occluders pass, where we will run a (cheaper) meshlet culling on all occluders
@@ -245,7 +178,7 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 #endif // defined (OCCLUSION_CULLING)
     
     // Mark the per-mesh meshlet-culling bitfield, since we'll need to reset the meshlet bitfield when this is fully inside later
-        SetBitAtomic(meshInstanceIsFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
+        SetBitAtomic(meshInstanceIsMeshletFrustrumCulledBitfield, command.perMeshInstanceBufferIndex);
     
         DispatchIndirectCommand meshletFrustrumCullingCommand;
         meshletFrustrumCullingCommand.dispatchX = command.dispatchMeshX;

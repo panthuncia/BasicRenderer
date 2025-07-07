@@ -21,9 +21,9 @@ public:
         builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR);
     }
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
-		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
-	}
+	void Setup() override {
+        RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
+    }
 
 	PassReturn Execute(RenderContext& context) override {
 		auto& psoManager = PSOManager::GetInstance();
@@ -50,11 +50,7 @@ public:
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-
-		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[0] = m_pHDRTarget->GetSRVInfo(0).index;
-
-		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
 		return {};
@@ -67,8 +63,7 @@ public:
 private:
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-
-	std::shared_ptr<PixelBuffer> m_pHDRTarget;
+    std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
@@ -81,6 +76,7 @@ private:
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		vertexShader = compiledBundle.vertexShader;
 		pixelShader = compiledBundle.pixelShader;
+        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
         inputLayoutDesc.pInputElementDescs = nullptr;

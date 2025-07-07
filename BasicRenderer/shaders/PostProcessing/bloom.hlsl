@@ -1,7 +1,7 @@
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
 #include "fullscreenVS.hlsli"
-#include "gammaCorrection.hlsli"
+#include "include/gammaCorrection.hlsli"
 
 // UintRootConstant0 is HDR source SRV
 // UintRootConstant1 is mip level of bloom source SRV

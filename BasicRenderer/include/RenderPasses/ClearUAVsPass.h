@@ -99,11 +99,11 @@ public:
 		builder->WithCopyDest(Builtin::IndirectCommandBuffers::MeshletCulling);
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
-		m_meshletCullingCommandBuffers = resourceRegistryView.Request<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
+		m_meshletCullingCommandBuffers = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
 	}
 
 	PassReturn Execute(RenderContext& context) override {

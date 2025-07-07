@@ -1,4 +1,4 @@
-#include "Structs.hlsli"
+#include "include/structs.hlsli"
 
 // point-clamp at s0
 SamplerState g_pointClamp : register(s0);

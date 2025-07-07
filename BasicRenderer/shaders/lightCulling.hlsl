@@ -1,5 +1,5 @@
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
 
 // Returns true if a sphere (with a given center and radius) intersects an AABB
 // defined by aabbMin and aabbMax

@@ -1,7 +1,7 @@
 #ifndef __VERTEX_HLSL__
 #define __VERTEX_HLSL__
 
-#include "loadingUtils.hlsli"
+#include "include/loadingUtils.hlsli"
 
 // Manually assembled from ByteAddressBuffer
 struct Vertex {

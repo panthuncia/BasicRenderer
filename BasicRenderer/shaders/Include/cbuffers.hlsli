@@ -30,24 +30,14 @@ cbuffer Settings : register(b4) {
 }
 
 cbuffer variableBufferInfo : register(b5) {
-    uint activeDrawSetIndicesBufferDescriptorIndex;
-    uint indirectCommandBufferDescriptorIndex;
-    uint meshletFrustrumCullingIndirectCommandBufferDescriptorIndex;
-    uint meshletCullingBitfieldBufferDescriptorIndex;
     uint maxDrawIndex;
 }
 
 cbuffer transparencyInfo : register(b6) {
-    uint PPLLHeadsDescriptorIndex;
-    uint PPLLNodesDescriptorIndex;
-    uint PPLLNodesCounterDescriptorIndex;
     uint PPLLNodePoolSize;
 }
 
 cbuffer LightClusterInfo : register(b7) {
-    uint lightClusterBufferDescriptorIndex;
-    uint lightPagesBufferDescriptorIndex;
-    uint lightPagesCounterDescriptorIndex;
     uint lightPagesPoolSize;
 }
 
@@ -58,6 +48,11 @@ cbuffer MiscUintRootConstants : register(b8) { // Used for pass-specific one-off
     uint UintRootConstant3;
     uint UintRootConstant4;
     uint UintRootConstant5;
+    uint UintRootConstant6;
+    uint UintRootConstant7;
+    uint UintRootConstant8;
+    uint UintRootConstant9;
+    uint UintRootConstant10;
 }
 
 cbuffer MiscFloatRootConstants : register(b9) { // Used for pass-specific one-off constants

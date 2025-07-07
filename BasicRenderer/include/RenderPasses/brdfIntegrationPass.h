@@ -13,7 +13,7 @@ public:
         builder->WithRenderTarget(Builtin::BRDFLUT);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
 
 		m_lutTexture = resourceRegistryView.Request<PixelBuffer>(Builtin::BRDFLUT);
         CreatePSO();

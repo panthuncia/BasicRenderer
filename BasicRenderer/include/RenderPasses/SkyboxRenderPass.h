@@ -18,15 +18,15 @@ public:
             .WithRenderTarget(Builtin::Color::HDRColorTarget);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateSkyboxRootSignature();
         CreateSkyboxPSO();
 
-		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-        m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
+        m_environmentBufferDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
     }
 
     PassReturn Execute(RenderContext& context) override {

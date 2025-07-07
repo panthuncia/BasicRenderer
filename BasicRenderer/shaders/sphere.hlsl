@@ -1,4 +1,4 @@
-#include "structs.hlsli"
+#include "include/structs.hlsli"
 
 cbuffer SphereParams : register(b1) {
     float4 center;

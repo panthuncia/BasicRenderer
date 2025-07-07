@@ -1,4 +1,4 @@
-#include "cbuffers.hlsli"
+#include "include/cbuffers.hlsli"
 
 #define A_GPU
 #define A_HLSL

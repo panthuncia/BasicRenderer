@@ -1,7 +1,7 @@
 #ifndef __PBR_HLSLI__
 #define __PBR_HLSLI__
 
-#include "constants.hlsli"
+#include "include/constants.hlsli"
 
 // https://github.com/AcademySoftwareFoundation/MaterialX/blob/a578d8a9758f0a6eefc5a1a5c7ab10727ee11b2d/libraries/pbrlib/genglsl/lib/mx_microfacet_specular.glsl#L85
 // Rational quadratic fit to Monte Carlo data for GGX directional albedo.

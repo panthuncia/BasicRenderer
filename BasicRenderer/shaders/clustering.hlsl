@@ -1,5 +1,5 @@
 #include "cbuffers.hlsli"
-#include "structs.hlsli"
+#include "include/structs.hlsli"
 
 // Helper function: Returns the intersection between a line (from startPoint to endPoint)
 // and a plane perpendicular to the Z-axis (at zDistance).

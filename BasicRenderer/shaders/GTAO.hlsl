@@ -19,9 +19,9 @@
 #endif
 
 #include "Intel/XeGTAO.hlsli"
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
-#include "utilities.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
+#include "include/utilities.hlsli"
 /*
 SamplerState g_samplerPointClamp : register(s0); // Sampler used for depth sampling - used in all passes
 

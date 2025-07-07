@@ -1,8 +1,8 @@
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
 #include "fullscreenVS.hlsli"
-#include "IBL.hlsli"
-#include "utilities.hlsli"
+#include "include/IBL.hlsli"
+#include "include/utilities.hlsli"
 
 // UintRootConstant0 is screen-space reflection SRV
 // UintRootConstan1 is depth texture SRV
@@ -16,14 +16,14 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
 
     uint2 screenAddress = (uint2) (texCoord * screenRes);
     
-    Texture2D<float4> screenSpaceReflection = ResourceDescriptorHeap[UintRootConstant0];
+    Texture2D<float4> screenSpaceReflection = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostProcessing::ScreenSpaceReflections)];
     float3 reflectionColor = screenSpaceReflection[screenAddress].xyz;
     
     // Basically another deferred pass
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     
-    Texture2D<float> depthTexture = ResourceDescriptorHeap[UintRootConstant1];
+    Texture2D<float> depthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::DepthTexture)];
     float depth = depthTexture[input.position.xy];
     
     float linearZ = unprojectDepth(depth, mainCamera.zNear, mainCamera.zFar);

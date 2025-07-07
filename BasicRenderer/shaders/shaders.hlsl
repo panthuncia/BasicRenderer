@@ -1,12 +1,12 @@
 #include "vertex.hlsli"
 #include "utilities.hlsli"
 #include "cbuffers.hlsli"
-#include "structs.hlsli"
+#include "include/structs.hlsli"
 #include "materialflags.hlsli"
-#include "lighting.hlsli"
-#include "gammaCorrection.hlsli"
-#include "outputTypes.hlsli"
-#include "MaterialFlags.hlsli"
+#include "include/lighting.hlsli"
+#include "include/gammaCorrection.hlsli"
+#include "include/outputTypes.hlsli"
+#include "include/materialFlags.hlsli"
 #include "fullscreenVS.hlsli"
 
 PSInput VSMain(uint vertexID : SV_VertexID) {
@@ -266,7 +266,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     
-    Texture2D<float> depthTexture = ResourceDescriptorHeap[UintRootConstant0];
+    Texture2D<float> depthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::DepthTexture)];
     float depth = depthTexture[input.position.xy];
     
     float linearZ = unprojectDepth(depth, mainCamera.zNear, mainCamera.zFar);

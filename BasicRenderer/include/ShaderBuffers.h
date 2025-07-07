@@ -286,26 +286,16 @@ enum SettingsRootConstants {
 };
 
 enum VariableBufferRootConstants {
-    ActiveDrawSetIndicesBufferDescriptorIndex,
-    IndirectCommandBufferDescriptorIndex,
-    MeshletCullingIndirectCommandBufferDescriptorIndex,
-    MeshletCullingBitfieldBufferDescriptorIndex,
     MaxDrawIndex,
 	NumVariableBufferRootConstants
 };
 
 enum TransparencyInfoRootConstants {
-	PPLLHeadBufferDescriptorIndex,
-	PPLLNodeBufferDescriptorIndex,
-	PPLLCounterBufferDescriptorIndex,
     PPLLNodePoolSize,
 	NumTransparencyInfoRootConstants
 };
 
 enum LightClusterRootConstants {
-	LightClusterBufferDescriptorIndex,
-	LightPagesBufferDescriptorIndex,
-	LightPagesCounterDescriptorIndex,
     LightPagesPoolSize,
 	NumLightClusterRootConstants
 };
@@ -317,6 +307,11 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant3,
 	UintRootConstant4,
 	UintRootConstant5,
+	UintRootConstant6,
+	UintRootConstant7,
+	UintRootConstant8,
+	UintRootConstant9,
+	UintRootConstant10,
 	NumMiscUintRootConstants
 };
 

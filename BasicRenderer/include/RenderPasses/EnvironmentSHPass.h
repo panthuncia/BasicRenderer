@@ -41,10 +41,10 @@ public:
 			.WithUnorderedAccess(Builtin::Environment::InfoBuffer);
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		CreatePSO();
 
-		m_environmentBufferUAVDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetUAVShaderVisibleInfo(0).index;
+		m_environmentBufferUAVDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetUAVShaderVisibleInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {

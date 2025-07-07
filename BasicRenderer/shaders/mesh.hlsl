@@ -1,8 +1,8 @@
-#include "vertex.hlsli"
-#include "utilities.hlsli"
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
-#include "loadingUtils.hlsli"
+#include "include/vertex.hlsli"
+#include "include/utilities.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
+#include "include/loadingUtils.hlsli"
 #include "Common/defines.h"
 
 PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint prevBlockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {

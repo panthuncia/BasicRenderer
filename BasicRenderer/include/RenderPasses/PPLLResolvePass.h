@@ -16,15 +16,12 @@
 
 class PPLLResolvePass : public RenderPass {
 public:
-	PPLLResolvePass(std::shared_ptr<PixelBuffer> PPLLHeads, std::shared_ptr<Buffer> PPLLBuffer) {
+	PPLLResolvePass() {
 
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-
-		m_PPLLHeadPointerTexture = PPLLHeads;
-		m_PPLLBuffer = PPLLBuffer;
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) {
@@ -32,10 +29,13 @@ public:
 			.WithRenderTarget(Builtin::Color::HDRColorTarget);
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		CreatePSO();
 
-		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+
+		RegisterSRV(Builtin::PPLL::HeadPointerTexture);
+		RegisterSRV(Builtin::PPLL::DataBuffer);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -74,34 +74,12 @@ public:
 		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
 		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
 
-		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		auto& meshManager = context.meshManager;
-		auto& objectManager = context.objectManager;
-		auto& cameraManager = context.cameraManager;
-		//staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferSRVIndex;
-		//staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferSRVIndex;
-		//staticBufferIndices[MeshletBufferDescriptorIndex] = m_meshletOffsetBufferSRVIndex;
-		//staticBufferIndices[MeshletVerticesBufferDescriptorIndex] = m_meshletVertexIndexBufferSRVIndex;
-		//staticBufferIndices[MeshletTrianglesBufferDescriptorIndex] = m_meshletTriangleBufferSRVIndex;
-		//staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
-		//staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
-		//staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
-
-		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLHeadBufferDescriptorIndex] = m_PPLLHeadPointerTexture->GetSRVInfo(0).index;
-		transparencyInfo[PPLLNodeBufferDescriptorIndex] = m_PPLLBuffer->GetSRVInfo(0).index;
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
-
-		commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
+		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		unsigned int localPSOFlags = 0;
 		if (getImageBasedLightingEnabled()) {
 			localPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
 		}
-
-		// PPLL heads & buffer
-		uint32_t indices[4] = { m_PPLLHeadPointerTexture->GetSRVInfo(0).index, m_PPLLBuffer->GetSRVInfo(0).index };
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, 2, &indices, 0);
 
 		commandList->DrawInstanced(4, 1, 0, 0); // Fullscreen quad
 		return {};
@@ -115,12 +93,12 @@ private:
 	ComPtr<ID3D12PipelineState> pso;
 
 	std::shared_ptr<PixelBuffer> m_pHDRTarget;
-	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
-	std::shared_ptr<Buffer> m_PPLLBuffer;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
+
+	std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
 
 	void CreatePSO() {
 		// Compile shaders
@@ -132,6 +110,8 @@ private:
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		vertexShader = compiledBundle.vertexShader;
 		pixelShader = compiledBundle.pixelShader;
+
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
 
 		D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
 		inputLayoutDesc.pInputElementDescs = nullptr;

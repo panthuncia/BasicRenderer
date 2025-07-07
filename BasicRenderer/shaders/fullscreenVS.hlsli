@@ -1,8 +1,8 @@
 #ifndef __FULLSCREEN_VS_HLSLI__
 #define __FULLSCREEN_VS_HLSLI__
 
-#include "structs.hlsli"
-#include "cbuffers.hlsli"
+#include "include/structs.hlsli"
+#include "include/cbuffers.hlsli"
 
 struct FULLSCREEN_VS_OUTPUT
 {

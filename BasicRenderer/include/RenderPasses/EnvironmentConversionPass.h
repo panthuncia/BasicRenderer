@@ -24,7 +24,7 @@ public:
             .WithRenderTarget(Builtin::Environment::WorkingCubemapGroup);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
 		CreateEnvironmentConversionRootSignature();
 		CreateEnvironmentConversionPSO();

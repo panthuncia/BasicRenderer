@@ -22,7 +22,7 @@ public:
             .WithRenderTarget(Builtin::Environment::PrefilteredCubemapsGroup);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateRootSignature();
         CreatePSO();

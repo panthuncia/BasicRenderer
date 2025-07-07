@@ -1,8 +1,8 @@
-#include "vertex.hlsli"
-#include "cbuffers.hlsli"
-#include "lighting.hlsli"
-#include "outputTypes.hlsli"
-#include "utilities.hlsli"
+#include "include/vertex.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/lighting.hlsli"
+#include "include/outputTypes.hlsli"
+#include "include/utilities.hlsli"
 #include "fullscreenVS.hlsli"
 
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl

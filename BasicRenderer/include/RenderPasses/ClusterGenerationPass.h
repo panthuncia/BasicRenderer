@@ -26,12 +26,12 @@ public:
 			.WithUnorderedAccess(Builtin::Light::ClusterBuffer);
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();
 
-		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
-		m_clusterBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Light::ClusterBuffer)->GetUAVShaderVisibleInfo(0).index;
+		RegisterSRV(Builtin::CameraBuffer);
+		RegisterUAV(Builtin::Light::ClusterBuffer);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -55,13 +55,7 @@ public:
 		auto& objectManager = context.objectManager;
 		auto& cameraManager = context.cameraManager;
 
-		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
-		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
-
-		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
-		lightClusterConstants[LightClusterBufferDescriptorIndex] = m_clusterBufferUAVIndex;
-		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
+		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		auto clusterSize = getClusterSize();
 		commandList->Dispatch(clusterSize.x, clusterSize.y, clusterSize.z);
@@ -73,9 +67,7 @@ public:
 	}
 
 private:
-
-	int m_cameraBufferSRVIndex = -1;
-	int m_clusterBufferUAVIndex = -1;
+	std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
 
 	void CreatePSO() {
 		// Compile the compute shader
@@ -85,6 +77,7 @@ private:
 		shaderInfoBundle.computeShader = { L"shaders/clustering.hlsl", L"CSMain", L"cs_6_6" };
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;

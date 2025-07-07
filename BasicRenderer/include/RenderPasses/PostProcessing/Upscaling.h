@@ -24,11 +24,11 @@ public:
         builder->WithLegacyInterop(Builtin::Color::HDRColorTarget, Builtin::GBuffer::MotionVectors, Builtin::PrimaryCamera::DepthTexture, Builtin::PostProcessing::UpscaledHDR);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
-        m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        m_pMotionVectors = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-		m_pDepthTexture = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pUpscaledHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+    void Setup() override {
+        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+		m_pDepthTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pUpscaledHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {
