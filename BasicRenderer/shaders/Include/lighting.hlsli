@@ -1,16 +1,16 @@
 #ifndef __LIGHTING_HLSLI__
 #define __LIGHTING_HLSLI__
 
-#include "vertex.hlsli"
-#include "structs.hlsli"
-#include "materialFlags.hlsli"
-#include "parallax.hlsli"
-#include "cbuffers.hlsli"
-#include "PBR.hlsli"
-#include "gammaCorrection.hlsli"
-#include "shadows.hlsli"
-#include "constants.hlsli"
-#include "IBL.hlsli"
+#include "include/vertex.hlsli"
+#include "include/structs.hlsli"
+#include "include/materialFlags.hlsli"
+#include "include/parallax.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/PBR.hlsli"
+#include "include/gammaCorrection.hlsli"
+#include "include/shadows.hlsli"
+#include "include/constants.hlsli"
+#include "include/IBL.hlsli"
 
 struct LightFragmentData {
     uint lightType;

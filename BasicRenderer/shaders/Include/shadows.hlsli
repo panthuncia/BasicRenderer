@@ -1,8 +1,8 @@
 #ifndef __SHADOWS_HLSLI__
 #define __SHADOWS_HLSLI__
 
-#include "structs.hlsli"
-#include "utilities.hlsli"
+#include "include/structs.hlsli"
+#include "include/utilities.hlsli"
 
 float calculatePointShadow(float3 fragPosWorldSpace, float3 normal, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz - light.posWorldSpace.xyz;

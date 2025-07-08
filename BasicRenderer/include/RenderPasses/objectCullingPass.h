@@ -239,7 +239,7 @@ private:
 		}
 
 		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/culling.hlsl", L"ObjectCullingCSMain", L"cs_6_6" };
+		shaderInfoBundle.computeShader = { L"shaders/objectCulling.hlsl", L"ObjectCullingCSMain", L"cs_6_6" };
 		shaderInfoBundle.defines = defines;
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
@@ -265,7 +265,7 @@ private:
 
 		defines.push_back({ L"BLEND_OBJECTS", L"1" });
 
-		shaderInfoBundle.computeShader = { L"shaders/culling.hlsl", L"ObjectCullingCSMain", L"cs_6_6" };
+		shaderInfoBundle.computeShader = { L"shaders/objectCulling.hlsl", L"ObjectCullingCSMain", L"cs_6_6" };
 		shaderInfoBundle.defines = defines;
 		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;

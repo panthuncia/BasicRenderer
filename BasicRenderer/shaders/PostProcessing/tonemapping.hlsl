@@ -1,6 +1,6 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
-#include "include/fullscreenVS.hlsli"
+#include "fullscreenVS.hlsli"
 #include "include/gammaCorrection.hlsli"
 
 #define TONEMAP_REINHARD_JODIE 0

@@ -1,9 +1,9 @@
 #ifndef OCCLUSION_CULLING_HLSLI
 #define OCCLUSION_CULLING_HLSLI
 
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
-#include "Misc/sphereScreenExtents.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
+#include "include/misc/sphereScreenExtents.hlsli"
 
 void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection)
 {

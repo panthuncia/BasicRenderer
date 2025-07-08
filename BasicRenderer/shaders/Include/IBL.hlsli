@@ -1,10 +1,9 @@
 #ifndef __IBL_HLSLI__
 #define __IBL_HLSLI__
 
-#include "constants.hlsli"
-#include "cbuffers.hlsli"
-#include "PBRUtilites.hlsli"
-#include "PBR.hlsli"
+#include "include/constants.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/PBR.hlsli"
 
 float3 irradianceSH(float3 n, in const uint environmentIndex, in const uint environmentBufferIndex)
 {

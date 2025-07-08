@@ -213,7 +213,7 @@ private:
 			defines.push_back(occlusionDefine);
 		}
 		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6" };
+		shaderInfoBundle.computeShader = { L"shaders/meshletCulling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6" };
 		shaderInfoBundle.defines = defines;
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
@@ -242,7 +242,7 @@ private:
 		//pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 		//ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_occlusionCullingPSO)));
 
-		shaderInfoBundle.computeShader = { L"shaders/culling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6" };
+		shaderInfoBundle.computeShader = { L"shaders/meshletCulling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6" };
 		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
 

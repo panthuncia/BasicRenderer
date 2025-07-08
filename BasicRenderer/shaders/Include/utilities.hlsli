@@ -1,12 +1,12 @@
 #ifndef __UTILITY_HLSL__
 #define __UTILITY_HLSL__
-#include "structs.hlsli"
-#include "cbuffers.hlsli"
-#include "vertex.hlsli"
-#include "materialFlags.hlsli"
-#include "parallax.hlsli"
-#include "gammaCorrection.hlsli"
-#include "constants.hlsli"
+#include "include/structs.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/vertex.hlsli"
+#include "include/materialFlags.hlsli"
+#include "include/parallax.hlsli"
+#include "include/gammaCorrection.hlsli"
+#include "include/constants.hlsli"
 
 // Basic blinn-phong for uint visualization
 float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {

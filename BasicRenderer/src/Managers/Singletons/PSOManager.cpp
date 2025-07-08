@@ -1070,12 +1070,19 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
                         }
 
                         std::string identifier = std::move(rawText);
+                        if (identifier == "Builtin::GBuffer::Normals") {
+                            spdlog::info("");
+                        }
                         if (replacementMap.count(identifier)) {
                             replacements.push_back({
                             ts_node_start_byte(node),
                             ts_node_end_byte(node),
                             replacementMap.at(identifier)
                             });
+                        }
+                        else {
+                            throw std::runtime_error(
+								"ResourceDescriptorIndex identifier does not have mapped replacement: " + identifier);
                         }
                     }
                 }
@@ -1112,8 +1119,12 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
         processBody(body, processBody);
     }
 
+	// Sort replacements by startByte
+    std::sort(replacements.begin(), replacements.end(),
+        [](const Replacement& a, const Replacement& b) {
+            return a.startByte < b.startByte;
+		});
 
-    // once you have replacements[] sorted in ascending startByte:
     std::string source(preprocessedSource, sourceSize);
     std::string out;
     size_t cursor = 0;
@@ -1124,6 +1135,130 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
     }
     out.append(source, cursor);
 
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+
+    return out;
+}
+
+struct Range { uint32_t start, end; };
+std::string
+pruneUnusedCode(const char* preprocessedSource,
+    size_t       sourceSize,
+    const std::string& entryPointName,
+    const std::unordered_map<std::string, std::string>& replacementMap)
+{
+    TSParser* parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_hlsl());
+    TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, sourceSize);
+    TSNode root = ts_tree_root_node(tree);
+
+    std::unordered_map<std::string, TSNode> bodyMap, defMap;
+    uint32_t topCount = ts_node_child_count(root);
+    for (uint32_t i = 0; i < topCount; ++i) {
+        TSNode node = ts_node_child(root, i);
+        if (std::string(ts_node_type(node)) != "function_definition") continue;
+
+        // extract the function name
+        TSNode decl1 = ts_node_child_by_field_name(node, "declarator", strlen("declarator"));
+        TSNode decl2 = !ts_node_is_null(decl1)
+            ? ts_node_child_by_field_name(decl1, "declarator", strlen("declarator"))
+            : TSNode{};
+        TSNode nameNode = {};
+        if (!ts_node_is_null(decl2) && std::string(ts_node_type(decl2)) == "identifier") {
+            nameNode = decl2;
+        }
+        else if (!ts_node_is_null(decl2)) {
+            nameNode = ts_node_child_by_field_name(decl2, "name", strlen("name"));
+        }
+        if (ts_node_is_null(nameNode)) continue;
+
+        auto s = ts_node_start_byte(nameNode);
+        auto e = ts_node_end_byte(nameNode);
+        std::string fnName(preprocessedSource + s, e - s);
+
+        // store the full def node and its body
+        defMap[fnName] = node;
+        bodyMap[fnName] = ts_node_child_by_field_name(node, "body", strlen("body"));
+    }
+
+    // BFS from entryPointName to find reachable functions
+    std::unordered_set<std::string> visited{ entryPointName };
+    std::vector<std::string> work{ entryPointName };
+
+    auto enqueueCalls = [&](TSNode body) {
+        std::function<void(TSNode)> walk = [&](TSNode n) {
+            if (ts_node_is_null(n)) return;
+            if (std::string(ts_node_type(n)) == "call_expression") {
+                TSNode fn = ts_node_child_by_field_name(n, "function", strlen("function"));
+                if (!ts_node_is_null(fn)) {
+                    uint32_t ss = ts_node_start_byte(fn), ee = ts_node_end_byte(fn);
+                    std::string called(preprocessedSource + ss, ee - ss);
+                    auto l = called.find_first_not_of(" \t\r\n"),
+                        r = called.find_last_not_of(" \t\r\n");
+                    if (l != std::string::npos && r != std::string::npos)
+                        called = called.substr(l, r - l + 1);
+                    if (bodyMap.count(called) && !visited.count(called)) {
+                        visited.insert(called);
+                        work.push_back(called);
+                    }
+                }
+            }
+            uint32_t c = ts_node_child_count(n);
+            for (uint32_t i = 0; i < c; ++i) walk(ts_node_child(n, i));
+            };
+        walk(body);
+        };
+
+    while (!work.empty()) {
+        auto fn = work.back(); work.pop_back();
+        auto it = bodyMap.find(fn);
+        if (it != bodyMap.end())
+            enqueueCalls(it->second);
+    }
+
+    std::vector<Range> removeRanges;
+    for (auto const& kv : defMap) {
+        if (!visited.count(kv.first)) {
+            TSNode defNode = kv.second;
+            removeRanges.push_back({
+                ts_node_start_byte(defNode),
+                ts_node_end_byte(defNode)
+                });
+        }
+    }
+
+    // merge overlapping removeRanges
+    std::sort(removeRanges.begin(), removeRanges.end(),
+        [](auto& a, auto& b) { return a.start < b.start; });
+    std::vector<Range> merged;
+    for (auto& r : removeRanges) {
+        if (merged.empty() || r.start > merged.back().end) {
+            merged.push_back(r);
+        }
+        else {
+            merged.back().end = std::max(merged.back().end, r.end);
+        }
+    }
+
+    // keepRanges as complement of merged removeRanges
+    std::vector<Range> keep;
+    uint32_t lastEnd = 0;
+    for (auto& r : merged) {
+        if (lastEnd < r.start)
+            keep.push_back({ lastEnd, r.start });
+        lastEnd = std::max(lastEnd, r.end);
+    }
+    if (lastEnd < sourceSize)
+        keep.push_back({ lastEnd, (uint32_t)sourceSize });
+
+    // splice keepRanges together
+    std::string out;
+    out.reserve(sourceSize);
+    for (auto& r : keep)
+        out.append(preprocessedSource + r.start, r.end - r.start);
+
+    // cleanup
     ts_tree_delete(tree);
     ts_parser_delete(parser);
 
@@ -1162,6 +1297,22 @@ void PSOManager::GetPreprocessedBlob(
     );
 
     preProcessedResult->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&outBlob), nullptr);
+}
+
+void pruneUnusedCodeForSlot(
+	std::string& inOutSource,
+    const std::optional<ShaderInfo>& slot)
+{
+    if (!slot)
+        return;
+    // Prune unused code
+    std::string prunedSource = pruneUnusedCode(
+        inOutSource.c_str(),
+        inOutSource.length(),
+        ws2s(slot->entryPoint),
+        {}
+    );
+	inOutSource = std::move(prunedSource);
 }
 
 void parseBRSLResourceIdentifiersForSlot(
@@ -1279,6 +1430,12 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     auto newPixel = rewriteResourceDescriptorIndexCallsForSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer, replacementMap);
     auto newVertex = rewriteResourceDescriptorIndexCallsForSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer, replacementMap);
 	auto newCompute = rewriteResourceDescriptorIndexCallsForSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer, replacementMap);
+
+	pruneUnusedCodeForSlot(newAmplification, info.amplificationShader);
+	pruneUnusedCodeForSlot(newMesh, info.meshShader);
+	pruneUnusedCodeForSlot(newPixel, info.pixelShader);
+	pruneUnusedCodeForSlot(newVertex, info.vertexShader);
+	pruneUnusedCodeForSlot(newCompute, info.computeShader);
 
     if (!newAmplification.empty()) {
         amplificationBuffer.Ptr = newAmplification.data();
