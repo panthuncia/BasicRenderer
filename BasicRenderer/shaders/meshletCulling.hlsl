@@ -79,7 +79,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
         
 #if defined (OCCLUSION_CULLING)
         bool occlusionCulled = false;
-        OcclusionCulling(occlusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
+        OcclusionCulling(occlusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection, LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX);
         
         bCulled |= occlusionCulled;
 #endif

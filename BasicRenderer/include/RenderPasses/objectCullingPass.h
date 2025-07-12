@@ -76,6 +76,8 @@ public:
 
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
+		unsigned int drawRootConstants[NumDrawInfoRootConstants] = {};
+
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
 
 		unsigned int numCascades = getNumDirectionalLightCascades();
@@ -90,6 +92,9 @@ public:
 			unsigned int numThreadGroups = std::ceil(numOpaqueDraws / 64.0);
 			// First, process buffer for main camera
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+
+			drawRootConstants[MaxDrawIndex] = numOpaqueDraws-1;
+			commandList->SetComputeRoot32BitConstants(DrawInfoRootSignatureIndex, NumDrawInfoRootConstants, drawRootConstants, 0);
 
 			miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
@@ -131,6 +136,9 @@ public:
 			unsigned int numThreadGroups = std::ceil(numAlphaTestDraws / 64.0);
 
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+
+			drawRootConstants[MaxDrawIndex] = numAlphaTestDraws - 1;
+			commandList->SetComputeRoot32BitConstants(DrawInfoRootSignatureIndex, NumDrawInfoRootConstants, drawRootConstants, 0);
 
 			miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 			miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
@@ -175,6 +183,9 @@ public:
 				unsigned int numThreadGroups = std::ceil(numBlendDraws / 64.0);
 
 				commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+
+				drawRootConstants[MaxDrawIndex] = numBlendDraws - 1;
+				commandList->SetComputeRoot32BitConstants(DrawInfoRootSignatureIndex, NumDrawInfoRootConstants, drawRootConstants, 0);
 
 				miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 				miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;

@@ -60,7 +60,7 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 #if defined (OCCLUSION_CULLING)
 
     bool occlusionCulled = false;
-    OcclusionCulling(occlusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection);
+    OcclusionCulling(occlusionCulled, camera, viewSpaceCenter.xyz, -viewSpaceCenter.z, scaledBoundingRadius, camera.viewProjection, LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX);
     if (occlusionCulled)
     {
         // Update bitfield

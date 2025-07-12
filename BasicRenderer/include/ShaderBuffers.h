@@ -251,7 +251,7 @@ enum RootSignatureLayout {
     PerMeshRootSignatureIndex,
 	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
-	VariableBufferRootSignatureIndex,
+	DrawInfoRootSignatureIndex,
 	TransparencyInfoRootSignatureIndex,
 	LightClusterRootSignatureIndex,
 	MiscUintRootSignatureIndex,
@@ -284,9 +284,9 @@ enum SettingsRootConstants {
 	NumSettingsRootConstants
 };
 
-enum VariableBufferRootConstants {
+enum DrawInfoRootConstants {
     MaxDrawIndex,
-	NumVariableBufferRootConstants
+	NumDrawInfoRootConstants
 };
 
 enum TransparencyInfoRootConstants {

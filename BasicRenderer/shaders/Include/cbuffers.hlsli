@@ -29,7 +29,7 @@ cbuffer Settings : register(b4) {
     bool enableGTAO;
 }
 
-cbuffer variableBufferInfo : register(b5) {
+cbuffer DrawInfo : register(b5) {
     uint maxDrawIndex;
 }
 

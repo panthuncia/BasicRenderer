@@ -5,7 +5,7 @@
 #include "include/structs.hlsli"
 #include "include/misc/sphereScreenExtents.hlsli"
 
-void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection)
+void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewSpaceCenter, float boundingSphereDepth, float scaledBoundingRadius, matrix viewProjection, uint depthMapDescriptorIndex)
 {
     // Occlusion culling
     float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
@@ -37,7 +37,7 @@ void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewS
     float4 occlusionDepth;
     if (camera.depthBufferArrayIndex < 0)
     { // Not a texture array
-        Texture2D<float> depthBuffer = ResourceDescriptorHeap[UintRootConstant2];
+        Texture2D<float> depthBuffer = ResourceDescriptorHeap[depthMapDescriptorIndex];
         occlusionDepth = float4(
             depthBuffer.SampleLevel(g_pointClamp, vUV.xy, fMipLevel),
             depthBuffer.SampleLevel(g_pointClamp, vUV.zy, fMipLevel),
@@ -46,7 +46,7 @@ void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewS
     }
     else
     {
-        Texture2DArray<float> depthBuffer = ResourceDescriptorHeap[UintRootConstant2];
+        Texture2DArray<float> depthBuffer = ResourceDescriptorHeap[depthMapDescriptorIndex];
         occlusionDepth = float4(
             depthBuffer.SampleLevel(g_pointClamp, float3(vUV.xy, camera.depthBufferArrayIndex), fMipLevel),
             depthBuffer.SampleLevel(g_pointClamp, float3(vUV.zy, camera.depthBufferArrayIndex), fMipLevel),

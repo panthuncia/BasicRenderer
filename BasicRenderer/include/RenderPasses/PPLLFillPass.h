@@ -61,8 +61,8 @@ public:
 		}
 		if (m_meshShaders) {
 			builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
+			builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
 			if (m_indirect) {
-				builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
 				builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
 			}
 		}
@@ -78,9 +78,9 @@ public:
 		RegisterUAV(Builtin::PPLL::HeadPointerTexture);
 		if (m_indirect) {
 			m_primaryCameraBlendIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
-			if (m_meshShaders) {
-				m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
-			}
+		}
+		if (m_meshShaders) {
+			m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		}
 
 		m_PPLLCounter = m_resourceRegistryView->Request<Buffer>(Builtin::PPLL::Counter);
@@ -198,9 +198,11 @@ private:
 		transparencyInfo[PPLLNodePoolSize] = m_numPPLLNodes;
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
 	
-		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
-		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+		if (m_meshShaders) {
+			unsigned int misc[NumMiscUintRootConstants] = {};
+			misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
+			commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+		}
 	}
 
 	void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {

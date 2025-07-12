@@ -1780,11 +1780,11 @@ void PSOManager::createRootSignature() {
     parameters[3].Constants.Num32BitValues = NumSettingsRootConstants;
     parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-    // Variable buffer indices
+    // Draw info
     parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[4].Constants.ShaderRegister = 5;
     parameters[4].Constants.RegisterSpace = 0;
-    parameters[4].Constants.Num32BitValues = NumVariableBufferRootConstants;
+    parameters[4].Constants.Num32BitValues = NumDrawInfoRootConstants;
     parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // transparency info
