@@ -25,7 +25,7 @@ public:
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) {
-		builder->WithShaderResource(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::DataBuffer)
+		builder->WithShaderResource(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::DataBuffer, Builtin::CameraBuffer)
 			.WithRenderTarget(Builtin::Color::HDRColorTarget);
 	}
 
@@ -36,6 +36,7 @@ public:
 
 		RegisterSRV(Builtin::PPLL::HeadPointerTexture);
 		RegisterSRV(Builtin::PPLL::DataBuffer);
+		RegisterSRV(Builtin::CameraBuffer);
 	}
 
 	PassReturn Execute(RenderContext& context) override {

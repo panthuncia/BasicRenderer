@@ -328,7 +328,7 @@ void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, 
         ret.alpha = 1.0; // Opaque objects
         if (enableGTAO) {
             float2 pixelCoordinates = input.position.xy;
-            Texture2D<uint> aoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GTAO::OutputAOTerm)];
+            Texture2D<uint> aoTexture = ResourceDescriptorHeap[OptionalResourceDescriptorIndex(Builtin::GTAO::OutputAOTerm)];
             ret.diffuseAmbientOcclusion = min(materialInfo.ambientOcclusion, float(aoTexture[pixelCoordinates].x) / 255.0);
         } else {
             ret.diffuseAmbientOcclusion = materialInfo.ambientOcclusion;

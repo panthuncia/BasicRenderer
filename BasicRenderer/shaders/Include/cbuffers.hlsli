@@ -77,6 +77,30 @@ cbuffer ResourceDescriptorIndices : register(b10) {
     uint ResourceDescriptorIndex13;
     uint ResourceDescriptorIndex14;
     uint ResourceDescriptorIndex15;
+    uint ResourceDescriptorIndex16;
+    uint ResourceDescriptorIndex17;
+    uint ResourceDescriptorIndex18;
+    uint ResourceDescriptorIndex19;
+    uint ResourceDescriptorIndex20;
+    uint ResourceDescriptorIndex21;
+    uint ResourceDescriptorIndex22;
+    uint ResourceDescriptorIndex23;
+    uint ResourceDescriptorIndex24;
+    uint ResourceDescriptorIndex25;
+    uint ResourceDescriptorIndex26;
+    uint ResourceDescriptorIndex27;
+    uint ResourceDescriptorIndex28;
+    uint ResourceDescriptorIndex29;
+    uint ResourceDescriptorIndex30;
+    uint ResourceDescriptorIndex31;
+    uint ResourceDescriptorIndex32;
+    uint ResourceDescriptorIndex33;
+    uint ResourceDescriptorIndex34;
+    uint ResourceDescriptorIndex35;
+    uint ResourceDescriptorIndex36;
+    uint ResourceDescriptorIndex37;
+    uint ResourceDescriptorIndex38;
+    uint ResourceDescriptorIndex39;
 };
 
 

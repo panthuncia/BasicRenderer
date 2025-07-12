@@ -43,8 +43,8 @@ public:
 
 	void Setup() override {
 		CreatePSO();
-
-		m_environmentBufferUAVDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetUAVShaderVisibleInfo(0).index;
+		
+		RegisterUAV(Builtin::Environment::InfoBuffer, 0);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -64,10 +64,11 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
+		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+
 		// Root parameters
 		unsigned int miscParams[NumMiscUintRootConstants] = { };
 		miscParams[UintRootConstant1] = m_samplerIndex; // Sampler index
-		miscParams[UintRootConstant2] = m_environmentBufferUAVDescriptorIndex;
 
 		float miscFloatParams[NumMiscFloatRootConstants] = { };
 
@@ -76,7 +77,7 @@ public:
 		for (auto& env : environments) {
 			auto cubemapRes = env->GetReflectionCubemapResolution();
 			miscParams[UintRootConstant0] = cubemapRes; // Resolution
-			miscParams[UintRootConstant3] = env->GetEnvironmentIndex(); // Environment index
+			miscParams[UintRootConstant2] = env->GetEnvironmentIndex(); // Environment index
 
 			//miscFloatParams[FloatRootConstant0] =  (4.0f * XM_PI / (cubemapRes * cubemapRes * 6)); // Weight
 
@@ -98,7 +99,7 @@ public:
 
 private:
 
-	int m_environmentBufferUAVDescriptorIndex = -1;
+	PipelineResources m_resourceDescriptorBindings;
 
 	void CreatePSO() {
 		// Compile the compute shader
@@ -107,6 +108,7 @@ private:
 		shaderInfoBundle.computeShader = { L"shaders/SphericalHarmonics.hlsl", L"CSMain", L"cs_6_6" };
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;

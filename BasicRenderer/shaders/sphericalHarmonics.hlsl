@@ -13,7 +13,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
     float weight = FloatRootConstant0;
     uint samplerIndex = UintRootConstant1;
     uint environmentBufferDescriptorIndex = UintRootConstant2;
-    uint environmentIndex = UintRootConstant3;
+    uint environmentIndex = UintRootConstant2;
 	
     ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
     RWStructuredBuffer<EnvironmentInfo> environments = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Environment::InfoBuffer)];
