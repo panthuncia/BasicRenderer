@@ -156,7 +156,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool w
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
@@ -206,7 +206,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, 
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 
@@ -267,7 +267,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState,
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
@@ -322,7 +322,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bo
     auto& device = DeviceManager::GetInstance().GetDevice();
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPSO(
@@ -411,7 +411,7 @@ PipelineState PSOManager::CreateMeshPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateShadowMeshPSO(
@@ -497,7 +497,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPrePassPSO(
@@ -594,7 +594,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPPLLPSO(
@@ -673,7 +673,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
     ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags) {
@@ -756,7 +756,7 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags) {
     if (FAILED(hr)) {
         throw std::runtime_error("Failed to create debug PSO");
     }
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlotMap };
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
@@ -872,7 +872,7 @@ void BuildFunctionDefs(std::unordered_map<std::string, std::vector<TSNode>>& fun
     }
 }
 
-void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outIdentifiers, const DxcBuffer* pBuffer, const std::string& entryPointName) {
+void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outMandatoryIdentifiers, std::unordered_set<std::string>& outOptionalIdentifiers, const DxcBuffer* pBuffer, const std::string& entryPointName) {
     const char* preprocessedSource = static_cast<const char*>(pBuffer->Ptr);
     size_t sourceSize = pBuffer->Size;
 
@@ -924,8 +924,7 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outIdentifier
                 if (l != std::string::npos && r != std::string::npos)
                     funcName = funcName.substr(l, r - l + 1);
 
-
-                if (funcName == "ResourceDescriptorIndex") {
+                auto parseBuiltin = [&]() -> std::string {
                     TSNode argList = ts_node_child_by_field_name(node, "arguments", 9);
                     if (ts_node_named_child_count(argList) == 1) {
                         TSNode argNode = ts_node_named_child(argList, 0);
@@ -940,19 +939,15 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outIdentifier
                             rawText = rawText.substr(1, rawText.size() - 2);
                         }
 
-                        std::string identifier = std::move(rawText);
-                        outIdentifiers.insert(identifier);
-                        //// Assign slot if not already assigned
-                        //if (!indexMap.contains(identifier)) {
-                        //    indexMap[identifier] = "UintRootConstant" + std::to_string(nextIndex++);
-                        //}
-
-                        //replacements.push_back({
-                        //    ts_node_start_byte(node),
-                        //    ts_node_end_byte(node),
-                        //    indexMap[identifier]
-                        //    });
+                        return std::move(rawText);
                     }
+					};
+
+                if (funcName == "ResourceDescriptorIndex") {
+                    outMandatoryIdentifiers.insert(parseBuiltin());
+                }
+                else if (funcName == "OptionalResourceDescriptorIndex") {
+                    outOptionalIdentifiers.insert(parseBuiltin());
                 }
                 else {
                     // Otherwise, a normal function call:
@@ -1058,7 +1053,7 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
                     funcName = funcName.substr(l, r - l + 1);
 
 
-                if (funcName == "ResourceDescriptorIndex") {
+                if (funcName == "ResourceDescriptorIndex" || funcName == "OptionalResourceDescriptorIndex") {
                     TSNode argList = ts_node_child_by_field_name(node, "arguments", 9);
                     if (ts_node_named_child_count(argList) == 1) {
                         TSNode argNode = ts_node_named_child(argList, 0);
@@ -1144,6 +1139,41 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
     ts_parser_delete(parser);
 
     return out;
+}
+
+static uint32_t
+shrinkToIncludeDecorators(const char* src, uint32_t origStart)
+{
+    uint32_t newStart = origStart;
+    while (newStart > 0) {
+        // find the '\n' that ends the *previous* line
+        auto prevNL = std::string_view(src, newStart).rfind('\n');
+        if (prevNL == std::string::npos) break;
+        // prevNL points at the '\n' before the declaration line,
+        // so the line we care about runs from (prevNL_of_that + 1) .. prevNL-1
+        size_t lineEnd = prevNL;
+        size_t lineBegin = std::string_view(src, prevNL).rfind('\n');
+        if (lineBegin == std::string_view::npos) lineBegin = 0;
+        else                                    lineBegin += 1;
+
+        // extract that line and trim it
+        auto   len = lineEnd - lineBegin;
+        auto   sv = std::string_view(src + lineBegin, len);
+        auto   first = sv.find_first_not_of(" \t\r\n");
+        if (first == std::string_view::npos) {
+            // blank line: skip it, but keep going up
+            newStart = (uint32_t)lineBegin;
+            continue;
+        }
+        if (sv[first] == '[') {
+            // decorator: include this line too
+            newStart = (uint32_t)lineBegin;
+            continue;
+        }
+        // otherwise: stop looking
+        break;
+    }
+    return newStart;
 }
 
 struct Range { uint32_t start, end; };
@@ -1247,13 +1277,13 @@ pruneUnusedCode(const char* preprocessedSource,
     std::vector<Range> removeRanges;
     for (auto const& kv : defMap) {
         if (!visited.count(kv.first)) {
-            for (auto& body : kv.second) {
-                // If this function is not reachable, remove its body
-                removeRanges.push_back({
-                    ts_node_start_byte(body),
-                    ts_node_end_byte(body)
-                    });
-			}
+            for (auto& defNode : kv.second) {
+                uint32_t origStart = ts_node_start_byte(defNode);
+                uint32_t origEnd = ts_node_end_byte(defNode);
+                uint32_t adjStart = shrinkToIncludeDecorators(
+                    preprocessedSource, origStart);
+                removeRanges.push_back({ adjStart, origEnd });
+            }
         }
     }
 
@@ -1348,12 +1378,13 @@ void parseBRSLResourceIdentifiersForSlot(
     const std::optional<ShaderInfo>& slot,
     const std::vector<DxcDefine>& defines,
 	const DxcBuffer* preprocessedBuffer,
-    std::unordered_set<std::string>& outUsedIDs)
+    std::unordered_set<std::string>& outMandatoryIDs,
+    std::unordered_set<std::string>& outOptionalIDs)
 {
     if (!slot)
         return;
     
-    ParseBRSLResourceIdentifiers(outUsedIDs, preprocessedBuffer, ws2s(slot->entryPoint));
+    ParseBRSLResourceIdentifiers(outMandatoryIDs, outOptionalIDs, preprocessedBuffer, ws2s(slot->entryPoint));
 }
 
 std::string rewriteResourceDescriptorIndexCallsForSlot(
@@ -1437,22 +1468,31 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     PreprocessShaderSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer);
     PreprocessShaderSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer);
 
-	std::unordered_set<std::string> usedResourceIDs;
-    parseBRSLResourceIdentifiersForSlot(info.amplificationShader, info.defines, &amplificationBuffer, usedResourceIDs);
-	parseBRSLResourceIdentifiersForSlot(info.meshShader, info.defines, &meshBuffer, usedResourceIDs);
-    parseBRSLResourceIdentifiersForSlot(info.pixelShader, info.defines, &pixelBuffer, usedResourceIDs);
-    parseBRSLResourceIdentifiersForSlot(info.vertexShader, info.defines, &vertexBuffer, usedResourceIDs);
-    parseBRSLResourceIdentifiersForSlot(info.computeShader, info.defines, &computeBuffer, usedResourceIDs);
+	std::unordered_set<std::string> usedMandatoryIDs;
+	std::unordered_set<std::string> usedOptionalIDs;
+    parseBRSLResourceIdentifiersForSlot(info.amplificationShader, info.defines, &amplificationBuffer, usedMandatoryIDs, usedOptionalIDs);
+	parseBRSLResourceIdentifiersForSlot(info.meshShader, info.defines, &meshBuffer, usedMandatoryIDs, usedOptionalIDs);
+    parseBRSLResourceIdentifiersForSlot(info.pixelShader, info.defines, &pixelBuffer, usedMandatoryIDs, usedOptionalIDs);
+    parseBRSLResourceIdentifiersForSlot(info.vertexShader, info.defines, &vertexBuffer, usedMandatoryIDs, usedOptionalIDs);
+    parseBRSLResourceIdentifiersForSlot(info.computeShader, info.defines, &computeBuffer, usedMandatoryIDs, usedOptionalIDs);
 
 	std::unordered_map<std::string, std::string> replacementMap;
 	uint32_t nextIndex = 0;
     ShaderBundle bundle = {};
-    std::vector<std::string> usedResourceIDsVec;
-    for (std::string entry : usedResourceIDs) {
-		bundle.resourceDescriptorSlotMap.push_back(entry);
+    std::vector<std::string> usedMandatoryResourceIDsVec;
+    for (std::string entry : usedMandatoryIDs) {
+		bundle.resourceDescriptorSlots.mandatoryResourceDescriptorSlots.push_back(entry);
 		replacementMap[entry] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
-		usedResourceIDsVec.push_back(entry);
+        usedMandatoryResourceIDsVec.push_back(entry);
     }
+
+	std::vector<std::string> usedOptionalResourceIDsVec;
+    for (std::string entry : usedOptionalIDs) {
+        bundle.resourceDescriptorSlots.optionalResourceDescriptorSlots.push_back(entry);
+        replacementMap[entry] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
+        usedOptionalResourceIDsVec.push_back(entry);
+    }
+
 
 	auto newAmplification = rewriteResourceDescriptorIndexCallsForSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer, replacementMap);
     auto newMesh = rewriteResourceDescriptorIndexCallsForSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer, replacementMap);
@@ -1493,7 +1533,11 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
 	CompileShaderForSlot(info.vertexShader, info.defines, vertexBuffer, bundle.vertexShader);
     CompileShaderForSlot(info.computeShader, info.defines, computeBuffer, bundle.computeShader);
 
-	bundle.resourceIDsHash = hash_list(usedResourceIDsVec);
+    std::vector<std::string> combinedIds = {};
+	combinedIds.insert(combinedIds.end(), usedMandatoryResourceIDsVec.begin(), usedMandatoryResourceIDsVec.end());
+	combinedIds.insert(combinedIds.end(), usedOptionalResourceIDsVec.begin(), usedOptionalResourceIDsVec.end());
+
+	bundle.resourceIDsHash = hash_list(combinedIds);
 
 	return bundle;
 }

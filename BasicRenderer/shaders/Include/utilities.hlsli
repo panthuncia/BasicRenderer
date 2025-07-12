@@ -245,7 +245,7 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     
     if (enableGTAO)
     {
-        Texture2D<uint> aoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GTAO::OutputAOTerm)];
+        Texture2D<uint> aoTexture = ResourceDescriptorHeap[OptionalResourceDescriptorIndex(Builtin::GTAO::OutputAOTerm)];
         ret.diffuseAmbientOcclusion = min(baseColorSample.w, float(aoTexture[pixelCoordinates].x) / 255.0);
     }
     else

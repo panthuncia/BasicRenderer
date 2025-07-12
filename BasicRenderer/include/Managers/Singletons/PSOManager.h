@@ -73,7 +73,7 @@ struct ShaderBundle {
     Microsoft::WRL::ComPtr<ID3DBlob> amplificationShader;
     Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
     Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-   std::vector<ResourceIdentifier> resourceDescriptorSlotMap;
+	PipelineResources resourceDescriptorSlots;
 	uint64_t resourceIDsHash = 0;
 };
 

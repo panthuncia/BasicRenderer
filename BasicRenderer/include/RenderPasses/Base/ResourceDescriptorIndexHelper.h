@@ -85,9 +85,12 @@ public:
 		auto resourceIndexOrDynamic = GetResourceIndexOrDynamicResource(id, resource, accessor);
 		m_resourceMap[id.hash] = ResourceAndAccessor{ resourceIndexOrDynamic, accessor };
 	}
-	unsigned int GetResourceDescriptorIndex(size_t hash, const std::string* name = nullptr) const {
+	unsigned int GetResourceDescriptorIndex(size_t hash, bool allowFail = true, const std::string* name = nullptr) const {
 		auto it = m_resourceMap.find(hash);
 		if (it == m_resourceMap.end()) {
+			if (allowFail) {
+				return -1; // Return max value if the resource is not found and allowFail is true
+			}
 			std::string resourceName = name ? *name : "Unknown";
 			throw std::runtime_error("Resource "+ resourceName +" not found!");
 		}
@@ -99,8 +102,8 @@ public:
 			return resourceAndAccessor.resource.index;
 		}
 	}
-	unsigned int GetResourceDescriptorIndex(ResourceIdentifier& id) {
-		return GetResourceDescriptorIndex(id.hash);
+	unsigned int GetResourceDescriptorIndex(ResourceIdentifier& id, bool allowFail = true) {
+		return GetResourceDescriptorIndex(id.hash, allowFail);
 	}
 private:
 	std::unordered_map<size_t, ResourceAndAccessor> m_resourceMap; // Maps resource identifiers to descriptor indices

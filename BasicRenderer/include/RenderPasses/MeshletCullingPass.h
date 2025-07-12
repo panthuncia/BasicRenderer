@@ -217,7 +217,7 @@ private:
 		shaderInfoBundle.defines = defines;
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
@@ -255,7 +255,7 @@ private:
 	ComPtr<ID3D12PipelineState> m_frustrumCullingPSO;
 	ComPtr<ID3D12PipelineState> m_clearPSO;
 
-	std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
+	PipelineResources m_resourceDescriptorBindings;
 
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingIndirectCommandBuffer = nullptr;

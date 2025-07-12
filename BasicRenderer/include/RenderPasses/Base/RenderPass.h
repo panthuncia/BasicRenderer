@@ -16,6 +16,7 @@
 #include "Render/ResourceRegistry.h"
 #include "../../../generated/BuiltinResources.h"
 #include "ResourceDescriptorIndexHelper.h"
+#include "Render/PipelineState.h"
 
 struct RenderPassParameters {
     std::vector<ResourceAndRange> shaderResources;
@@ -59,18 +60,20 @@ protected:
 	bool invalidated = true;
 	virtual void DeclareResourceUsages(RenderPassBuilder* builder) {};
 
-	void BindResourceDescriptorIndices(ID3D12GraphicsCommandList7* commandList, const std::vector<ResourceIdentifier>& resourceDescriptorIndexBindings) {
+	void BindResourceDescriptorIndices(ID3D12GraphicsCommandList7* commandList, const PipelineResources& resources) {
 		unsigned int indices[NumResourceDescriptorIndicesRootConstants] = {};
-		for (int i = 0; i < resourceDescriptorIndexBindings.size(); ++i) {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(resourceDescriptorIndexBindings[i].hash, &resourceDescriptorIndexBindings[i].name);
-#else
-			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(resourceDescriptorIndexBindings[i].hash);
-#endif
+		int i = 0;
+		for (auto& binding : resources.mandatoryResourceDescriptorSlots) {
+			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, false, &binding.name);
+			i++;
+		}
+		for (auto& binding : resources.optionalResourceDescriptorSlots) {
+			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, true, &binding.name);
+			i++;
 		}
 		commandList->SetGraphicsRoot32BitConstants(
 			ResourceDescriptorIndicesRootSignatureIndex,
-			NumResourceDescriptorIndicesRootConstants,
+			i,
 			indices,
 			0
 		);

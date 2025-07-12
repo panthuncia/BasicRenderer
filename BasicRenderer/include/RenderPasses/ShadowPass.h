@@ -154,7 +154,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -178,7 +178,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -203,7 +203,7 @@ private:
                     for (auto& pMesh : meshes) {
                         auto& mesh = *pMesh->GetMesh();
                         auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                        BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                        BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                         commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                         auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
@@ -286,7 +286,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -307,7 +307,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -328,7 +328,7 @@ private:
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
                     auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -421,7 +421,7 @@ private:
             auto numOpaque = context.drawStats.numOpaqueDraws;
             if (numOpaque != 0) {
                 auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
                 commandList->ExecuteIndirect(commandSignature, numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
             }
@@ -429,7 +429,7 @@ private:
             auto numAlphaTest = context.drawStats.numAlphaTestDraws;
             if (numAlphaTest != 0) {
                 auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST | PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_MASK, false);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
                 commandList->ExecuteIndirect(commandSignature, numAlphaTest, alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset);
             }
@@ -437,7 +437,7 @@ private:
             auto numBlend = context.drawStats.numBlendDraws;
             if (numBlend != 0) {
                 auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
                 commandList->ExecuteIndirect(commandSignature, numBlend, blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset);
             }

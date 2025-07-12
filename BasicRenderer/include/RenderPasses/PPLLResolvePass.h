@@ -98,7 +98,7 @@ private:
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
 
-	std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
+	PipelineResources m_resourceDescriptorBindings;
 
 	void CreatePSO() {
 		// Compile shaders
@@ -111,7 +111,7 @@ private:
 		vertexShader = compiledBundle.vertexShader;
 		pixelShader = compiledBundle.pixelShader;
 
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
 		D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
 		inputLayoutDesc.pInputElementDescs = nullptr;

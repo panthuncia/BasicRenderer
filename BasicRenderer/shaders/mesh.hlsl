@@ -175,8 +175,8 @@ void MSMain(
     // Test if this meshlet is culled
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
-    ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
-    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + meshletIndex;
+    //ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
+    //unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + meshletIndex;
     
     //bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
     

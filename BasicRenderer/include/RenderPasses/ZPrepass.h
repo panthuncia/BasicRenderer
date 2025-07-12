@@ -202,9 +202,11 @@ private:
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
-        unsigned int misc[NumMiscUintRootConstants] = {};
-        misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
-        commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+        if (m_indirect && m_meshShaders) {
+            unsigned int misc[NumMiscUintRootConstants] = {};
+            misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
+            commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+        }
     }
 
     void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
@@ -222,7 +224,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -245,7 +247,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -275,7 +277,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -297,7 +299,7 @@ private:
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
                 auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
@@ -323,7 +325,7 @@ private:
 
             auto opaqueIndirectBuffer = m_pPrimaryCameraOpaqueIndirectCommandBuffer;
             auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
-            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
             commandList->SetPipelineState(pso.GetAPIPipelineState());
 
             auto apiResource = opaqueIndirectBuffer->GetAPIResource();
@@ -343,7 +345,7 @@ private:
             auto alphaTestIndirectBuffer = m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
             auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
                 BlendState::BLEND_STATE_MASK, m_wireframe);
-            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
             commandList->SetPipelineState(pso.GetAPIPipelineState());
 
             auto apiResource = alphaTestIndirectBuffer->GetAPIResource();

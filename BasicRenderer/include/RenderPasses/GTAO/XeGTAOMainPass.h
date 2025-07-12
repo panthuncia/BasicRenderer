@@ -85,7 +85,7 @@ private:
 
     uint64_t frameIndex = 0;
 
-    std::vector<ResourceIdentifier> m_resourceDescriptorBindings_High;
+    PipelineResources m_resourceDescriptorBindings_High;
 
     void CreateXeGTAOComputePSO() {
         auto device = DeviceManager::GetInstance().GetDevice();
@@ -117,7 +117,7 @@ private:
 		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		CSGTAOHigh = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSGTAOHigh.Get());
-        m_resourceDescriptorBindings_High = compiledBundle.resourceDescriptorSlotMap;
+        m_resourceDescriptorBindings_High = compiledBundle.resourceDescriptorSlots;
 
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&GTAOHighPSO)));

@@ -123,7 +123,7 @@ public:
 
 private:
 
-	std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
+	PipelineResources m_resourceDescriptorBindings;
 
 	void CreatePSO() {
 		// Compile the compute shader
@@ -133,7 +133,7 @@ private:
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		computeShader = compiledBundle.computeShader;
 
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;

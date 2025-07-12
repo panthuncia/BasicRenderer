@@ -110,7 +110,7 @@ public:
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
-		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
+		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 
 		unsigned int settings[NumSettingsRootConstants] = {};
 		settings[EnableShadows] = getShadowsEnabled();

@@ -96,7 +96,7 @@ private:
 
     std::shared_ptr<PixelBuffer> m_pHDRTarget;
 	std::shared_ptr<PixelBuffer> m_pScreenSpaceReflections;
-    std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
+    PipelineResources m_resourceDescriptorBindings;
 
     bool m_gtaoEnabled = true;
 
@@ -110,7 +110,7 @@ private:
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		vertexShader = compiledBundle.vertexShader;
 		pixelShader = compiledBundle.pixelShader;
-        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
+        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
         inputLayoutDesc.pInputElementDescs = nullptr;

@@ -64,7 +64,7 @@ public:
 private:
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
-    std::vector<ResourceIdentifier> m_resourceDescriptorBindings;
+    PipelineResources m_resourceDescriptorBindings;
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
@@ -77,7 +77,7 @@ private:
 		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
 		vertexShader = compiledBundle.vertexShader;
 		pixelShader = compiledBundle.pixelShader;
-        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlotMap;
+        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
         inputLayoutDesc.pInputElementDescs = nullptr;
