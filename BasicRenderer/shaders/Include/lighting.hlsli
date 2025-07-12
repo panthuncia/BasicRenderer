@@ -204,8 +204,8 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         uint clusterLightCount = 0; // Number of lights in the cluster
 #if defined(PSO_CLUSTERED_LIGHTING)
         
-        StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
-        StructuredBuffer<LightPage> lightPagesBuffer = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
+        StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ClusterBuffer)];
+        StructuredBuffer<LightPage> lightPagesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesBuffer)];
         
         float3 clusterID = ComputeClusterID(fragmentInfo.pixelCoords, fragmentInfo.fragPosViewSpace.z, perFrameBuffer, cameraBuffer[perFrameBuffer.mainCameraIndex]);
         clusterIndex = clusterID.x +

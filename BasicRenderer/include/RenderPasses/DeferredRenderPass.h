@@ -106,10 +106,11 @@ public:
 		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
 		auto pso = PSOManager::GetInstance().GetDeferredPSO(context.globalPSOFlags);
-		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
 		commandList->SetPipelineState(pso.GetAPIPipelineState());
 		auto rootSignature = psoManager.GetRootSignature();
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
+
+		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlotMap());
 
 		unsigned int settings[NumSettingsRootConstants] = {};
 		settings[EnableShadows] = getShadowsEnabled();

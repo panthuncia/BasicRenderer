@@ -14,6 +14,7 @@ struct ResourceIdentifier {
     // e.g. {"Builtin","GBuffer","Normals"}
     std::vector<std::string> segments;
 	size_t hash = 0;
+    std::string name;
     ResourceIdentifier() = default;
 
     // parse "A::B::C"
@@ -26,6 +27,7 @@ struct ResourceIdentifier {
             start = pos + 2;
         }
 		hash = Hasher{}(*this);
+        name = s;
     }
 
     // String constructor

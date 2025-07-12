@@ -54,8 +54,12 @@ protected:
 
 	void BindResourceDescriptorIndices(ID3D12GraphicsCommandList7* commandList, const std::vector<ResourceIdentifier>& resourceDescriptorIndexBindings) {
 		unsigned int indices[NumResourceDescriptorIndicesRootConstants] = {};
-		for (int i = 0; i < NumResourceDescriptorIndicesRootConstants; ++i) {
+		for (int i = 0; i < resourceDescriptorIndexBindings.size(); ++i) {
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(resourceDescriptorIndexBindings[i].hash, &resourceDescriptorIndexBindings[i].name);
+#else
 			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(resourceDescriptorIndexBindings[i].hash);
+#endif
 		}
 		commandList->SetComputeRoot32BitConstants(
 			ResourceDescriptorIndicesRootSignatureIndex,

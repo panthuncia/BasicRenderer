@@ -85,10 +85,11 @@ public:
 		auto resourceIndexOrDynamic = GetResourceIndexOrDynamicResource(id, resource, accessor);
 		m_resourceMap[id.hash] = ResourceAndAccessor{ resourceIndexOrDynamic, accessor };
 	}
-	unsigned int GetResourceDescriptorIndex(size_t hash) const {
+	unsigned int GetResourceDescriptorIndex(size_t hash, const std::string* name = nullptr) const {
 		auto it = m_resourceMap.find(hash);
 		if (it == m_resourceMap.end()) {
-			throw std::runtime_error("Resource not found");
+			std::string resourceName = name ? *name : "Unknown";
+			throw std::runtime_error("Resource "+ resourceName +" not found!");
 		}
 		const auto& resourceAndAccessor = it->second;
 		if (resourceAndAccessor.resource.isDynamic) {

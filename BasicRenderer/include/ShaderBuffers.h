@@ -251,7 +251,6 @@ enum RootSignatureLayout {
     PerMeshRootSignatureIndex,
 	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
-	StaticBufferRootSignatureIndex,
 	VariableBufferRootSignatureIndex,
 	TransparencyInfoRootSignatureIndex,
 	LightClusterRootSignatureIndex,

@@ -39,7 +39,7 @@ Scene::Scene(){
 		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
 		.set<Components::Name>("Scene Root");
 	ECSSceneRoot = ECSSceneRoot;
-    world.set_pipeline(world.get<Components::GameScene>()->pipeline);
+    world.set_pipeline(world.get<Components::GameScene>().pipeline);
 
 	m_renderResSubscription = SettingsManager::GetInstance().addObserver<DirectX::XMUINT2>("renderResolution", [this](const DirectX::XMUINT2& renderRes) {
 		UpdateMainCameraDepths();
@@ -148,10 +148,10 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 void Scene::ActivateRenderable(flecs::entity& entity) {
 	auto& world = ECSManager::GetInstance().GetWorld();
 
-	auto& buffer = entity.get_mut<Components::RenderableObject>()->perObjectCB;
-	auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
-	auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
-	auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+	auto& buffer = entity.get_mut<Components::RenderableObject>().perObjectCB;
+	auto opaqueMeshInstances = entity.try_get<Components::OpaqueMeshInstances>();
+	auto alphaTestMeshInstances = entity.try_get<Components::AlphaTestMeshInstances>();
+	auto blendMeshInstances = entity.try_get<Components::BlendMeshInstances>();
 
 	auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
 	auto drawStats = world.get_mut<Components::DrawStats>();
@@ -161,38 +161,38 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 	if (opaqueMeshInstances) {
 		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
 		for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
-			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+			if (!globalMeshLibrary.meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary.meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
 				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Opaque, useMeshletReorderedVertices);
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
-		drawStats->numOpaqueDraws += opaqueMeshInstances->meshInstances.size();
-		drawStats->numDrawsInScene += opaqueMeshInstances->meshInstances.size();
+		drawStats.numOpaqueDraws += opaqueMeshInstances->meshInstances.size();
+		drawStats.numDrawsInScene += opaqueMeshInstances->meshInstances.size();
 	}
 	if (alphaTestMeshInstances) {
 		//e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
 		for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
-			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+			if (!globalMeshLibrary.meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary.meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
 				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::AlphaTest, useMeshletReorderedVertices);
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
-		drawStats->numAlphaTestDraws += alphaTestMeshInstances->meshInstances.size();
-		drawStats->numDrawsInScene += alphaTestMeshInstances->meshInstances.size();
+		drawStats.numAlphaTestDraws += alphaTestMeshInstances->meshInstances.size();
+		drawStats.numDrawsInScene += alphaTestMeshInstances->meshInstances.size();
 	}
 	if (blendMeshInstances) {
 		//e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
 		for (auto& meshInstance : blendMeshInstances->meshInstances) {
-			if (!globalMeshLibrary->meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
-				globalMeshLibrary->meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
+			if (!globalMeshLibrary.meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
+				globalMeshLibrary.meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
 				m_managerInterface.GetMeshManager()->AddMesh(meshInstance->GetMesh(), MaterialBuckets::Blend, useMeshletReorderedVertices);
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
-		drawStats->numBlendDraws += blendMeshInstances->meshInstances.size();
-		drawStats->numDrawsInScene += blendMeshInstances->meshInstances.size();
+		drawStats.numBlendDraws += blendMeshInstances->meshInstances.size();
+		drawStats.numDrawsInScene += blendMeshInstances->meshInstances.size();
 	}
 
 	auto drawInfo = m_managerInterface.GetObjectManager()->AddObject(buffer, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
@@ -200,19 +200,19 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 	buffer.normalMatrixBufferIndex = drawInfo.normalMatrixIndex;
 	
 	if (drawInfo.opaque.has_value()) {
-		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Opaque, drawStats->numOpaqueDraws);
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Opaque, drawStats.numOpaqueDraws);
 	}
 	if (drawInfo.alphaTest.has_value()) {
-		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, drawStats->numAlphaTestDraws);
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::AlphaTest, drawStats.numAlphaTestDraws);
 	}
 	if (drawInfo.blend.has_value()) {
-		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Blend, drawStats->numBlendDraws);
+		m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForBucket(MaterialBuckets::Blend, drawStats.numBlendDraws);
 	}
 }
 
 void Scene::ActivateLight(flecs::entity& entity) {
 	auto lightInfo = entity.get<Components::Light>();
-	auto newInfo = Components::Light(*lightInfo);
+	auto newInfo = Components::Light(lightInfo);
 	AddLightReturn addInfo = m_managerInterface.GetLightManager()->AddLight(&newInfo.lightInfo, entity.id());
 	entity.set<Components::LightViewInfo>({ addInfo.lightViewInfo });
 	if (addInfo.shadowMap.has_value()) {
@@ -232,7 +232,7 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 	auto camera = entity.get<Components::Camera>();
 
 	Components::Camera newCameraInfo = {};
-	newCameraInfo = *camera;
+	newCameraInfo = camera;
 	auto screenRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	auto depth = CreateDepthMapComponent(screenRes.x, screenRes.y, 1, false);
 	newCameraInfo.info.numDepthMips = NumMips(screenRes.x, screenRes.y);
@@ -267,9 +267,9 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 	std::vector<std::shared_ptr<Skeleton>> skeletonsToAdd;
 	world.defer_begin();
 	query.each([&](flecs::entity entity) {
-		auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
-		auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
-		auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+		auto opaqueMeshInstances = entity.try_get<Components::OpaqueMeshInstances>();
+		auto alphaTestMeshInstances = entity.try_get<Components::AlphaTestMeshInstances>();
+		auto blendMeshInstances = entity.try_get<Components::BlendMeshInstances>();
 
 		// Discard old instances and add new ones
 		if (opaqueMeshInstances) {
@@ -445,7 +445,7 @@ void Scene::Update() {
 
 	for (auto& node : animatedEntitiesByID) {
 		auto& entity = node.second;
-		AnimationController* animationController = entity.get_mut<AnimationController>();
+		AnimationController* animationController = entity.try_get_mut<AnimationController>();
 #if defined(_DEBUG)
 		if (animationController == nullptr) {
 			spdlog::error("AnimationController is null for entity with ID: {}", node.first);
@@ -481,7 +481,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 
         m_managerInterface.GetIndirectCommandBufferManager()->UnregisterBuffers(m_primaryCamera.id());
 
-		m_managerInterface.GetCameraManager()->RemoveCamera(*m_primaryCamera.get<Components::RenderView>());
+		m_managerInterface.GetCameraManager()->RemoveCamera(m_primaryCamera.get<Components::RenderView>());
     }
 
 	SettingsManager::GetInstance().getSettingSetter<float>("maxShadowDistance")(zFar);

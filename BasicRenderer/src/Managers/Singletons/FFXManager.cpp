@@ -79,15 +79,15 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
 	sssrDesc.brdfTexture = getFFXResource(pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
 	sssrDesc.output = getFFXResource(pReflectionsTarget, L"Reflections", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    auto camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
-    auto invViewProjection = DirectX::XMMatrixInverse(nullptr, camera->info.viewProjection);
-    auto prevViewProjection = DirectX::XMMatrixMultiply(camera->info.prevView, camera->info.prevJitteredProjection);
+    auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
+    auto invViewProjection = DirectX::XMMatrixInverse(nullptr, camera.info.viewProjection);
+    auto prevViewProjection = DirectX::XMMatrixMultiply(camera.info.prevView, camera.info.prevJitteredProjection);
 
     DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invViewProjection), invViewProjection);
-    DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.projection), camera->info.jitteredProjection);
-	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invProjection), camera->info.projectionInverse);
-	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.view), camera->info.view);
-	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invView), camera->info.viewInverse);
+    DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.projection), camera.info.jitteredProjection);
+	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invProjection), camera.info.projectionInverse);
+	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.view), camera.info.view);
+	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invView), camera.info.viewInverse);
     DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.prevViewProjection), prevViewProjection);
     sssrDesc.commandList = context.commandList;
     auto renderSize = m_getRenderRes();

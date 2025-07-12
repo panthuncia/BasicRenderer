@@ -33,6 +33,7 @@ public:
 		CreateXeGTAOComputePSO();
 
         RegisterSRV(Builtin::CameraBuffer);
+        RegisterSRV(Builtin::GBuffer::Normals);
     }
 
     PassReturn Execute(RenderContext& context) override {

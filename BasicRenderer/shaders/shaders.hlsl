@@ -1,8 +1,8 @@
-#include "vertex.hlsli"
-#include "utilities.hlsli"
-#include "cbuffers.hlsli"
+#include "include/vertex.hlsli"
+#include "include/utilities.hlsli"
+#include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
-#include "materialflags.hlsli"
+#include "include/materialflags.hlsli"
 #include "include/lighting.hlsli"
 #include "include/gammaCorrection.hlsli"
 #include "include/outputTypes.hlsli"
@@ -212,7 +212,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     FragmentInfo fragmentInfo;
     GetFragmentInfoDirect(input, viewDir, enableGTAO, false, isFrontFace, fragmentInfo);
 
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::EnvironmentInfo::InfoBuffer), isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::Environment::InfoBuffer), isFrontFace);
     
     float3 lighting = lightingOutput.lighting;
     
@@ -291,7 +291,7 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     FragmentInfo fragmentInfo;
     GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
     
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::EnvironmentInfo::InfoBuffer), true);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::Environment::InfoBuffer), true);
 
     
     float3 lighting = lightingOutput.lighting;

@@ -65,9 +65,9 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     
     // Fill the PPLL buffers with the fragment data
     
-    RWTexture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
-    RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
-    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[PPLLNodesCounterDescriptorIndex];
+    RWTexture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::HeadPointerTexture)];
+    RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::DataBuffer)];
+    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::Counter)];
     
     uint2 vScreenAddress = uint2(input.position.xy);
     
@@ -174,8 +174,8 @@ void SortNearest(inout KBUFFER_STRUCT fragments[K_NEAREST]) {
 
 float4 PPLLResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target {
     
-    Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
-    StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
+    Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::HeadPointerTexture)];
+    StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::DataBuffer)];
 
     uint2 pixelCoord = (uint2) input.position.xy;
 

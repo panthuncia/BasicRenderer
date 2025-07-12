@@ -1,3 +1,6 @@
+#ifndef __SPHERE_SCREEN_EXTENTS_HLSLI__
+#define __SPHERE_SCREEN_EXTENTS_HLSLI__
+
 //============================================================================
 // sphere_screen_extents
 //============================================================================
@@ -43,3 +46,5 @@ float4 sphere_screen_extents_ortho(float3 vsPos, float radius, float4x4 proj)
 
     return float4(left, bottom, right, top);
 }
+
+#endif // __SPHERE_SCREEN_EXTENTS_HLSLI__

@@ -206,14 +206,14 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
 
         if (entity.has<Components::RenderableObject>() && entity.has<Components::ObjectDrawInfo>()) {
-            Components::RenderableObject* object = entity.get_mut<Components::RenderableObject>();
-            Components::ObjectDrawInfo* drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
+            Components::RenderableObject& object = entity.get_mut<Components::RenderableObject>();
+            Components::ObjectDrawInfo& drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
 
-            object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
-            object->perObjectCB.modelMatrix = mOut.matrix;
-            m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo->perObjectCBView.get(), object->perObjectCB);
+            object.perObjectCB.prevModelMatrix = object.perObjectCB.modelMatrix;
+            object.perObjectCB.modelMatrix = mOut.matrix;
+            m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo.perObjectCBView.get(), object.perObjectCB);
 
-            auto& modelMatrix = object->perObjectCB.modelMatrix;
+            auto& modelMatrix = object.perObjectCB.modelMatrix;
             XMMATRIX upperLeft3x3 = XMMatrixSet(
                 XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
                 XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
@@ -221,67 +221,67 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
                 0.0f, 0.0f, 0.0f, 1.0f
             );
             XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
-            m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo->normalMatrixView.get(), &normalMat);
+            m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo.normalMatrixView.get(), &normalMat);
         }
 
         if (entity.has<Components::Camera>() && entity.has<Components::RenderView>()) {
             auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
 
-            Components::Camera* camera = entity.get_mut<Components::Camera>();
+            Components::Camera& camera = entity.get_mut<Components::Camera>();
 
 			auto view = XMMatrixInverse(nullptr, cameraModel);
-			DirectX::XMMATRIX projection = camera->info.unjitteredProjection;
-			camera->info.prevJitteredProjection = camera->info.jitteredProjection; // Save previous jittered projection matrix
+			DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
+			camera.info.prevJitteredProjection = camera.info.jitteredProjection; // Save previous jittered projection matrix
             if (m_jitter && entity.has<Components::PrimaryCamera>()) {
                 // Apply jitter
                 auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
-                camera->jitterPixelSpace = jitterPixelSpace;
+                camera.jitterPixelSpace = jitterPixelSpace;
                 DirectX::XMFLOAT2 jitterNDC = {
                     (jitterPixelSpace.x / res.x),
                     (jitterPixelSpace.y / res.y)
                 };
-				camera->jitterNDC = jitterNDC;
+				camera.jitterNDC = jitterNDC;
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
 				projection = XMMatrixMultiply(projection, jitterMatrix); // Apply jitter to projection matrix
             }
 
-			camera->info.jitteredProjection = projection; // Save jittered projection matrix
-            camera->info.prevView = camera->info.view; // Save view from last frame
+			camera.info.jitteredProjection = projection; // Save jittered projection matrix
+            camera.info.prevView = camera.info.view; // Save view from last frame
 
-            camera->info.view = view;
-			camera->info.viewInverse = cameraModel;
-            camera->info.viewProjection = XMMatrixMultiply(camera->info.view, projection);
-			camera->info.projectionInverse = XMMatrixInverse(nullptr, projection);
+            camera.info.view = view;
+			camera.info.viewInverse = cameraModel;
+            camera.info.viewProjection = XMMatrixMultiply(camera.info.view, projection);
+			camera.info.projectionInverse = XMMatrixInverse(nullptr, projection);
 
             auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
-            camera->info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
+            camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
 
             auto renderView = entity.get_mut<Components::RenderView>();
-			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(renderView->cameraBufferView.get(), camera->info);
+			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(renderView.cameraBufferView.get(), camera.info);
         }
 
         if (entity.has<Components::Light>()) {
-            Components::Light* light = entity.get_mut<Components::Light>();
+            Components::Light& light = entity.get_mut<Components::Light>();
             XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-            light->lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
-            light->lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
+            light.lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
+            light.lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
                 mOut.matrix.r[3].m128_f32[1],  // _42
                 mOut.matrix.r[3].m128_f32[2],  // _43
                 1.0f);
-            switch(light->lightInfo.type){
+            switch(light.lightInfo.type){
             case Components::LightType::Spot:
-                light->lightInfo.boundingSphere = ComputeConeBoundingSphere(light->lightInfo.posWorldSpace, light->lightInfo.dirWorldSpace, light->lightInfo.maxRange, acos(light->lightInfo.outerConeAngle));
+                light.lightInfo.boundingSphere = ComputeConeBoundingSphere(light.lightInfo.posWorldSpace, light.lightInfo.dirWorldSpace, light.lightInfo.maxRange, acos(light.lightInfo.outerConeAngle));
                 break;
             case Components::LightType::Point:
-                light->lightInfo.boundingSphere = { {mOut.matrix.r[3].m128_f32[0],  // _41
+                light.lightInfo.boundingSphere = { {mOut.matrix.r[3].m128_f32[0],  // _41
                     mOut.matrix.r[3].m128_f32[1],  // _42
                     mOut.matrix.r[3].m128_f32[2],  // _43
-                    light->lightInfo.maxRange} };
+                    light.lightInfo.maxRange} };
             }
 
-            if (light->lightInfo.shadowCaster) {
-				const Components::LightViewInfo* viewInfo = entity.get<Components::LightViewInfo>();
-				m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo->lightBufferView.get(), light->lightInfo);
+            if (light.lightInfo.shadowCaster) {
+				const Components::LightViewInfo& viewInfo = entity.get<Components::LightViewInfo>();
+				m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
 				m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
             }
         }
@@ -488,7 +488,7 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
 	// 5. Remove and re-add all objects from the object manager to rebuild indirect draw info
 
 	auto& world = ECSManager::GetInstance().GetWorld();
-	auto& meshLibrary = world.get_mut<Components::GlobalMeshLibrary>()->meshes;
+	auto& meshLibrary = world.get_mut<Components::GlobalMeshLibrary>().meshes;
 
 	// Remove all meshes from the mesh manager
 	for (auto& meshPair : meshLibrary) {
@@ -519,9 +519,9 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
 
     world.defer_begin();
     query.each([&](flecs::entity entity, const Components::RenderableObject& object, const Components::ObjectDrawInfo& drawInfo) {
-        auto opaqueMeshInstances = entity.get<Components::OpaqueMeshInstances>();
-        auto alphaTestMeshInstances = entity.get<Components::AlphaTestMeshInstances>();
-        auto blendMeshInstances = entity.get<Components::BlendMeshInstances>();
+        auto opaqueMeshInstances = entity.try_get<Components::OpaqueMeshInstances>();
+        auto alphaTestMeshInstances = entity.try_get<Components::AlphaTestMeshInstances>();
+        auto blendMeshInstances = entity.try_get<Components::BlendMeshInstances>();
 
         if (opaqueMeshInstances) {
             for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
@@ -845,8 +845,8 @@ void DX12Renderer::Update(double elapsedSeconds) {
 		CreateRenderGraph();
     }
 
-	Components::Position& cameraPosition = *currentScene->GetPrimaryCamera().get_mut<Components::Position>();
-	Components::Rotation& cameraRotation = *currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
+	Components::Position& cameraPosition = currentScene->GetPrimaryCamera().get_mut<Components::Position>();
+	Components::Rotation& cameraRotation = currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
 	ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
 	RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
 
@@ -861,7 +861,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
 	world.progress();
 
     auto camera = currentScene->GetPrimaryCamera();
-    unsigned int cameraIndex = camera.get<Components::RenderView>()->cameraBufferIndex;
+    unsigned int cameraIndex = camera.get<Components::RenderView>().cameraBufferIndex;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
 
@@ -888,7 +888,7 @@ void DX12Renderer::Render() {
     auto& commandList = m_commandLists[m_frameIndex];
 
 	auto& world = ECSManager::GetInstance().GetWorld();
-	const Components::DrawStats* drawStats = world.get<Components::DrawStats>();
+	const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
 
@@ -911,7 +911,7 @@ void DX12Renderer::Render() {
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
-	m_context.drawStats = *drawStats;
+	m_context.drawStats = drawStats;
 	m_context.deltaTime = deltaTime;
 
     unsigned int globalPSOFlags = 0;
@@ -1157,7 +1157,7 @@ void DX12Renderer::CreateRenderGraph() {
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
-    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCamera().get<Components::RenderView>()->meshletBitfieldBuffer;
+    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCamera().get<Components::RenderView>().meshletBitfieldBuffer;
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
     // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
@@ -1175,18 +1175,18 @@ void DX12Renderer::CreateRenderGraph() {
     newGraph->RegisterProvider(m_pIndirectCommandBufferManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
 
-	auto depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
-    std::shared_ptr<PixelBuffer> depthTexture = depth->depthMap;
+	auto& depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
+    std::shared_ptr<PixelBuffer> depthTexture = depth.depthMap;
 
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
-    newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth->linearDepthMap);
+    newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
 
-    auto view = currentScene->GetPrimaryCamera().get<Components::RenderView>();
-    newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view->indirectCommandBuffers.opaqueIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view->indirectCommandBuffers.alphaTestIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view->indirectCommandBuffers.blendIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view->indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view->indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
+    auto& view = currentScene->GetPrimaryCamera().get<Components::RenderView>();
+    newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view.indirectCommandBuffers.opaqueIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view.indirectCommandBuffers.alphaTestIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view.indirectCommandBuffers.blendIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
     //newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
@@ -1221,7 +1221,7 @@ void DX12Renderer::CreateRenderGraph() {
     // GTAO pass
     if (m_gtaoEnabled) {
 		RegisterGTAOResources(newGraph.get());
-        BuildGTAOPipeline(newGraph.get(), currentScene->GetPrimaryCamera().get<Components::Camera>());
+        BuildGTAOPipeline(newGraph.get(), currentScene->GetPrimaryCamera().try_get<Components::Camera>());
     }
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass

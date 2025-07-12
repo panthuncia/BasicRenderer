@@ -239,7 +239,7 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     float4 baseColorSample = albedoTexture[pixelCoordinates];
     ret.albedo = baseColorSample.xyz;
     
-    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Gbuffer::Emissive)];
+    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Emissive)];
     float4 emissive = emissiveTexture[pixelCoordinates];
     ret.emissive = emissive.xyz;
     

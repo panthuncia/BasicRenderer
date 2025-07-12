@@ -18,11 +18,12 @@ public:
 	}
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
-        builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR);
+        builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer);
     }
 
 	void Setup() override {
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
+		RegisterSRV(Builtin::CameraBuffer);
     }
 
 	PassReturn Execute(RenderContext& context) override {

@@ -825,7 +825,7 @@ struct Replacement {
     std::string replacement;
 };
 
-void BuildFunctionDefs(std::unordered_map<std::string, TSNode>& functionDefs, const char* preprocessedSource, const TSNode& root) {
+void BuildFunctionDefs(std::unordered_map<std::string, std::vector<TSNode>>& functionDefs, const char* preprocessedSource, const TSNode& root) {
     // Search through all children of root to find function_definition nodes
     uint32_t childCount = ts_node_child_count(root);
     for (uint32_t i = 0; i < childCount; ++i) {
@@ -864,7 +864,10 @@ void BuildFunctionDefs(std::unordered_map<std::string, TSNode>& functionDefs, co
             std::string fnName(preprocessedSource + start, end - start);
 
             TSNode bodyNode = ts_node_child_by_field_name(node, "body", 4);
-            functionDefs[fnName] = bodyNode;
+            if (!functionDefs.contains(fnName)) {
+                functionDefs[fnName] = std::vector<TSNode>();
+            }
+            functionDefs[fnName].push_back(bodyNode);
         }
     }
 }
@@ -879,7 +882,7 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outIdentifier
     TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, sourceSize);
     TSNode root = ts_tree_root_node(tree);
 
-    std::unordered_map<std::string, TSNode> functionDefs;
+    std::unordered_map<std::string, std::vector<TSNode>> functionDefs;
 
 	BuildFunctionDefs(functionDefs, preprocessedSource, root);
 
@@ -980,8 +983,9 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outIdentifier
         if (it == functionDefs.end())
             continue;   // no definition in this file
 
-        TSNode body = it->second;
-        processBody(body, processBody);
+        for (const auto& bodyNode : it->second) {
+            processBody(bodyNode, processBody);
+		}
     }
 
     std::string sourceText(preprocessedSource, sourceSize);
@@ -1011,7 +1015,7 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
         parser, nullptr, preprocessedSource, sourceSize);
     TSNode root = ts_tree_root_node(tree);
 
-    std::unordered_map<std::string, TSNode> functionDefs;
+    std::unordered_map<std::string, std::vector<TSNode>> functionDefs;
 
 	BuildFunctionDefs(functionDefs, preprocessedSource, root);
    
@@ -1115,8 +1119,9 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
         if (it == functionDefs.end())
             continue;   // no definition in this file
 
-        TSNode body = it->second;
-        processBody(body, processBody);
+        for (const auto& bodyNode : it->second) {
+            processBody(bodyNode, processBody);
+		}
     }
 
 	// Sort replacements by startByte
@@ -1153,7 +1158,7 @@ pruneUnusedCode(const char* preprocessedSource,
     TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, sourceSize);
     TSNode root = ts_tree_root_node(tree);
 
-    std::unordered_map<std::string, TSNode> bodyMap, defMap;
+    std::unordered_map<std::string, std::vector<TSNode>> bodyMap, defMap;
     uint32_t topCount = ts_node_child_count(root);
     for (uint32_t i = 0; i < topCount; ++i) {
         TSNode node = ts_node_child(root, i);
@@ -1178,8 +1183,17 @@ pruneUnusedCode(const char* preprocessedSource,
         std::string fnName(preprocessedSource + s, e - s);
 
         // store the full def node and its body
-        defMap[fnName] = node;
-        bodyMap[fnName] = ts_node_child_by_field_name(node, "body", strlen("body"));
+
+        if (!defMap.contains(fnName)) {
+            defMap[fnName] = {};
+        }
+
+        if (!bodyMap.contains(fnName)) {
+            bodyMap[fnName] = {};
+		}
+
+        defMap[fnName].push_back(node);
+        bodyMap[fnName].push_back(ts_node_child_by_field_name(node, "body", strlen("body")));
     }
 
     // BFS from entryPointName to find reachable functions
@@ -1192,6 +1206,17 @@ pruneUnusedCode(const char* preprocessedSource,
             if (std::string(ts_node_type(n)) == "call_expression") {
                 TSNode fn = ts_node_child_by_field_name(n, "function", strlen("function"));
                 if (!ts_node_is_null(fn)) {
+
+                    TSNode args = ts_node_child_by_field_name(n, "arguments", strlen("arguments"));
+
+                    uint32_t start = ts_node_start_byte(fn);
+                    uint32_t end = ts_node_end_byte(args);    // include closing ')'
+
+                    std::string callSig(
+                        preprocessedSource + start,
+                        end - start
+                    );
+
                     uint32_t ss = ts_node_start_byte(fn), ee = ts_node_end_byte(fn);
                     std::string called(preprocessedSource + ss, ee - ss);
                     auto l = called.find_first_not_of(" \t\r\n"),
@@ -1214,17 +1239,21 @@ pruneUnusedCode(const char* preprocessedSource,
         auto fn = work.back(); work.pop_back();
         auto it = bodyMap.find(fn);
         if (it != bodyMap.end())
-            enqueueCalls(it->second);
+            for (auto& body : it->second) {
+                enqueueCalls(body);
+            }
     }
 
     std::vector<Range> removeRanges;
     for (auto const& kv : defMap) {
         if (!visited.count(kv.first)) {
-            TSNode defNode = kv.second;
-            removeRanges.push_back({
-                ts_node_start_byte(defNode),
-                ts_node_end_byte(defNode)
-                });
+            for (auto& body : kv.second) {
+                // If this function is not reachable, remove its body
+                removeRanges.push_back({
+                    ts_node_start_byte(body),
+                    ts_node_end_byte(body)
+                    });
+			}
         }
     }
 
@@ -1469,6 +1498,21 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
 	return bundle;
 }
 
+// for string delimiter
+std::vector<std::string> split(std::string s, std::string delimiter) {
+    size_t pos_start = 0, pos_end, delim_len = delimiter.length();
+    std::string token;
+    std::vector<std::string> res;
+
+    while ((pos_end = s.find(delimiter, pos_start)) != std::string::npos) {
+        token = s.substr(pos_start, pos_end - pos_start);
+        pos_start = pos_end + delim_len;
+        res.push_back(token);
+    }
+
+    res.push_back(s.substr(pos_start));
+    return res;
+}
 void PSOManager::CompileShader(
     const std::wstring& filename,
     const std::wstring& entryPoint, 
@@ -1500,6 +1544,18 @@ void PSOManager::CompileShader(
         return;
     }
     auto result = InvokeCompile(ppBuffer, args, includeHandler.Get());
+
+    ComPtr<IDxcBlobEncoding> errors;
+    result->GetErrorBuffer(&errors);
+    std::string errText{ (char*)errors->GetBufferPointer(),
+                         errors->GetBufferSize() };
+
+    // scan for lines beginning with "BRSL-CG:" and log them
+    for (auto& line : split(errText, "\n")) {
+        if (line.find("BRSL-CG:") == 0) {
+            spdlog::info("BRSL-CG: {}", line.substr(8));
+        }
+	}
 
     auto obj = ExtractObject(result.Get(), filename, opts.enableDebugInfo);
 

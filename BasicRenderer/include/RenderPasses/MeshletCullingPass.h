@@ -96,7 +96,7 @@ public:
 
 		commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
 
-		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>()->cameraBufferIndex;
+		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>().cameraBufferIndex;
 		commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 		// Culling for main camera
