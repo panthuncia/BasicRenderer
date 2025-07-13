@@ -406,7 +406,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     PPLLCounter->SetName(L"PPLLCounter");
 
     graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
-    graph->RegisterResource(Builtin::PPLL::Buffer, PPLLBuffer);
+    graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
     graph->RegisterResource(Builtin::PPLL::Counter, PPLLCounter);
 
     auto PPLLFillBuilder = graph->BuildRenderPass("PPFillPass");
@@ -417,7 +417,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         indirect);
 
     graph->BuildRenderPass("PPLLResolvePass")
-        .Build<PPLLResolvePass>(PPLLHeadPointerTexture, PPLLBuffer);
+        .Build<PPLLResolvePass>();
 }
 
 void BuildBloomPipeline(RenderGraph* graph) {

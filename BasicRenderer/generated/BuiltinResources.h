@@ -70,8 +70,8 @@ struct Builtin {
   inline static constexpr std::string_view MeshletCullingBitfieldGroup = "Builtin::MeshletCullingBitfieldGroup";
   inline static constexpr std::string_view NormalMatrixBuffer = "Builtin::NormalMatrixBuffer";
   struct PPLL {
-    inline static constexpr std::string_view Buffer = "Builtin::PPLL::Buffer";
     inline static constexpr std::string_view Counter = "Builtin::PPLL::Counter";
+    inline static constexpr std::string_view DataBuffer = "Builtin::PPLL::DataBuffer";
     inline static constexpr std::string_view HeadPointerTexture = "Builtin::PPLL::HeadPointerTexture";
   };
   inline static constexpr std::string_view PerMeshBuffer = "Builtin::PerMeshBuffer";

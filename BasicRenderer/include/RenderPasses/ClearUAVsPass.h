@@ -25,14 +25,14 @@ public:
 		}
 	}
   
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
-		m_opaqueIndirectCommandBuffer = resourceRegistryView.Request<ResourceGroup>(Builtin::IndirectCommandBuffers::Opaque);
-		m_alphaTestIndirectCommandBuffer = resourceRegistryView.Request<ResourceGroup>(Builtin::IndirectCommandBuffers::AlphaTest);
+		m_opaqueIndirectCommandBuffer = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::Opaque);
+		m_alphaTestIndirectCommandBuffer = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::AlphaTest);
 		if (m_clearBlend)
-		m_blendIndirectCommandBuffer = resourceRegistryView.Request<ResourceGroup>(Builtin::IndirectCommandBuffers::Blend);
+		m_blendIndirectCommandBuffer = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::Blend);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -99,11 +99,11 @@ public:
 		builder->WithCopyDest(Builtin::IndirectCommandBuffers::MeshletCulling);
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
-		m_meshletCullingCommandBuffers = resourceRegistryView.Request<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
+		m_meshletCullingCommandBuffers = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
 	}
 
 	PassReturn Execute(RenderContext& context) override {

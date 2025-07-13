@@ -13,9 +13,9 @@ public:
         builder->WithRenderTarget(Builtin::BRDFLUT);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
 
-		m_lutTexture = resourceRegistryView.Request<PixelBuffer>(Builtin::BRDFLUT);
+		m_lutTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::BRDFLUT);
         CreatePSO();
     }
 
@@ -60,8 +60,12 @@ private:
         // Compile shaders
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::GetInstance().CompileShader(L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+		shaderInfoBundle.pixelShader = { L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		vertexShader = compiledBundle.vertexShader;
+		pixelShader = compiledBundle.pixelShader;
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
         inputLayoutDesc.pInputElementDescs = nullptr;

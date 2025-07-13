@@ -454,7 +454,7 @@ inline void Menu::Render(const RenderContext& context) {
     m_commandList->Reset(frameCtx->CommandAllocator, nullptr);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-	auto dsvHandle = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>()->depthMap->GetDSVInfo(0).cpuHandle;
+	auto dsvHandle = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>().depthMap->GetDSVInfo(0).cpuHandle;
     m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	auto heap = g_pd3dSrvDescHeap.Get();
     m_commandList->SetDescriptorHeaps(1, &heap);
@@ -668,7 +668,7 @@ inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
     }
 
     // Show the node with its name
-	auto nameComponent = node.get<Components::Name>();
+	auto nameComponent = node.try_get<Components::Name>();
 	std::string name = nameComponent ? nameComponent->name : "Unnamed Node";
     void* uniqueId = reinterpret_cast<void*>(static_cast<intptr_t>(node.id()));
     if (ImGui::TreeNodeEx(uniqueId, nodeFlags, "%s", name.c_str())) {
@@ -680,9 +680,9 @@ inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
         // Display information specific to RenderableObject, if the node is of that type.
 		if (node.has<Components::RenderableObject>()) {
             // Display meshes
-			auto opaqueMeshInstances = node.get<Components::OpaqueMeshInstances>();
-			auto alphaTestMeshInstances = node.get<Components::AlphaTestMeshInstances>();
-			auto blendMeshInstances = node.get<Components::BlendMeshInstances>();
+			auto opaqueMeshInstances = node.try_get<Components::OpaqueMeshInstances>();
+			auto alphaTestMeshInstances = node.try_get<Components::AlphaTestMeshInstances>();
+			auto blendMeshInstances = node.try_get<Components::BlendMeshInstances>();
 			if (opaqueMeshInstances) {
 				ImGui::Text("Opaque Meshes: %d", opaqueMeshInstances->meshInstances.size());
 			}
@@ -736,15 +736,15 @@ inline void Menu::DisplaySelectedNode() {
         // Display the transform details
         ImGui::Text("Position:");
         XMFLOAT3 pos;
-        auto position = selectedNode.get<Components::Position>();
-        XMStoreFloat3(&pos, position->pos);
+        auto& position = selectedNode.get<Components::Position>();
+        XMStoreFloat3(&pos, position.pos);
         if (ImGui::InputFloat3("Position", &pos.x)) {
 			selectedNode.set<Components::Position>(XMLoadFloat3(&pos));
             //selectedNode->transform.isDirty = true;
         }
         ImGui::Text("Scale:");
 		XMFLOAT3 scale;
-		XMStoreFloat3(&scale, selectedNode.get<Components::Scale>()->scale);
+		XMStoreFloat3(&scale, selectedNode.get<Components::Scale>().scale);
         if (ImGui::InputFloat("Scale", &scale.x)) {
             //selectedNode->transform.isDirty = true;
 			scale.y = scale.x;
@@ -754,7 +754,7 @@ inline void Menu::DisplaySelectedNode() {
 
         // Display rotation
         XMFLOAT4 rotation;
-        XMStoreFloat4(&rotation, selectedNode.get<Components::Rotation>()->rot);
+        XMStoreFloat4(&rotation, selectedNode.get<Components::Rotation>().rot);
         ImGui::Text("Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)", rotation.x, rotation.y, rotation.z, rotation.w);
 
         ImGui::End();

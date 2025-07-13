@@ -719,7 +719,7 @@ static std::shared_ptr<Skeleton> parseSkeletonForMesh(
         if (!jointNode) continue;
         for (auto& anim : animations) {
 			auto jointAnimationName = jointNode.get<Components::AnimationName>();
-            if (anim->nodesMap.contains(jointAnimationName->name.c_str())) {
+            if (anim->nodesMap.contains(jointAnimationName.name.c_str())) {
                 skeleton->AddAnimation(anim);
             }
         }

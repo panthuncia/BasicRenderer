@@ -251,12 +251,12 @@ enum RootSignatureLayout {
     PerMeshRootSignatureIndex,
 	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
-	StaticBufferRootSignatureIndex,
-	VariableBufferRootSignatureIndex,
+	DrawInfoRootSignatureIndex,
 	TransparencyInfoRootSignatureIndex,
 	LightClusterRootSignatureIndex,
 	MiscUintRootSignatureIndex,
 	MiscFloatRootSignatureIndex,
+	ResourceDescriptorIndicesRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -284,54 +284,17 @@ enum SettingsRootConstants {
 	NumSettingsRootConstants
 };
 
-enum StaticBufferRootConstants {
-    PerMeshBufferDescriptorIndex,
-    NormalMatrixBufferDescriptorIndex,
-    PreSkinningVertexBufferDescriptorIndex,
-    PostSkinningVertexBufferDescriptorIndex,
-    MeshletBufferDescriptorIndex,
-    MeshletVerticesBufferDescriptorIndex,
-    MeshletTrianglesBufferDescriptorIndex,
-    PerObjectBufferDescriptorIndex,
-    CameraBufferDescriptorIndex,
-    PerMeshInstanceBufferDescriptorIndex,
-    DrawSetCommandBufferDescriptorIndex,
-	NormalsTextureDescriptorIndex,
-    AOTextureDescriptorIndex,
-	AlbedoTextureDescriptorIndex,
-	MetallicRoughnessTextureDescriptorIndex,
-	EmissiveTextureDescriptorIndex,
-
-    ActiveLightIndicesBufferDescriptorIndex,
-    LightBufferDescriptorIndex,
-    PointLightCubemapBufferDescriptorIndex,
-    SpotLightMatrixBufferDescriptorIndex,
-    DirectionalLightCascadeBufferDescriptorIndex,
-    EnvironmentBufferDescriptorIndex,
-    NumStaticBufferRootConstants
-};
-
-enum VariableBufferRootConstants {
-    ActiveDrawSetIndicesBufferDescriptorIndex,
-    IndirectCommandBufferDescriptorIndex,
-    MeshletCullingIndirectCommandBufferDescriptorIndex,
-    MeshletCullingBitfieldBufferDescriptorIndex,
+enum DrawInfoRootConstants {
     MaxDrawIndex,
-	NumVariableBufferRootConstants
+	NumDrawInfoRootConstants
 };
 
 enum TransparencyInfoRootConstants {
-	PPLLHeadBufferDescriptorIndex,
-	PPLLNodeBufferDescriptorIndex,
-	PPLLCounterBufferDescriptorIndex,
     PPLLNodePoolSize,
 	NumTransparencyInfoRootConstants
 };
 
 enum LightClusterRootConstants {
-	LightClusterBufferDescriptorIndex,
-	LightPagesBufferDescriptorIndex,
-	LightPagesCounterDescriptorIndex,
     LightPagesPoolSize,
 	NumLightClusterRootConstants
 };
@@ -343,6 +306,11 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant3,
 	UintRootConstant4,
 	UintRootConstant5,
+	UintRootConstant6,
+	UintRootConstant7,
+	UintRootConstant8,
+	UintRootConstant9,
+	UintRootConstant10,
 	NumMiscUintRootConstants
 };
 
@@ -350,4 +318,48 @@ enum MiscFloatRootConstants { // Used for pass-specific one-off constants
 	FloatRootConstant0,
 	FloatRootConstant1,
 	NumMiscFloatRootConstants
+};
+
+enum ResourceDescriptorIndicesRootConstants {
+    ResourceDescriptorIndex0,
+    ResourceDescriptorIndex1,
+	ResourceDescriptorIndex2,
+	ResourceDescriptorIndex3,
+	ResourceDescriptorIndex4,
+	ResourceDescriptorIndex5,
+	ResourceDescriptorIndex6,
+	ResourceDescriptorIndex7,
+	ResourceDescriptorIndex8,
+	ResourceDescriptorIndex9,
+	ResourceDescriptorIndex10,
+	ResourceDescriptorIndex11,
+	ResourceDescriptorIndex12,
+	ResourceDescriptorIndex13,
+	ResourceDescriptorIndex14,
+	ResourceDescriptorIndex15,
+	ResourceDescriptorIndex16,
+	ResourceDescriptorIndex17,
+	ResourceDescriptorIndex18,
+	ResourceDescriptorIndex19,
+	ResourceDescriptorIndex20,
+	ResourceDescriptorIndex21,
+	ResourceDescriptorIndex22,
+	ResourceDescriptorIndex23,
+	ResourceDescriptorIndex24,
+	ResourceDescriptorIndex25,
+	ResourceDescriptorIndex26,
+	ResourceDescriptorIndex27,
+	ResourceDescriptorIndex28,
+	ResourceDescriptorIndex29,
+	ResourceDescriptorIndex30,
+	ResourceDescriptorIndex31,
+	ResourceDescriptorIndex32,
+	ResourceDescriptorIndex33,
+	ResourceDescriptorIndex34,
+	ResourceDescriptorIndex35,
+	ResourceDescriptorIndex36,
+	ResourceDescriptorIndex37,
+	ResourceDescriptorIndex38,
+	ResourceDescriptorIndex39,
+    NumResourceDescriptorIndicesRootConstants
 };

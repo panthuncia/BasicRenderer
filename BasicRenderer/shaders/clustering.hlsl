@@ -1,5 +1,5 @@
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
 
 // Helper function: Returns the intersection between a line (from startPoint to endPoint)
 // and a plane perpendicular to the Z-axis (at zDistance).
@@ -44,7 +44,7 @@ void CSMain(uint3 groupID : SV_GroupID) {
     float2 minTile_screenspace = groupID.xy * tileSize;
     float2 maxTile_screenspace = (groupID.xy + 1.0) * tileSize;
 
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrame.mainCameraIndex];
 	
     // Convert the screen-space tile corners to view space.
@@ -83,7 +83,7 @@ void CSMain(uint3 groupID : SV_GroupID) {
     float3 p2 = lineIntersectionWithZPlane(float3(0, 0, 0), minTile, planeFar);
     float3 p3 = lineIntersectionWithZPlane(float3(0, 0, 0), maxTile, planeFar);
 
-    RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
+    RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ClusterBuffer)];
     // Set the cluster bounds using component-wise minimum and maximum.
     float3 aabbMin = min(min(p0, p1), min(p2, p3));
     float3 aabbMax = max(max(p0, p1), max(p2, p3));

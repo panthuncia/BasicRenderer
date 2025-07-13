@@ -19,6 +19,7 @@ find_package(assimp CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(unofficial-tree-sitter CONFIG REQUIRED)
 # Build tool for code generation
 add_executable(codegen
   "generators/resource_codegen.cpp"
@@ -36,16 +37,20 @@ target_include_directories(codegen
 )
 
 set(GENERATED_DIR  "${CMAKE_SOURCE_DIR}/BasicRenderer/generated")
+set(GENERATED_SHADER_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated")
 set(GENERATED_HDR  "${GENERATED_DIR}/BuiltinResources.h")
+set(GENERATED_HLSL "${GENERATED_SHADER_DIR}/BuiltinResources.hlsli")
 
 # ensure the output directory exists
 file(MAKE_DIRECTORY "${GENERATED_DIR}")
+file(MAKE_DIRECTORY "${GENERATED_SHADER_DIR}")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 add_custom_command(
   OUTPUT "${GENERATED_HDR}"
   COMMAND codegen
           "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
           "${GENERATED_HDR}"
+          "${GENERATED_HLSL}"
   DEPENDS codegen
           "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
   COMMENT "Regenerating BuiltinResources.h from BuiltinResources.h.json"
@@ -268,6 +273,16 @@ add_symlink_or_copy_per_config(
     "FFX_denoiser_dx12"
 )
 
+set(HLSL_PARSER_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/hlsl.dll")
+set(HLSL_PARSER_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/hlsl.dll")
+
+add_symlink_or_copy_per_config(
+    "${HLSL_PARSER_DIR}"
+    "${HLSL_PARSER_FILE}"
+    FALSE  # IS_DIRECTORY
+    "HLSL_Parser"
+)
+
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 
 # Heck off Microsoft
@@ -319,10 +334,12 @@ PRIVATE
     assimp::assimp 
     flecs::flecs 
     flecs::flecs_static 
+    unofficial::tree-sitter::tree-sitter
     "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/amd_fidelityfx_dx12.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_backend_dx12_x64drel.lib"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_sssr_x64drel.lib"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/hlsl_parser.lib"
 )

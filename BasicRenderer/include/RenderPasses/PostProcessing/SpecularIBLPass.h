@@ -34,20 +34,21 @@ public:
         }
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
-        m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-		m_pScreenSpaceReflections = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
-        m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
+    void Setup() override {
+        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
         
-        if (m_gtaoEnabled)
-            m_aoTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).index;
+        RegisterSRV(Builtin::Environment::InfoBuffer);
 
-        m_normalsTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Normals)->GetSRVInfo(0).index;
-        m_albedoTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Albedo)->GetSRVInfo(0).index;
-        m_metallicRoughnessTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::MetallicRoughness)->GetSRVInfo(0).index;
-        m_emissiveTextureSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::GBuffer::Emissive)->GetSRVInfo(0).index;
-        m_depthBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).index;
-		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+        if (m_gtaoEnabled)
+			RegisterSRV(Builtin::GTAO::OutputAOTerm);
+
+		RegisterSRV(Builtin::GBuffer::Normals);
+		RegisterSRV(Builtin::GBuffer::Albedo);
+		RegisterSRV(Builtin::GBuffer::Emissive);
+		RegisterSRV(Builtin::GBuffer::MetallicRoughness);
+		RegisterSRV(Builtin::PrimaryCamera::DepthTexture);
+		RegisterSRV(Builtin::CameraBuffer);
+		RegisterSRV(Builtin::PostProcessing::ScreenSpaceReflections);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -79,23 +80,7 @@ public:
         settings[EnableGTAO] = m_gtaoEnabled;
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
-        unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[EnvironmentBufferDescriptorIndex] = m_environmentBufferDescriptorIndex;
-        staticBufferIndices[AOTextureDescriptorIndex] = m_aoTextureSRVIndex;
-        staticBufferIndices[NormalsTextureDescriptorIndex] = m_normalsTextureSRVIndex;
-        staticBufferIndices[AlbedoTextureDescriptorIndex] = m_albedoTextureSRVIndex;
-        staticBufferIndices[MetallicRoughnessTextureDescriptorIndex] = m_metallicRoughnessTextureSRVIndex;
-        staticBufferIndices[EmissiveTextureDescriptorIndex] = m_emissiveTextureSRVIndex;
-		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
-
-        commandList->SetGraphicsRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
-
-        unsigned int misc[NumMiscUintRootConstants] = {};
-        //misc[0] = m_pHDRTarget->GetUAVShaderVisibleInfo(0).index;
-		misc[UintRootConstant0] = m_pScreenSpaceReflections->GetSRVInfo(0).index;
-		misc[UintRootConstant1] = m_depthBufferSRVIndex;
-
-        commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
         commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
         return {};
@@ -111,24 +96,21 @@ private:
 
     std::shared_ptr<PixelBuffer> m_pHDRTarget;
 	std::shared_ptr<PixelBuffer> m_pScreenSpaceReflections;
-
-    int m_environmentBufferDescriptorIndex = -1;
-    int m_aoTextureSRVIndex = -1;
-    int m_normalsTextureSRVIndex = -1;
-    int m_albedoTextureSRVIndex = -1;
-    int m_metallicRoughnessTextureSRVIndex = -1;
-    int m_emissiveTextureSRVIndex = -1;
-    int m_depthBufferSRVIndex = -1;
-	int m_cameraBufferSRVIndex = -1;
+    PipelineResources m_resourceDescriptorBindings;
 
     bool m_gtaoEnabled = true;
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::GetInstance().CompileShader(L"shaders/specularIBL.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
 
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+		shaderInfoBundle.pixelShader = { L"shaders/specularIBL.hlsl", L"PSMain", L"ps_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		vertexShader = compiledBundle.vertexShader;
+		pixelShader = compiledBundle.pixelShader;
+        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
         inputLayoutDesc.pInputElementDescs = nullptr;

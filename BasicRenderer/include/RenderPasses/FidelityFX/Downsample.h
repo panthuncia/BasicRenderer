@@ -38,9 +38,9 @@ public:
             .WithUnorderedAccess(Subresources(Builtin::PrimaryCamera::LinearDepthMap, FromMip{ 1 }), Subresources(Builtin::Shadows::LinearShadowMaps, FromMip{ 1 }));
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
         m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<spdConstants>(1, L"Downsample constants");
-		m_pLinearDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
+		m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
@@ -180,7 +180,11 @@ private:
         psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
         Microsoft::WRL::ComPtr<ID3DBlob> downsample;
-        PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", {}, downsample);
+        //PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", {}, downsample);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		downsample = compiledBundle.computeShader;
         psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsample.Get());
         ThrowIfFailed(device->CreateComputePipelineState(
             &psoDesc, IID_PPV_ARGS(&downsamplePassPSO)));
@@ -190,7 +194,11 @@ private:
 		define.Value = L"1";
 
         Microsoft::WRL::ComPtr<ID3DBlob> downsampleArray;
-        PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", { define }, downsampleArray);
+        //PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", { define }, downsampleArray);
+		shaderInfoBundle.computeShader = { L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6" };
+		shaderInfoBundle.defines = { define };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		downsampleArray = compiledBundle.computeShader;
         psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsampleArray.Get());
         ThrowIfFailed(device->CreateComputePipelineState(
             &psoDesc, IID_PPV_ARGS(&downsampleArrayPSO)));

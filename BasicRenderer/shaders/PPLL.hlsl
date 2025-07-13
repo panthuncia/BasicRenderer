@@ -1,8 +1,8 @@
-#include "vertex.hlsli"
-#include "cbuffers.hlsli"
-#include "lighting.hlsli"
-#include "outputTypes.hlsli"
-#include "utilities.hlsli"
+#include "include/vertex.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/lighting.hlsli"
+#include "include/outputTypes.hlsli"
+#include "include/utilities.hlsli"
 #include "fullscreenVS.hlsli"
 
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
@@ -47,11 +47,11 @@ void WriteFragmentAttributes(int nAddress, int nPreviousLink, float4 vColor, flo
 [earlydepthstencil]
 void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - input.positionWorldSpace.xyz);
 
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[perMeshBufferDescriptorIndex];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
@@ -60,14 +60,14 @@ void PPLLFillPS(PSInput input, bool isFrontFace : SV_IsFrontFace) {
     FragmentInfo fragmentInfo;
     GetFragmentInfoDirect(input, viewDir, enableGTAO, true, isFrontFace, fragmentInfo);
     
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, environmentBufferDescriptorIndex, isFrontFace);
+    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::Environment::InfoBuffer), isFrontFace);
 
     
     // Fill the PPLL buffers with the fragment data
     
-    RWTexture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
-    RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
-    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[PPLLNodesCounterDescriptorIndex];
+    RWTexture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::HeadPointerTexture)];
+    RWStructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::DataBuffer)];
+    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::Counter)];
     
     uint2 vScreenAddress = uint2(input.position.xy);
     
@@ -174,8 +174,8 @@ void SortNearest(inout KBUFFER_STRUCT fragments[K_NEAREST]) {
 
 float4 PPLLResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target {
     
-    Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[PPLLHeadsDescriptorIndex];
-    StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[PPLLNodesDescriptorIndex];
+    Texture2D<uint> RWFragmentListHead = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::HeadPointerTexture)];
+    StructuredBuffer<PPLL_STRUCT> LinkedListUAV = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PPLL::DataBuffer)];
 
     uint2 pixelCoord = (uint2) input.position.xy;
 

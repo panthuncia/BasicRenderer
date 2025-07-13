@@ -11,7 +11,7 @@ class GTAOFilterPass : public ComputePass {
 public:
     GTAOFilterPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
 		CreateXeGTAOComputePSO();
     }
 
@@ -62,7 +62,11 @@ private:
         auto device = DeviceManager::GetInstance().GetDevice();
 
         Microsoft::WRL::ComPtr<ID3DBlob> CSPrefilterDepths16x16;
-        PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSPrefilterDepths16x16", L"cs_6_6", {}, CSPrefilterDepths16x16);
+        //PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSPrefilterDepths16x16", L"cs_6_6", {}, CSPrefilterDepths16x16);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSPrefilterDepths16x16", L"cs_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		CSPrefilterDepths16x16 = compiledBundle.computeShader;
         D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
 		psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
         psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSPrefilterDepths16x16.Get());

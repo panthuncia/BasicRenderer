@@ -10,6 +10,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
+#include "../../shaders/PerPassRootConstants/meshletCullingRootConstants.h"
 
 class MeshletCullingPass : public ComputePass {
 public:
@@ -25,23 +26,23 @@ public:
 	~MeshletCullingPass() {
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
 
-		m_perObjectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
-		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
-		m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
-		m_perMeshInstanceBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
-		m_meshletBoundsBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::MeshResources::MeshletBounds)->GetSRVInfo(0).index;
+		RegisterSRV(Builtin::PerObjectBuffer);
+		RegisterSRV(Builtin::CameraBuffer);
+		RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::PerMeshInstanceBuffer);
+		RegisterSRV(Builtin::MeshResources::MeshletBounds);
 
-		m_primaryCameraMeshletFrustrumCullingBitfieldBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
-		m_primaryCameraMeshletCullingIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling);
-		m_primaryCameraMeshletCullingResetIndirectCommandBuffer = resourceRegistryView.Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset);
+		m_primaryCameraMeshletCullingBitfieldBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+		m_primaryCameraMeshletCullingIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling);
+		m_primaryCameraMeshletCullingResetIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset);
 
-		m_primaryCameraLinearDepthMap = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
+		m_primaryCameraLinearDepthMap = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) override {
@@ -87,22 +88,15 @@ public:
 		auto& objectManager = context.objectManager;
 		auto& cameraManager = context.cameraManager;
 
-		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
-		staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
-		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferSRVIndex;
-
-		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, &staticBufferIndices, 0);
+		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-		miscRootConstants[UintRootConstant0] = m_meshletBoundsBufferSRVIndex;
-		miscRootConstants[UintRootConstant1] = m_primaryCameraMeshletFrustrumCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-		miscRootConstants[UintRootConstant2] = m_primaryCameraLinearDepthMap->GetSRVInfo(0).index;
+		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+		miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = m_primaryCameraLinearDepthMap->GetSRVInfo(0).index;
 
 		commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
 
-		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>()->cameraBufferIndex;
+		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>().cameraBufferIndex;
 		commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
 		// Culling for main camera
@@ -119,25 +113,6 @@ public:
 			meshletCullingBuffer->GetResource()->GetAPIResource(),
 			meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
 		);
-
-		// Occlusion culling
-		//if (!m_isOccludersPass) { // Occluders pass builds HZB, and it is used in the later culling pass
-		//	auto meshletOcclusionCullingBuffer = context.currentScene->GetPrimaryCameraMeshletOcclusionCullingIndirectCommandBuffer();
-		//	commandList->SetPipelineState(m_occlusionCullingPSO.Get());
-
-		//	auto primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
-		//	miscRootConstants[UintRootConstant2] = primaryDepth->linearDepthMap->GetSRVInfo(0).index;
-		//	commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
-
-		//	commandList->ExecuteIndirect(
-		//		commandSignature,
-		//		numDraws,
-		//		meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
-		//		0,
-		//		meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
-		//		meshletOcclusionCullingBuffer->GetResource()->GetUAVCounterOffset()
-		//	);
-		//}
 
 		// Reset necessary meshlets
 		if (m_doResets) {
@@ -165,8 +140,8 @@ public:
 					cameraIndex = view.cameraBufferIndex;
 					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
-					miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-					miscRootConstants[UintRootConstant2] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
+					miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+					miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
 					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
 					meshletCullingBuffer = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer;
 					commandList->ExecuteIndirect(
@@ -180,28 +155,6 @@ public:
 				}
 				});
 
-			// Occlusion culling
-			//if (!m_isOccludersPass) { // Occluders pass builds HZB, and it is used in the later culling pass
-			//	commandList->SetPipelineState(m_occlusionCullingPSO.Get());
-			//	lightQuery.each([&](flecs::entity e, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
-			//		for (auto& view : lightViewInfo.renderViews) {
-			//			cameraIndex = view.cameraBufferIndex;
-			//			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
-			//			miscRootConstants[UintRootConstant2] = lightDepth.linearDepthMap->GetSRVInfo(0).index;
-			//			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
-			//			auto meshletOcclusionCullingBuffer = view.indirectCommandBuffers.meshletOcclusionCullingIndirectCommandBuffer;
-			//			commandList->ExecuteIndirect(
-			//				commandSignature,
-			//				numDraws,
-			//				meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
-			//				0,
-			//				meshletOcclusionCullingBuffer->GetResource()->GetAPIResource(),
-			//				meshletOcclusionCullingBuffer->GetResource()->GetUAVCounterOffset()
-			//			);
-			//		}
-			//		});
-			//}
-
 			// Reset necessary meshlets
 			if (m_doResets) {
 				commandList->SetPipelineState(m_clearPSO.Get());
@@ -212,7 +165,7 @@ public:
 						cameraIndex = view.cameraBufferIndex;
 						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
-						miscRootConstants[UintRootConstant1] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
 						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
 						auto meshletCullingClearBuffer = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
 						commandList->ExecuteIndirect(
@@ -259,7 +212,12 @@ private:
 			occlusionDefine.Value = L"1";
 			defines.push_back(occlusionDefine);
 		}
-		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6", defines, computeShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/meshletCulling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6" };
+		shaderInfoBundle.defines = defines;
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		computeShader = compiledBundle.computeShader;
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
@@ -284,7 +242,9 @@ private:
 		//pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 		//ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_occlusionCullingPSO)));
 
-		PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6", {}, computeShader);
+		shaderInfoBundle.computeShader = { L"shaders/meshletCulling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6" };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		computeShader = compiledBundle.computeShader;
 
 		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
 		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_clearPSO)));
@@ -293,17 +253,11 @@ private:
 	flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
 
 	ComPtr<ID3D12PipelineState> m_frustrumCullingPSO;
-	//ComPtr<ID3D12PipelineState> m_occlusionCullingPSO;
 	ComPtr<ID3D12PipelineState> m_clearPSO;
 
-	int m_perObjectBufferSRVIndex = -1;
-	int m_cameraBufferSRVIndex = -1;
-	int m_perMeshBufferSRVIndex = -1;
-	int m_perMeshInstanceBufferSRVIndex = -1;
+	PipelineResources m_resourceDescriptorBindings;
 
-	int m_meshletBoundsBufferSRVIndex = -1;
-
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletFrustrumCullingBitfieldBuffer = nullptr;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingIndirectCommandBuffer = nullptr;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingResetIndirectCommandBuffer = nullptr;
 	std::shared_ptr<PixelBuffer> m_primaryCameraLinearDepthMap = nullptr;

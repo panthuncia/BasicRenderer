@@ -13,7 +13,8 @@ template<typename T> struct ReflectNamespaceTag {};
 struct ResourceIdentifier {
     // e.g. {"Builtin","GBuffer","Normals"}
     std::vector<std::string> segments;
-
+	size_t hash = 0;
+    std::string name;
     ResourceIdentifier() = default;
 
     // parse "A::B::C"
@@ -25,6 +26,8 @@ struct ResourceIdentifier {
             segments.emplace_back(s.substr(start, pos - start));
             start = pos + 2;
         }
+		hash = Hasher{}(*this);
+        name = s;
     }
 
     // String constructor
@@ -72,6 +75,15 @@ struct ResourceIdentifier {
         }
     };
 };
+
+namespace std {
+    template<>
+    struct hash<ResourceIdentifier> {
+        size_t operator()(ResourceIdentifier const& id) const noexcept {
+            return ResourceIdentifier::Hasher{}(id);
+        }
+    };
+}
 
 struct ResourceIdentifierAndRange {
     ResourceIdentifierAndRange(const ResourceIdentifier& resource) : identifier(resource) {

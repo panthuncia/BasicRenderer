@@ -18,15 +18,15 @@ public:
             .WithRenderTarget(Builtin::Color::HDRColorTarget);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
         m_vertexBufferView = CreateSkyboxVertexBuffer();
         CreateSkyboxRootSignature();
         CreateSkyboxPSO();
 
-		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-        m_environmentBufferDescriptorIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
+        m_environmentBufferDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -47,7 +47,7 @@ public:
         commandList->RSSetScissorRects(1, &scissorRect);
 
         //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
+        auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
         auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
         // Clear HDR target
@@ -59,9 +59,9 @@ public:
         commandList->SetPipelineState(skyboxPSO.Get());
         commandList->SetGraphicsRootSignature(skyboxRootSignature.Get());
 
-        auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.view;
+        auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>().info.view;
         viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
-        auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>()->info.jitteredProjection);
+        auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>().info.jitteredProjection);
         commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
         commandList->SetGraphicsRoot32BitConstant(1, m_environmentBufferDescriptorIndex, 0);
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -82,10 +82,10 @@ private:
     ComPtr<ID3D12RootSignature> skyboxRootSignature;
     ComPtr<ID3D12PipelineState> skyboxPSO;
 
-	std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
+    std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
     std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
 
-	int m_environmentBufferDescriptorIndex = -1;
+    int m_environmentBufferDescriptorIndex = -1;
 
     struct SkyboxVertex {
         XMFLOAT3 position;
@@ -160,29 +160,29 @@ private:
         CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[2] = {};
 
         skyboxRootParameters[0].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
-		skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Environment buffer index
+        skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Environment buffer index
 
         D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
 
         // point-clamp at s0
         auto& pointClamp = staticSamplers[0];
-        pointClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        pointClamp.AddressU       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClamp.AddressV       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClamp.AddressW       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClamp.MipLODBias     = 0;
-        pointClamp.MaxAnisotropy  = 0;
+        pointClamp.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        pointClamp.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClamp.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClamp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        pointClamp.MipLODBias = 0;
+        pointClamp.MaxAnisotropy = 0;
         pointClamp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        pointClamp.MinLOD         = 0;
-        pointClamp.MaxLOD         = D3D12_FLOAT32_MAX;
+        pointClamp.MinLOD = 0;
+        pointClamp.MaxLOD = D3D12_FLOAT32_MAX;
         pointClamp.ShaderRegister = 0;
-        pointClamp.RegisterSpace  = 0;
+        pointClamp.RegisterSpace = 0;
         pointClamp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
         // linear-clamp at s1
         auto& linearClamp = staticSamplers[1];
         linearClamp = pointClamp;
-        linearClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        linearClamp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         linearClamp.ShaderRegister = 1;
 
 
@@ -210,8 +210,12 @@ private:
         // Compile shaders
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::GetInstance().CompileShader(L"shaders/skybox.hlsl", L"VSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::GetInstance().CompileShader(L"shaders/skybox.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
+        ShaderInfoBundle shaderInfoBundle;
+        shaderInfoBundle.vertexShader = { L"shaders/skybox.hlsl", L"VSMain", L"vs_6_6" };
+        shaderInfoBundle.pixelShader = { L"shaders/skybox.hlsl", L"PSMain", L"ps_6_6" };
+        auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+        vertexShader = compiledBundle.vertexShader;
+        pixelShader = compiledBundle.pixelShader;
 
         static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },

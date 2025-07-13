@@ -80,7 +80,7 @@
     },
     "PPLL": {
       "HeadPointerTexture": {},
-      "Buffer": {},
+      "DataBuffer": {},
       "Counter": {}
     },
     "Color": {

@@ -11,7 +11,7 @@ class GTAODenoisePass : public ComputePass {
 public:
     GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex(workingBufferIndex) {}
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
 		CreateXeGTAOComputePSO();
     }
 
@@ -67,12 +67,19 @@ private:
         psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
        
 		Microsoft::WRL::ComPtr<ID3DBlob> CSDenoisePass;
-		PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSDenoisePass", L"cs_6_6", {}, CSDenoisePass);
+		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSDenoisePass", L"cs_6_6", {}, CSDenoisePass);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSDenoisePass", L"cs_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		CSDenoisePass = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSDenoisePass.Get());
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&DenoisePassPSO)));
 		Microsoft::WRL::ComPtr<ID3DBlob> CSDenoiseLastPass;
-		PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSDenoiseLastPass", L"cs_6_6", {}, CSDenoiseLastPass);
+		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSDenoiseLastPass", L"cs_6_6", {}, CSDenoiseLastPass);
+		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSDenoiseLastPass", L"cs_6_6" };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		CSDenoiseLastPass = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSDenoiseLastPass.Get());
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&DenoiseLastPassPSO)));

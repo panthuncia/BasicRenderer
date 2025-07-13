@@ -1,5 +1,5 @@
-#include "cbuffers.hlsli"
-#include "structs.hlsli"
+#include "include/cbuffers.hlsli"
+#include "include/structs.hlsli"
 
 // Returns true if a sphere (with a given center and radius) intersects an AABB
 // defined by aabbMin and aabbMax
@@ -42,20 +42,20 @@ void CSMain(uint3 groupID : SV_GroupID,
     // Compute the global index for the cluster.
     uint index = groupID.x * 128 + threadID.x;
     
-    StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[activeLightIndicesBufferDescriptorIndex];
-    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[lightBufferDescriptorIndex];
+    StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ActiveLightIndices)];
+    StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     uint lightCount = perFrameBuffer.numLights;
     
-    RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[lightClusterBufferDescriptorIndex];
+    RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ClusterBuffer)];
     Cluster cluster = clusters[index];
     
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferDescriptorIndex];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera primaryCamera = cameras[perFrameBuffer.mainCameraIndex];
 
     // Light pages, clusters index into linked list
-    RWStructuredBuffer<LightPage> lightPages = ResourceDescriptorHeap[lightPagesBufferDescriptorIndex];
-    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[lightPagesCounterDescriptorIndex];
+    RWStructuredBuffer<LightPage> lightPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesBuffer)];
+    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesCounter];
 
     // Process every point light.
     

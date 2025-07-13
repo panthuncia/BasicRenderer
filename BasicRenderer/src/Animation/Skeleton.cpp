@@ -43,13 +43,13 @@ Skeleton::Skeleton(const Skeleton& other) {
         flecs::entity newBone = ecs_world.entity();
 
         // Copy components from oldBone to newBone.
-		newBone.set<Components::Rotation>({ oldBone.get<Components::Rotation>()->rot });
-		newBone.set<Components::Position>({ oldBone.get<Components::Position>()->pos });
-		newBone.set<Components::Scale>({ oldBone.get<Components::Scale>()->scale });
+		newBone.set<Components::Rotation>({ oldBone.get<Components::Rotation>().rot });
+		newBone.set<Components::Position>({ oldBone.get<Components::Position>().pos });
+		newBone.set<Components::Scale>({ oldBone.get<Components::Scale>().scale });
 		newBone.set<Components::Matrix>(DirectX::XMMatrixIdentity());
 		auto animationController = oldBone.get<AnimationController>();
-        newBone.set<AnimationController>(*animationController);
-		newBone.set<Components::AnimationName>({ oldBone.get<Components::AnimationName>()->name });
+        newBone.set<AnimationController>(animationController);
+		newBone.set<Components::AnimationName>({ oldBone.get<Components::AnimationName>().name });
 
         // Save in mapping.
         oldBonesToNewBonesIDMap[oldBone.id()] = newBone.id();
@@ -145,22 +145,22 @@ void Skeleton::SetAnimation(size_t index) {
     auto& animation = animations[index];
     for (auto& node : m_bones) {
 		auto name = node.get<Components::AnimationName>();
-        if (animation->nodesMap.find(name->name.c_str()) != animation->nodesMap.end()) {
-            AnimationController* controller = node.get_mut<AnimationController>();
+        if (animation->nodesMap.find(name.name.c_str()) != animation->nodesMap.end()) {
+            AnimationController* controller = node.try_get_mut<AnimationController>();
 #ifdef _DEBUG
 			if (!controller) {
 				spdlog::warn("Skeleton node {} does not have an AnimationController component", node.name().c_str());
 			}
 #endif
-            controller->setAnimationClip(animation->nodesMap[name->name.c_str()]);
+            controller->setAnimationClip(animation->nodesMap[name.name.c_str()]);
         }
     }
 }
 
 void Skeleton::UpdateTransforms() {
     for (size_t i = 0; i < m_bones.size(); ++i) {
-		const Components::Matrix* transform = m_bones[i].get<Components::Matrix>();
-        memcpy(&m_boneTransforms[i * 16], &transform->matrix, sizeof(XMMATRIX));
+		const Components::Matrix transform = m_bones[i].get<Components::Matrix>();
+        memcpy(&m_boneTransforms[i * 16], &transform.matrix, sizeof(XMMATRIX));
     }
     UploadManager::GetInstance().UploadData(m_boneTransforms.data(), m_bones.size() * sizeof(XMMATRIX), m_transformsBuffer.get(), 0);
 }
@@ -188,7 +188,7 @@ void Skeleton::SetJoints(const std::vector<flecs::entity>& joints) {
 
 void Skeleton::SetAnimationSpeed(float speed) {
 	for (auto& node : m_bones) {
-		AnimationController* controller = node.get_mut<AnimationController>();
+		AnimationController* controller = node.try_get_mut<AnimationController>();
 #ifdef _DEBUG
 		if (!controller) {
 			spdlog::warn("Skeleton node {} does not have an AnimationController component", node.name().c_str());

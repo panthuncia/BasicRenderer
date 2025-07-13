@@ -26,19 +26,20 @@ public:
 			.WithUnorderedAccess(Builtin::PostSkinningVertices);
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		opaqueQuery = ecsWorld.query_builder<Components::OpaqueSkinned, Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		alphaTestQuery = ecsWorld.query_builder<Components::AlphaTestSkinned, Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		blendQuery = ecsWorld.query_builder<Components::BlendSkinned, Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		CreatePSO();
 
-		m_preSkinningVertexBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PreSkinningVertices)->GetSRVInfo(0).index;
-		m_normalMatrixBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::NormalMatrixBuffer)->GetSRVInfo(0).index;
-		m_postSkinningVertexBufferUAVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PostSkinningVertices)->GetUAVShaderVisibleInfo(0).index;
-		m_perObjectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
-		m_perMeshInstanceBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshInstanceBuffer)->GetSRVInfo(0).index;
-		m_perMeshBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerMeshBuffer)->GetSRVInfo(0).index;
+		RegisterSRV(Builtin::PreSkinningVertices);
+		RegisterSRV(Builtin::NormalMatrixBuffer);
+		RegisterSRV(Builtin::PerObjectBuffer);
+		RegisterSRV(Builtin::PerMeshInstanceBuffer);
+		RegisterSRV(Builtin::PerMeshBuffer);
+
+		RegisterUAV(Builtin::PostSkinningVertices);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -61,15 +62,7 @@ public:
 		auto& meshManager = context.meshManager;
 		auto& objectManager = context.objectManager;
 
-		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-		staticBufferIndices[PreSkinningVertexBufferDescriptorIndex] = m_preSkinningVertexBufferSRVIndex;
-		staticBufferIndices[NormalMatrixBufferDescriptorIndex] = m_normalMatrixBufferSRVIndex;
-		staticBufferIndices[PostSkinningVertexBufferDescriptorIndex] = m_postSkinningVertexBufferUAVIndex;
-		staticBufferIndices[PerObjectBufferDescriptorIndex] = m_perObjectBufferSRVIndex;
-		staticBufferIndices[PerMeshInstanceBufferDescriptorIndex] = m_perMeshInstanceBufferSRVIndex;
-		staticBufferIndices[PerMeshBufferDescriptorIndex] = m_perMeshBufferSRVIndex;
-
-		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
+		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		auto meshShadersEnabled = getMeshShadersEnabled();
 
@@ -130,17 +123,17 @@ public:
 
 private:
 
-	int m_preSkinningVertexBufferSRVIndex = -1;
-	int m_normalMatrixBufferSRVIndex = -1;
-	int m_postSkinningVertexBufferUAVIndex = -1;
-	int m_perObjectBufferSRVIndex = -1;
-	int m_perMeshInstanceBufferSRVIndex = -1;
-	int m_perMeshBufferSRVIndex = -1;
+	PipelineResources m_resourceDescriptorBindings;
 
 	void CreatePSO() {
 		// Compile the compute shader
 		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		PSOManager::GetInstance().CompileShader(L"shaders/skinning.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/skinning.brsl", L"CSMain", L"cs_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		computeShader = compiledBundle.computeShader;
+
+		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
 		struct PipelineStateStream {
 			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;

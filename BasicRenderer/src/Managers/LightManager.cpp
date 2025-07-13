@@ -189,8 +189,8 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		return { viewInfo, cascadePlanes };
 	}
 
-	auto camera = m_currentCamera.get<Components::Camera>();
-	auto& matrix = m_currentCamera.get<Components::Matrix>()->matrix;
+	auto& camera = m_currentCamera.get<Components::Camera>();
+	auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 	auto posFloats = GetGlobalPositionFromMatrix(matrix);
 
 	// Compute cascades (each cascade carries its own view and ortho projection matrix).
@@ -198,7 +198,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		DirectX::XMLoadFloat3(&posFloats), 
 		GetForwardFromMatrix(matrix),
 		GetUpFromMatrix(matrix),
-		camera->zNear, camera->fov, camera->aspect,
+		camera.zNear, camera.fov, camera.aspect,
 		getDirectionalLightCascadeSplits());
 
 	// Collect the frustum planes from each cascade.
@@ -215,7 +215,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.unjitteredProjection = cascades[i].orthoMatrix;
 		cameraInfo.jitteredProjection = cameraInfo.unjitteredProjection; // lights don't use jittering.
 		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
-		cameraInfo.aspectRatio = camera->aspect;
+		cameraInfo.aspectRatio = camera.aspect;
 		cameraInfo.clippingPlanes[0] = cascades[i].frustumPlanes[0];
 		cameraInfo.clippingPlanes[1] = cascades[i].frustumPlanes[1];
 		cameraInfo.clippingPlanes[2] = cascades[i].frustumPlanes[2];
@@ -242,13 +242,13 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 
 void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	//auto projectionMatrix = light.get<Components::ProjectionMatrix>();
-	auto viewInfo = light.get<Components::LightViewInfo>();
-	auto& renderViews = viewInfo->renderViews;
-	auto lightInfo = light.get<Components::Light>();
-	auto lightMatrix = light.get<Components::Matrix>();
-	auto planes = light.get<Components::FrustrumPlanes>()->frustumPlanes;
-	auto globalPos = GetGlobalPositionFromMatrix(lightMatrix->matrix);
-	switch (lightInfo->type) {
+	auto& viewInfo = light.get<Components::LightViewInfo>();
+	auto& renderViews = viewInfo.renderViews;
+	auto& lightInfo = light.get<Components::Light>();
+	auto& lightMatrix = light.get<Components::Matrix>();
+	auto& planes = light.get<Components::FrustrumPlanes>().frustumPlanes;
+	auto globalPos = GetGlobalPositionFromMatrix(lightMatrix.matrix);
+	switch (lightInfo.type) {
 	case Components::LightType::Point: {
 		auto cubemapMatrices = GetCubemapViewMatrices(globalPos);
 		for (int i = 0; i < 6; i++) {
@@ -256,9 +256,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 			info.view = cubemapMatrices[i];
-			info.unjitteredProjection = viewInfo->projectionMatrix.matrix;
+			info.unjitteredProjection = viewInfo.projectionMatrix.matrix;
 			info.jitteredProjection = info.unjitteredProjection; // lights don't use jittering.
-			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], viewInfo->projectionMatrix.matrix);
+			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], viewInfo.projectionMatrix.matrix);
 			info.clippingPlanes[0] = planes[i][0];
 			info.clippingPlanes[1] = planes[i][1];
 			info.clippingPlanes[2] = planes[i][2];
@@ -266,11 +266,11 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[4] = planes[i][4];
 			info.clippingPlanes[5] = planes[i][5];
 			info.depthBufferArrayIndex = i;
-			info.depthResX = viewInfo->depthResX;
-			info.depthResY = viewInfo->depthResY;
+			info.depthResX = viewInfo.depthResX;
+			info.depthResY = viewInfo.depthResY;
 			info.uvScaleToNextPowerOfTwo = {
-				static_cast<float>(viewInfo->depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResX)),
-				static_cast<float>(viewInfo->depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResY))
+				static_cast<float>(viewInfo.depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResX)),
+				static_cast<float>(viewInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResY))
 			};
 			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
@@ -281,10 +281,10 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		CameraInfo camera = {};
 		camera.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
 		auto up = DirectX::XMFLOAT3(0, 1, 0);
-		camera.view = DirectX::XMMatrixLookToRH(DirectX::XMLoadFloat3(&globalPos), DirectX::XMVector3Normalize(lightMatrix->matrix.r[2]), XMLoadFloat3(&up));
-		camera.unjitteredProjection = viewInfo->projectionMatrix.matrix;
+		camera.view = DirectX::XMMatrixLookToRH(DirectX::XMLoadFloat3(&globalPos), DirectX::XMVector3Normalize(lightMatrix.matrix.r[2]), XMLoadFloat3(&up));
+		camera.unjitteredProjection = viewInfo.projectionMatrix.matrix;
 		camera.jitteredProjection = camera.unjitteredProjection; // lights don't use jittering.
-		camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, viewInfo->projectionMatrix.matrix);
+		camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, viewInfo.projectionMatrix.matrix);
 		camera.clippingPlanes[0] = planes[0][0];
 		camera.clippingPlanes[1] = planes[0][1];
 		camera.clippingPlanes[2] = planes[0][2];
@@ -292,11 +292,11 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		camera.clippingPlanes[4] = planes[0][4];
 		camera.clippingPlanes[5] = planes[0][5];
 		camera.depthBufferArrayIndex = 0;
-		camera.depthResX = viewInfo->depthResX;
-		camera.depthResY = viewInfo->depthResY;
+		camera.depthResX = viewInfo.depthResX;
+		camera.depthResY = viewInfo.depthResY;
 		camera.uvScaleToNextPowerOfTwo = {
-			static_cast<float>(viewInfo->depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResX)),
-			static_cast<float>(viewInfo->depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo->depthResY))
+			static_cast<float>(viewInfo.depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResX)),
+			static_cast<float>(viewInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResY))
 		};
 		camera.numDepthMips = CalculateMipLevels(camera.depthResX, camera.depthResY);
 
@@ -309,11 +309,11 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			return;
 		}
 		auto numCascades = getNumDirectionalLightCascades();
-		auto dir = DirectX::XMVector3Normalize(lightMatrix->matrix.r[2]);
-		auto camera = m_currentCamera.get<Components::Camera>();
-		auto& matrix = m_currentCamera.get<Components::Matrix>()->matrix;
+		auto dir = DirectX::XMVector3Normalize(lightMatrix.matrix.r[2]);
+		auto& camera = m_currentCamera.get<Components::Camera>();
+		auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
-		auto cascades = setupCascades(numCascades, lightInfo->lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera->zNear, camera->fov, camera->aspect, getDirectionalLightCascadeSplits());
+		auto cascades = setupCascades(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			CameraInfo info = {};
 			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
@@ -328,13 +328,13 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.clippingPlanes[4] = cascades[i].frustumPlanes[4];
 			info.clippingPlanes[5] = cascades[i].frustumPlanes[5];
 			info.depthBufferArrayIndex = i;
-			info.depthResX = viewInfo->depthResX;
-			info.depthResY = viewInfo->depthResY;
-			unsigned int nextPowerOfTwoX = GetNextPowerOfTwo(viewInfo->depthResX);
-			unsigned int nextPowerOfTwoY = GetNextPowerOfTwo(viewInfo->depthResY);
+			info.depthResX = viewInfo.depthResX;
+			info.depthResY = viewInfo.depthResY;
+			unsigned int nextPowerOfTwoX = GetNextPowerOfTwo(viewInfo.depthResX);
+			unsigned int nextPowerOfTwoY = GetNextPowerOfTwo(viewInfo.depthResY);
 			info.uvScaleToNextPowerOfTwo = {
-				static_cast<float>(viewInfo->depthResX) / static_cast<float>(nextPowerOfTwoX),
-				static_cast<float>(viewInfo->depthResY) / static_cast<float>(nextPowerOfTwoY)
+				static_cast<float>(viewInfo.depthResX) / static_cast<float>(nextPowerOfTwoX),
+				static_cast<float>(viewInfo.depthResY) / static_cast<float>(nextPowerOfTwoY)
 			};
 			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
 			info.isOrtho = true; // Directional lights use orthographic projection for shadows.
@@ -350,22 +350,22 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 void LightManager::RemoveLightViewInfo(flecs::entity light) {
 
 	//m_pCommandBufferManager->UnregisterBuffers(light.id()); // Remove indirect command buffers
-	auto lightInfo = light.get<Components::Light>();
-	auto viewInfo = light.get<Components::LightViewInfo>();
-	switch (lightInfo->type) {
+	auto& lightInfo = light.get<Components::Light>();
+	auto& viewInfo = light.get<Components::LightViewInfo>();
+	switch (lightInfo.type) {
 	case Components::LightType::Point: {
-		auto& views = viewInfo->renderViews;
+		auto& views = viewInfo.renderViews;
 		for (int i = 0; i < 6; i++) {
 			m_pCameraManager->RemoveCamera(views[i]);
 		}
 		break;
 	}
 	case Components::LightType::Spot: {
-		m_pCameraManager->RemoveCamera(viewInfo->renderViews[0]);
+		m_pCameraManager->RemoveCamera(viewInfo.renderViews[0]);
 		break;
 	}
 	case Components::LightType::Directional: {
-		auto& views = viewInfo->renderViews;
+		auto& views = viewInfo.renderViews;
 		for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
 			m_pCameraManager->RemoveCamera(views[i]);
 		}

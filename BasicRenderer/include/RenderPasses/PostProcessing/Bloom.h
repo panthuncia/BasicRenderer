@@ -31,8 +31,8 @@ public:
         }
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
-		m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+    void Setup() override {
+		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -111,8 +111,14 @@ private:
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/bloom.hlsl", L"downsample", L"ps_6_6", {}, pixelShader);
+
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+		shaderInfoBundle.pixelShader = { L"shaders/PostProcessing/bloom.hlsl", L"downsample", L"ps_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		vertexShader = compiledBundle.vertexShader;
+		pixelShader = compiledBundle.pixelShader;
+
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
         inputLayoutDesc.pInputElementDescs = nullptr;
@@ -198,7 +204,11 @@ private:
         }
 
         // Upsample
-        PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/bloom.hlsl", L"upsample", L"ps_6_6", {}, pixelShader);
+        //PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/bloom.hlsl", L"upsample", L"ps_6_6", {}, pixelShader);
+		shaderInfoBundle.pixelShader = { L"shaders/PostProcessing/bloom.hlsl", L"upsample", L"ps_6_6" };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		pixelShader = compiledBundle.pixelShader;
+
 		psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
 		hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_upsamplePso));
 		if (FAILED(hr)) {
@@ -219,8 +229,8 @@ public:
             .WithUnorderedAccess(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ 0, 1 }));
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
-        m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+    void Setup() override {
+        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -286,8 +296,14 @@ private:
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
-        PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/bloom.hlsl", L"blend", L"ps_6_6", {}, pixelShader);
+        //PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
+        //PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/bloom.hlsl", L"blend", L"ps_6_6", {}, pixelShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+		shaderInfoBundle.pixelShader = { L"shaders/PostProcessing/bloom.hlsl", L"blend", L"ps_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		vertexShader = compiledBundle.vertexShader;
+		pixelShader = compiledBundle.pixelShader;
 
         D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
         inputLayoutDesc.pInputElementDescs = nullptr;

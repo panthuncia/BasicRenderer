@@ -32,16 +32,16 @@ public:
         builder->WithInternalTransition({ Builtin::PostProcessing::ScreenSpaceReflections, {} }, {ResourceAccessType::COMMON, ResourceLayout::LAYOUT_COMMON, ResourceSyncState::ALL});
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
-        m_pHDRTarget = resourceRegistryView.Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        m_pMotionVectors = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-        m_pDepthTexture = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pNormals = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::Normals);
-        m_pMetallicRoughness = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
-		m_pMotionVectors = resourceRegistryView.Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-		m_pEnvironmentCubemap = resourceRegistryView.Request<Texture>(Builtin::Environment::CurrentPrefilteredCubemap);
-        m_pBRDFLUT = resourceRegistryView.Request<PixelBuffer>(Builtin::BRDFLUT);
-		m_pSSSROutput = resourceRegistryView.Request<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
+    void Setup() override {
+        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+        m_pDepthTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pNormals = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Normals);
+        m_pMetallicRoughness = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
+		m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+		m_pEnvironmentCubemap = m_resourceRegistryView->Request<Texture>(Builtin::Environment::CurrentPrefilteredCubemap);
+        m_pBRDFLUT = m_resourceRegistryView->Request<PixelBuffer>(Builtin::BRDFLUT);
+		m_pSSSROutput = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
     }
 
     void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {

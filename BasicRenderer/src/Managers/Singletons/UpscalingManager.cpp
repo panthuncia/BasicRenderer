@@ -228,7 +228,7 @@ bool UpscalingManager::InitSL() {
     }
 
     sl::Preferences pref{};
-    pref.showConsole = true; // for debugging, set to false in production
+    pref.showConsole = false; // for debugging, set to false in production
     pref.logLevel = sl::LogLevel::eDefault;
     auto path = GetExePath() + L"\\NVSL";
     const wchar_t* path_wchar = path.c_str();
@@ -339,28 +339,28 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
 
     sl::Constants consts = {};
 
-    auto camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
-    DirectX::XMMATRIX unjitteredProjectionInverse = XMMatrixInverse(nullptr, camera->info.unjitteredProjection);
+    auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
+    DirectX::XMMATRIX unjitteredProjectionInverse = XMMatrixInverse(nullptr, camera.info.unjitteredProjection);
     sl::float4x4 cameraViewToWorld;
-    StoreFloat4x4(camera->info.viewInverse, cameraViewToWorld);
+    StoreFloat4x4(camera.info.viewInverse, cameraViewToWorld);
     sl::float4x4 cameraViewToWorldPrev;
-    DirectX::XMMATRIX viewPrevInverse = XMMatrixInverse(nullptr, camera->info.prevView);
+    DirectX::XMMATRIX viewPrevInverse = XMMatrixInverse(nullptr, camera.info.prevView);
     StoreFloat4x4(viewPrevInverse, cameraViewToWorldPrev);
     sl::float4x4 cameraViewToPrevCameraView;
     sl::calcCameraToPrevCamera(cameraViewToPrevCameraView, cameraViewToWorld, cameraViewToWorldPrev);
     sl::float4x4 clipToPrevCameraView;
 
-    StoreFloat4x4(camera->info.unjitteredProjection, consts.cameraViewToClip); // Projection matrix
+    StoreFloat4x4(camera.info.unjitteredProjection, consts.cameraViewToClip); // Projection matrix
     StoreFloat4x4(unjitteredProjectionInverse, consts.clipToCameraView); // Inverse projection matrix
 
     sl::matrixMul(clipToPrevCameraView, consts.clipToCameraView, cameraViewToPrevCameraView);
 
     sl::float4x4 cameraViewToClipPrev;
-    StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
+    StoreFloat4x4(camera.info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
-	consts.jitterOffset.x = camera->jitterNDC.x; // Docs say this should be pixel space, but that causes screen shaking. Not sure what's wrong.
-    consts.jitterOffset.y = -camera->jitterNDC.y;
+	consts.jitterOffset.x = camera.jitterNDC.x; // Docs say this should be pixel space, but that causes screen shaking. Not sure what's wrong.
+    consts.jitterOffset.y = -camera.jitterNDC.y;
 
     // Set motion vector scaling based on your setup
     //consts.mvecScale = { -1,1 }; // Values in eMotionVectors are in [-1,1] range
@@ -368,17 +368,17 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
     //consts.mvecScale = myCustomScaling; // Custom scaling to ensure values end up in [-1,1] range
 
     consts.cameraPinholeOffset = { 0, 0 };
-    consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };
+    consts.cameraPos = { camera.info.positionWorldSpace.x, camera.info.positionWorldSpace.y, camera.info.positionWorldSpace.z };
 
-    auto basisVectors = GetBasisVectors3f(camera->info.view);
+    auto basisVectors = GetBasisVectors3f(camera.info.view);
     consts.cameraUp = { basisVectors.Up.x, basisVectors.Up.y, basisVectors.Up.z };
     consts.cameraRight = { basisVectors.Right.x, basisVectors.Right.y, basisVectors.Right.z };
     consts.cameraFwd = { basisVectors.Forward.x, basisVectors.Forward.y, basisVectors.Forward.z };
 
-    consts.cameraNear = camera->info.zNear;
-    consts.cameraFar = camera->info.zFar;
-    consts.cameraFOV = camera->info.fov;
-    consts.cameraAspectRatio = camera->info.aspectRatio;
+    consts.cameraNear = camera.info.zNear;
+    consts.cameraFar = camera.info.zFar;
+    consts.cameraFOV = camera.info.fov;
+    consts.cameraAspectRatio = camera.info.aspectRatio;
     consts.depthInverted = sl::Boolean::eFalse;
     consts.cameraMotionIncluded = sl::Boolean::eTrue;
     consts.motionVectors3D = sl::Boolean::eFalse;
@@ -419,7 +419,7 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
 void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     ffx::DispatchDescUpscale dispatchUpscale{};
 
-    auto camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
+    auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
 
     dispatchUpscale.commandList = context.commandList;
 
@@ -434,8 +434,8 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
 	auto outputRes = m_getOutputRes();
 
     // Jitter is calculated earlier in the frame using a callback from the camera update
-    dispatchUpscale.jitterOffset.x = camera->jitterPixelSpace.x;
-    dispatchUpscale.jitterOffset.y = -camera->jitterPixelSpace.y;
+    dispatchUpscale.jitterOffset.x = camera.jitterPixelSpace.x;
+    dispatchUpscale.jitterOffset.y = -camera.jitterPixelSpace.y;
 	dispatchUpscale.motionVectorScale.x = -renderRes.x; // FFX expects left-handed, we use right-handed
     dispatchUpscale.motionVectorScale.y = renderRes.y;
     dispatchUpscale.reset = false;
@@ -452,18 +452,18 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
     dispatchUpscale.upscaleSize.height = outputRes.y;
 
     // Setup camera params as required
-    dispatchUpscale.cameraFovAngleVertical = camera->fov;
+    dispatchUpscale.cameraFovAngleVertical = camera.fov;
 
     bool s_InvertedDepth = false;
     if (s_InvertedDepth) // TODO: FFX docs says this is preferred. Why?
     {
-        dispatchUpscale.cameraFar = camera->zNear;
+        dispatchUpscale.cameraFar = camera.zNear;
         dispatchUpscale.cameraNear = FLT_MAX;
     }
     else
     {
-        dispatchUpscale.cameraFar = camera->zFar;
-        dispatchUpscale.cameraNear = camera->zNear;
+        dispatchUpscale.cameraFar = camera.zFar;
+        dispatchUpscale.cameraNear = camera.zNear;
     }
 
     ffx::ReturnCode retCode = ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);

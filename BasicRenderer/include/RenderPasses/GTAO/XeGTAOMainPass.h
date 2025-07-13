@@ -17,7 +17,7 @@ public:
             .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1);
     }
 
-    void Setup(const ResourceRegistryView& resourceRegistryView) override {
+    void Setup() override {
         auto& manager = DeviceManager::GetInstance();
         auto& device = manager.GetDevice();
         uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
@@ -32,7 +32,8 @@ public:
         }
 		CreateXeGTAOComputePSO();
 
-		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+        RegisterSRV(Builtin::CameraBuffer);
+        RegisterSRV(Builtin::GBuffer::Normals);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -49,10 +50,7 @@ public:
 		commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
 		commandList->SetPipelineState(GTAOHighPSO.Get());
 
-		unsigned int staticBufferIndices[NumStaticBufferRootConstants] = {};
-        staticBufferIndices[CameraBufferDescriptorIndex] = m_cameraBufferSRVIndex;
-
-		commandList->SetComputeRoot32BitConstants(StaticBufferRootSignatureIndex, NumStaticBufferRootConstants, staticBufferIndices, 0);
+        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings_High);
 
         unsigned int passConstants[NumMiscUintRootConstants] = {};
         passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
@@ -87,7 +85,7 @@ private:
 
     uint64_t frameIndex = 0;
 
-	int m_cameraBufferSRVIndex = -1;
+    PipelineResources m_resourceDescriptorBindings_High;
 
     void CreateXeGTAOComputePSO() {
         auto device = DeviceManager::GetInstance().GetDevice();
@@ -97,22 +95,37 @@ private:
         psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
         
 		Microsoft::WRL::ComPtr<ID3DBlob> CSGTAOLow;
-		PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOLow", L"cs_6_6", {}, CSGTAOLow);
+		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOLow", L"cs_6_6", {}, CSGTAOLow);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSGTAOLow", L"cs_6_6" };
+		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		CSGTAOLow = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSGTAOLow.Get());
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&GTAOLowPSO)));
 		Microsoft::WRL::ComPtr<ID3DBlob> CSGTAOMedium;
-		PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOMedium", L"cs_6_6", {}, CSGTAOMedium);
+		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOMedium", L"cs_6_6", {}, CSGTAOMedium);
+		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSGTAOMedium", L"cs_6_6" };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		CSGTAOMedium = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSGTAOMedium.Get());
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&GTAOMediumPSO)));
 		Microsoft::WRL::ComPtr<ID3DBlob> CSGTAOHigh;
-		PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOHigh", L"cs_6_6", {}, CSGTAOHigh);
+		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOHigh", L"cs_6_6", {}, CSGTAOHigh);
+		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSGTAOHigh", L"cs_6_6" };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		CSGTAOHigh = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSGTAOHigh.Get());
+        m_resourceDescriptorBindings_High = compiledBundle.resourceDescriptorSlots;
+
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&GTAOHighPSO)));
 		Microsoft::WRL::ComPtr<ID3DBlob> CSGTAOUltra;
-		PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOUltra", L"cs_6_6", {}, CSGTAOUltra);
+		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSGTAOUltra", L"cs_6_6", {}, CSGTAOUltra);
+		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSGTAOUltra", L"cs_6_6" };
+		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
+		CSGTAOUltra = compiledBundle.computeShader;
 		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSGTAOUltra.Get());
 		ThrowIfFailed(device->CreateComputePipelineState(
 			&psoDesc, IID_PPV_ARGS(&GTAOUltraPSO)));

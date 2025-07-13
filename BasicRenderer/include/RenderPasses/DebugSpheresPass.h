@@ -27,16 +27,16 @@ public:
 			.IsGeometryPass();
 	}
 
-	void Setup(const ResourceRegistryView& resourceRegistryView) override {
+	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	
-		m_pPrimaryDepthBuffer = resourceRegistryView.Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-		m_cameraBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
-		m_objectBufferSRVIndex = resourceRegistryView.Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+		m_cameraBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
+		m_objectBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -175,8 +175,14 @@ private:
 		Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
 		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
-		manager.CompileShader(L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6", {}, meshShader);
-		manager.CompileShader(L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6", {}, pixelShader);
+		//manager.CompileShader(L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6", {}, meshShader);
+		//manager.CompileShader(L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6", {}, pixelShader);
+		ShaderInfoBundle shaderInfoBundle;
+		shaderInfoBundle.meshShader = { L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6" };
+		shaderInfoBundle.pixelShader = { L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6" };
+		auto compiledBundle = manager.CompileShaders(shaderInfoBundle);
+		meshShader = compiledBundle.meshShader;
+		pixelShader = compiledBundle.pixelShader;
 
 		CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 		rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
@@ -206,10 +212,7 @@ private:
 		PipelineStateStream pipelineStateStream = {};
 		pipelineStateStream.RootSignature = m_debugRootSignature.Get();
 		pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-
-		if (pixelShader) {
-			pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-		}
+		pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
 
 		pipelineStateStream.RasterizerState = rasterizerState;
 		pipelineStateStream.BlendState = blendDesc;
