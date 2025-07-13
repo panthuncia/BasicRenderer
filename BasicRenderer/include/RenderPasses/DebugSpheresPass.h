@@ -182,6 +182,7 @@ private:
 		shaderInfoBundle.pixelShader = { L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6" };
 		auto compiledBundle = manager.CompileShaders(shaderInfoBundle);
 		meshShader = compiledBundle.meshShader;
+		pixelShader = compiledBundle.pixelShader;
 
 		CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 		rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
@@ -211,10 +212,7 @@ private:
 		PipelineStateStream pipelineStateStream = {};
 		pipelineStateStream.RootSignature = m_debugRootSignature.Get();
 		pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-
-		if (pixelShader) {
-			pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-		}
+		pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
 
 		pipelineStateStream.RasterizerState = rasterizerState;
 		pipelineStateStream.BlendState = blendDesc;

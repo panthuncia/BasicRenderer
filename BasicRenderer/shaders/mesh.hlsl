@@ -172,13 +172,8 @@ void MSMain(
         return;
     }
     
-    // Test if this meshlet is culled
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
-    //ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[meshletCullingBitfieldBufferDescriptorIndex];
-    //unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + meshletIndex;
-    
-    //bool bCulled = GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
     
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)]; // Base vertex buffer
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)]; // Meshlets, containing vertex & primitive offset & num

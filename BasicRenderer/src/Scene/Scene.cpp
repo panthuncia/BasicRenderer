@@ -153,7 +153,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 	auto alphaTestMeshInstances = entity.try_get<Components::AlphaTestMeshInstances>();
 	auto blendMeshInstances = entity.try_get<Components::BlendMeshInstances>();
 
-	auto globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
+	auto& globalMeshLibrary = world.get_mut<Components::GlobalMeshLibrary>();
 	auto& drawStats = world.get_mut<Components::DrawStats>();
 
 	bool useMeshletReorderedVertices = getMeshShadersEnabled();

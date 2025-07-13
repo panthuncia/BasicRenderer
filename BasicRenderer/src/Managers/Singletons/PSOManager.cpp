@@ -1069,9 +1069,6 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
                         }
 
                         std::string identifier = std::move(rawText);
-                        if (identifier == "Builtin::GBuffer::Normals") {
-                            spdlog::info("");
-                        }
                         if (replacementMap.count(identifier)) {
                             replacements.push_back({
                             ts_node_start_byte(node),
