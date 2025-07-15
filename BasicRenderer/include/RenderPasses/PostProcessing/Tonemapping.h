@@ -10,11 +10,25 @@
 #include "Scene/Scene.h"
 #include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Colorspaces.h"
+
+#include "../shaders/FidelityFX/ffx_a.h"
+A_STATIC AF1 fs2S;
+A_STATIC AF1 hdr10S;
+A_STATIC AU1 ctl[24 * 4];
+
+A_STATIC void LpmSetupOut(AU1 i, inAU4 v)
+{
+    for (int j = 0; j < 4; ++j) { ctl[i * 4 + j] = v[j]; }
+}
+#include "../shaders/FidelityFX/ffx_lpm.h"
+#include "../shaders/PerPassRootConstants/tonemapRootConstants.h"
 
 class TonemappingPass : public RenderPass {
 public:
 	TonemappingPass() {
 		CreatePSO();
+		getTonemapType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("tonemapType");
 	}
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
@@ -22,6 +36,38 @@ public:
     }
 
 	void Setup() override {
+
+        m_pLPMConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<LPMConstants>(1, L"AMD LPM constants");
+        LPMConstants lpmConstants = {};
+        
+        lpmConstants.shoulder = true;
+        lpmConstants.con = false;
+        lpmConstants.soft = false;
+        lpmConstants.con2 = false;
+        lpmConstants.clip = true;
+        lpmConstants.scaleOnly = false;
+		float scaleC = 1.0f;
+		float softGap = 0.001f;
+		float hdrMax = 400.0f; // TODO : replace with actual HDR max luminance
+        
+		float Lk = 0.5f;//computeKeyLuminance(); // TODO: compute key luminance from HDR input
+        float exposure = log2(hdrMax * 0.18f / std::max(Lk, 1e-5f));
+        float contrast = 0.0f;
+        float shoulderContrast = 1.0f;
+
+		float saturation[3] = { 0.0f, 0.0f, 0.0f };
+		float crosstalk[3] = { 1.0f, 1.0f, 1.0f };
+
+        LpmSetup(lpmConstants.shoulder, lpmConstants.con, lpmConstants.soft, lpmConstants.con2, lpmConstants.clip, lpmConstants.scaleOnly,
+            (float*)&Rec709.r, (float*)&Rec709.g, (float*)&Rec709.b, (float*)&Rec709.D65,
+            (float*)&Rec709.r, (float*)&Rec709.g, (float*)&Rec709.b, (float*)&Rec709.D65,
+            (float*)&Rec709.r, (float*)&Rec709.g, (float*)&Rec709.b, (float*)&Rec709.D65,
+            scaleC, softGap, hdrMax, exposure, contrast, shoulderContrast, (float*)&saturation, (float*)&crosstalk);
+
+		memcpy(lpmConstants.u_ctl, ctl, sizeof(ctl));
+
+		UploadManager::GetInstance().UploadData(&lpmConstants, sizeof(LPMConstants), m_pLPMConstants.get(), 0);
+
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);
     }
@@ -53,6 +99,12 @@ public:
 
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
+		unsigned int misc[NumMiscUintRootConstants] = {};
+		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).index;
+		misc[TONEMAP_TYPE] = getTonemapType();
+
+		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, misc, 0);
+
 		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}
@@ -65,6 +117,10 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
     PipelineResources m_resourceDescriptorBindings;
+
+    std::shared_ptr<LazyDynamicStructuredBuffer<LPMConstants>> m_pLPMConstants;
+
+    std::function<unsigned int()> getTonemapType;
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;

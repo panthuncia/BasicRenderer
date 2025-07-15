@@ -98,6 +98,7 @@ private:
 
 	std::function<void(unsigned int)> setOutputType;
     std::function<void(unsigned int)> setTonemapType;
+	std::function<unsigned int()> getTonemapType;
 
     bool meshShaderEnabled = false;
     bool indirectDrawsWereEnabled = false;
@@ -249,6 +250,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 
 	setOutputType = settingsManager.getSettingSetter<unsigned int>("outputType");
 	setTonemapType = settingsManager.getSettingSetter<unsigned int>("tonemapType");
+	getTonemapType = settingsManager.getSettingGetter<unsigned int>("tonemapType");
 
     getSceneRoot = settingsManager.getSettingGetter<std::function<flecs::entity()>>("getSceneRoot")();
 
@@ -576,6 +578,7 @@ inline void Menu::DrawUpscalingQualityCombo()
 
 inline void Menu::DrawTonemapTypeDropdown() {
     static int selectedItemIndex = 0;
+	selectedItemIndex = getTonemapType();
     if (ImGui::BeginCombo("Tonemap Type", TonemapTypeNames[selectedItemIndex].c_str())) {
         for (int i = 0; i < TonemapTypeNames.size(); ++i) {
             bool isSelected = (selectedItemIndex == i);

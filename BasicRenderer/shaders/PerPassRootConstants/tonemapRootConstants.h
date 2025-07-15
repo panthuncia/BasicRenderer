@@ -1,0 +1,7 @@
+#ifndef __TONEMAP_ROOT_CONSTANTS_H__
+#define __TONEMAP_ROOT_CONSTANTS_H__
+
+#define LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX UintRootConstant0
+#define TONEMAP_TYPE UintRootConstant1
+
+#endif // __TONEMAP_ROOT_CONSTANTS_H__

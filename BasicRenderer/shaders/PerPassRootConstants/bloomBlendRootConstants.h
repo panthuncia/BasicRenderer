@@ -1,0 +1,12 @@
+#ifndef __BLOOM_BLEND_ROOT_CONSTANTS_H__
+#define __BLOOM_BLEND_ROOT_CONSTANTS_H__
+
+#define HDR_TARGET_UAV_DESCRIPTOR_INDEX UintRootConstant0
+#define BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX UintRootConstant1
+#define DST_WIDTH UintRootConstant2
+#define DST_HEIGHT UintRootConstant3
+
+#define FILTER_RADIUS FloatRootConstant0
+#define ASPECT_RATIO FloatRootConstant1
+
+#endif // __BLOOM_BLEND_ROOT_CONSTANTS_H__

@@ -68,9 +68,8 @@ struct PerFrameBuffer {
     uint nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
     
-    uint tonemapType;
     uint frameIndex; // 0 to 64
-    uint pad[2];
+    uint pad[3];
 };
 
 struct BoundingSphere {
@@ -272,6 +271,20 @@ struct EnvironmentInfo {
     float sphericalHarmonicsScale;
     int sphericalHarmonics[27]; // floats scaled by SH_FLOAT_SCALE
     uint pad[2];
+};
+
+struct LPMConstants
+{
+    uint u_ctl[24 * 4];
+    uint shoulder;
+    uint con;
+    uint soft;
+    uint con2;
+    uint clip;
+    uint scaleOnly;
+    uint displayMode;
+    uint pad;
+    float4x4 inputToOutputMatrix;
 };
 
 #endif // __STRUCTS_HLSL__

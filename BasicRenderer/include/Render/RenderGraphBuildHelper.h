@@ -2,6 +2,8 @@
 #include "Scene/Components.h"
 #include "Render/RenderGraph.h"
 #include "../../generated/BuiltinResources.h"
+#include "RenderPasses/PostProcessing/BloomSamplePass.h"
+#include "RenderPasses/PostProcessing/BloomBlendPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources

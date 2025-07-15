@@ -45,7 +45,6 @@
 #include "RenderPasses/DeferredRenderPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
-#include "RenderPasses/PostProcessing/Bloom.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
 #include "RenderPasses/brdfIntegrationPass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
@@ -319,7 +318,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", OutputType::COLOR);
-	settingsManager.registerSetting<unsigned int>("tonemapType", TonemapType::REINHARD_JODIE);
+	settingsManager.registerSetting<unsigned int>("tonemapType", TonemapType::AMD_LPM);
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
@@ -375,9 +374,6 @@ void DX12Renderer::SetSettings() {
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
-		}));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
-		ResourceManager::GetInstance().SetTonemapType(newValue);
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
 		ToggleMeshShaders(newValue);

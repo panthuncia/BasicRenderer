@@ -65,9 +65,8 @@ struct PerFrameCB {
     unsigned int nearClusterCount; // how many uniform slices up close
     float clusterZSplitDepth; // view-space depth to switch to log
 
-    unsigned int tonemapType;
     unsigned int frameIndex; // 0 to 63
-    unsigned int pad[2];
+    unsigned int pad[3];
 };
 
 struct PerObjectCB {
@@ -246,6 +245,20 @@ struct EnvironmentInfo {
     uint pad[2];
 };
 
+struct LPMConstants {
+    unsigned int u_ctl[24 * 4];
+    unsigned int shoulder;
+    unsigned int con;
+    unsigned int soft;
+    unsigned int con2;
+    unsigned int clip;
+    unsigned int scaleOnly;
+    uint displayMode;
+    uint pad;
+    DirectX::XMMATRIX inputToOutputMatrix;
+};
+
+
 enum RootSignatureLayout {
     PerObjectRootSignatureIndex,
     PerMeshRootSignatureIndex,
@@ -317,6 +330,10 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
 enum MiscFloatRootConstants { // Used for pass-specific one-off constants
 	FloatRootConstant0,
 	FloatRootConstant1,
+	FloatRootConstant2,
+	FloatRootConstant3,
+	FloatRootConstant4,
+	FloatRootConstant5,
 	NumMiscFloatRootConstants
 };
 
@@ -356,10 +373,5 @@ enum ResourceDescriptorIndicesRootConstants {
 	ResourceDescriptorIndex32,
 	ResourceDescriptorIndex33,
 	ResourceDescriptorIndex34,
-	ResourceDescriptorIndex35,
-	ResourceDescriptorIndex36,
-	ResourceDescriptorIndex37,
-	ResourceDescriptorIndex38,
-	ResourceDescriptorIndex39,
     NumResourceDescriptorIndicesRootConstants
 };

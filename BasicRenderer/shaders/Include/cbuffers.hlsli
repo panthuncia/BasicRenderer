@@ -58,6 +58,10 @@ cbuffer MiscUintRootConstants : register(b8) { // Used for pass-specific one-off
 cbuffer MiscFloatRootConstants : register(b9) { // Used for pass-specific one-off constants
     float FloatRootConstant0;
     float FloatRootConstant1;
+    float FloatRootConstant2;
+    float FloatRootConstant3;
+    float FloatRootConstant4;
+    float FloatRootConstant5;
 }
 
 cbuffer ResourceDescriptorIndices : register(b10) {
@@ -96,11 +100,6 @@ cbuffer ResourceDescriptorIndices : register(b10) {
     uint ResourceDescriptorIndex32;
     uint ResourceDescriptorIndex33;
     uint ResourceDescriptorIndex34;
-    uint ResourceDescriptorIndex35;
-    uint ResourceDescriptorIndex36;
-    uint ResourceDescriptorIndex37;
-    uint ResourceDescriptorIndex38;
-    uint ResourceDescriptorIndex39;
 };
 
 
