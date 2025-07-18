@@ -130,7 +130,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         true);
 
     // Single-pass downsample on all occluder-only depth maps
-    // TODO: Unhandled edge case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped)
+    // TODO: Case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped), handled sub-optimally
     auto downsampleBuilder = graph->BuildComputePass("DownsamplePass")
         .Build<DownsamplePass>();
 
@@ -176,7 +176,7 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
         .Build<ObjectCullingPass>(false, occlusionCulling);
 
     if (meshletCulling || occlusionCulling) {
-        graph->BuildComputePass("MeshletFrustrumCullingPass") // Any meshes that are partially frustrum *or* occlusion culled are sent to the meshlet culling pass
+        graph->BuildComputePass("MeshletCullingPass") // Any meshes that are partially culled are sent to the meshlet culling pass
             .Build<MeshletCullingPass>(false, false, true);
     }
 }

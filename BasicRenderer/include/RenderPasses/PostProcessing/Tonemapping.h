@@ -48,9 +48,9 @@ public:
         lpmConstants.scaleOnly = false;
 		float scaleC = 1.0f;
 		float softGap = 0.001f;
-		float hdrMax = 400.0f; // TODO : replace with actual HDR max luminance
+		float hdrMax = 10.0f; // TODO : replace with actual HDR max luminance
         
-		float Lk = 0.5f;//computeKeyLuminance(); // TODO: compute key luminance from HDR input
+		float Lk = 1.0f;//computeKeyLuminance(); // TODO: compute key luminance from HDR input
         float exposure = log2(hdrMax * 0.18f / std::max(Lk, 1e-5f));
         float contrast = 0.0f;
         float shoulderContrast = 1.0f;

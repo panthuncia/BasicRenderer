@@ -49,6 +49,8 @@
 #include "RenderPasses/brdfIntegrationPass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
+#include "RenderPasses/PostProcessing/luminanceHistogram.h"
+#include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1183,7 +1185,7 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view.indirectCommandBuffers.blendIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
-    //newGraph->AddResource(depthTexture, false);
+    //newGraph->AddResource(depthTexture, false);https://www.linkedin.com/in/matthew-gomes-857a4h/
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1250,6 +1252,16 @@ void DX12Renderer::CreateRenderGraph() {
 	if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
         BuildSSRPasses(newGraph.get());
     }
+
+	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), false, true, false);
+    newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
+	auto histogramBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(255, sizeof(uint32_t), false, true, false);
+	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
+
+    newGraph->BuildComputePass("luminanceHistogramPass")
+        .Build<LuminanceHistogramPass>();
+    newGraph->BuildComputePass("LuminanceAveragePass")
+		.Build<LuminanceHistogramAveragePass>();
 
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
