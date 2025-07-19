@@ -103,6 +103,21 @@ void RenderGraph::ProcessResourceRequirements(
 }
 
 void RenderGraph::Compile() {
+	// Register resource providers from pass builders
+
+
+	for (auto& v : m_passBuilders) {
+		std::visit([this](auto& builder) {
+			RegisterProvider(builder.pass.get());
+			}, v);
+	}
+
+	for (auto& v : m_passBuilders) {
+		std::visit([this](auto& builder) {
+			builder.Finalize();
+			}, v);
+	}
+
     batches.clear();
 
 	//Check if any of the resource groups we have have Nth children that we also manage directly
@@ -917,4 +932,11 @@ ComputePassBuilder RenderGraph::BuildComputePass(std::string const& name) {
 }
 RenderPassBuilder RenderGraph::BuildRenderPass(std::string const& name) {
 	return RenderPassBuilder(this, name);
+}
+
+void RenderGraph::RegisterPassBuilder(RenderPassBuilder&& builder) {
+	m_passBuilders.emplace_back(std::move(builder));
+}
+void RenderGraph::RegisterPassBuilder(ComputePassBuilder&& builder) {
+	m_passBuilders.emplace_back(std::move(builder));
 }

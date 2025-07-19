@@ -13,7 +13,7 @@ public:
     LuminanceHistogramAveragePass() {}
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
-        builder->WithUnorderedAccess(Builtin::PostProcessing::LuminanceHistogram, Builtin::PostProcessing::AdaptedLuminance);
+        builder->WithUnorderedAccess(Builtin::PostProcessing::LuminanceHistogram, Builtin::PostProcessing::AdaptedLuminance, "FFX::LPMConstants");
     }
 
     void Setup() override {
@@ -21,6 +21,7 @@ public:
         
 		RegisterUAV(Builtin::PostProcessing::AdaptedLuminance);
         RegisterUAV(Builtin::PostProcessing::LuminanceHistogram);
+		RegisterSRV("FFX::LPMConstants");
     }
 
     PassReturn Execute(RenderContext& context) override {

@@ -29,15 +29,25 @@ public:
 	TonemappingPass() {
 		CreatePSO();
 		getTonemapType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("tonemapType");
+        m_pLPMConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<LPMConstants>(1, L"AMD LPM constants", 1, true);
 	}
 
+    std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
+        if (key == m_providedResources[0]) {
+			return m_pLPMConstants;
+        }
+		return nullptr;
+    }
+    std::vector<ResourceIdentifier> GetSupportedKeys() override {
+		return m_providedResources;
+    }
+
     void DeclareResourceUsages(RenderPassBuilder* builder) {
-        builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer);
+        builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer, "FFX::LPMConstants");
     }
 
 	void Setup() override {
 
-        m_pLPMConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<LPMConstants>(1, L"AMD LPM constants");
         LPMConstants lpmConstants = {};
         
         lpmConstants.shoulder = true;
@@ -70,6 +80,7 @@ public:
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);
+		RegisterSRV("FFX::LPMConstants");
     }
 
 	PassReturn Execute(RenderContext& context) override {
@@ -121,6 +132,10 @@ private:
     std::shared_ptr<LazyDynamicStructuredBuffer<LPMConstants>> m_pLPMConstants;
 
     std::function<unsigned int()> getTonemapType;
+
+    std::vector<ResourceIdentifier> m_providedResources = {
+		"FFX::LPMConstants"
+	};
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;

@@ -118,11 +118,11 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     // We need to draw occluder shadows early
     auto drawShadows = graph->RequestResource(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
     if (drawShadows) {
-        auto shadowOccluderPassBuilder = graph->BuildRenderPass("OccluderShadowPrepass")
+        graph->BuildRenderPass("OccluderShadowPrepass")
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, true);
     }
 
-    auto occludersPrepassBuilder = graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
+    graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
         .Build<ZPrepass>(
         wireframeEnabled, 
         meshShadersEnabled, 
@@ -131,7 +131,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 
     // Single-pass downsample on all occluder-only depth maps
     // TODO: Case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped), handled sub-optimally
-    auto downsampleBuilder = graph->BuildComputePass("DownsamplePass")
+    graph->BuildComputePass("DownsamplePass")
         .Build<DownsamplePass>();
 
     // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
@@ -142,11 +142,11 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     // Now, render the occluder remainders (prepass & shadows)
     if (drawShadows) {
 
-        auto shadowOccluderRemainderPassBuilder = graph->BuildRenderPass("OccluderRemaindersShadowPass")
+        graph->BuildRenderPass("OccluderRemaindersShadowPass")
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, false);
     }
 
-    auto occludersRemaindersPrepassBuilder = graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
+    graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
         .Build<ZPrepass>(
         wireframeEnabled, 
         meshShadersEnabled, 
@@ -194,7 +194,7 @@ void BuildZPrepass(RenderGraph* graph) {
     if (!occlusionCulling || !indirect) {
         clearRTVs = true; // We will not run an earlier pass
     }
-    auto newObjectsPrepassBuilder = graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
+    graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
         .Build<ZPrepass>(
         enableWireframe, 
         useMeshShaders,
@@ -348,7 +348,7 @@ void BuildMainShadowPass(RenderGraph* graph) {
         clearRTVs = true; // We will not run an earlier pass
     }
 
-    auto shadowBuilder = graph->BuildRenderPass("ShadowPass")
+    graph->BuildRenderPass("ShadowPass")
         .Build<ShadowPass>(wireframe, useMeshShaders, indirect, true, clearRTVs);
 }
 

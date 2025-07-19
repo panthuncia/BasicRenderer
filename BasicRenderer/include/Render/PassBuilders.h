@@ -543,36 +543,26 @@ public:
 
     // First build, callable on Lvalues
     template<DerivedRenderPass PassT, typename... CtorArgs>
-    RenderPassBuilder& Build(CtorArgs&&... args) & {
-        ensureNotBuilt();
+    void Build(CtorArgs&&... args) & {
+        if (built_) return;
+
         built_ = true;
 
-        auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        pass->DeclareResourceUsages(this);
+        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
 
-        params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
-
-        graph->AddRenderPass(pass, params, passName);
-
-        return *this;
+        graph->RegisterPassBuilder(std::move(*this));
     }
 
     // Second build, callable on temporaries
     template<DerivedRenderPass PassT, typename... CtorArgs>
-    RenderPassBuilder Build(CtorArgs&&... args) && {
-        ensureNotBuilt();
+    void Build(CtorArgs&&... args) && {
+        if (built_) return;
+
         built_ = true;
 
-        auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        pass->DeclareResourceUsages(this);
+        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
 
-        params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
-
-        graph->AddRenderPass(pass, params, passName);
-
-        return std::move(*this);
+        graph->RegisterPassBuilder(std::move(*this));
     }
 
     auto const& DeclaredResourceIds() const { return _declaredIds; }
@@ -580,6 +570,17 @@ public:
 private:
     RenderPassBuilder(RenderGraph* g, std::string name)
         : graph(g), passName(std::move(name)) {}
+
+    void Finalize() {
+        if (!built_) return;
+
+        pass->DeclareResourceUsages(this);
+
+        params.identifierSet = _declaredIds;
+        params.resourceRequirements = GatherResourceRequirements();
+
+        graph->AddRenderPass(pass, params, passName);
+    }
 
     // Shader Resource
 	template<typename T>
@@ -712,11 +713,6 @@ private:
         return *this;
     }
 
-    void ensureNotBuilt() const {
-        if (built_) throw std::runtime_error("RenderPassBuilder::Build() may only be called once");
-    }
-
-
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
         std::vector<std::pair<ResourceAndRange,ResourceAccessType>> entries;
@@ -811,6 +807,7 @@ private:
     RenderGraph*             graph;
     std::string              passName;
     RenderPassParameters     params;
+	std::shared_ptr<RenderPass> pass;
     bool built_ = false;
     std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> _declaredIds;
 
@@ -904,36 +901,26 @@ public:
 
     // First build, callable on Lvalues
     template<DerivedComputePass PassT, typename... CtorArgs>
-    ComputePassBuilder& Build(CtorArgs&&... args) & {
-        ensureNotBuilt();
+    void Build(CtorArgs&&... args) & {
+		if (built_) return *this;
+
         built_ = true;
 
-        auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        pass->DeclareResourceUsages(this);
+        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
 
-        params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
-
-        graph->AddComputePass(pass, params, passName);
-
-        return *this;
+        graph->RegisterPassBuilder(std::move(*this));
     }
 
     // Second build, callable on temporaries
     template<DerivedComputePass PassT, typename... CtorArgs>
-    ComputePassBuilder Build(CtorArgs&&... args) && {
-        ensureNotBuilt();
+    void Build(CtorArgs&&... args) && {
+        if (built_) return;
+
         built_ = true;
 
-        auto pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-        pass->DeclareResourceUsages(this);
+        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
 
-		params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
-
-        graph->AddComputePass(pass, params, passName);
-
-        return std::move(*this);
+        graph->RegisterPassBuilder(std::move(*this));
     }
 
     auto const& DeclaredResourceIds() const { return _declaredIds; }
@@ -941,6 +928,17 @@ public:
 private:
     ComputePassBuilder(RenderGraph* g, std::string name)
         : graph(g), passName(std::move(name)) {}
+
+    void Finalize() {
+        if (!built_) return;
+
+        pass->DeclareResourceUsages(this);
+
+        params.identifierSet = _declaredIds;
+        params.resourceRequirements = GatherResourceRequirements();
+
+        graph->AddComputePass(pass, params, passName);
+    }
 
     // Shader resource
 	template<typename T>
@@ -1013,10 +1011,6 @@ private:
 		}
         return *this;
 	}
-
-    void ensureNotBuilt() const {
-        if (built_) throw std::runtime_error("ComputePassBuilder::Build() may only be called once");
-    }
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
@@ -1102,6 +1096,7 @@ private:
     RenderGraph*             graph;
     std::string              passName;
     ComputePassParameters     params;
+    std::shared_ptr<ComputePass> pass;
     bool built_ = false;
     std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> _declaredIds;
 

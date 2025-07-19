@@ -1258,10 +1258,10 @@ void DX12Renderer::CreateRenderGraph() {
 	auto histogramBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(255, sizeof(uint32_t), false, true, false);
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
-    newGraph->BuildComputePass("luminanceHistogramPass")
-        .Build<LuminanceHistogramPass>();
-    newGraph->BuildComputePass("LuminanceAveragePass")
-		.Build<LuminanceHistogramAveragePass>();
+  //  newGraph->BuildComputePass("luminanceHistogramPass")
+  //      .Build<LuminanceHistogramPass>();
+  //  newGraph->BuildComputePass("LuminanceAveragePass")
+		//.Build<LuminanceHistogramAveragePass>();
 
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
@@ -1283,7 +1283,7 @@ void DX12Renderer::CreateRenderGraph() {
 	}
 
     if (getDrawBoundingSpheres()) {
-		auto debugSphereBuilder = newGraph->BuildRenderPass("DebugSpherePass")
+		newGraph->BuildRenderPass("DebugSpherePass")
 			.Build<DebugSpherePass>();
     }
 
