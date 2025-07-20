@@ -56,25 +56,8 @@ public:
         lpmConstants.con2 = false;
         lpmConstants.clip = true;
         lpmConstants.scaleOnly = false;
-		float scaleC = 1.0f;
-		float softGap = 0.001f;
-		float hdrMax = 10.0f; // TODO : replace with actual HDR max luminance
         
-		float Lk = 1.0f;//computeKeyLuminance(); // TODO: compute key luminance from HDR input
-        float exposure = log2(hdrMax * 0.18f / std::max(Lk, 1e-5f));
-        float contrast = 0.0f;
-        float shoulderContrast = 1.0f;
-
-		float saturation[3] = { 0.0f, 0.0f, 0.0f };
-		float crosstalk[3] = { 1.0f, 1.0f, 1.0f };
-
-        LpmSetup(lpmConstants.shoulder, lpmConstants.con, lpmConstants.soft, lpmConstants.con2, lpmConstants.clip, lpmConstants.scaleOnly,
-            (float*)&Rec709.r, (float*)&Rec709.g, (float*)&Rec709.b, (float*)&Rec709.D65,
-            (float*)&Rec709.r, (float*)&Rec709.g, (float*)&Rec709.b, (float*)&Rec709.D65,
-            (float*)&Rec709.r, (float*)&Rec709.g, (float*)&Rec709.b, (float*)&Rec709.D65,
-            scaleC, softGap, hdrMax, exposure, contrast, shoulderContrast, (float*)&saturation, (float*)&crosstalk);
-
-		memcpy(lpmConstants.u_ctl, ctl, sizeof(ctl));
+        // Rest will be filled in by the luminanceHistogramAverage shader
 
 		UploadManager::GetInstance().UploadData(&lpmConstants, sizeof(LPMConstants), m_pLPMConstants.get(), 0);
 

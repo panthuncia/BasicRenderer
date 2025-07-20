@@ -1258,10 +1258,10 @@ void DX12Renderer::CreateRenderGraph() {
 	auto histogramBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(255, sizeof(uint32_t), false, true, false);
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
-  //  newGraph->BuildComputePass("luminanceHistogramPass")
-  //      .Build<LuminanceHistogramPass>();
-  //  newGraph->BuildComputePass("LuminanceAveragePass")
-		//.Build<LuminanceHistogramAveragePass>();
+    newGraph->BuildComputePass("luminanceHistogramPass")
+        .Build<LuminanceHistogramPass>();
+    newGraph->BuildComputePass("LuminanceAveragePass")
+		.Build<LuminanceHistogramAveragePass>();
 
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
@@ -1310,36 +1310,6 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
     else {
         spdlog::error("Environment file not found: " + envpath.string());
     }
-
-	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
- //   auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
- //   auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
-	//auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
- //   if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
- //       if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
- //           DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
- //           m_currentEnvironmentTexture = nullptr;
- //       }
-	//	// Load the cached environment
- //       auto skybox = loadCubemapFromFile(skyboxPath);
-	//	auto radiance = loadCubemapFromFile(radiancePath);
- //       auto prefiltered = loadCubemapFromFile(prefilteredPath);
-	//	SetSkybox(skybox);
-	//	SetIrradiance(radiance);
-	//	SetPrefilteredEnvironment(prefiltered);
- //       rebuildRenderGraph = true;
- //   }
- //   else {
- //       std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
- //       
- //       if (std::filesystem::exists(envpath)) {
- //           auto skyHDR = loadTextureFromFileSTBI(envpath.string());
- //           SetEnvironmentTexture(skyHDR, ws2s(name));
- //       }
- //       else {
- //           spdlog::error("Environment file not found: " + envpath.string());
- //       }
- //   }
 }
 
 void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
