@@ -38,4 +38,17 @@ FULLSCREEN_VS_OUTPUT FullscreenVSMain(uint vid : SV_VertexID)
     return o;
 }
 
+FULLSCREEN_VS_OUTPUT FullscreenVSNoViewRayMain(uint vid : SV_VertexID)
+{
+    FULLSCREEN_VS_OUTPUT o;
+    float2 pos = 0;
+    pos.x = (vid == 1) ? +3.0 : -1.0;
+    pos.y = (vid == 2) ? +3.0 : -1.0;
+    
+    o.position = float4(pos, 1.0f, 1);
+    o.uv = pos * 0.5 + 0.5;
+    
+    return o;
+}
+
 #endif // __FULLSCREEN_VS_HLSLI__

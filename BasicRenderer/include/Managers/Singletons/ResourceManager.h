@@ -442,7 +442,6 @@ public:
 
 	void SetActiveEnvironmentIndex(unsigned int index) { perFrameCBData.activeEnvironmentIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
-    void SetTonemapType(unsigned int type) { perFrameCBData.tonemapType = type; }
 
 	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
 

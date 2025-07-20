@@ -45,11 +45,12 @@
 #include "RenderPasses/DeferredRenderPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
-#include "RenderPasses/PostProcessing/Bloom.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
 #include "RenderPasses/brdfIntegrationPass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
+#include "RenderPasses/PostProcessing/luminanceHistogram.h"
+#include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "Resources/TextureDescription.h"
 #include "Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -319,7 +320,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enablePunctualLighting", true);
 	settingsManager.registerSetting<std::string>("environmentName", "");
 	settingsManager.registerSetting<unsigned int>("outputType", OutputType::COLOR);
-	settingsManager.registerSetting<unsigned int>("tonemapType", TonemapType::REINHARD_JODIE);
+	settingsManager.registerSetting<unsigned int>("tonemapType", TonemapType::AMD_LPM);
     settingsManager.registerSetting<bool>("allowTearing", false);
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
@@ -375,9 +376,6 @@ void DX12Renderer::SetSettings() {
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
-		}));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("tonemapType", [this](const unsigned int& newValue) {
-		ResourceManager::GetInstance().SetTonemapType(newValue);
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
 		ToggleMeshShaders(newValue);
@@ -1187,7 +1185,7 @@ void DX12Renderer::CreateRenderGraph() {
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view.indirectCommandBuffers.blendIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
-    //newGraph->AddResource(depthTexture, false);
+    //newGraph->AddResource(depthTexture, false);https://www.linkedin.com/in/matthew-gomes-857a4h/
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1255,6 +1253,16 @@ void DX12Renderer::CreateRenderGraph() {
         BuildSSRPasses(newGraph.get());
     }
 
+	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), false, true, false);
+    newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
+	auto histogramBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(255, sizeof(uint32_t), false, true, false);
+	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
+
+    newGraph->BuildComputePass("luminanceHistogramPass")
+        .Build<LuminanceHistogramPass>();
+    newGraph->BuildComputePass("LuminanceAveragePass")
+		.Build<LuminanceHistogramAveragePass>();
+
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
 
@@ -1275,7 +1283,7 @@ void DX12Renderer::CreateRenderGraph() {
 	}
 
     if (getDrawBoundingSpheres()) {
-		auto debugSphereBuilder = newGraph->BuildRenderPass("DebugSpherePass")
+		newGraph->BuildRenderPass("DebugSpherePass")
 			.Build<DebugSpherePass>();
     }
 
@@ -1302,36 +1310,6 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
     else {
         spdlog::error("Environment file not found: " + envpath.string());
     }
-
-	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
- //   auto radiancePath = GetCacheFilePath(name + L"_radiance.dds", L"environments");
- //   auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
-	//auto prefilteredPath = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
- //   if (std::filesystem::exists(radiancePath) && std::filesystem::exists(skyboxPath) && std::filesystem::exists(prefilteredPath)) {
- //       if (m_currentEnvironmentTexture != nullptr) { // unset environment texture so render graph doesn't try to rebuld resources
- //           DeletionManager::GetInstance().MarkForDelete(m_currentEnvironmentTexture);
- //           m_currentEnvironmentTexture = nullptr;
- //       }
-	//	// Load the cached environment
- //       auto skybox = loadCubemapFromFile(skyboxPath);
-	//	auto radiance = loadCubemapFromFile(radiancePath);
- //       auto prefiltered = loadCubemapFromFile(prefilteredPath);
-	//	SetSkybox(skybox);
-	//	SetIrradiance(radiance);
-	//	SetPrefilteredEnvironment(prefiltered);
- //       rebuildRenderGraph = true;
- //   }
- //   else {
- //       std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
- //       
- //       if (std::filesystem::exists(envpath)) {
- //           auto skyHDR = loadTextureFromFileSTBI(envpath.string());
- //           SetEnvironmentTexture(skyHDR, ws2s(name));
- //       }
- //       else {
- //           spdlog::error("Environment file not found: " + envpath.string());
- //       }
- //   }
 }
 
 void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {

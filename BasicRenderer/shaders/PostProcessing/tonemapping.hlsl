@@ -3,9 +3,27 @@
 #include "fullscreenVS.hlsli"
 #include "include/gammaCorrection.hlsli"
 
+#define A_GPU 1
+#define A_HLSL 1
+#include "FidelityFX/ffx_a.h"
+
+#include "PerPassRootConstants/tonemapRootConstants.h"
+uint4 LpmFilterCtl(uint i)
+{
+    StructuredBuffer<LPMConstants> lpmConstants = ResourceDescriptorHeap[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX];
+    LPMConstants constants = lpmConstants[0];
+    return constants.u_ctl[i];
+}
+
+#define LPM_NO_SETUP 1
+#include "FidelityFX/ffx_lpm.h"
+
+#include "FidelityFX/transferFunction.h"
+
 #define TONEMAP_REINHARD_JODIE 0
 #define TONEMAP_KRONOS_PBR_NEUTRAL 1
 #define TONEMAP_ACES_HILL 2
+#define TONEMAP_AMD_LPM 3
 
 float luminanceFromColor(float3 color)
 {
@@ -96,8 +114,8 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
     float4 color = float4(hdrSource.SampleLevel(g_pointClamp, uv, 0).rgb, 1.0);
 	ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 	// Apply tone mapping based on the selected method
-	switch (perFrameBuffer.tonemapType)
-	{
+    switch (TONEMAP_TYPE)
+    {
 		case TONEMAP_REINHARD_JODIE:
 			color.rgb = reinhardJodie(color.rgb);
 			break;
@@ -107,6 +125,12 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
 		case TONEMAP_ACES_HILL:
 			color.rgb = toneMapACES_Hill(color.rgb);
 			break;
+        case TONEMAP_AMD_LPM:{
+            StructuredBuffer<LPMConstants> lpmConstants = ResourceDescriptorHeap[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX];
+                LPMConstants constants = lpmConstants[0];
+                LpmFilter(color.r, color.g, color.b, constants.shoulder, constants.con, constants.soft, constants.con2, constants.clip, constants.scaleOnly);
+
+            }
 		default:
 			// No tone mapping
 			break;

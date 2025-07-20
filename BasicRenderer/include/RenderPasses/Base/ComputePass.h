@@ -16,6 +16,7 @@
 #include "../../../generated/BuiltinResources.h"
 #include "ResourceDescriptorIndexHelper.h"
 #include "Render/PipelineState.h"
+#include "interfaces/IResourceProvider.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;
@@ -31,7 +32,7 @@ struct ComputePassParameters {
 
 class ComputePassBuilder;
 
-class ComputePass {
+class ComputePass : public IResourceProvider {
 public:
 	virtual ~ComputePass() = default;
 
@@ -81,6 +82,9 @@ protected:
 	void RegisterUAV(ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {
 		m_resourceDescriptorIndexHelper->RegisterUAV(id, mip, slice);
 	}
+
+	virtual std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) { return nullptr; }
+	virtual std::vector<ResourceIdentifier> GetSupportedKeys() { return {}; }
 
 	std::unique_ptr<ResourceDescriptorIndexHelper> m_resourceDescriptorIndexHelper;
 	std::shared_ptr<ResourceRegistryView> m_resourceRegistryView;

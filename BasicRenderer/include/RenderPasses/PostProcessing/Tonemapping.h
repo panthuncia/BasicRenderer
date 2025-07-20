@@ -10,20 +10,60 @@
 #include "Scene/Scene.h"
 #include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Colorspaces.h"
+
+#include "../shaders/FidelityFX/ffx_a.h"
+A_STATIC AF1 fs2S;
+A_STATIC AF1 hdr10S;
+A_STATIC AU1 ctl[24 * 4];
+
+A_STATIC void LpmSetupOut(AU1 i, inAU4 v)
+{
+    for (int j = 0; j < 4; ++j) { ctl[i * 4 + j] = v[j]; }
+}
+#include "../shaders/FidelityFX/ffx_lpm.h"
+#include "../shaders/PerPassRootConstants/tonemapRootConstants.h"
 
 class TonemappingPass : public RenderPass {
 public:
 	TonemappingPass() {
 		CreatePSO();
+		getTonemapType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("tonemapType");
+        m_pLPMConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<LPMConstants>(1, L"AMD LPM constants", 1, true);
 	}
 
+    std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
+        if (key == m_providedResources[0]) {
+			return m_pLPMConstants;
+        }
+		return nullptr;
+    }
+    std::vector<ResourceIdentifier> GetSupportedKeys() override {
+		return m_providedResources;
+    }
+
     void DeclareResourceUsages(RenderPassBuilder* builder) {
-        builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer);
+        builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer, "FFX::LPMConstants");
     }
 
 	void Setup() override {
+
+        LPMConstants lpmConstants = {};
+        
+        lpmConstants.shoulder = true;
+        lpmConstants.con = false;
+        lpmConstants.soft = false;
+        lpmConstants.con2 = false;
+        lpmConstants.clip = true;
+        lpmConstants.scaleOnly = false;
+        
+        // Rest will be filled in by the luminanceHistogramAverage shader
+
+		UploadManager::GetInstance().UploadData(&lpmConstants, sizeof(LPMConstants), m_pLPMConstants.get(), 0);
+
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);
+		RegisterSRV("FFX::LPMConstants");
     }
 
 	PassReturn Execute(RenderContext& context) override {
@@ -53,6 +93,12 @@ public:
 
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
+		unsigned int misc[NumMiscUintRootConstants] = {};
+		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).index;
+		misc[TONEMAP_TYPE] = getTonemapType();
+
+		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, misc, 0);
+
 		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}
@@ -65,6 +111,14 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
     PipelineResources m_resourceDescriptorBindings;
+
+    std::shared_ptr<LazyDynamicStructuredBuffer<LPMConstants>> m_pLPMConstants;
+
+    std::function<unsigned int()> getTonemapType;
+
+    std::vector<ResourceIdentifier> m_providedResources = {
+		"FFX::LPMConstants"
+	};
 
     void CreatePSO() {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;

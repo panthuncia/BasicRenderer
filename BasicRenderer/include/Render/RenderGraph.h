@@ -166,6 +166,9 @@ private:
 	ResourceRegistry _registry;
 	std::unordered_map<ResourceIdentifier, IResourceProvider*, ResourceIdentifier::Hasher> _providerMap;
 
+	using BuilderVariant = std::variant<RenderPassBuilder, ComputePassBuilder>;
+	std::vector<BuilderVariant>   m_passBuilders;
+
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
@@ -326,4 +329,10 @@ private:
 		}
 		return out;
 	}
+
+	void RegisterPassBuilder(RenderPassBuilder&& builder);
+	void RegisterPassBuilder(ComputePassBuilder&& builder);
+
+	friend class RenderPassBuilder;
+	friend class ComputePassBuilder;
 };

@@ -65,7 +65,9 @@
     },
     "PostProcessing": {
       "UpscaledHDR": {},
-      "ScreenSpaceReflections": {}
+      "ScreenSpaceReflections": {},
+      "LuminanceHistogram": {},
+      "AdaptedLuminance": {}
     },
     "GTAO": {
       "WorkingDepths": {},

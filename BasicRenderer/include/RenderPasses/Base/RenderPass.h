@@ -17,6 +17,7 @@
 #include "../../../generated/BuiltinResources.h"
 #include "ResourceDescriptorIndexHelper.h"
 #include "Render/PipelineState.h"
+#include "interfaces/IResourceProvider.h"
 
 struct RenderPassParameters {
     std::vector<ResourceAndRange> shaderResources;
@@ -38,7 +39,7 @@ struct RenderPassParameters {
 
 class RenderPassBuilder;
 
-class RenderPass {
+class RenderPass : public IResourceProvider {
 public:
     virtual ~RenderPass() = default;
 
@@ -88,6 +89,9 @@ protected:
 	void RegisterUAV(ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {
 		m_resourceDescriptorIndexHelper->RegisterUAV(id, mip, slice);
 	}
+
+	virtual std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) { return nullptr; }
+	virtual std::vector<ResourceIdentifier> GetSupportedKeys() { return {}; }
 
 	std::unique_ptr<ResourceDescriptorIndexHelper> m_resourceDescriptorIndexHelper;
 	std::shared_ptr<ResourceRegistryView> m_resourceRegistryView;
