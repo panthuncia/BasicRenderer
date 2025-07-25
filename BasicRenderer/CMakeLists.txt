@@ -22,11 +22,6 @@ find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(pxr CONFIG REQUIRED)
 
-if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-  message(STATUS "Patching pxr imported targets to use Release libs in RelWithDebInfo…")
-  include("${pxr_DIR}/pxrTargets-release.cmake" OPTIONAL)
-endif()
-
 # Build tool for code generation
 add_executable(resource_codegen
   "generators/resource_codegen.cpp"
