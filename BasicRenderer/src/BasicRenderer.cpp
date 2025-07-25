@@ -303,7 +303,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    auto usdScene = LoadModel("models/usd/metersPerUnit/unit_test_cm.usda");
+    auto usdScene = LoadModel("models/usd/hierarchy/MultipleRoots.usda");
 
     renderer.SetCurrentScene(baseScene);
 

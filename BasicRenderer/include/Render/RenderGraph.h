@@ -158,8 +158,8 @@ private:
 	};
 
 	struct CompileContext {
-		std::unordered_map<uint64_t, unsigned int> transHistCompute;
-		std::unordered_map<uint64_t, unsigned int> transHistRender;
+		std::unordered_map<uint64_t, unsigned int> usageHistCompute;
+		std::unordered_map<uint64_t, unsigned int> usageHistRender;
 	};
 
 	std::vector<IResourceProvider*> _providers;
@@ -232,7 +232,7 @@ private:
 	void ProcessResourceRequirements(
 		bool isCompute,
 		std::vector<ResourceRequirement>& resourceRequirements,
-		CompileContext& compileContext,
+		std::unordered_map<uint64_t, unsigned int>&  batchOfLastRenderQueueUsage,
 		std::unordered_map<uint64_t, unsigned int>& producerHistory,
 		unsigned int batchIndex,
 		PassBatch& currentBatch);
@@ -308,7 +308,7 @@ private:
 	}
 
 	void AddTransition(
-		CompileContext& context,
+		std::unordered_map<uint64_t, unsigned int>&  batchOfLastRenderQueueUsage,
 		unsigned int batchIndex,
 		PassBatch& currentBatch,
 		bool isComputePass,

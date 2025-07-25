@@ -11,6 +11,8 @@
 #include <pxr/usd/usdShade/tokens.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdGeom/metrics.h>
+#include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/transform.h>
 
@@ -192,7 +194,7 @@ namespace USDLoader {
 		return true; // Successfully processed material
 	}
 
-    std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, const std::string& directory) {
+    std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, const std::string& directory) {
         spdlog::info("Found Mesh: {}", prim.GetName().GetString());
 
         if (meshCache.contains(prim.GetPath().GetString())) {
@@ -226,6 +228,11 @@ namespace USDLoader {
         mesh.GetPointsAttr().Get(&usdPositions);
         geometry.positions.resize(usdPositions.size() * 3);
         memcpy(geometry.positions.data(), usdPositions.data(), usdPositions.size() * sizeof(GfVec3f));
+        for (size_t i = 0; i < usdPositions.size(); ++i) {
+            geometry.positions[i * 3 + 0] *= metersPerUnit;
+            geometry.positions[i * 3 + 1] *= metersPerUnit;
+            geometry.positions[i * 3 + 2] *= metersPerUnit;
+		}
 
         VtArray<GfVec3f> usdNormals;
         bool hasNormals = mesh.GetNormalsAttr().Get(&usdNormals);
@@ -273,6 +280,7 @@ namespace USDLoader {
 
     void ParseNodeHierarchy(std::shared_ptr<Scene> scene,
         const pxr::UsdStageRefPtr& stage,
+		double metersPerUnit,
         const std::string& directory) {
         
         std::function<void(const UsdPrim& prim, 
@@ -306,7 +314,7 @@ namespace USDLoader {
 			std::vector<std::shared_ptr<Mesh>> meshes;
             for (auto child : prim.GetAllChildren()) {
                 if (child.IsA<UsdGeomMesh>()) {
-                    meshes.push_back(ProcessMesh(child, stage, directory));
+                    meshes.push_back(ProcessMesh(child, stage, metersPerUnit, directory));
                 }
             }
 
@@ -318,7 +326,7 @@ namespace USDLoader {
                 entity = scene->CreateNodeECS(s2ws(prim.GetName().GetString()));
             }
 
-			entity.set<Components::Position>({ DirectX::XMFLOAT3(translation[0], translation[1], translation[2]) });
+			entity.set<Components::Position>({ DirectX::XMFLOAT3(translation[0]*metersPerUnit, translation[1]*metersPerUnit, translation[2]*metersPerUnit) });
 			entity.set<Components::Rotation>({ DirectX::XMFLOAT4(rot.GetImaginary()[0], rot.GetImaginary()[1], rot.GetImaginary()[2], rot.GetReal()) });
 			entity.set<Components::Scale>({ DirectX::XMFLOAT3(scale[0], scale[1], scale[2]) });
 
@@ -331,7 +339,9 @@ namespace USDLoader {
             }
 
             for (auto child : prim.GetAllChildren()) {
+                if (child.IsA<UsdGeomXformable>()) {
                     RecurseHierarchy(child, entity);
+                }
             }
             };
 
@@ -347,11 +357,13 @@ namespace USDLoader {
         pxr::TfDebug::SetOutputFile(stderr);
 
         UsdStageRefPtr stage = UsdStage::Open(filePath);
+		auto metersPerUnit = UsdGeomGetStageMetersPerUnit(stage);
+        TfToken upAxis = UsdGeomGetStageUpAxis(stage); // TODO
 
         auto scene = std::make_shared<Scene>();
 
 		//LoadMaterialsFromUsdStage(stage, std::filesystem::path(filePath).parent_path().string(), true);
-		ParseNodeHierarchy(scene, stage, std::filesystem::path(filePath).parent_path().string());
+		ParseNodeHierarchy(scene, stage, metersPerUnit, std::filesystem::path(filePath).parent_path().string());
 
         materialCache.clear();
         meshCache.clear();

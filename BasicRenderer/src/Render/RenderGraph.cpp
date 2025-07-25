@@ -14,7 +14,7 @@
 
 // Factory for the transition lambda
 void RenderGraph::AddTransition(
-	CompileContext& context,
+	std::unordered_map<uint64_t, unsigned int>&  batchOfLastRenderQueueUsage,
 	unsigned int batchIndex,
 	PassBatch& currentBatch,
 	bool isComputePass, 
@@ -50,22 +50,22 @@ void RenderGraph::AddTransition(
 		}
 	}
 	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to palce transitions on render queue
-		unsigned int gfxBatch = context.transHistRender[resource->GetGlobalResourceID()];
+		unsigned int gfxBatch = batchOfLastRenderQueueUsage[resource->GetGlobalResourceID()];
 		for (auto& transition : transitions) {
-			context.transHistRender[transition.pResource->GetGlobalResourceID()] = gfxBatch;
+			batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()] = gfxBatch; // Can this cause transition overlaps?
 			batches[gfxBatch].passEndTransitions.push_back(transition);
 		}
 	}
 	else {
 		if (isComputePass) {
 			for (auto& transition : transitions) {
-				context.transHistCompute[transition.pResource->GetGlobalResourceID()] = batchIndex;
+				//context.transHistCompute[transition.pResource->GetGlobalResourceID()] = batchIndex;
 				currentBatch.computeTransitions.push_back(transition);
 			}
 		}
 		else {
 			for (auto& transition : transitions) {
-				context.transHistRender[transition.pResource->GetGlobalResourceID()] = batchIndex;
+				//context.transHistRender[transition.pResource->GetGlobalResourceID()] = batchIndex;
 				currentBatch.renderTransitions.push_back(transition);
 			}
 		}
@@ -75,7 +75,7 @@ void RenderGraph::AddTransition(
 void RenderGraph::ProcessResourceRequirements(
 	bool isCompute,
 	std::vector<ResourceRequirement>& resourceRequirements,
-	CompileContext& compileContext,
+	std::unordered_map<uint64_t, unsigned int>& batchOfLastRenderQueueUsage,
 	std::unordered_map<uint64_t, unsigned int>& producerHistory,
 	unsigned int batchIndex,
 	PassBatch& currentBatch) {
@@ -89,7 +89,7 @@ void RenderGraph::ProcessResourceRequirements(
 
 		const auto& id = resourceRequirement.resourceAndRange.resource->GetGlobalResourceID();
 
-		AddTransition(compileContext, batchIndex, currentBatch, isCompute, resourceRequirement);
+		AddTransition(batchOfLastRenderQueueUsage, batchIndex, currentBatch, isCompute, resourceRequirement);
 
 		if (AccessTypeIsWriteType(resourceRequirement.state.access)) {
 			if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
@@ -200,7 +200,8 @@ void RenderGraph::Compile() {
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueProducer;
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueProducer;
 
-	CompileContext context;
+	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueUsage;
+	//std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueUsage;
 
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
@@ -255,7 +256,7 @@ void RenderGraph::Compile() {
 			ProcessResourceRequirements(
 				isCompute,
 				pass.resources.resourceRequirements,
-				context,
+				batchOfLastRenderQueueUsage,
 				batchOfLastComputeQueueTransition,
 				currentBatchIndex,
 				currentBatch);
@@ -267,13 +268,14 @@ void RenderGraph::Compile() {
 			}
 			for (auto& req : pass.resources.resourceRequirements) {
 				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
+				//batchOfLastComputeQueueUsage[req.resourceAndRange.resource->GetGlobalResourceID()] = currentBatchIndex;
 			}
 		} else {
 			auto& pass = std::get<RenderPassAndResources>(pr.pass);
 			ProcessResourceRequirements(
 				isCompute,
 				pass.resources.resourceRequirements,
-				context,
+				batchOfLastRenderQueueUsage,
 				batchOfLastRenderQueueTransition,
 				currentBatchIndex,
 				currentBatch);
@@ -285,6 +287,7 @@ void RenderGraph::Compile() {
 			}
 			for (auto& req : pass.resources.resourceRequirements) {
 				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
+				batchOfLastRenderQueueUsage[req.resourceAndRange.resource->GetGlobalResourceID()] = currentBatchIndex;
 			}
 		}
 
@@ -585,7 +588,7 @@ void RenderGraph::Execute(RenderContext& context) {
 	auto& graphicsCommandList = m_graphicsCommandLists[context.frameIndex];
 	auto& graphicsCommandAllocator = m_graphicsCommandAllocators[context.frameIndex];
 
-	bool useAsyncCompute = true;
+	bool useAsyncCompute = false;
 	auto computeQueue = graphicsQueue;//manager.GetComputeQueue();
 	auto computeCommandList = graphicsCommandList;//m_computeCommandLists[context.frameIndex];
 	auto computeCommandAllocator = graphicsCommandAllocator;//m_computeCommandAllocators[context.frameIndex];
