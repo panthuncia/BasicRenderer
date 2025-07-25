@@ -5,7 +5,7 @@
 #include <iostream>
 #include <wrl/client.h>
 #include <d3dcompiler.h>
-#include <stb_image.h>
+#include <ThirdParty/stb/stb_image.h>
 #include <array>
 #include <memory>
 #include <DirectXMath.h>

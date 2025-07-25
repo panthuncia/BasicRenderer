@@ -45,3 +45,43 @@ static std::unordered_set<ImageFiletype> STBImageSupportedFiletypes = {
 	ImageFiletype::JPEG,
 	ImageFiletype::BMP
 };
+
+enum class SceneFiletype {
+	OTHER,
+	USD,
+};
+
+enum class SceneLoader {
+	UNKNOWN,
+	Assimp,
+	OpenUSD
+};
+
+static std::unordered_map<SceneFiletype, SceneLoader> sceneFiletypeToLoader = {
+	{SceneFiletype::USD, SceneLoader::OpenUSD},
+	{SceneFiletype::OTHER, SceneLoader::Assimp} // default loader
+};
+
+static std::unordered_set<std::string> usdFileExtensions = {
+	".usd", ".usda", ".usdc", ".usdz",
+	"usd", "usda", "usdc", "usdz"
+};
+
+inline bool isUsdExt(const std::string& ext) {
+	return usdFileExtensions.contains(ext);
+}
+
+inline SceneFiletype GetSceneFiletype(const std::string& ext) {
+	if (isUsdExt(ext)) {
+		return SceneFiletype::USD;
+	}
+	return SceneFiletype::OTHER;
+}
+
+inline SceneLoader GetSceneLoader(const std::string& ext) {
+	SceneFiletype filetype = GetSceneFiletype(ext);
+	if (sceneFiletypeToLoader.contains(filetype)) {
+		return sceneFiletypeToLoader[filetype];
+	}
+	return SceneLoader::Assimp; // default
+}

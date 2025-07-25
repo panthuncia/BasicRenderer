@@ -14,3 +14,4 @@ out/
 vcpkg_installed/
 models/
 textures/
+ThirdParty/

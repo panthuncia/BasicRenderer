@@ -15,23 +15,30 @@ find_package(imgui CONFIG REQUIRED)
 find_package(meshoptimizer REQUIRED)
 find_package(DirectX-Headers CONFIG REQUIRED)
 find_package(DirectX12-Agility CONFIG REQUIRED)
-find_package(assimp CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
+find_package(assimp CONFIG REQUIRED)
+find_package(pxr CONFIG REQUIRED)
+
+if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+  message(STATUS "Patching pxr imported targets to use Release libs in RelWithDebInfo…")
+  include("${pxr_DIR}/pxrTargets-release.cmake" OPTIONAL)
+endif()
+
 # Build tool for code generation
-add_executable(codegen
+add_executable(resource_codegen
   "generators/resource_codegen.cpp"
 )
 
-target_link_libraries(codegen
+target_link_libraries(resource_codegen
   PRIVATE
     nlohmann_json::nlohmann_json
     fmt::fmt
 )
 
-target_include_directories(codegen
+target_include_directories(resource_codegen
     PRIVATE
     refl-cpp::refl-cpp
 )
@@ -47,18 +54,18 @@ file(MAKE_DIRECTORY "${GENERATED_SHADER_DIR}")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 add_custom_command(
   OUTPUT "${GENERATED_HDR}"
-  COMMAND codegen
+  COMMAND resource_codegen
           "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
           "${GENERATED_HDR}"
           "${GENERATED_HLSL}"
-  DEPENDS codegen
+  DEPENDS resource_codegen
           "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
   COMMENT "Regenerating BuiltinResources.h from BuiltinResources.h.json"
   VERBATIM
   USES_TERMINAL
 )
 
-set_target_properties(codegen PROPERTIES
+set_target_properties(resource_codegen PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
 )
@@ -283,8 +290,157 @@ add_symlink_or_copy_per_config(
     "HLSL_Parser"
 )
 
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
+#if in debug mode, copy the debug version of the USD libraries
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(USD_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg")
+else()
+    set(USD_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel")
+endif()
+ 
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_usd.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usd.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_USD"
+)
 
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_sdf.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_sdf.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_SDF"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_tf.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_tf.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_TF"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_kind.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_kind.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_KIND"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_pcp.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_pcp.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_PCP"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_ar.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_ar.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_AR"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_plug.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_plug.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_PLUG"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_vt.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_vt.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_VT"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_ts.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_ts.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_TS"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_work.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_work.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_WORK"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_gf.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_gf.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_GF"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_trace.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_trace.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_TRACE"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_arch.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_arch.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_ARCH"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_js.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_js.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_JS"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_usdShade.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usdShade.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_USDSHADE"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_usdGeom.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usdGeom.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_USDGEOM"
+)
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_sdr.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_sdr.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_SDR"
+)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_symlink_or_copy_per_config(
+        "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg/bin/tbb_debug.dll"
+        "${CMAKE_BINARY_DIR}/BasicRenderer/tbb_debug.dll"
+        FALSE  # IS_DIRECTORY
+        "tbb_debug"
+    )
+else()
+    add_symlink_or_copy_per_config(
+        "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel/bin/tbb.dll"
+        "${CMAKE_BINARY_DIR}/BasicRenderer/tbb.dll"
+        FALSE  # IS_DIRECTORY
+        "tbb"
+    )
+endif()
+
+add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd"
+    TRUE  # IS_DIRECTORY
+    "USD_PLUGINS"
+)
+
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${CMAKE_SOURCE_DIR}/ThirdParty/usd/include/")
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
 
@@ -335,6 +491,14 @@ PRIVATE
     flecs::flecs 
     flecs::flecs_static 
     unofficial::tree-sitter::tree-sitter
+    usd
+    sdf
+    tf
+    vt
+    arch
+    plug
+    ar
+    usdShade
     "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 

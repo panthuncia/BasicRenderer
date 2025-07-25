@@ -15,5 +15,19 @@ endif()
 
 project ("BasicRenderer")
 
+#set(CMAKE_VS_JUST_MY_CODE_DEBUGGING ON) # Skip external code in the debugger.
+
+if (MSVC)
+  add_compile_options(/Zc:preprocessor)
+endif()
+
 # Include sub-projects.
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg")
+set(PXR_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg/lib/cmake/pxr")
+else()
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel")
+set(PXR_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel/lib/cmake/pxr")
+endif()
+
 add_subdirectory ("BasicRenderer")
