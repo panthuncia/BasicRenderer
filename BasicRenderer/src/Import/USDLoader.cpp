@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <vector>
 
+#include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdShade/material.h>
@@ -15,6 +16,8 @@
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/transform.h>
+#include <pxr/base/gf/rotation.h>
+#include <pxr/base/gf/vec3d.h>
 
 #include <flecs.h>
 
@@ -36,29 +39,6 @@ namespace USDLoader {
     using namespace pxr;
 	std::unordered_map<std::string, std::shared_ptr<Material>> materialCache;
 	std::unordered_map<std::string, std::shared_ptr<Mesh>> meshCache;
-
-    std::vector<std::shared_ptr<Material>>
-        LoadMaterialsFromUsdStage(const pxr::UsdStageRefPtr& stage,
-            const std::string& directory,
-            bool sRGB)
-    {
-        using namespace pxr;
-        std::vector<std::shared_ptr<Material>> materials;
-        // Cache to avoid dup loads
-        std::unordered_map<std::string, std::shared_ptr<Texture>> texCache;
-
-        //stage->GetPseudoRoot().GetAllChildren();
-
-        for (const UsdPrim& prim : stage->Traverse()) {
-            spdlog::info("Primitive: {}", prim.GetTypeName().GetString());
-			UsdAttributeVector attribs = prim.GetAttributes();
-            for (auto& attrib : attribs) {
-				spdlog::info("Attribute: {}", attrib.GetName().GetString());
-            }
-        }
-
-        return materials;
-    }
 
     bool ProcessMaterial(const pxr::UsdShadeMaterial& material,
         const pxr::UsdStageRefPtr& stage,
@@ -171,10 +151,10 @@ namespace USDLoader {
 
 		BlendState blendMode = BlendState::BLEND_STATE_OPAQUE;
 
-        auto newMaterial = std::make_shared<Material>(
+        auto newMaterial = Material::CreateShared(
             material.GetPrim().GetName().GetString(),
-            materialFlags,
-            psoFlags,
+            static_cast<MaterialFlags>(materialFlags),
+            static_cast<PSOFlags>(psoFlags),
             baseColorTexture,
             normalTexture,
             aoMap,
@@ -194,7 +174,7 @@ namespace USDLoader {
 		return true; // Successfully processed material
 	}
 
-    std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, const std::string& directory) {
+    std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, GfRotation upRot, const std::string& directory) {
         spdlog::info("Found Mesh: {}", prim.GetName().GetString());
 
         if (meshCache.contains(prim.GetPath().GetString())) {
@@ -219,26 +199,42 @@ namespace USDLoader {
                 bool success = ProcessMaterial(mat, stage, directory);
                 if (success) {
                     geometry.material = materialCache[mat.GetPrim().GetPath().GetString()];
+					foundMaterial = true;
                 }
             }
         }
 
+        if (!foundMaterial) {
+            spdlog::warn("No material found for Mesh: {}", prim.GetName().GetString());
+            geometry.material = Material::GetDefaultMaterial();
+		}
+
         UsdGeomMesh mesh(prim);
         VtArray<GfVec3f> usdPositions;
         mesh.GetPointsAttr().Get(&usdPositions);
-        geometry.positions.resize(usdPositions.size() * 3);
-        memcpy(geometry.positions.data(), usdPositions.data(), usdPositions.size() * sizeof(GfVec3f));
-        for (size_t i = 0; i < usdPositions.size(); ++i) {
-            geometry.positions[i * 3 + 0] *= metersPerUnit;
-            geometry.positions[i * 3 + 1] *= metersPerUnit;
-            geometry.positions[i * 3 + 2] *= metersPerUnit;
-		}
+        geometry.positions.reserve(usdPositions.size() * 3);
+        GfMatrix4d rotMat(upRot, GfVec3d(0.0));
+
+        for (auto& p : usdPositions) {
+            GfVec3d dpYup = rotMat.Transform(p) * metersPerUnit;
+            geometry.positions.push_back(float(dpYup[0]));
+            geometry.positions.push_back(float(dpYup[1]));
+            geometry.positions.push_back(float(dpYup[2]));
+        }
 
         VtArray<GfVec3f> usdNormals;
         bool hasNormals = mesh.GetNormalsAttr().Get(&usdNormals);
         if (hasNormals) {
-            geometry.normals.resize(usdNormals.size() * 3);
-            memcpy(geometry.normals.data(), usdNormals.data(), usdNormals.size() * sizeof(GfVec3f));
+            geometry.normals.reserve(usdNormals.size() * 3);
+            for (auto& n : usdNormals) {
+                GfVec3d dnYup = rotMat.Transform(n);
+                GfVec3f fn = { float(dnYup[0]), float(dnYup[1]), float(dnYup[2]) };
+                fn.Normalize();
+                geometry.normals.push_back(fn[0]);
+                geometry.normals.push_back(fn[1]);
+                geometry.normals.push_back(fn[2]);
+            }
+
             geometry.flags |= VertexFlags::VERTEX_NORMALS;
         }
 
@@ -281,6 +277,7 @@ namespace USDLoader {
     void ParseNodeHierarchy(std::shared_ptr<Scene> scene,
         const pxr::UsdStageRefPtr& stage,
 		double metersPerUnit,
+		GfRotation upRot,
         const std::string& directory) {
         
         std::function<void(const UsdPrim& prim, 
@@ -298,23 +295,27 @@ namespace USDLoader {
 
                 GfMatrix4d mat;
                 bool resets = query.GetLocalTransformation(&mat, UsdTimeCode::Default());
-
+                GfMatrix4d rotMat(upRot, GfVec3d(0.0));
+                mat = rotMat * mat;
+                
                 // Decompose via GfTransform:
                 GfTransform xf(mat);
                 translation = xf.GetTranslation();
                 rot = xf.GetRotation().GetQuaternion();   // as a quaternion
                 scale = xf.GetScale();
             }
+            std::vector<std::shared_ptr<Mesh>> meshes;
+            if (prim.IsA<UsdGeomMesh>()) {
+				meshes.push_back(ProcessMesh(prim, stage, metersPerUnit, upRot, directory));
+            }
 
-            //if (prim.IsA<UsdShadeMaterial>()) {
-            //    spdlog::info("Found Material: {}", prim.GetName().GetString());
-                //auto material = UsdShadeMaterial(prim);
-            //}
-
-			std::vector<std::shared_ptr<Mesh>> meshes;
+            std::vector<UsdPrim> childrenToRecurse;
             for (auto child : prim.GetAllChildren()) {
-                if (child.IsA<UsdGeomMesh>()) {
-                    meshes.push_back(ProcessMesh(child, stage, metersPerUnit, directory));
+                if (child.IsA<UsdGeomMesh>() && !child.IsA<UsdGeomXformable>()) {
+                    meshes.push_back(ProcessMesh(child, stage, metersPerUnit, upRot, directory));
+                }
+                else {
+					childrenToRecurse.push_back(child);
                 }
             }
 
@@ -338,7 +339,7 @@ namespace USDLoader {
                 spdlog::warn("Node {} has no parent", entity.name().c_str());
             }
 
-            for (auto child : prim.GetAllChildren()) {
+            for (auto& child : childrenToRecurse) {
                 if (child.IsA<UsdGeomXformable>()) {
                     RecurseHierarchy(child, entity);
                 }
@@ -351,19 +352,38 @@ namespace USDLoader {
 
     std::shared_ptr<Scene> LoadModel(std::string filePath) {
 
+        //ArSetPreferredResolver("USDHttpResolver");
+
         pxr::TfDebug::SetDebugSymbolsByName("USD_STAGE_OPEN", true);
         pxr::TfDebug::SetDebugSymbolsByName("PLUG_LOAD", true);
         pxr::TfDebug::SetDebugSymbolsByName("SDF_LAYER", true);
         pxr::TfDebug::SetOutputFile(stderr);
 
+        auto resolvers = ArGetAvailableResolvers();
+        for (const auto& resolver : resolvers) {
+            spdlog::info("Available Resolver: {}", resolver.GetTypeName());
+		}
+
         UsdStageRefPtr stage = UsdStage::Open(filePath);
 		auto metersPerUnit = UsdGeomGetStageMetersPerUnit(stage);
         TfToken upAxis = UsdGeomGetStageUpAxis(stage); // TODO
+        GfRotation upRot;  // identity by default
+        if (upAxis == UsdGeomTokens->z) {
+            // Rotate frame: Z-up -> Y-up = rotate -90 about X
+            upRot = GfRotation(GfVec3d(1, 0, 0), -90.0);
+        } else if (upAxis == UsdGeomTokens->y) {
+            // Y-up is default, no rotation needed
+            upRot = GfRotation(GfVec3d(0, 1, 0), 0);
+        } else if (upAxis == UsdGeomTokens->x) {
+            // X-up -> Z-up = rotate -90 about Y
+            upRot = GfRotation(GfVec3d(0, 1, 0), -90.0);
+        } else {
+            spdlog::warn("Unknown Up Axis: {}", upAxis.GetString());
+		}
 
         auto scene = std::make_shared<Scene>();
 
-		//LoadMaterialsFromUsdStage(stage, std::filesystem::path(filePath).parent_path().string(), true);
-		ParseNodeHierarchy(scene, stage, metersPerUnit, std::filesystem::path(filePath).parent_path().string());
+		ParseNodeHierarchy(scene, stage, metersPerUnit, upRot, std::filesystem::path(filePath).parent_path().string());
 
         materialCache.clear();
         meshCache.clear();

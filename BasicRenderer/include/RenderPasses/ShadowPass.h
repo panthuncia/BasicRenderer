@@ -153,7 +153,7 @@ private:
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+                    auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -177,7 +177,7 @@ private:
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
+                    auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -202,7 +202,7 @@ private:
 
                     for (auto& pMesh : meshes) {
                         auto& mesh = *pMesh->GetMesh();
-                        auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+                        auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                         BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                         commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -285,7 +285,7 @@ private:
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -306,7 +306,7 @@ private:
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState);
+                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -327,7 +327,7 @@ private:
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->m_psoFlags, mesh.material->m_blendState);
+                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 

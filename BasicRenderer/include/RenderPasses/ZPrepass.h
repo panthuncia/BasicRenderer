@@ -223,7 +223,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
 				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -246,7 +246,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -276,7 +276,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -298,7 +298,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 

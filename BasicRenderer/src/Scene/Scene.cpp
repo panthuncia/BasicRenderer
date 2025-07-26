@@ -364,7 +364,7 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		if (skinned) {
 			entity.add<Components::Skinned>();
 		}
-        switch (mesh->material->m_blendState) {
+        switch (mesh->material->GetBlendState()) {
 		case BlendState::BLEND_STATE_OPAQUE: {
 			opaqueMeshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(mesh)));
 			if (skinned) {

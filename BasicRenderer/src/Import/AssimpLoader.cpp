@@ -394,10 +394,10 @@ namespace AssimpLoader {
             DirectX::XMFLOAT4 baseColorFactor(diffuse.r, diffuse.g, diffuse.b, diffuse.a);
             DirectX::XMFLOAT4 emissiveFactor(emissive.r, emissive.g, emissive.b, 1.f);
 
-            auto newMaterial = std::make_shared<Material>(
+            auto newMaterial = Material::CreateShared(
                 mName,
-                materialFlags,
-                psoFlags,
+                static_cast<MaterialFlags>(materialFlags),
+                static_cast<PSOFlags>(psoFlags),
                 baseColorTexture,
                 normalTexture,
                 aoMap,

@@ -9,7 +9,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 
 Material::Material(const std::string& name,
-    UINT materialFlags, UINT psoFlags)
+    MaterialFlags materialFlags, PSOFlags psoFlags)
     : m_name(name), m_psoFlags(psoFlags) {
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
@@ -18,7 +18,7 @@ Material::Material(const std::string& name,
 }
 
 Material::Material(const std::string& name,
-	UINT materialFlags, UINT psoFlags,
+    MaterialFlags materialFlags, PSOFlags psoFlags,
     std::shared_ptr<Texture> baseColorTexture,
     std::shared_ptr<Texture> normalTexture,
     std::shared_ptr<Texture> aoMap,
@@ -108,43 +108,43 @@ Material::~Material() {
 	DeletionManager::GetInstance().MarkForDelete(m_perMaterialHandle);
 }
 
-std::shared_ptr<Texture> Material::createDefaultTexture() {
-    // Create a 1x1 white texture
-    static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
-
-	TextureDescription desc;
-	desc.channels = 4;
-    ImageDimensions dims;
-	dims.width = 1;
-	dims.height = 1;
-	dims.rowPitch = 4;
-	dims.slicePitch = 4;
-	desc.imageDimensions.push_back(dims);
-	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::Create(desc, {whitePixel});
-
-    D3D12_SAMPLER_DESC defaultSamplerDesc = {};
-    defaultSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    defaultSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-    defaultSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-    defaultSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-    defaultSamplerDesc.MipLODBias = 0.0f;
-    defaultSamplerDesc.MaxAnisotropy = 1;
-    defaultSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-    defaultSamplerDesc.BorderColor[0] = 0.0f;
-    defaultSamplerDesc.BorderColor[1] = 0.0f;
-    defaultSamplerDesc.BorderColor[2] = 0.0f;
-    defaultSamplerDesc.BorderColor[3] = 0.0f;
-    defaultSamplerDesc.MinLOD = 0.f;
-    defaultSamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
-
-    std::shared_ptr<Sampler> defaultSampler = Sampler::CreateSampler(defaultSamplerDesc);
-
-    std::shared_ptr<Texture> defaultTexture = std::make_shared<Texture>(defaultImage, defaultSampler);
-
-    return defaultTexture;
-}
+//std::shared_ptr<Texture> Material::CreateDefaultTexture() {
+//    // Create a 1x1 white texture
+//    static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
+//
+//	TextureDescription desc;
+//	desc.channels = 4;
+//    ImageDimensions dims;
+//	dims.width = 1;
+//	dims.height = 1;
+//	dims.rowPitch = 4;
+//	dims.slicePitch = 4;
+//	desc.imageDimensions.push_back(dims);
+//	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+//
+//    std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::Create(desc, {whitePixel});
+//
+//    D3D12_SAMPLER_DESC defaultSamplerDesc = {};
+//    defaultSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+//    defaultSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+//    defaultSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+//    defaultSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+//    defaultSamplerDesc.MipLODBias = 0.0f;
+//    defaultSamplerDesc.MaxAnisotropy = 1;
+//    defaultSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+//    defaultSamplerDesc.BorderColor[0] = 0.0f;
+//    defaultSamplerDesc.BorderColor[1] = 0.0f;
+//    defaultSamplerDesc.BorderColor[2] = 0.0f;
+//    defaultSamplerDesc.BorderColor[3] = 0.0f;
+//    defaultSamplerDesc.MinLOD = 0.f;
+//    defaultSamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+//
+//    std::shared_ptr<Sampler> defaultSampler = Sampler::CreateSampler(defaultSamplerDesc);
+//
+//    std::shared_ptr<Texture> defaultTexture = std::make_shared<Texture>(defaultImage, defaultSampler);
+//
+//    return defaultTexture;
+//}
 
 UINT Material::GetMaterialBufferIndex() {
     return m_perMaterialHandle->GetCBVInfo().index;
@@ -167,4 +167,29 @@ void Material::SetTextureScale(float scale) {
 void Material::SetHeightmapScale(float scale) {
 	m_materialData.heightMapScale = scale;
 	UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+}
+
+std::shared_ptr<Material> Material::GetDefaultMaterial() {
+    if (defaultMaterial) {
+        return defaultMaterial;
+	}
+
+	defaultMaterial = Material::CreateShared("DefaultMaterial", 
+        MaterialFlags::MATERIAL_FLAGS_NONE, 
+        PSOFlags::PSO_FLAGS_NONE,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        0.0f,
+        0.5f,
+        {1.0, 1.0, 1.0, 1.0},
+        {0.0, 0.0, 0.0, 1.0},
+        BlendState::BLEND_STATE_OPAQUE,
+        0.5f);
+
+    return defaultMaterial;
 }

@@ -68,7 +68,7 @@ void ThrowIfFailed(HRESULT hr) {
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {
     bool hasTexcoords = !meshData.texcoords.empty();
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
-    unsigned int materialFlags = meshData.material->m_materialData.materialFlags;
+    unsigned int materialFlags = meshData.material->GetMaterialFlags();
 
     std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
     unsigned int numVertices = meshData.positions.size() / 3;
