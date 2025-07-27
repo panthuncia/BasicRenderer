@@ -217,7 +217,7 @@ private:
 				auto& mesh = *pMesh->GetMesh();
 				auto globalFlags = context.globalPSOFlags;
 				//globalFlags &= ~PSOFlags::PSO_SCREENSPACE_REFLECTIONS; // Disable SSR for transparencies for now
-				auto pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
+				auto pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
 				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -244,7 +244,7 @@ private:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->m_psoFlags, BLEND_STATE_BLEND, m_wireframe);
+				auto pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
 				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList->SetPipelineState(pso.GetAPIPipelineState());
 

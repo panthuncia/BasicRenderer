@@ -67,3 +67,4 @@ set(PXR_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel/lib/cmake/pxr")
 endif()
 
 add_subdirectory ("BasicRenderer")
+add_subdirectory("UsdPlugins")

@@ -7,11 +7,49 @@
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Materials/BlendState.h"
+#include "Render/PSOFlags.h"
+#include "Materials/MaterialFlags.h"
 
 using Microsoft::WRL::ComPtr;
 
 class Material {
 public:
+    static std::shared_ptr<Material> CreateShared(const std::string& name,
+        MaterialFlags materialFlags, PSOFlags psoFlags,
+        std::shared_ptr<Texture> baseColorTexture,
+        std::shared_ptr<Texture> normalTexture,
+        std::shared_ptr<Texture> aoMap,
+        std::shared_ptr<Texture> heightMap,
+        std::shared_ptr<Texture> metallicTexture,
+        std::shared_ptr<Texture> roughnessTexture,
+        std::shared_ptr<Texture> emissiveTexture,
+        float metallicFactor,
+        float roughnessFactor,
+        DirectX::XMFLOAT4 baseColorFactor,
+        DirectX::XMFLOAT4 emissiveFactor,
+        BlendState blendState,
+        float alphaCutoff) {
+        return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
+            baseColorTexture, normalTexture, aoMap, heightMap,
+            metallicTexture, roughnessTexture, emissiveTexture,
+            metallicFactor, roughnessFactor, baseColorFactor, emissiveFactor,
+            blendState, alphaCutoff));
+    }
+    ~Material();
+
+    UINT GetMaterialBufferIndex();
+    void SetHeightmap(std::shared_ptr<Texture> heightmap);
+    void SetTextureScale(float scale);
+    void SetHeightmapScale(float scale);
+    PSOFlags GetPSOFlags() const { return m_psoFlags; }
+    MaterialFlags GetMaterialFlags() const { return static_cast<MaterialFlags>(m_materialData.materialFlags); }
+    BlendState GetBlendState() const { return m_blendState; }
+    static std::shared_ptr<Material> GetDefaultMaterial();
+    static void DestroyDefaultMaterial() {
+        defaultMaterial.reset();
+    }
+private:
+
     std::string m_name;
     std::shared_ptr<Texture> m_baseColorTexture;
     std::shared_ptr<Texture> m_normalTexture;
@@ -25,14 +63,14 @@ public:
     DirectX::XMFLOAT4 m_baseColorFactor;
     DirectX::XMFLOAT4 m_emissiveFactor;
     BlendState m_blendState;
-    PerMaterialCB m_materialData = {0};
-    UINT m_psoFlags;
+    PerMaterialCB m_materialData = { 0 };
+    PSOFlags m_psoFlags;
 
     Material(const std::string& name,
-        UINT materialFlags, UINT psoFlags);
+        MaterialFlags materialFlags, PSOFlags psoFlags);
 
     Material(const std::string& name,
-		UINT materialFlags, UINT psoFlags,
+        MaterialFlags materialFlags, PSOFlags psoFlags,
         std::shared_ptr<Texture> baseColorTexture,
         std::shared_ptr<Texture> normalTexture,
         std::shared_ptr<Texture> aoMap,
@@ -46,13 +84,7 @@ public:
         DirectX::XMFLOAT4 emissiveFactor,
         BlendState blendState,
         float alphaCutoff);
-    ~Material();
 
-    static std::shared_ptr<Texture> createDefaultTexture();
-    UINT GetMaterialBufferIndex();
-    void SetHeightmap(std::shared_ptr<Texture> heightmap);
-    void SetTextureScale(float scale);
-    void SetHeightmapScale(float scale);
-private:
     std::shared_ptr<Buffer> m_perMaterialHandle;
+    inline static std::shared_ptr<Material> defaultMaterial;
 };
