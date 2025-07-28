@@ -1027,6 +1027,7 @@ void DX12Renderer::Cleanup() {
 	m_pObjectManager.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
+    Material::DestroyDefaultMaterial();
     DeletionManager::GetInstance().Cleanup();
 }
 

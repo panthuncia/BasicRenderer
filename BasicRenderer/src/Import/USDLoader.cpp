@@ -80,6 +80,23 @@ namespace USDLoader {
                 material.GetPrim().GetName().GetString());
         }
 
+        SdfAssetPath mdlAsset;
+        if (shader.GetSourceAsset(&mdlAsset, TfToken("mdl"))) {
+            std::string url = mdlAsset.GetAssetPath();
+            spdlog::info("  MDL URL = {}", url);
+        }
+        else {
+            // No mdl:sourceAsset found
+        }
+
+        //sub-identifier:
+        TfToken subId;
+        if (shader.GetSourceAssetSubIdentifier(&subId, TfToken("mdl"))) {
+            spdlog::info("  subIdentifier = {}", subId.GetString());
+        }
+
+        // TODO: MDL support
+
         bool enableEmission = false;
         bool enableOpacity = false;
 
@@ -215,35 +232,90 @@ namespace USDLoader {
         VtArray<GfVec3f> usdPositions;
         mesh.GetPointsAttr().Get(&usdPositions);
         geometry.positions.reserve(usdPositions.size() * 3);
-        GfMatrix4d rotMat(upRot, GfVec3d(0.0));
 
         for (auto& p : usdPositions) {
-            GfVec3d dpYup = rotMat.Transform(p) * metersPerUnit;
+            GfVec3d dpYup = p * metersPerUnit;
             geometry.positions.push_back(float(dpYup[0]));
             geometry.positions.push_back(float(dpYup[1]));
             geometry.positions.push_back(float(dpYup[2]));
         }
 
+        VtArray<int> faceVertexCounts, faceVertexIndices;
+        mesh.GetFaceVertexCountsAttr().Get(&faceVertexCounts);
+        mesh.GetFaceVertexIndicesAttr().Get(&faceVertexIndices);
+
         VtArray<GfVec3f> usdNormals;
         bool hasNormals = mesh.GetNormalsAttr().Get(&usdNormals);
+        TfToken interp = mesh.GetNormalsInterpolation();
+
         if (hasNormals) {
-            geometry.normals.reserve(usdNormals.size() * 3);
-            for (auto& n : usdNormals) {
-                GfVec3d dnYup = rotMat.Transform(n);
-                GfVec3f fn = { float(dnYup[0]), float(dnYup[1]), float(dnYup[2]) };
-                fn.Normalize();
-                geometry.normals.push_back(fn[0]);
-                geometry.normals.push_back(fn[1]);
-                geometry.normals.push_back(fn[2]);
+            // Reserve worst-case size (faceVarying == one normal per index)
+            geometry.normals.reserve(faceVertexIndices.size() * 3);
+
+            if (interp == UsdGeomTokens->faceVarying) {
+                // one normal per face-vertex -> match faceVertexIndices
+                for (auto& n : usdNormals) {
+                    n = n.GetNormalized();
+                    geometry.normals.push_back((float)n[0]);
+                    geometry.normals.push_back((float)n[1]);
+                    geometry.normals.push_back((float)n[2]);
+                }
+            }
+            else if (interp == UsdGeomTokens->uniform) {
+                // one normal per face -> duplicate per corner
+                size_t idxOff = 0;
+                for (size_t f = 0; f < faceVertexCounts.size(); ++f) {
+                    GfVec3f n = usdNormals[f].GetNormalized();
+                    for (int corner = 0; corner < faceVertexCounts[f]; ++corner) {
+                        geometry.normals.push_back((float)n[0]);
+                        geometry.normals.push_back((float)n[1]);
+                        geometry.normals.push_back((float)n[2]);
+                    }
+                    idxOff += faceVertexCounts[f];
+                }
+            }
+            else if (interp == UsdGeomTokens->vertex ||
+                interp == UsdGeomTokens->varying) {
+                // one normal per point
+                for (auto& n : usdNormals) {
+                    n = n.GetNormalized();
+                    geometry.normals.push_back((float)n[0]);
+                    geometry.normals.push_back((float)n[1]);
+                    geometry.normals.push_back((float)n[2]);
+                }
+            }
+            else if (interp == UsdGeomTokens->constant) {
+                // single normal -> replicate for every face-vertex
+                GfVec3f n = usdNormals[0].GetNormalized();
+                for (size_t i = 0; i < faceVertexIndices.size(); ++i) {
+                    geometry.normals.push_back((float)n[0]);
+                    geometry.normals.push_back((float)n[1]);
+                    geometry.normals.push_back((float)n[2]);
+                }
+            }
+            else {
+                spdlog::warn("Unhandled normals interpolation: {}", interp.GetString());
             }
 
             geometry.flags |= VertexFlags::VERTEX_NORMALS;
         }
+        else {
+            // no authored normals -> treat as faceted: compute flat normals from indices
+            geometry.normals.resize(faceVertexIndices.size() * 3);
+        }
+
+        VtArray<GfVec2f> usdTexcoords;
+		bool hasTexcoords = mesh.GetPrim().GetAttribute(pxr::TfToken("primvars:st0")).Get(&usdTexcoords);
+        if (hasTexcoords) {
+            geometry.texcoords.reserve(usdTexcoords.size() * 2);
+            for (auto& tc : usdTexcoords) {
+                geometry.texcoords.push_back(tc[0]);
+                geometry.texcoords.push_back(tc[1]);
+            }
+            geometry.flags |= VertexFlags::VERTEX_TEXCOORDS;
+		}
 
 
-        VtArray<int> faceVertexCounts, faceVertexIndices;
-        mesh.GetFaceVertexCountsAttr().Get(&faceVertexCounts);
-        mesh.GetFaceVertexIndicesAttr().Get(&faceVertexIndices);
         size_t indexOffset = 0;
         for (int faceVertCount : faceVertexCounts) {
             if (faceVertCount == 3) {
@@ -270,6 +342,7 @@ namespace USDLoader {
             }
             indexOffset += faceVertCount;
         }
+		RebuildFaceVarying(geometry);
         auto meshPtr = MeshFromData(geometry, s2ws(prim.GetName().GetString()));
         meshCache[prim.GetPath().GetString()] = meshPtr;
         spdlog::info("Processed Mesh: {}", prim.GetName().GetString());
@@ -283,8 +356,8 @@ namespace USDLoader {
         const std::string& directory) {
 
         std::function<void(const UsdPrim& prim,
-            flecs::entity parent)> RecurseHierarchy = [&](const UsdPrim& prim, flecs::entity parent) {
-                //spdlog::info("Prim type: {}", prim.GetTypeName().GetString());
+            flecs::entity parent, bool hasCorrectedAxis)> RecurseHierarchy = [&](const UsdPrim& prim, flecs::entity parent, bool hasCorrectedAxis) {
+                spdlog::info("Prim: {}", prim.GetName().GetString());
 
                 GfVec3d translation = { 0, 0, 0 };
                 GfQuaternion rot = GfQuaternion(1);
@@ -296,9 +369,31 @@ namespace USDLoader {
                     UsdGeomXformable::XformQuery query(xformable);
 
                     GfMatrix4d mat;
-                    bool resets = query.GetLocalTransformation(&mat, UsdTimeCode::Default());
-                    GfMatrix4d rotMat(upRot, GfVec3d(0.0));
-                    mat = rotMat * mat;
+                    bool result = query.GetLocalTransformation(&mat, UsdTimeCode::Default());
+					bool resets = query.GetResetXformStack(); // TODO: Handle reset xform stack
+
+                    // Serialize mat
+					std::string matStr;
+                    for (int i = 0; i < 4; ++i) {
+                        for (int j = 0; j < 4; ++j) {
+                            matStr += std::to_string(mat[i][j]) + " ";
+                        }
+                        matStr += "\n";
+					}
+
+                    if (prim.GetName().GetString() == "Plane_036") {
+						spdlog::info("plane036");
+                    }
+                    if (prim.GetName().GetString() == "Cylinder_011") {
+                        spdlog::info("plane036");
+                    }
+					spdlog::info("Xformable has transform: {}", matStr);
+
+                    if (!hasCorrectedAxis) { // Apply axis correction only on root transforms
+                        GfMatrix4d rotMat(upRot, GfVec3d(0.0));
+                        mat = rotMat * mat;
+						hasCorrectedAxis = true;
+                    }
 
                     // Decompose via GfTransform:
                     GfTransform xf(mat);
@@ -343,12 +438,12 @@ namespace USDLoader {
 
                 for (auto& child : childrenToRecurse) {
                     if (child.IsA<UsdGeomXformable>()) {
-                        RecurseHierarchy(child, entity);
+                        RecurseHierarchy(child, entity, hasCorrectedAxis);
                     }
                 }
             };
 
-        RecurseHierarchy(stage->GetPseudoRoot(), flecs::entity());
+        RecurseHierarchy(stage->GetPseudoRoot(), flecs::entity(), false);
 
     }
 
@@ -366,7 +461,7 @@ namespace USDLoader {
 
         auto plug = PlugRegistry::GetInstance().GetPluginWithName("usd_httpResolver");
 
-        ArSetPreferredResolver("HttpResolver");
+        //ArSetPreferredResolver("HttpResolver");
 
         pxr::TfDebug::SetDebugSymbolsByName("USD_STAGE_OPEN", true);
         pxr::TfDebug::SetDebugSymbolsByName("PLUG_LOAD", true);
@@ -386,6 +481,11 @@ namespace USDLoader {
 		}
 
         UsdStageRefPtr stage = UsdStage::Open(filePath);
+
+        for (auto& layer : stage->GetLayerStack()) {
+            spdlog::info("Loaded layer: {}", layer->GetIdentifier());
+        }
+
         auto metersPerUnit = UsdGeomGetStageMetersPerUnit(stage);
         TfToken upAxis = UsdGeomGetStageUpAxis(stage); // TODO
         GfRotation upRot;  // identity by default

@@ -11,6 +11,8 @@
 #include <mutex>
 #include <filesystem>
 #include <fstream>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -18,7 +20,11 @@ namespace fs = std::filesystem;
 
 class HttpResolver : public ArResolver {
 public:
-    HttpResolver() = default;
+    HttpResolver() {
+        auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/usd_http_resolver.txt");
+        spdlog::set_default_logger(file_logger);
+        file_logger->flush_on(spdlog::level::info);
+    }
     ~HttpResolver() override = default;
 
 protected:

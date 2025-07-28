@@ -35,7 +35,7 @@ void HttpResolver::_FetchURLToFile(const std::string& url, const fs::path& outPa
 }
 
 ArResolvedPath HttpResolver::_Resolve(const std::string& assetPath) const {
-    spdlog::debug("USDHttpResolver resolving: {}", assetPath);
+    spdlog::info("HttpResolver resolving: {}", assetPath);
     if (_IsHttpURL(assetPath)) {
         fs::path tmpDir = fs::temp_directory_path();
         auto ext = fs::path(assetPath).extension().string();
