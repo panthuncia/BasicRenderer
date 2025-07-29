@@ -73,14 +73,14 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	std::shared_ptr<Texture> skybox;
 	unsigned int res = m_reflectionCubemapResolution;
 	if (std::filesystem::exists(skyboxPath)) {
-		skybox = loadCubemapFromFile(skyboxPath, true);
+		skybox = LoadCubemapFromFile(skyboxPath, true);
 		skybox->SetName(L"Skybox cubemap");
 		res = skybox->GetBuffer()->GetWidth();
 		e->SetReflectionCubemapResolution(res);
 		e->SetEnvironmentCubemap(skybox);
 	}
 	else {
-		auto skyHDR = loadTextureFromFileSTBI(hdriPath);
+		auto skyHDR = LoadTextureFromFileSTBI(hdriPath);
 
 		TextureDescription skyboxDesc;
 		ImageDimensions dims;

@@ -9,6 +9,7 @@
 #include "Materials/BlendState.h"
 #include "Render/PSOFlags.h"
 #include "Materials/MaterialFlags.h"
+#include "Materials/MaterialDescription.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -34,6 +35,49 @@ public:
             metallicTexture, roughnessTexture, emissiveTexture,
             metallicFactor, roughnessFactor, baseColorFactor, emissiveFactor,
             blendState, alphaCutoff));
+    }
+    static std::shared_ptr<Material> CreateShared(const MaterialDescription& desc) {
+        uint32_t materialFlags = 0;
+		uint32_t psoFlags = 0;
+
+        if (desc.baseColor.texture) {
+            if (!desc.baseColor.texture->AlphaIsAllOpaque()) {
+                materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
+                psoFlags |= PSOFlags::PSO_ALPHA_TEST;
+			}
+			materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+        }
+        if (desc.metallic.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+        }
+        if (desc.roughness.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
+		}
+        if (desc.emissive.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+		}
+        if (desc.normal.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
+        }
+
+        return CreateShared(
+            desc.name,
+            static_cast<MaterialFlags>(materialFlags),
+            static_cast<PSOFlags>(psoFlags),
+            desc.baseColor.texture,
+            desc.normal.texture,
+            desc.aoMap.texture,
+            desc.heightMap.texture,
+            desc.metallic.texture,
+            desc.roughness.texture,
+            desc.emissive.texture,
+            desc.metallic.factor,
+            desc.roughness.factor,
+            desc.diffuseColor,
+            desc.emissiveColor,
+            BlendState::BLEND_STATE_OPAQUE, // Default blend state
+            0.5f // Default alpha cutoff
+		);
     }
     ~Material();
 

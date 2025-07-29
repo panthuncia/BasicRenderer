@@ -41,10 +41,11 @@ void print(Args... args) {
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
 DirectX::XMMATRIX RemoveScalingFromMatrix(DirectX::XMMATRIX& initialMatrix);
-std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
-std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
+std::shared_ptr<Texture> LoadTextureFromFile(std::wstring filePath, std::shared_ptr<Sampler> sampler = nullptr);
+std::shared_ptr<Texture> LoadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler = nullptr);
+std::shared_ptr<Texture> LoadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
+std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
+std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
 template <typename T1, typename T2>
 bool mapHasKeyNotAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
 	return map.contains(key) && map[key] != val;

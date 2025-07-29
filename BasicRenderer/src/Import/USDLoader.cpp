@@ -10,6 +10,7 @@
 #include <pxr/usd/usdShade/shader.h>
 #include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/tokens.h>
+#include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/metrics.h>
@@ -34,29 +35,57 @@
 #include "Animation/AnimationController.h"
 
 #include "Import/USDLoader.h"
+#include "Import/USDShaderGraphBuilder.h"
 
 namespace USDLoader {
 
     using namespace pxr;
     std::unordered_map<std::string, std::shared_ptr<Material>> materialCache;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> meshCache;
+	std::unordered_map<std::string, std::shared_ptr<Texture>> textureCache;
+	std::unordered_map<std::string, std::string> uvSetCache;
 
-    bool ProcessMaterial(const pxr::UsdShadeMaterial& material,
-        const pxr::UsdStageRefPtr& stage,
-        const std::string& directory)
-    {
-
-        if (materialCache.contains(material.GetPrim().GetPath().GetString())) {
-            spdlog::info("Material {} already processed, skipping.", material.GetPrim().GetPath().GetString());
-            return true; // Already processed
+    UsdShadeShader GetUSDShaderFromMaterial(const pxr::UsdShadeMaterial& material) {
+		UsdShadeShader shader;
+        UsdShadeOutput surfOut =
+            material.GetSurfaceOutput(UsdShadeTokens->universalRenderContext);
+        if (!surfOut) {
+            spdlog::warn("No surface output on material {}",
+                material.GetPrim().GetPath().GetText());
+            return shader;
         }
 
+            // 2) Resolve the connected shader for that output:
+        TfToken       srcName;
+        UsdShadeAttributeType srcType;
+        shader =
+            material.ComputeSurfaceSource(
+                UsdShadeTokens->universalRenderContext,
+                &srcName, &srcType);
+        if (!shader) {
+            spdlog::warn("No shader bound to {}'s surface",
+                material.GetPrim().GetPath().GetText());
+            return shader;
+        }
+        spdlog::info("Surface shader = {} (via {})",
+            shader.GetPath().GetText(),
+            srcName.GetText());
+
+        // 3) Inspect its ID to see what node type it is:
+        TfToken shaderId;
+        shader.GetIdAttr().Get(&shaderId);
+        spdlog::info("Shader info:id = {}", shaderId.GetText());
+
+        return shader;
+	}
+
+    UsdShadeShader GetMdlShaderFromMaterial(const pxr::UsdShadeMaterial& material) {
         UsdShadeOutput mdlOut =
             material.GetOutput(pxr::TfToken("mdl:surface"));
         if (!mdlOut) {
             spdlog::warn("No mdl:surface output found on {}",
                 material.GetPrim().GetName().GetString());
-            return false;
+			return UsdShadeShader(); // Return an invalid shader
         }
 
         UsdShadeShader shader;
@@ -75,123 +104,156 @@ namespace USDLoader {
             }
         }
 
+        return shader;
+	}
+
+    UsdShadeShader GetShaderFromMaterial(const pxr::UsdShadeMaterial& material) {
+        
+		auto shader = GetUSDShaderFromMaterial(material);
         if (!shader) {
-            spdlog::warn("No shader found for material: {}",
-                material.GetPrim().GetName().GetString());
+            shader = GetMdlShaderFromMaterial(material);
         }
 
-        SdfAssetPath mdlAsset;
-        if (shader.GetSourceAsset(&mdlAsset, TfToken("mdl"))) {
-            std::string url = mdlAsset.GetAssetPath();
-            spdlog::info("  MDL URL = {}", url);
-        }
-        else {
-            // No mdl:sourceAsset found
-        }
+		return shader;
+	}
 
-        //sub-identifier:
-        TfToken subId;
-        if (shader.GetSourceAssetSubIdentifier(&subId, TfToken("mdl"))) {
-            spdlog::info("  subIdentifier = {}", subId.GetString());
-        }
+    MaterialDescription ParseMaterialGraph(
+        const pxr::UsdShadeMaterial& material,
+        const std::string& directory)
+    {
+        USDShaderGraphBuilder builder(material);
+        builder.Build();
+        auto nodes = builder.GetTopologicalNodes();
 
-        // TODO: MDL support
+        MaterialDescription result;
 
-        bool enableEmission = false;
-        bool enableOpacity = false;
-
-        bool enableOpacityTexture = false;
-
-        DirectX::XMFLOAT4 diffuseColor(1.f, 1.f, 1.f, 1.f);
-        DirectX::XMFLOAT4 emissiveColor(0.f, 0.f, 0.f, 1.f);
-        float metallicFactor = 0.f;
-        float roughnessFactor = 0.5f;
-        float opacityConstant = 1.f;
-        float alphaCutoff = 0.5f;
-
-        GfVec2f textureScale(1.f, 1.f);
-        GfVec2f textureOffset(0.f, 0.f);
-        float textureRotation = 0.f;
-
-        auto inputs = shader.GetInputs();
-        for (const auto& input : inputs) {
-            spdlog::info("Input: {} {}", input.GetTypeName().GetCPPTypeName(), input.GetBaseName().GetString());
-            if (input.GetTypeName() == pxr::SdfValueTypeNames->Asset) {
-                pxr::SdfAssetPath assetPath;
-                input.Get(&assetPath);
-                spdlog::info("Asset Path: {}", assetPath.GetAssetPath());
+        // helper to load a USD texture node
+        auto TryLoadTexture = [&](const pxr::UsdShadeShader& texShader) {
+            pxr::SdfAssetPath asset;
+            if (texShader.GetInput(pxr::TfToken("file"))
+                .Get(&asset))
+            {
+                std::string path = asset.GetAssetPath();
+                return nullptr;// LoadTextureFromDisk(directoryForTextures + "/" + path);
             }
-            else if (input.GetTypeName() == pxr::SdfValueTypeNames->Color3f) {
-                GfVec3f color;
-                input.Get(&color);
-                if (input.GetBaseName() == pxr::TfToken("diffuse_color_constant")) {
-                    diffuseColor = { color[0], color[1], color[2], 1.0f };
+            return nullptr;//std::shared_ptr<Texture>(nullptr);
+            };
+
+        // Walk nodes in topo order
+        for (auto& node : nodes) {
+            TfToken shaderId;
+            if (!node.shader.GetIdAttr().Get(&shaderId)) {
+                // no info:id, skip
+                continue;
+            }
+
+            // The core "surface" node: UsdPreviewSurface
+            if (shaderId == TfToken("UsdPreviewSurface")) {
+                // first pull out unconnected constants
+                for (auto const& in : node.inputs) {
+                    TfToken name = in.GetBaseName();
+                    if (name == TfToken("diffuseColor") && in.GetConnectedSources().empty()) {
+                        GfVec3f c; in.Get(&c);
+                        result.diffuseColor = { c[0],c[1],c[2],1.0f };
+                    }
+                    else if (name == TfToken("metallic") && in.GetConnectedSources().empty()) {
+                        float v; in.Get(&v);
+                        result.metallic.factor = v;
+                    }
+                    else if (name == TfToken("roughness") && in.GetConnectedSources().empty()) {
+                        float v; in.Get(&v);
+                        result.roughness.factor = v;
+                    }
+                    else if (name == TfToken("opacity") && in.GetConnectedSources().empty()) {
+                        float v; in.Get(&v);
+                        result.opacity.factor = v;
+                    }
+                    else if (name == TfToken("emissiveColor") && in.GetConnectedSources().empty()) {
+                        GfVec3f c; in.Get(&c);
+                        result.emissiveColor = { c[0],c[1],c[2],1.0f };
+                    }
                 }
-                else if (input.GetBaseName() == pxr::TfToken("emissive_color")) {
-                    emissiveColor = { color[0], color[1], color[2], 1.0f };
+
+                // follow connected inputs
+                for (auto const& in : node.inputs) {
+                    TfToken name = in.GetBaseName();
+                    if (name != TfToken("diffuseColor") &&
+                        name != TfToken("metallic") &&
+                        name != TfToken("roughness") &&
+                        name != TfToken("opacity") &&
+                        name != TfToken("emissiveColor") &&
+						name != TfToken("normal") &&
+						name != TfToken("displacement") &&
+						name != TfToken("ambientOcclusion"))
+                        spdlog::warn("Unsupported input type: {}", in.GetBaseName().GetString());
+
+                    // there may be zero or more connections
+                    for (auto const& src : in.GetConnectedSources()) {
+                        // only take the *first* UsdUVTexture we find
+                        if (auto srcShader = UsdShadeShader(src.source)) {
+                            TfToken srcId;
+                            srcShader.GetIdAttr().Get(&srcId);
+
+                            if (srcId == TfToken("UsdUVTexture") && !textureCache.contains(src.source.GetPath().GetString())) {
+                                // load the texture and stash it
+                                SdfAssetPath asset;
+                                srcShader.GetInput(TfToken("file")).Get(&asset);
+								auto texPath = asset.GetAssetPath();
+								spdlog::info("Loading texture from path: {}", texPath);
+                                auto tex = LoadTextureFromFile(s2ws(directory) + L"/" + s2ws(asset.GetAssetPath()));
+                                textureCache[src.source.GetPath().GetString()] = tex;
+                            }
+
+                            // now map that texture into the correct material slot:
+                            auto texIt = textureCache.find(src.source.GetPath().GetString());
+                            if (texIt != textureCache.end()) {
+                                if (name == TfToken("diffuseColor"))      result.baseColor.texture = texIt->second;
+                                else if (name == TfToken("metallic"))     result.metallic.texture = texIt->second;
+                                else if (name == TfToken("roughness"))    result.roughness.texture = texIt->second;
+                                else if (name == TfToken("opacity"))      result.opacity.texture = texIt->second;
+                                else if (name == TfToken("emissiveColor"))result.emissive.texture = texIt->second;
+                                else if (name == TfToken("normal"))       result.normal.texture = texIt->second;
+                                else if (name == TfToken("displacement")) result.heightMap.texture = texIt->second;
+                                else if (name == TfToken("ambientOcclusion")) result.aoMap.texture = texIt->second;
+                                else {
+                                    spdlog::warn("Unknown texture input: {}", name.GetString());
+								}
+                            }
+                        }
+                        else {
+                            spdlog::warn("Non-shader connected to {} : skipping.", name.GetText());
+                        }
+                    }
                 }
             }
-            else if (input.GetTypeName() == pxr::SdfValueTypeNames->Float) {
-                float value;
-                input.Get(&value);
-                if (input.GetBaseName() == pxr::TfToken("metallic")) {
-                    metallicFactor = value;
-                }
-                else if (input.GetBaseName() == pxr::TfToken("roughness")) {
-                    roughnessFactor = value;
-                }
-                else if (input.GetBaseName() == pxr::TfToken("opacity_constant")) {
-                    opacityConstant = value;
-                    enableOpacity = true;
-                }
+
+            else if (shaderId == TfToken("UsdUVTexture")) {
+                // we actually loaded these in the surface node pass
             }
-            else if (input.GetTypeName() == pxr::SdfValueTypeNames->Float2) {
-                GfVec2f vec2f;
-                input.Get(&vec2f);
-                if (input.GetBaseName() == pxr::TfToken("texture_scale")) {
-                    textureScale = vec2f;
-                }
-                else if (input.GetBaseName() == pxr::TfToken("texture_offset")) {
-                    textureOffset = vec2f;
-                }
+
+            else if (shaderId == TfToken("UsdPrimvarReader_float2")) {
+                TfToken varname;
+                node.shader.GetInput(TfToken("varname")).Get(&varname);
+                uvSetCache[node.path.GetString()] = varname.GetString();
             }
+            // TODO: Other node types?
+        }
+		result.name = material.GetPrim().GetName().GetString();
+        return result;
+    }
+
+    void ProcessMaterial(const pxr::UsdShadeMaterial& material, const pxr::UsdStageRefPtr& stage, const std::string& directory) {
+        if (materialCache.contains(material.GetPrim().GetPath().GetString())) {
+            spdlog::info("Material {} already processed, skipping.", material.GetPrim().GetPath().GetString());
+            return; // Already processed
         }
 
-        std::shared_ptr<Texture> baseColorTexture = nullptr;
-        std::shared_ptr<Texture> normalTexture = nullptr;
-        std::shared_ptr<Texture> metallicTex = nullptr;
-        std::shared_ptr<Texture> roughnessTex = nullptr;
-        std::shared_ptr<Texture> aoMap = nullptr;
-        std::shared_ptr<Texture> emissiveTexture = nullptr;
-        std::shared_ptr<Texture> heightMap = nullptr;
+        auto materialDesc = ParseMaterialGraph(material, directory);
 
-        uint32_t materialFlags = 0;
-        uint32_t psoFlags = 0;
-
-        BlendState blendMode = BlendState::BLEND_STATE_OPAQUE;
-
-        auto newMaterial = Material::CreateShared(
-            material.GetPrim().GetName().GetString(),
-            static_cast<MaterialFlags>(materialFlags),
-            static_cast<PSOFlags>(psoFlags),
-            baseColorTexture,
-            normalTexture,
-            aoMap,
-            heightMap,
-            metallicTex,
-            roughnessTex,
-            emissiveTexture,
-            metallicFactor,
-            roughnessFactor,
-            diffuseColor,
-            emissiveColor,
-            blendMode,
-            alphaCutoff
-        );
+        auto newMaterial = Material::CreateShared(materialDesc);
 
         materialCache[material.GetPrim().GetPath().GetString()] = newMaterial;
-        return true; // Successfully processed material
-    }
+	}
 
     std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, GfRotation upRot, const std::string& directory) {
         spdlog::info("Found Mesh: {}", prim.GetName().GetString());
@@ -206,6 +268,18 @@ namespace USDLoader {
         auto rels = prim.FindAllRelationshipTargetPaths();
         bool foundMaterial = false;
 
+        // Try with material binding API
+		auto bindingAPI = UsdShadeMaterialBindingAPI(prim);
+		auto boundMaterial = bindingAPI.ComputeBoundMaterial();
+        if (boundMaterial) {
+            spdlog::info("Found Material via binding API: {}", boundMaterial.GetPrim().GetName().GetString());
+            //bool success = ProcessMaterial(boundMaterial, stage, directory);
+
+			ProcessMaterial(boundMaterial, stage, directory);
+            geometry.material = materialCache[boundMaterial.GetPrim().GetPath().GetString()];
+            foundMaterial = true;
+		}
+
         for (const auto& rel : rels) {
             spdlog::info("Relationship target: {}", rel.GetString());
             auto relPrim = stage->GetPrimAtPath(rel);
@@ -215,11 +289,8 @@ namespace USDLoader {
                 }
                 spdlog::info("Found Material for Mesh: {}", prim.GetName().GetString());
                 UsdShadeMaterial mat = UsdShadeMaterial(relPrim);
-                bool success = ProcessMaterial(mat, stage, directory);
-                if (success) {
-                    geometry.material = materialCache[mat.GetPrim().GetPath().GetString()];
-                    foundMaterial = true;
-                }
+                ProcessMaterial(mat, stage, directory);
+                geometry.material = materialCache[mat.GetPrim().GetPath().GetString()];
             }
         }
 
@@ -342,7 +413,7 @@ namespace USDLoader {
             }
             indexOffset += faceVertCount;
         }
-		RebuildFaceVarying(geometry);
+		RebuildFaceVarying(geometry); // TODO: Make separate shader path for face-varying attributes. For now, we just duplicate the attributes
         auto meshPtr = MeshFromData(geometry, s2ws(prim.GetName().GetString()));
         meshCache[prim.GetPath().GetString()] = meshPtr;
         spdlog::info("Processed Mesh: {}", prim.GetName().GetString());

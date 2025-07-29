@@ -143,7 +143,7 @@ struct ImageData {
     }
 };
 
-ImageData loadImage(const char* filename) {
+ImageData LoadSTBImage(const char* filename) {
     ImageData img;
     img.data = stbi_load(filename, &img.width, &img.height, &img.channels, 0);
     if (!img.data) {
@@ -152,8 +152,8 @@ ImageData loadImage(const char* filename) {
     return img;
 }
 
-std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler) {
-	ImageData img = loadImage(filename.c_str());
+std::shared_ptr<Texture> LoadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler) {
+	ImageData img = LoadSTBImage(filename.c_str());
     // Determine DXGI_FORMAT based on number of channels
 	DXGI_FORMAT format;
     switch (img.channels) {
@@ -189,7 +189,7 @@ std::shared_ptr<Texture> loadTextureFromFileSTBI(std::string filename, std::shar
     return std::make_shared<Texture>(buffer, sampler);
 }
 
-std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler) {
+std::shared_ptr<Texture> LoadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler) {
 	DirectX::ScratchImage image;
 	DirectX::TexMetadata metadata;
     HRESULT hr;
@@ -229,13 +229,29 @@ std::shared_ptr<Texture> loadTextureFromFileDXT(std::wstring filePath, ImageFile
 	return texture;
 }
 
-std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
-    ImageData top = loadImage(topPath);
-	ImageData bottom = loadImage(bottomPath);
-	ImageData left = loadImage(leftPath);
-	ImageData right = loadImage(rightPath);
-	ImageData front = loadImage(frontPath);
-	ImageData back = loadImage(backPath);
+std::shared_ptr<Texture> LoadTextureFromFile(std::wstring filePath, std::shared_ptr<Sampler> sampler) {
+    auto fileExtension = GetFileExtension(ws2s(filePath));
+    ImageFiletype format = extensionToFiletype[fileExtension];
+    ImageLoader loader = imageFiletypeToLoader[format];
+
+    switch (loader) {
+    case ImageLoader::STBImage:
+        return LoadTextureFromFileSTBI(ws2s(filePath), sampler);
+    case ImageLoader::DirectXTex:
+        return LoadTextureFromFileDXT(filePath, format, sampler);
+    default:
+        throw std::runtime_error("Unsupported texture format: " + ws2s(filePath));
+    }
+}
+
+
+std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
+    ImageData top = LoadSTBImage(topPath);
+	ImageData bottom = LoadSTBImage(bottomPath);
+	ImageData left = LoadSTBImage(leftPath);
+	ImageData right = LoadSTBImage(rightPath);
+	ImageData front = LoadSTBImage(frontPath);
+	ImageData back = LoadSTBImage(backPath);
 
 
 	ImageDimensions dim;
@@ -255,7 +271,7 @@ std::shared_ptr<Texture> loadCubemapFromFile(const char* topPath, const char* bo
     return std::make_shared<Texture>(buffer, sampler);
 }
 
-std::shared_ptr<Texture> loadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV) {
+std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV) {
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);

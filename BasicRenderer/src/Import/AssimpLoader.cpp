@@ -140,18 +140,7 @@ namespace AssimpLoader {
             }
 
             std::string fullPath = (isRelative ? ws2s(GetExePath()) + "\\" : "") + directory + "\\" + texPath;
-            auto fileExtension = GetFileExtension(fullPath);
-            ImageFiletype format = extensionToFiletype[fileExtension];
-            ImageLoader loader = imageFiletypeToLoader[format];
-
-            switch (loader) {
-            case ImageLoader::STBImage:
-                return loadTextureFromFileSTBI(fullPath, sampler);
-            case ImageLoader::DirectXTex:
-                return loadTextureFromFileDXT(s2ws(fullPath), format, sampler);
-            default:
-                throw std::runtime_error("Unsupported texture format: " + fullPath);
-            }
+			LoadTextureFromFile(s2ws(fullPath), sampler);
         }
     }
 
