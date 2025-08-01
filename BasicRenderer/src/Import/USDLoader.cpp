@@ -21,6 +21,8 @@
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/usd/usdGeom/primvarsAPI.h>
+#include <pxr/usd/usdGeom/primvar.h>
 #include <pxr/usd/usdSkel/skeleton.h>
 #include <pxr/usd/usdSkel/animation.h>
 #include <pxr/usd/usdSkel/bindingAPI.h>
@@ -78,78 +80,6 @@ namespace USDLoader {
 	};
 
 	LoadingCaches loadingCache;
-
-    UsdShadeShader GetUSDShaderFromMaterial(const pxr::UsdShadeMaterial& material) {
-		UsdShadeShader shader;
-        UsdShadeOutput surfOut =
-            material.GetSurfaceOutput(UsdShadeTokens->universalRenderContext);
-        if (!surfOut) {
-            spdlog::warn("No surface output on material {}",
-                material.GetPrim().GetPath().GetText());
-            return shader;
-        }
-
-            // 2) Resolve the connected shader for that output:
-        TfToken       srcName;
-        UsdShadeAttributeType srcType;
-        shader =
-            material.ComputeSurfaceSource(
-                UsdShadeTokens->universalRenderContext,
-                &srcName, &srcType);
-        if (!shader) {
-            spdlog::warn("No shader bound to {}'s surface",
-                material.GetPrim().GetPath().GetText());
-            return shader;
-        }
-        spdlog::info("Surface shader = {} (via {})",
-            shader.GetPath().GetText(),
-            srcName.GetText());
-
-        // 3) Inspect its ID to see what node type it is:
-        TfToken shaderId;
-        shader.GetIdAttr().Get(&shaderId);
-        spdlog::info("Shader info:id = {}", shaderId.GetText());
-
-        return shader;
-	}
-
-    UsdShadeShader GetMdlShaderFromMaterial(const pxr::UsdShadeMaterial& material) {
-        UsdShadeOutput mdlOut =
-            material.GetOutput(pxr::TfToken("mdl:surface"));
-        if (!mdlOut) {
-            spdlog::warn("No mdl:surface output found on {}",
-                material.GetPrim().GetName().GetString());
-			return UsdShadeShader(); // Return an invalid shader
-        }
-
-        UsdShadeShader shader;
-        auto sources = mdlOut.GetConnectedSources();
-        if (!sources.empty()) {
-            // sources[0].source is a UsdShadeConnectableAPI wrapping the shader prim
-            spdlog::info("Found shader source: {} at {}", sources[0].source.GetPrim().GetName().GetString(), sources[0].source.GetPath().GetString());
-            UsdShadeConnectableAPI srcAPI = sources[0].source;
-            UsdPrim shaderPrim = srcAPI.GetPrim();
-            if (shaderPrim.IsA<UsdShadeShader>()) {
-                shader = UsdShadeShader(shaderPrim);
-            }
-            else {
-                spdlog::warn("Source is not a UsdShadeShader: {}",
-                    shaderPrim.GetTypeName().GetString());
-            }
-        }
-
-        return shader;
-	}
-
-    UsdShadeShader GetShaderFromMaterial(const pxr::UsdShadeMaterial& material) {
-        
-		auto shader = GetUSDShaderFromMaterial(material);
-        if (!shader) {
-            shader = GetMdlShaderFromMaterial(material);
-        }
-
-		return shader;
-	}
 
     static std::vector<uint32_t> SwizzleToIndices(const std::string& swizzle) {
         std::vector<uint32_t> indices;
@@ -374,6 +304,20 @@ namespace USDLoader {
                 if (in && in.Get(&varnameStr)) {
                     TfToken varname(varnameStr);
                 }
+                if (varnameStr.empty()) {
+                    spdlog::info("UsdPrimvarReader_float2 node has no string varname set, checking for inputs:varname token.");
+                    pxr::UsdAttribute attr = node.shader.GetPrim().GetAttribute(pxr::TfToken("inputs:varname"));
+                    if (attr) {
+                        pxr::TfToken varnameValue;
+                        if (attr.Get(&varnameValue)) {
+                            varnameStr = varnameValue.GetString();
+                        }
+                        else {
+                            spdlog::warn("UsdPrimvarReader_float2 node has no varname set, skipping.");
+                            continue; // No varname set, skip this node
+                        }
+                    }
+				}
 				spdlog::info("Found UsdPrimvarReader_float2 node with varname: {}", varnameStr);
                 auto& path = material.GetPrim().GetPath().GetString();
                 if (loadingCache.uvSetCache.contains(path) && loadingCache.uvSetCache[path] != varnameStr) {
@@ -399,6 +343,24 @@ namespace USDLoader {
         auto newMaterial = Material::CreateShared(materialDesc);
 
         loadingCache.materialCache[material.GetPrim().GetPath().GetString()] = newMaterial;
+	}
+
+    InterpolationType GetInterpolationType(TfToken& token) {
+		if (token == UsdGeomTokens->constant) {
+			return InterpolationType::Constant; // One value per surface
+		}
+		if (token == UsdGeomTokens->uniform) {
+			return InterpolationType::Uniform; // One value per face, shared by all vertices
+		}
+		if (token == UsdGeomTokens->vertex) {
+			return InterpolationType::Vertex; // One value per vertex
+		}
+		if (token == UsdGeomTokens->varying) {
+			return InterpolationType::Varying; // One value per vertex, but can vary across faces
+		}
+        if (token == UsdGeomTokens->faceVarying) {
+			return InterpolationType::FaceVarying; // One value per face vertex
+        }
 	}
 
     std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, GfRotation upRot, const std::string& directory, bool isUSDZ) {
@@ -470,52 +432,16 @@ namespace USDLoader {
             // Reserve worst-case size (faceVarying == one normal per index)
             geometry.normals.reserve(faceVertexIndices.size() * 3);
 
-            if (interp == UsdGeomTokens->faceVarying) {
-                // one normal per face-vertex -> match faceVertexIndices
-                for (auto& n : usdNormals) {
-                    n = n.GetNormalized();
-                    geometry.normals.push_back((float)n[0]);
-                    geometry.normals.push_back((float)n[1]);
-                    geometry.normals.push_back((float)n[2]);
-                }
-            }
-            else if (interp == UsdGeomTokens->uniform) {
-                // one normal per face -> duplicate per corner
-                size_t idxOff = 0;
-                for (size_t f = 0; f < faceVertexCounts.size(); ++f) {
-                    GfVec3f n = usdNormals[f].GetNormalized();
-                    for (int corner = 0; corner < faceVertexCounts[f]; ++corner) {
-                        geometry.normals.push_back((float)n[0]);
-                        geometry.normals.push_back((float)n[1]);
-                        geometry.normals.push_back((float)n[2]);
-                    }
-                    idxOff += faceVertexCounts[f];
-                }
-            }
-            else if (interp == UsdGeomTokens->vertex ||
-                interp == UsdGeomTokens->varying) {
-                // one normal per point
-                for (auto& n : usdNormals) {
-                    n = n.GetNormalized();
-                    geometry.normals.push_back((float)n[0]);
-                    geometry.normals.push_back((float)n[1]);
-                    geometry.normals.push_back((float)n[2]);
-                }
-            }
-            else if (interp == UsdGeomTokens->constant) {
-                // single normal -> replicate for every face-vertex
-                GfVec3f n = usdNormals[0].GetNormalized();
-                for (size_t i = 0; i < faceVertexIndices.size(); ++i) {
-                    geometry.normals.push_back((float)n[0]);
-                    geometry.normals.push_back((float)n[1]);
-                    geometry.normals.push_back((float)n[2]);
-                }
-            }
-            else {
-                spdlog::warn("Unhandled normals interpolation: {}", interp.GetString());
+            for (auto& n : usdNormals) {
+                n = n.GetNormalized();
+                geometry.normals.push_back((float)n[0]);
+                geometry.normals.push_back((float)n[1]);
+                geometry.normals.push_back((float)n[2]);
             }
 
             geometry.flags |= VertexFlags::VERTEX_NORMALS;
+            auto interpType = mesh.GetNormalsInterpolation();
+            geometry.normalInterpolation = GetInterpolationType(interpType);
         }
         else {
             // no authored normals -> treat as faceted: compute flat normals from indices
@@ -528,9 +454,10 @@ namespace USDLoader {
             geometry.texcoords.reserve(usdTexcoords.size() * 2);
             for (auto& tc : usdTexcoords) {
                 geometry.texcoords.push_back(tc[0]);
-                geometry.texcoords.push_back(tc[1]);
+				geometry.texcoords.push_back(1.0 - tc[1]); // Flip Y to match DirectX convention
             }
             geometry.flags |= VertexFlags::VERTEX_TEXCOORDS;
+			auto interpType = mesh.GetPrim().GetAttribute(pxr::TfToken("primvars:" + loadingCache.uvSetCache[materialPath])).Get;
 		}
 
 		// Joints and weights
@@ -538,63 +465,65 @@ namespace USDLoader {
 
         // Get the skeleton's joint order
         UsdSkelSkeleton skel = bindAPI.GetInheritedSkeleton();
-        VtTokenArray    skelJoints;
-        skel.GetJointsAttr().Get(&skelJoints);
+        if (skel) {
+            VtTokenArray    skelJoints;
+            skel.GetJointsAttr().Get(&skelJoints);
 
-        // Get any mesh-local joint order
-        VtTokenArray    meshJoints;
-        bindAPI.GetJointsAttr().Get(&meshJoints);
+            // Get any mesh-local joint order
+            VtTokenArray    meshJoints;
+            bindAPI.GetJointsAttr().Get(&meshJoints);
 
-        // Construct the query, passing through all authored bindings
-        UsdSkelSkinningQuery skinQ(
-            prim,
-            skelJoints,
-            meshJoints,
-            bindAPI.GetJointIndicesAttr(),
-            bindAPI.GetJointWeightsAttr(),
-            bindAPI.GetSkinningMethodAttr(),
-            bindAPI.GetGeomBindTransformAttr(),
-            bindAPI.GetJointsAttr(),
-            bindAPI.GetBlendShapesAttr(),
-            bindAPI.GetBlendShapeTargetsRel()
-        );
+            // Construct the query, passing through all authored bindings
+            UsdSkelSkinningQuery skinQ(
+                prim,
+                skelJoints,
+                meshJoints,
+                bindAPI.GetJointIndicesAttr(),
+                bindAPI.GetJointWeightsAttr(),
+                bindAPI.GetSkinningMethodAttr(),
+                bindAPI.GetGeomBindTransformAttr(),
+                bindAPI.GetJointsAttr(),
+                bindAPI.GetBlendShapesAttr(),
+                bindAPI.GetBlendShapeTargetsRel()
+            );
 
-        size_t numPoints = usdPositions.size();
+            size_t numPoints = usdPositions.size();
 
-        VtIntArray indices;
-        VtFloatArray weights;
-		unsigned short maxInfluencesPerVertex = 4;
-        if (skinQ.ComputeVaryingJointInfluences(numPoints, &indices, &weights)) {
-			spdlog::info("Mesh {} has {} joints with varying influences", prim.GetName().GetString(), indices.size());
-            int numJointsPerVertex = skinQ.GetNumInfluencesPerComponent();
-            spdlog::info("Mesh {} has {} joints per vertex", prim.GetName().GetString(), numJointsPerVertex);
-            if (numJointsPerVertex > maxInfluencesPerVertex) {
-                spdlog::error("Mesh {} has more than 4 joints per vertex, clamping to 4", prim.GetName().GetString());
-				throw std::runtime_error("Mesh has more than 4 joints per vertex, which is not supported.");
-			}
-			unsigned int currentJoint = 0;
-            for (size_t i = 0; i < numPoints; ++i) {
-                for (int j = 0; j < maxInfluencesPerVertex; ++j) {
-                    //size_t idx = i * numJointsPerVertex + j;
-                    if (j < numJointsPerVertex) {
-                        if (currentJoint < indices.size()) {
-                            geometry.joints.push_back(indices[currentJoint]);
-                            geometry.weights.push_back(weights[currentJoint]);
+            VtIntArray indices;
+            VtFloatArray weights;
+		    unsigned short maxInfluencesPerVertex = 4;
+            if (skinQ.ComputeVaryingJointInfluences(numPoints, &indices, &weights)) {
+			    spdlog::info("Mesh {} has {} joints with varying influences", prim.GetName().GetString(), indices.size());
+                int numJointsPerVertex = skinQ.GetNumInfluencesPerComponent();
+                spdlog::info("Mesh {} has {} joints per vertex", prim.GetName().GetString(), numJointsPerVertex);
+                if (numJointsPerVertex > maxInfluencesPerVertex) {
+                    spdlog::error("Mesh {} has more than 4 joints per vertex, clamping to 4", prim.GetName().GetString());
+				    throw std::runtime_error("Mesh has more than 4 joints per vertex, which is not supported.");
+			    }
+			    unsigned int currentJoint = 0;
+                for (size_t i = 0; i < numPoints; ++i) {
+                    for (int j = 0; j < maxInfluencesPerVertex; ++j) {
+                        //size_t idx = i * numJointsPerVertex + j;
+                        if (j < numJointsPerVertex) {
+                            if (currentJoint < indices.size()) {
+                                geometry.joints.push_back(indices[currentJoint]);
+                                geometry.weights.push_back(weights[currentJoint]);
+                            }
+                            else {
+                                geometry.joints.push_back(0);
+                                geometry.weights.push_back(0.0f);
+                            }
+                            currentJoint++;
                         }
                         else {
+                            // TODO: Make # of influences per vertex dynamic
                             geometry.joints.push_back(0);
                             geometry.weights.push_back(0.0f);
                         }
-                        currentJoint++;
                     }
-                    else {
-                        // TODO: Make # of influences per vertex dynamic
-                        geometry.joints.push_back(0);
-                        geometry.weights.push_back(0.0f);
-                    }
-                }
-			}
-            geometry.flags |= VertexFlags::VERTEX_SKINNED;
+			    }
+                geometry.flags |= VertexFlags::VERTEX_SKINNED;
+            }
         }
 
         size_t indexOffset = 0;
@@ -630,7 +559,7 @@ namespace USDLoader {
         return meshPtr;
     }
 
-    std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const UsdSkelCache& skelCache, const std::shared_ptr<Scene>& scene) {
+    std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const UsdSkelCache& skelCache, const std::shared_ptr<Scene>& scene, float metersPerUnit) {
 		if (loadingCache.skeletonMap.contains(skel.GetPrim().GetPath().GetString())) {
 			spdlog::info("Skeleton {} already processed, skipping.", skel.GetPrim().GetPath().GetString());
 			return loadingCache.skeletonMap[skel.GetPrim().GetPath().GetString()];
@@ -652,11 +581,17 @@ namespace USDLoader {
         for (size_t i = 0; i < jointOrder.size(); ++i) {
             auto& m = bindXforms[i];
 			// Convert GfMatrix4d to XMMATRIX
-            DirectX::XMMATRIX xm = DirectX::XMMATRIX(
-                m[0][0], m[0][1], m[0][2], m[0][3],
-                m[1][0], m[1][1], m[1][2], m[1][3],
-                m[2][0], m[2][1], m[2][2], m[2][3],
-				m[3][0], m[3][1], m[3][2], m[3][3]);
+
+			// Extract translation and scale from the matrix
+            auto transform = GfTransform(m);
+			auto translation = transform.GetTranslation() * metersPerUnit;
+			auto rotation = transform.GetRotation().GetQuaternion();
+			auto& scale = transform.GetScale();
+			
+			// Create an XMMATRIX from the translation, rotation, and scale
+            XMMATRIX xm = XMMatrixScaling(scale[0], scale[1], scale[2]) *
+                XMMatrixRotationQuaternion(XMVectorSet(rotation.GetImaginary()[0], rotation.GetImaginary()[1], rotation.GetImaginary()[2], rotation.GetReal())) *
+				XMMatrixTranslation(translation[0], translation[1], translation[2]);
 
             invBindMats.push_back(xm);
 
@@ -686,7 +621,7 @@ namespace USDLoader {
 		return skeleton;
     }
 
-    std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery) {
+    std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, float metersPerUnit) {
         if (!animQuery) {
             return nullptr;
         }
@@ -728,7 +663,7 @@ namespace USDLoader {
                 auto& clip = animation->nodesMap[nodeName];
 
                 // position
-                const GfVec3f& p = translations[j];
+                const GfVec3f& p = translations[j] * metersPerUnit;
                 clip->addPositionKeyframe(static_cast<float>(t),
                     DirectX::XMFLOAT3(p[0], p[1], p[2]));
 
@@ -751,7 +686,8 @@ namespace USDLoader {
     void BuildSkeletons(std::shared_ptr<Scene> scene,
         const pxr::UsdStageRefPtr& stage,
         const std::string& directory,
-        const UsdSkelCache& skelCache) {
+        const UsdSkelCache& skelCache,
+        float metersPerUnit) {
 
         std::vector<UsdSkelRoot> skelRoots;
         for (auto prim : stage->Traverse()) {
@@ -773,7 +709,7 @@ namespace USDLoader {
                 std::cout << "Skeleton: " << skel.GetPrim().GetPath() << "\n";
 
 				// Process the skeleton
-				auto skeleton = ProcessSkeleton(skel, skelCache, scene);
+				auto skeleton = ProcessSkeleton(skel, skelCache, scene, metersPerUnit);
 
                 // Which prims does it drive?
                 for (auto const& skinQuery : binding.GetSkinningTargets()) {
@@ -787,7 +723,7 @@ namespace USDLoader {
                     UsdSkelAnimation anim(animPrim);
                     auto animQuery = skelCache.GetAnimQuery(anim);
                     if (animQuery) {
-                        auto animation = ProcessAnimQuery(animQuery);
+                        auto animation = ProcessAnimQuery(animQuery, metersPerUnit);
 						skeleton->AddAnimation(animation);
                     }
                 }
@@ -883,7 +819,7 @@ namespace USDLoader {
                     UsdSkelSkeleton skel;
                     if (bindingAPI.GetSkeleton(&skel)) {
                         spdlog::info("Found skeleton on prim: {}", prim.GetName().GetString());
-                        auto skeleton = ProcessSkeleton(skel, skelCache, scene);
+                        auto skeleton = ProcessSkeleton(skel, skelCache, scene, metersPerUnit);
 
                         UsdSkelBindingAPI skelAPI(skel.GetPrim());
                         UsdPrim animPrim;
@@ -892,7 +828,7 @@ namespace USDLoader {
                             UsdSkelAnimation anim(animPrim);
                             auto animQuery = skelCache.GetAnimQuery(anim);
                             if (animQuery) {
-                                auto animation = ProcessAnimQuery(animQuery);
+                                auto animation = ProcessAnimQuery(animQuery, metersPerUnit);
                                 skeleton->AddAnimation(animation);
                                 // TODO: Should sleletons be applied to all child entities? Or just to this one?
                                 for (auto& mesh : meshes) {
