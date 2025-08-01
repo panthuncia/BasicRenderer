@@ -30,6 +30,13 @@ Material::Material(const std::string& name,
     float roughnessFactor,
     DirectX::XMFLOAT4 baseColorFactor,
     DirectX::XMFLOAT4 emissiveFactor,
+	std::vector<uint32_t> baseColorChannels,
+	std::vector<uint32_t> normalChannels,
+	std::vector<uint32_t> aoChannel,
+	std::vector<uint32_t> heightChannel,
+	std::vector<uint32_t> metallicChannel,
+	std::vector<uint32_t> roughnessChannel,
+	std::vector<uint32_t> emissiveChannels,
     BlendState blendState,
     float alphaCutoff)
     : m_name(name),
@@ -60,31 +67,37 @@ Material::Material(const std::string& name,
     if (baseColorTexture != nullptr) {
         m_materialData.baseColorTextureIndex = baseColorTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.baseColorSamplerIndex = baseColorTexture->GetSamplerDescriptorIndex();
+		m_materialData.baseColorChannels = { baseColorChannels[0], baseColorChannels[1], baseColorChannels[2], baseColorChannels[3] };
         baseColorTexture->GetBuffer()->SetName(L"BaseColorTexture");
     }
     if (normalTexture != nullptr) {
         m_materialData.normalTextureIndex = normalTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.normalSamplerIndex = normalTexture->GetSamplerDescriptorIndex();
+		m_materialData.normalChannels = { normalChannels[0], normalChannels[1], normalChannels[2] };
         normalTexture->GetBuffer()->SetName(L"NormalTexture");
     }
     if (aoMap != nullptr) {
         m_materialData.aoMapIndex = aoMap->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.aoSamplerIndex = aoMap->GetSamplerDescriptorIndex();
+		m_materialData.aoChannel = aoChannel[0];
         aoMap->GetBuffer()->SetName(L"AOMap");
     }
     if (heightMap != nullptr) {
         m_materialData.heightMapIndex = heightMap->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.heightSamplerIndex = heightMap->GetSamplerDescriptorIndex();
+		m_materialData.heightChannel = heightChannel[0];
         heightMap->GetBuffer()->SetName(L"HeightMap");
     }
     if (metallicTexture != nullptr) {
         m_materialData.metallicTextureIndex = metallicTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.metallicSamplerIndex = metallicTexture->GetSamplerDescriptorIndex();
+		m_materialData.metallicChannel = metallicChannel[0];
         metallicTexture->GetBuffer()->SetName(L"MetallicTexture");
     }
     if (roughnessTexture != nullptr) {
         m_materialData.roughnessTextureIndex = roughnessTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.roughnessSamplerIndex = roughnessTexture->GetSamplerDescriptorIndex();
+		m_materialData.roughnessChannel = roughnessChannel[0];
         roughnessTexture->GetBuffer()->SetName(L"RoughnessTexture");
     }
     if (metallicTexture == roughnessTexture && metallicTexture != nullptr) {
@@ -94,6 +107,7 @@ Material::Material(const std::string& name,
     if (emissiveTexture != nullptr) {
         m_materialData.emissiveTextureIndex = emissiveTexture->GetBuffer()->GetSRVInfo(0).index;
         m_materialData.emissiveSamplerIndex = emissiveTexture->GetSamplerDescriptorIndex();
+		m_materialData.emissiveChannels = { emissiveChannels[0], emissiveChannels[1], emissiveChannels[2] };
         emissiveTexture->GetBuffer()->SetName(L"EmissiveTexture");
     }
 
@@ -174,22 +188,21 @@ std::shared_ptr<Material> Material::GetDefaultMaterial() {
         return defaultMaterial;
     }
 
-    defaultMaterial = Material::CreateShared("DefaultMaterial",
-        MaterialFlags::MATERIAL_FLAGS_NONE,
-        PSOFlags::PSO_FLAGS_NONE,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        0.0f,
-        0.5f,
-        { 1.0, 1.0, 1.0, 1.0 },
-        { 0.0, 0.0, 0.0, 1.0 },
-        BlendState::BLEND_STATE_OPAQUE,
-        0.5f);
+    MaterialDescription desc = {};
+	desc.name = "DefaultMaterial";
+	desc.alphaCutoff = 0.5f;
+	desc.diffuseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+	desc.emissiveColor = { 0.0f, 0.0f, 0.0f, 1.0f };
+	desc.baseColor = { nullptr, 1.0f, { 0, 1, 2, 3 } };
+	desc.metallic = { nullptr, 0.0f, { 0 } };
+	desc.roughness = { nullptr, 0.5f, { 0 } };
+	desc.emissive = { nullptr, 1.0f, { 0, 1, 2 } };
+	desc.opacity = { nullptr, 1.0f, { 0 } };
+	desc.aoMap = { nullptr, 1.0f, { 0 } };
+	desc.heightMap = { nullptr, 1.0f, { 0 } };
+	desc.normal = { nullptr, 1.0f, { 0, 1, 2 } };
+
+    defaultMaterial = Material::CreateShared(desc);
 
     return defaultMaterial;
 }

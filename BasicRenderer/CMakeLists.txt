@@ -405,6 +405,13 @@ add_symlink_or_copy_per_config(
 )
 
 add_symlink_or_copy_per_config(
+    "${USD_DIR}/lib/usd_usdSkel.dll"
+    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usdSkel.dll"
+    FALSE  # IS_DIRECTORY
+    "USD_USDSKEL"
+)
+
+add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_sdr.dll"
     "${CMAKE_BINARY_DIR}/BasicRenderer/usd_sdr.dll"
     FALSE  # IS_DIRECTORY
@@ -494,6 +501,7 @@ PRIVATE
     plug
     ar
     usdShade
+    usdSkel
     "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 

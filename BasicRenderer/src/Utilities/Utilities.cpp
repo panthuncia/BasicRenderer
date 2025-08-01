@@ -244,6 +244,32 @@ std::shared_ptr<Texture> LoadTextureFromFile(std::wstring filePath, std::shared_
     }
 }
 
+std::shared_ptr<Texture> LoadTextureFromMemory(void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler) {
+    int   w, h, n;
+    unsigned char* pixels = stbi_load_from_memory(
+        reinterpret_cast<const stbi_uc*>(bytes),
+        (int)byteCount, &w, &h, &n, 4);
+
+    if (!pixels) {
+        throw std::runtime_error("Failed to load texture from memory");
+    }
+	ImageDimensions dim;
+	dim.width = w;
+	dim.height = h;
+	dim.rowPitch = w * 4; // Assuming RGBA format
+	dim.slicePitch = dim.rowPitch * h;
+    TextureDescription desc;
+    desc.imageDimensions.push_back(dim);
+    desc.channels = 4; // RGBA
+    desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    auto buffer = PixelBuffer::Create(desc, { pixels });
+    stbi_image_free(pixels);
+    if (!sampler) {
+        sampler = Sampler::GetDefaultSampler();
+    }
+	return std::make_shared<Texture>(buffer, sampler);
+}
+
 
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
     ImageData top = LoadSTBImage(topPath);

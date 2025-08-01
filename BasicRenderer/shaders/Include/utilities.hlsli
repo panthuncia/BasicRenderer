@@ -7,6 +7,7 @@
 #include "include/parallax.hlsli"
 #include "include/gammaCorrection.hlsli"
 #include "include/constants.hlsli"
+#include "include/dynamicSwizzle.hlsli"
 
 // Basic blinn-phong for uint visualization
 float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {
@@ -154,8 +155,11 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
             SamplerState metallicSamplerState = SamplerDescriptorHeap[materialInfo.metallicSamplerIndex];
             Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[materialInfo.roughnessTextureIndex];
             SamplerState roughnessSamplerState = SamplerDescriptorHeap[materialInfo.roughnessSamplerIndex];
-            metallic = metallicTexture.Sample(metallicSamplerState, uv).b * materialInfo.metallicFactor;
-            roughness = roughnessTexture.Sample(roughnessSamplerState, uv).g * materialInfo.roughnessFactor;
+            
+            float4 metallicSample = metallicTexture.Sample(metallicSamplerState, uv);
+            float4 roughnessSample = roughnessTexture.Sample(roughnessSamplerState, uv);
+            metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
+            roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
         }
         else
         {

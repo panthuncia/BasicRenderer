@@ -383,24 +383,21 @@ namespace AssimpLoader {
             DirectX::XMFLOAT4 baseColorFactor(diffuse.r, diffuse.g, diffuse.b, diffuse.a);
             DirectX::XMFLOAT4 emissiveFactor(emissive.r, emissive.g, emissive.b, 1.f);
 
-            auto newMaterial = Material::CreateShared(
-                mName,
-                static_cast<MaterialFlags>(materialFlags),
-                static_cast<PSOFlags>(psoFlags),
-                baseColorTexture,
-                normalTexture,
-                aoMap,
-                heightMap,
-                metallicTex,
-                roughnessTex,
-                emissiveTexture,
-                metallicFactor,
-                roughnessFactor,
-                baseColorFactor,
-                emissiveFactor,
-                blendMode,
-                alphaCutoff
-            );
+			MaterialDescription desc;
+			desc.name = mName;
+			desc.alphaCutoff = alphaCutoff;
+			desc.diffuseColor = baseColorFactor;
+			desc.emissiveColor = emissiveFactor;
+            desc.aoMap = { aoMap, { 1 }, { 0 } };
+			desc.baseColor = { baseColorTexture, { 1 }, { 0, 1, 2, 3 } };
+			desc.normal = { normalTexture, { 1 }, { 0, 1, 2 } };
+			desc.heightMap = { heightMap, { 1 }, { 0 } };
+			desc.metallic = { metallicTex, { metallicFactor }, { 0 } };
+			desc.roughness = { roughnessTex, { roughnessFactor }, { 0 } };
+			desc.emissive = { emissiveTexture, { 1 }, { 0, 1, 2 } };
+
+            auto newMaterial = Material::CreateShared(desc);
+            
             materials.push_back(newMaterial);
         }
 

@@ -303,7 +303,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    auto usdScene = LoadModel("models/datsun.usdc");
+    auto usdScene = LoadModel("models/toy_drummer.usdz");
 
     renderer.SetCurrentScene(baseScene);
 
