@@ -345,127 +345,179 @@ namespace USDLoader {
         loadingCache.materialCache[material.GetPrim().GetPath().GetString()] = newMaterial;
 	}
 
-    InterpolationType GetInterpolationType(TfToken& token) {
-		if (token == UsdGeomTokens->constant) {
-			return InterpolationType::Constant; // One value per surface
-		}
-		if (token == UsdGeomTokens->uniform) {
-			return InterpolationType::Uniform; // One value per face, shared by all vertices
-		}
-		if (token == UsdGeomTokens->vertex) {
-			return InterpolationType::Vertex; // One value per vertex
-		}
-		if (token == UsdGeomTokens->varying) {
-			return InterpolationType::Varying; // One value per vertex, but can vary across faces
-		}
-        if (token == UsdGeomTokens->faceVarying) {
-			return InterpolationType::FaceVarying; // One value per face vertex
+    enum class InterpolationType {
+        Constant,
+        Uniform,
+        Varying,
+        Vertex,
+        FaceVarying
+    };
+
+    static InterpolationType GetInterpolationType(const TfToken& tok) {
+        if (tok == UsdGeomTokens->constant)    return InterpolationType::Constant;
+        if (tok == UsdGeomTokens->uniform)     return InterpolationType::Uniform;
+        if (tok == UsdGeomTokens->varying)     return InterpolationType::Varying;
+        if (tok == UsdGeomTokens->vertex)      return InterpolationType::Vertex;
+        if (tok == UsdGeomTokens->faceVarying) return InterpolationType::FaceVarying;
+        // fallback
+        return InterpolationType::Vertex;
+    }
+
+    // Fan-triangulate an n-gon index list -> triangles
+    static std::vector<uint32_t> TriangulateIndices(
+        VtArray<int> const& faceVertCounts,
+        VtArray<int> const& faceVertIndices)
+    {
+        std::vector<uint32_t> out;
+        out.reserve(faceVertIndices.size()); // at least as many corners
+        size_t offset = 0;
+        for (int fvCount : faceVertCounts) {
+            // a single triangle
+            if (fvCount == 3) {
+                out.push_back(faceVertIndices[offset + 0]);
+                out.push_back(faceVertIndices[offset + 1]);
+                out.push_back(faceVertIndices[offset + 2]);
+            }
+            else {
+                // fan: (0,i,i+1)
+                for (int i = 1; i + 1 < fvCount; ++i) {
+                    out.push_back(faceVertIndices[offset + 0]);
+                    out.push_back(faceVertIndices[offset + i]);
+                    out.push_back(faceVertIndices[offset + i + 1]);
+                }
+            }
+            offset += fvCount;
         }
-	}
+        return out;
+    }
 
-    std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, GfRotation upRot, const std::string& directory, bool isUSDZ) {
-        spdlog::info("Found Mesh: {}", prim.GetName().GetString());
-
-        if (loadingCache.meshCache.contains(prim.GetPath().GetString())) {
-            spdlog::info("Mesh {} already processed, skipping.", prim.GetPath().GetString());
-            return loadingCache.meshCache[prim.GetPath().GetString()]; // Already processed
+    // Builds a flat float buffer from a GfVecN array
+    template<typename GfVecN>
+    static void FlattenVecArray(
+        VtArray<GfVecN> const& src,
+        std::vector<float>& dst,
+        float                   scale = 1.0f)
+    {
+        constexpr size_t N = GfVecN::dimension;
+        dst.clear();
+        dst.reserve(src.size() * N);
+        for (auto const& v : src) {
+            for (size_t i = 0; i < N; ++i)
+                dst.push_back(float(v[i] * scale));
         }
+    }
 
-        MeshData geometry;
-
-        auto rels = prim.FindAllRelationshipTargetPaths();
-        bool foundMaterial = false;
-        std::string materialPath;
-        // Try with material binding API
-		auto bindingAPI = UsdShadeMaterialBindingAPI(prim);
-		auto boundMaterial = bindingAPI.ComputeBoundMaterial();
-        if (boundMaterial) {
-            spdlog::info("Found Material via binding API: {}", boundMaterial.GetPrim().GetName().GetString());
-            //bool success = ProcessMaterial(boundMaterial, stage, directory);
-
-			ProcessMaterial(boundMaterial, stage, isUSDZ, directory);
-            geometry.material = loadingCache.materialCache[boundMaterial.GetPrim().GetPath().GetString()];
-            foundMaterial = true;
-			materialPath = boundMaterial.GetPrim().GetPath().GetString();
-		}
-
-        //for (const auto& rel : rels) {
-        //    spdlog::info("Relationship target: {}", rel.GetString());
-        //    auto relPrim = stage->GetPrimAtPath(rel);
-        //    if (relPrim.IsA<UsdShadeMaterial>()) {
-        //        if (foundMaterial) {
-        //            spdlog::warn("Multiple materials found for Mesh: {}", prim.GetName().GetString());
-        //        }
-        //        spdlog::info("Found Material for Mesh: {}", prim.GetName().GetString());
-        //        UsdShadeMaterial mat = UsdShadeMaterial(relPrim);
-        //        ProcessMaterial(mat, stage, isUSDZ, directory);
-        //        geometry.material = loadingCache.materialCache[mat.GetPrim().GetPath().GetString()];
-        //    }
-        //}
-
-        if (!foundMaterial) {
-            spdlog::warn("No material found for Mesh: {}", prim.GetName().GetString());
-            geometry.material = Material::GetDefaultMaterial();
+    template<typename T>
+    inline void EmitPrimvar(
+        std::vector<T>& dst,             // where to append
+        std::vector<T> const& raw,             // flat raw array
+        size_t                numComponents,   // e.g. 3 for normals, 2 for uvs, 4 for skin
+        InterpolationType     interp,          // how it was authored
+        size_t                faceIndex,       // current face number
+        size_t                fvIndex,         // index into face vertex array
+        uint32_t              vertIndex)       // control point index
+    {
+        size_t base = 0;
+        switch (interp) {
+        case InterpolationType::Constant:
+            // one tuple at raw[0...numComponents-1]
+            base = 0;
+            break;
+        case InterpolationType::Uniform:
+            // one tuple per face
+            base = faceIndex * numComponents;
+            break;
+        case InterpolationType::Vertex:
+        case InterpolationType::Varying:
+            // one tuple per control point
+            base = vertIndex * numComponents;
+            break;
+        case InterpolationType::FaceVarying:
+            // one tuple per face vertex
+            base = fvIndex * numComponents;
+            break;
         }
+        // copy the tuple
+        for (size_t c = 0; c < numComponents; ++c) {
+            dst.push_back(raw[base + c]);
+        }
+    }
 
+    MeshData LoadGeom(
+        const UsdPrim& prim,
+        float                    metersPerUnit,
+        const std::string& uvSetName)
+    {
+        MeshData geom;
         UsdGeomMesh mesh(prim);
-        VtArray<GfVec3f> usdPositions;
-        mesh.GetPointsAttr().Get(&usdPositions);
-        geometry.positions.reserve(usdPositions.size() * 3);
 
-        for (auto& p : usdPositions) {
-            GfVec3d dpYup = p * metersPerUnit;
-            geometry.positions.push_back(float(dpYup[0]));
-            geometry.positions.push_back(float(dpYup[1]));
-            geometry.positions.push_back(float(dpYup[2]));
-        }
+        // positions
+        VtArray<GfVec3f> usdPts;
+        mesh.GetPointsAttr().Get(&usdPts);
 
-        VtArray<int> faceVertexCounts, faceVertexIndices;
-        mesh.GetFaceVertexCountsAttr().Get(&faceVertexCounts);
-        mesh.GetFaceVertexIndicesAttr().Get(&faceVertexIndices);
+        std::vector<float> ctrlPos;
+        FlattenVecArray<GfVec3f>(usdPts, ctrlPos, metersPerUnit);
 
+		// control mesh points
+        VtArray<int> faceVertCounts, faceVertIndices;
+        mesh.GetFaceVertexCountsAttr().Get(&faceVertCounts);
+        mesh.GetFaceVertexIndicesAttr().Get(&faceVertIndices);
+
+        // raw index list into control mesh points
+        std::vector<uint32_t> rawIndices =
+            TriangulateIndices(faceVertCounts, faceVertIndices);
+
+		std::string primName = prim.GetName().GetString();
+
+        // Reserve final arrays
+        size_t cornerCount = rawIndices.size();
+        geom.positions.reserve(cornerCount * 3);
+        // normals/texcoords only if present:
+        bool hasNormals = mesh.GetNormalsAttr().Get(
+            &usdPts /* reuse var as scratch GfVec3f*/);
+
+		// normals
         VtArray<GfVec3f> usdNormals;
-        bool hasNormals = mesh.GetNormalsAttr().Get(&usdNormals);
-        TfToken interp = mesh.GetNormalsInterpolation();
-
-        if (hasNormals) {
-            // Reserve worst-case size (faceVarying == one normal per index)
-            geometry.normals.reserve(faceVertexIndices.size() * 3);
-
-            for (auto& n : usdNormals) {
-                n = n.GetNormalized();
-                geometry.normals.push_back((float)n[0]);
-                geometry.normals.push_back((float)n[1]);
-                geometry.normals.push_back((float)n[2]);
-            }
-
-            geometry.flags |= VertexFlags::VERTEX_NORMALS;
-            auto interpType = mesh.GetNormalsInterpolation();
-            geometry.normalInterpolation = GetInterpolationType(interpType);
-        }
-        else {
-            // no authored normals -> treat as faceted: compute flat normals from indices
-            geometry.normals.resize(faceVertexIndices.size() * 3);
+        bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals);
+        InterpolationType normInterp = gotNormals
+            ? GetInterpolationType(mesh.GetNormalsInterpolation())
+            : InterpolationType::Vertex;
+        std::vector<float> rawNormals;
+        if (gotNormals) {
+            FlattenVecArray<GfVec3f>(usdNormals, rawNormals, /*scale*/1.0f);
+            geom.flags |= VertexFlags::VERTEX_NORMALS;
         }
 
-        VtArray<GfVec2f> usdTexcoords;
-		bool hasTexcoords = mesh.GetPrim().GetAttribute(pxr::TfToken("primvars:"+loadingCache.uvSetCache[materialPath])).Get(&usdTexcoords);
-        if (hasTexcoords) {
-            geometry.texcoords.reserve(usdTexcoords.size() * 2);
-            for (auto& tc : usdTexcoords) {
-                geometry.texcoords.push_back(tc[0]);
-				geometry.texcoords.push_back(1.0 - tc[1]); // Flip Y to match DirectX convention
+		// texcoords
+        UsdAttribute tcAttr = prim.GetAttribute(TfToken("primvars:" + uvSetName));
+        UsdGeomPrimvar uvPrim(tcAttr);
+        VtArray<GfVec2f> usdTC;
+        bool gotTC = (uvPrim && uvPrim.ComputeFlattened(&usdTC));
+        InterpolationType tcInterp = gotTC
+            ? GetInterpolationType(uvPrim.GetInterpolation())
+            : InterpolationType::Vertex;
+        std::vector<float> rawTC;
+        if (gotTC) {
+            VtIntArray stIndices;
+            // flip Y for DX
+            rawTC.reserve(usdTC.size() * 2);
+            for (auto const& uv : usdTC) {
+                rawTC.push_back(float(uv[0]));
+                rawTC.push_back(1.0f - float(uv[1]));
             }
-            geometry.flags |= VertexFlags::VERTEX_TEXCOORDS;
-			auto interpType = mesh.GetPrim().GetAttribute(pxr::TfToken("primvars:" + loadingCache.uvSetCache[materialPath])).Get;
-		}
+            geom.flags |= VertexFlags::VERTEX_TEXCOORDS;
+        }
 
-		// Joints and weights
+		// skinning
         UsdSkelBindingAPI bindAPI(prim);
+        UsdSkelSkeleton    skel = bindAPI.GetInheritedSkeleton();
+        std::vector<uint32_t> rawJoints;
+        std::vector<float>    rawWeights;
+        InterpolationType jointInterp = InterpolationType::Vertex,
+            weightInterp = InterpolationType::Vertex;
 
-        // Get the skeleton's joint order
-        UsdSkelSkeleton skel = bindAPI.GetInheritedSkeleton();
         if (skel) {
+
             VtTokenArray    skelJoints;
             skel.GetJointsAttr().Get(&skelJoints);
 
@@ -487,72 +539,153 @@ namespace USDLoader {
                 bindAPI.GetBlendShapeTargetsRel()
             );
 
-            size_t numPoints = usdPositions.size();
+            // compute per-point joint influences
+            VtIntArray   jointIndices;
+            VtFloatArray jointWeights;
+            skinQ.ComputeVaryingJointInfluences(
+                usdPts.size(), &jointIndices, &jointWeights);
 
-            VtIntArray indices;
-            VtFloatArray weights;
-		    unsigned short maxInfluencesPerVertex = 4;
-            if (skinQ.ComputeVaryingJointInfluences(numPoints, &indices, &weights)) {
-			    spdlog::info("Mesh {} has {} joints with varying influences", prim.GetName().GetString(), indices.size());
-                int numJointsPerVertex = skinQ.GetNumInfluencesPerComponent();
-                spdlog::info("Mesh {} has {} joints per vertex", prim.GetName().GetString(), numJointsPerVertex);
-                if (numJointsPerVertex > maxInfluencesPerVertex) {
-                    spdlog::error("Mesh {} has more than 4 joints per vertex, clamping to 4", prim.GetName().GetString());
-				    throw std::runtime_error("Mesh has more than 4 joints per vertex, which is not supported.");
-			    }
-			    unsigned int currentJoint = 0;
-                for (size_t i = 0; i < numPoints; ++i) {
-                    for (int j = 0; j < maxInfluencesPerVertex; ++j) {
-                        //size_t idx = i * numJointsPerVertex + j;
-                        if (j < numJointsPerVertex) {
-                            if (currentJoint < indices.size()) {
-                                geometry.joints.push_back(indices[currentJoint]);
-                                geometry.weights.push_back(weights[currentJoint]);
-                            }
-                            else {
-                                geometry.joints.push_back(0);
-                                geometry.weights.push_back(0.0f);
-                            }
-                            currentJoint++;
+            // flatten into rawJoints/rawWeights
+            rawJoints.reserve(jointIndices.size());
+            rawWeights.reserve(jointWeights.size());
+
+            unsigned int influencesPerPoint = skinQ.GetNumInfluencesPerComponent();
+            // reserve numPoints*slots
+            unsigned short maxInfluencesPerJoint = 4;
+            rawJoints.reserve(usdPts.size() * maxInfluencesPerJoint);
+            rawWeights.reserve(usdPts.size() * maxInfluencesPerJoint);
+
+            size_t cursor = 0;
+            for (size_t pt = 0; pt < usdPts.size(); ++pt) {
+                for (unsigned int slot = 0; slot < maxInfluencesPerJoint; ++slot) {
+                    if (slot < influencesPerPoint) {
+                        if (cursor < jointIndices.size()) {
+                            rawJoints.push_back((uint32_t)jointIndices[cursor]);
+                            rawWeights.push_back(jointWeights[cursor]);
+                            ++cursor;
                         }
                         else {
-                            // TODO: Make # of influences per vertex dynamic
-                            geometry.joints.push_back(0);
-                            geometry.weights.push_back(0.0f);
+                            rawJoints.push_back(0u);
+                            rawWeights.push_back(0.0f);
                         }
                     }
-			    }
-                geometry.flags |= VertexFlags::VERTEX_SKINNED;
-            }
-        }
-
-        size_t indexOffset = 0;
-        for (int faceVertCount : faceVertexCounts) {
-            if (faceVertCount == 3) {
-                // simple triangle
-                geometry.indices.push_back(faceVertexIndices[indexOffset + 0]);
-                geometry.indices.push_back(faceVertexIndices[indexOffset + 1]);
-                geometry.indices.push_back(faceVertexIndices[indexOffset + 2]);
-            }
-            else if (faceVertCount == 4) {
-                // quad -> two tris
-                unsigned int i0 = faceVertexIndices[indexOffset + 0];
-                unsigned int i1 = faceVertexIndices[indexOffset + 1];
-                unsigned int i2 = faceVertexIndices[indexOffset + 2];
-                unsigned int i3 = faceVertexIndices[indexOffset + 3];
-                geometry.indices.insert(geometry.indices.end(), { i0,i1,i2, i0,i2,i3 });
-            }
-            else {
-                // n-gon: fan-triangulate
-                for (int v = 1; v + 1 < faceVertCount; ++v) {
-                    geometry.indices.push_back(faceVertexIndices[indexOffset + 0]);
-                    geometry.indices.push_back(faceVertexIndices[indexOffset + v]);
-                    geometry.indices.push_back(faceVertexIndices[indexOffset + v + 1]);
+                    else {
+						rawJoints.push_back(0u); // padding
+						rawWeights.push_back(0.0f); // padding
+                    }
                 }
             }
-            indexOffset += faceVertCount;
+
+            // record interpolation tokens
+            jointInterp = GetInterpolationType(
+                bindAPI.GetJointIndicesPrimvar().GetInterpolation());
+            weightInterp = GetInterpolationType(
+                bindAPI.GetJointWeightsPrimvar().GetInterpolation());
+
+            geom.flags |= VertexFlags::VERTEX_SKINNED;
         }
-		RebuildFaceVarying(geometry); // TODO: Make separate shader path for face-varying attributes. For now, we just duplicate the attributes
+
+		// Flatten to "vertex" arrays
+        size_t fvOffset = 0; // running sum of faceVertCounts
+        uint32_t vtxCounter = 0;
+
+        for (size_t f = 0; f < faceVertCounts.size(); ++f) {
+            int fc = faceVertCounts[f];
+            // fan-triangulate an n-gon: (0, i, i+1)
+            for (int i = 1; i + 1 < fc; ++i) {
+                int cornerIdxs[3] = { 0, i, i + 1 };
+                for (int corner = 0; corner < 3; ++corner) {
+                    // Which face vertex and which control point:
+                    size_t fvIndex = fvOffset + cornerIdxs[corner];
+                    uint32_t vertIdx = faceVertIndices[fvIndex];
+
+                    // positions (always per-vertex)
+                    EmitPrimvar(geom.positions,
+                        ctrlPos,      // flattened [x,y,z]
+                        3,            // numComponents
+                        InterpolationType::Vertex,
+                        f, fvIndex, vertIdx);
+
+					// normals
+                    if (gotNormals) {
+                        EmitPrimvar(geom.normals,
+                            rawNormals,   // flattened normals
+                            3,
+                            normInterp,   // from GetInterpolationType(...)
+                            f, fvIndex, vertIdx);
+                    }
+
+					// texcoords
+                    if (gotTC) {
+                        EmitPrimvar(geom.texcoords,
+                            rawTC, // flattened uvs
+                            2,
+                            tcInterp,
+                            f, fvIndex, vertIdx);
+                    }
+
+					// joints/weights
+                    if (!rawJoints.empty()) {
+                        EmitPrimvar(geom.joints,
+                            rawJoints,
+                            4,
+                            jointInterp,
+                            f, fvIndex, vertIdx);
+
+                        EmitPrimvar(geom.weights,
+                            rawWeights,
+                            4,
+                            weightInterp,
+                            f, fvIndex, vertIdx);
+                    }
+
+					// indices
+                    geom.indices.push_back(vtxCounter++);
+                }
+            }
+
+            fvOffset += fc;
+        }
+
+        return geom;
+    }
+
+    std::shared_ptr<Mesh> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, GfRotation upRot, const std::string& directory, bool isUSDZ) {
+        spdlog::info("Found Mesh: {}", prim.GetName().GetString());
+
+        if (loadingCache.meshCache.contains(prim.GetPath().GetString())) {
+            spdlog::info("Mesh {} already processed, skipping.", prim.GetPath().GetString());
+            return loadingCache.meshCache[prim.GetPath().GetString()]; // Already processed
+        }
+
+
+        auto rels = prim.FindAllRelationshipTargetPaths();
+        bool foundMaterial = false;
+        std::string materialPath;
+        // Try with material binding API
+		auto bindingAPI = UsdShadeMaterialBindingAPI(prim);
+		auto boundMaterial = bindingAPI.ComputeBoundMaterial();
+		std::shared_ptr<Material> material;
+        if (boundMaterial) {
+            spdlog::info("Found Material via binding API: {}", boundMaterial.GetPrim().GetName().GetString());
+            //bool success = ProcessMaterial(boundMaterial, stage, directory);
+
+			ProcessMaterial(boundMaterial, stage, isUSDZ, directory);
+            material = loadingCache.materialCache[boundMaterial.GetPrim().GetPath().GetString()];
+            foundMaterial = true;
+			materialPath = boundMaterial.GetPrim().GetPath().GetString();
+		}
+
+        if (!foundMaterial) {
+            spdlog::warn("No material found for Mesh: {}", prim.GetName().GetString());
+            material = Material::GetDefaultMaterial();
+        }
+
+        std::string uvName = loadingCache.uvSetCache[materialPath];
+
+        auto geometry = LoadGeom(prim, metersPerUnit, uvName);
+		geometry.material = material;
+        
         auto meshPtr = MeshFromData(geometry, s2ws(prim.GetName().GetString()));
         loadingCache.meshCache[prim.GetPath().GetString()] = meshPtr;
         spdlog::info("Processed Mesh: {}", prim.GetName().GetString());
