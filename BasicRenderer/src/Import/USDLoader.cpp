@@ -57,7 +57,7 @@ namespace USDLoader {
 
     struct LoadingCaches {
         std::unordered_map<std::string, std::shared_ptr<Material>> materialCache;
-        std::unordered_map<std::string, std::pair<std::shared_ptr<Mesh>, std::optional<UsdSkelSkinningQuery>>> meshCache;
+        std::unordered_map<std::string, std::vector<std::shared_ptr<Mesh>>> meshCache;
         std::unordered_map<std::string, std::shared_ptr<Texture>> textureCache;
         std::unordered_map<std::string, std::string> uvSetCache;
         //std::unordered_map<std::string, std::shared_ptr<UsdSkelSkeleton>> unprocessedSkeletons;
@@ -443,14 +443,42 @@ namespace USDLoader {
         }
     }
 
-    std::pair<MeshData, std::optional<UsdSkelSkinningQuery>> LoadGeom(
-        const UsdPrim& prim,
-        float                    metersPerUnit,
-        const std::string& uvSetName)
+    std::optional<UsdSkelSkinningQuery>
+        ExtractSkinningQuery(const UsdGeomMesh& mesh, const UsdSkelCache& skelCache)
     {
-        MeshData geom;
-        UsdGeomMesh mesh(prim);
+        UsdSkelBindingAPI bindAPI(mesh.GetPrim());
+        UsdSkelSkeleton skel = bindAPI.GetInheritedSkeleton();
+        if (!skel)
+            return std::nullopt;
 
+        // populate & build the query
+        skelCache.Populate(UsdSkelRoot(skel.GetPrim()), UsdPrimDefaultPredicate);
+        VtTokenArray skelJoints, meshJoints;
+        skel.GetJointsAttr().Get(&skelJoints);
+        bindAPI.GetJointsAttr().Get(&meshJoints);
+
+        UsdSkelSkinningQuery skinQ(
+            mesh.GetPrim(),
+            skelJoints,
+            meshJoints,
+            bindAPI.GetJointIndicesAttr(),
+            bindAPI.GetJointWeightsAttr(),
+            bindAPI.GetSkinningMethodAttr(),
+            bindAPI.GetGeomBindTransformAttr(),
+            bindAPI.GetJointsAttr(),
+            bindAPI.GetBlendShapesAttr(),
+            bindAPI.GetBlendShapeTargetsRel());
+        return skinQ;
+    }
+
+    void LoadGeom(
+		MeshData& meshData,
+        const UsdGeomMesh& mesh,
+        const std::optional<UsdGeomSubset> subset,
+        float metersPerUnit,
+        const std::string& uvSetName,
+        const std::optional<UsdSkelSkinningQuery>& skinQ)
+    {
         // positions
         VtArray<GfVec3f> usdPts;
         mesh.GetPointsAttr().Get(&usdPts);
@@ -458,25 +486,59 @@ namespace USDLoader {
         std::vector<float> ctrlPos;
         FlattenVecArray<GfVec3f>(usdPts, ctrlPos, metersPerUnit);
 
-		// control mesh points
+        // control mesh points
         VtArray<int> faceVertCounts, faceVertIndices;
         mesh.GetFaceVertexCountsAttr().Get(&faceVertCounts);
         mesh.GetFaceVertexIndicesAttr().Get(&faceVertIndices);
+
+		// Apply subset if present
+		bool usingSubset = subset.has_value();
+        if (usingSubset) {
+            VtArray<int> subsetFaceIndices;
+			subset.value().GetIndicesAttr().Get(&subsetFaceIndices);
+            VtArray<int> subFaceVertCounts, subFaceVertIndices;
+            subFaceVertCounts.reserve(subsetFaceIndices.size());
+            int totalVerts = 0;
+            for (auto fi : subsetFaceIndices) {
+                if (fi >= 0 && fi < faceVertCounts.size()) {
+                    int fc = faceVertCounts[fi];
+                    subFaceVertCounts.push_back(fc);
+                    totalVerts += fc;
+                }
+                else {
+                    spdlog::warn("Subset face index {} out of range [0,{}]", fi, faceVertCounts.size());
+                }
+            }
+            subFaceVertIndices.reserve(totalVerts);
+            for (auto fi : subsetFaceIndices) {
+                if (fi >= 0 && fi < faceVertCounts.size()) {
+                    int fc = faceVertCounts[fi];
+                    size_t offset = 0;
+                    for (int f = 0; f < fi; ++f)
+                        offset += faceVertCounts[f];
+                    for (int vi = 0; vi < fc; ++vi) {
+                        subFaceVertIndices.push_back(faceVertIndices[offset + vi]);
+                    }
+                }
+            }
+            faceVertCounts = subFaceVertCounts;
+			faceVertIndices = subFaceVertIndices;
+        }
 
         // raw index list into control mesh points
         std::vector<uint32_t> rawIndices =
             TriangulateIndices(faceVertCounts, faceVertIndices);
 
-		std::string primName = prim.GetName().GetString();
+        std::string primName = mesh.GetPrim().GetName().GetString();
 
         // Reserve final arrays
         size_t cornerCount = rawIndices.size();
-        geom.positions.reserve(cornerCount * 3);
+        meshData.positions.reserve(cornerCount * 3);
         // normals/texcoords only if present:
         bool hasNormals = mesh.GetNormalsAttr().Get(
             &usdPts /* reuse var as scratch GfVec3f*/);
 
-		// normals
+        // normals
         VtArray<GfVec3f> usdNormals;
         bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals);
         InterpolationType normInterp = gotNormals
@@ -485,11 +547,11 @@ namespace USDLoader {
         std::vector<float> rawNormals;
         if (gotNormals) {
             FlattenVecArray<GfVec3f>(usdNormals, rawNormals, /*scale*/1.0f);
-            geom.flags |= VertexFlags::VERTEX_NORMALS;
+            meshData.flags |= VertexFlags::VERTEX_NORMALS;
         }
 
-		// texcoords
-        UsdAttribute tcAttr = prim.GetAttribute(TfToken("primvars:" + uvSetName));
+        // texcoords
+        UsdAttribute tcAttr = mesh.GetPrim().GetAttribute(TfToken("primvars:" + uvSetName));
         UsdGeomPrimvar uvPrim(tcAttr);
         VtArray<GfVec2f> usdTC;
         bool gotTC = (uvPrim && uvPrim.ComputeFlattened(&usdTC));
@@ -505,53 +567,30 @@ namespace USDLoader {
                 rawTC.push_back(float(uv[0]));
                 rawTC.push_back(1.0f - float(uv[1]));
             }
-            geom.flags |= VertexFlags::VERTEX_TEXCOORDS;
+            meshData.flags |= VertexFlags::VERTEX_TEXCOORDS;
         }
 
-		// skinning
-        UsdSkelBindingAPI bindAPI(prim);
+        // skinning
+        UsdSkelBindingAPI bindAPI(mesh.GetPrim());
         UsdSkelSkeleton    skel = bindAPI.GetInheritedSkeleton();
         std::vector<uint32_t> rawJoints;
         std::vector<float>    rawWeights;
         InterpolationType jointInterp = InterpolationType::Vertex,
             weightInterp = InterpolationType::Vertex;
 
-		std::optional<UsdSkelSkinningQuery> skinningQuery;
-        if (skel) {
-
-            VtTokenArray    skelJoints;
-            skel.GetJointsAttr().Get(&skelJoints);
-
-            // Get any mesh-local joint order
-            VtTokenArray    meshJoints;
-            bindAPI.GetJointsAttr().Get(&meshJoints);
-
-            // Construct the query, passing through all authored bindings
-            UsdSkelSkinningQuery skinQ(
-                prim,
-                skelJoints,
-                meshJoints,
-                bindAPI.GetJointIndicesAttr(),
-                bindAPI.GetJointWeightsAttr(),
-                bindAPI.GetSkinningMethodAttr(),
-                bindAPI.GetGeomBindTransformAttr(),
-                bindAPI.GetJointsAttr(),
-                bindAPI.GetBlendShapesAttr(),
-                bindAPI.GetBlendShapeTargetsRel()
-            );
-			skinningQuery = skinQ;
+        if (skinQ) {
 
             // compute per-point joint influences
             VtIntArray   jointIndices;
             VtFloatArray jointWeights;
-            skinQ.ComputeVaryingJointInfluences(
+            skinQ.value().ComputeVaryingJointInfluences(
                 usdPts.size(), &jointIndices, &jointWeights);
 
             // flatten into rawJoints/rawWeights
             rawJoints.reserve(jointIndices.size());
             rawWeights.reserve(jointWeights.size());
 
-            unsigned int influencesPerPoint = skinQ.GetNumInfluencesPerComponent();
+            unsigned int influencesPerPoint = skinQ.value().GetNumInfluencesPerComponent();
             // reserve numPoints*slots
             unsigned short maxInfluencesPerJoint = 4;
             rawJoints.reserve(usdPts.size() * maxInfluencesPerJoint);
@@ -572,8 +611,8 @@ namespace USDLoader {
                         }
                     }
                     else {
-						rawJoints.push_back(0u); // padding
-						rawWeights.push_back(0.0f); // padding
+                        rawJoints.push_back(0u); // padding
+                        rawWeights.push_back(0.0f); // padding
                     }
                 }
             }
@@ -584,10 +623,10 @@ namespace USDLoader {
             weightInterp = GetInterpolationType(
                 bindAPI.GetJointWeightsPrimvar().GetInterpolation());
 
-            geom.flags |= VertexFlags::VERTEX_SKINNED;
+            meshData.flags |= VertexFlags::VERTEX_SKINNED;
         }
 
-		// Flatten to "vertex" arrays
+        // Flatten to "vertex" arrays
         size_t fvOffset = 0; // running sum of faceVertCounts
         uint32_t vtxCounter = 0;
 
@@ -602,96 +641,132 @@ namespace USDLoader {
                     uint32_t vertIdx = faceVertIndices[fvIndex];
 
                     // positions (always per-vertex)
-                    EmitPrimvar(geom.positions,
+                    EmitPrimvar(meshData.positions,
                         ctrlPos,      // flattened [x,y,z]
                         3,            // numComponents
                         InterpolationType::Vertex,
                         f, fvIndex, vertIdx);
 
-					// normals
+                    // normals
                     if (gotNormals) {
-                        EmitPrimvar(geom.normals,
+                        EmitPrimvar(meshData.normals,
                             rawNormals,   // flattened normals
                             3,
                             normInterp,   // from GetInterpolationType(...)
                             f, fvIndex, vertIdx);
                     }
 
-					// texcoords
+                    // texcoords
                     if (gotTC) {
-                        EmitPrimvar(geom.texcoords,
+                        EmitPrimvar(meshData.texcoords,
                             rawTC, // flattened uvs
                             2,
                             tcInterp,
                             f, fvIndex, vertIdx);
                     }
 
-					// joints/weights
+                    // joints/weights
                     if (!rawJoints.empty()) {
-                        EmitPrimvar(geom.joints,
+                        EmitPrimvar(meshData.joints,
                             rawJoints,
                             4,
                             jointInterp,
                             f, fvIndex, vertIdx);
 
-                        EmitPrimvar(geom.weights,
+                        EmitPrimvar(meshData.weights,
                             rawWeights,
                             4,
                             weightInterp,
                             f, fvIndex, vertIdx);
                     }
 
-					// indices
-                    geom.indices.push_back(vtxCounter++);
+                    // indices
+                    meshData.indices.push_back(vtxCounter++);
                 }
             }
 
             fvOffset += fc;
         }
-
-        return { geom, skinningQuery};
     }
 
-    std::pair<std::shared_ptr<Mesh>, std::optional<UsdSkelSkinningQuery>> ProcessMesh(const UsdPrim& prim, const pxr::UsdStageRefPtr& stage, double metersPerUnit, GfRotation upRot, const std::string& directory, bool isUSDZ) {
-        spdlog::info("Found Mesh: {}", prim.GetName().GetString());
+    std::string& uvSetFor(const UsdShadeMaterial& mat)
+    {
+		auto& materialPath = mat.GetPrim().GetPath().GetString();
+        return loadingCache.uvSetCache[materialPath];
 
-        if (loadingCache.meshCache.contains(prim.GetPath().GetString())) {
-            spdlog::info("Mesh {} already processed, skipping.", prim.GetPath().GetString());
-            return loadingCache.meshCache[prim.GetPath().GetString()]; // Already processed
+	}
+
+    std::vector<std::shared_ptr<Mesh>> ProcessMesh(
+        const UsdGeomMesh& mesh,
+        const pxr::UsdStageRefPtr& stage,
+        double metersPerUnit,
+        GfRotation upRot,
+        const std::string& directory,
+        bool isUSDZ,
+        const UsdSkelCache& skelCache)
+    {
+        auto& cacheKey = mesh.GetPrim().GetPath().GetString();
+        if (loadingCache.meshCache.contains(cacheKey)) {
+            return loadingCache.meshCache[cacheKey];
         }
 
+        // Extract skin once
+        auto skinQ = ExtractSkinningQuery(mesh, skelCache);
 
-        auto rels = prim.FindAllRelationshipTargetPaths();
-        bool foundMaterial = false;
-        std::string materialPath;
-        // Try with material binding API
-		auto bindingAPI = UsdShadeMaterialBindingAPI(prim);
-		auto boundMaterial = bindingAPI.ComputeBoundMaterial();
-		std::shared_ptr<Material> material;
-        if (boundMaterial) {
-            spdlog::info("Found Material via binding API: {}", boundMaterial.GetPrim().GetName().GetString());
-            //bool success = ProcessMaterial(boundMaterial, stage, directory);
+        // Gather subsets
+        UsdShadeMaterialBindingAPI  bindAPI(mesh);
+        auto                        subsets = bindAPI.GetMaterialBindSubsets();
 
-			ProcessMaterial(boundMaterial, stage, isUSDZ, directory);
-            material = loadingCache.materialCache[boundMaterial.GetPrim().GetPath().GetString()];
-            foundMaterial = true;
-			materialPath = boundMaterial.GetPrim().GetPath().GetString();
-		}
+        std::vector<std::shared_ptr<Mesh>> outMeshes;
 
-        if (!foundMaterial) {
-            spdlog::warn("No material found for Mesh: {}", prim.GetName().GetString());
-            material = Material::GetDefaultMaterial();
+        // If no subsets: one full mesh with ComputeBoundMaterial()
+        if (subsets.empty()) {
+            // find whichever material is on the mesh itself
+            auto matAPI = UsdShadeMaterialBindingAPI(mesh);
+            auto mat = matAPI.ComputeBoundMaterial();
+            ProcessMaterial(mat, stage, isUSDZ, directory);
+			MeshData geomData;
+            LoadGeom(geomData, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ);
+			auto mtlPtr = loadingCache.materialCache.find(
+				mat.GetPrim().GetPath().GetString());
+            geomData.material = mtlPtr != loadingCache.materialCache.end()
+                ? mtlPtr->second
+				: nullptr;
+            auto mPtr = MeshFromData(
+                geomData,
+                s2ws(mesh.GetPrim().GetName().GetString()));
+            outMeshes.push_back(mPtr);
+        }
+        else {
+            // Otherwise: one mesh per subset
+            for (auto const& subset : subsets) {
+                // subset familyName=="materialBind", so:
+                auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
+                ProcessMaterial(mat, stage, isUSDZ, directory);
+				MeshData geomData;
+                LoadGeom(
+					geomData,
+                    mesh, 
+                    subset,
+                    metersPerUnit,
+                    uvSetFor(mat),
+                    skinQ);
+
+                auto mtlPtr = loadingCache.materialCache.find(
+					mat.GetPrim().GetPath().GetString());
+                geomData.material = mtlPtr != loadingCache.materialCache.end()
+                    ? mtlPtr->second
+					: nullptr;
+                auto mPtr = MeshFromData(
+                    geomData,
+                    s2ws(mesh.GetPrim().GetName().GetString()) +
+                    L"_" + s2ws(subset.GetPrim().GetName().GetString()));
+                outMeshes.push_back(mPtr);
+            }
         }
 
-        std::string uvName = loadingCache.uvSetCache[materialPath];
-
-        auto [geometry, skinningQuery] = LoadGeom(prim, metersPerUnit, uvName);
-		geometry.material = material;
-        
-        auto meshPtr = MeshFromData(geometry, s2ws(prim.GetName().GetString()));
-        loadingCache.meshCache[prim.GetPath().GetString()] = { meshPtr, skinningQuery };
-        spdlog::info("Processed Mesh: {}", prim.GetName().GetString());
-        return { meshPtr, skinningQuery };
+        loadingCache.meshCache[cacheKey] = outMeshes;
+        return outMeshes;
     }
 
     std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const VtTokenArray jointOrder, const UsdSkelSkeletonQuery& skelQuery, const std::shared_ptr<Scene>& scene, float metersPerUnit) {
@@ -848,12 +923,6 @@ namespace USDLoader {
                         matStr += "\n";
 					}
 
-                    if (prim.GetName().GetString() == "Plane_036") {
-						spdlog::info("plane036");
-                    }
-                    if (prim.GetName().GetString() == "Cylinder_011") {
-                        spdlog::info("plane036");
-                    }
 					spdlog::info("Xformable has transform: {}", matStr);
 
                     if (!hasCorrectedAxis) { // Apply axis correction only on root transforms
@@ -871,19 +940,20 @@ namespace USDLoader {
                 std::vector<std::shared_ptr<Mesh>> meshes;
 				std::optional<UsdSkelSkinningQuery> skinningQuery;
                 if (prim.IsA<UsdGeomMesh>()) {
-					auto [mesh, skelQuery] = ProcessMesh(prim, stage, metersPerUnit, upRot, directory, isUSDZ);
-                    meshes.push_back(mesh);
-                    skinningQuery = skelQuery;
+                    // Extract skin once
+                    UsdGeomMesh mesh(prim);
+                    auto skinQ = ExtractSkinningQuery(mesh, skelCache);
+                    skinningQuery = skinQ;
+					std::vector<std::shared_ptr<Mesh>> processedMesh = ProcessMesh(mesh, stage, metersPerUnit, upRot, directory, isUSDZ, skelCache);
+                    // Push back all meshes
+                    for (auto& m : processedMesh) {
+                        meshes.push_back(m);
+					}
                 }
 
                 std::vector<UsdPrim> childrenToRecurse;
                 for (auto child : prim.GetAllChildren()) {
-                    //if (child.IsA<UsdGeomMesh>() && !child.IsA<UsdGeomXformable>()) {
-                    //    meshes.push_back(ProcessMesh(child, stage, metersPerUnit, upRot, directory, isUSDZ));
-                    //}
-                    //else {
                         childrenToRecurse.push_back(child);
-                    //}
                 }
 
                 flecs::entity entity;
@@ -968,9 +1038,7 @@ namespace USDLoader {
                 }
 
                 for (auto& child : childrenToRecurse) {
-                    if (child.IsA<UsdGeomXformable>()) {
-                        RecurseHierarchy(child, entity, hasCorrectedAxis);
-                    }
+                    RecurseHierarchy(child, entity, hasCorrectedAxis);
                 }
             };
 
