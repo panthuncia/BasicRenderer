@@ -769,7 +769,7 @@ namespace USDLoader {
         return outMeshes;
     }
 
-    std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const VtTokenArray jointOrder, const UsdSkelSkeletonQuery& skelQuery, const std::shared_ptr<Scene>& scene, float metersPerUnit) {
+    std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const VtTokenArray rawJointOrder, const UsdSkelSkeletonQuery& skelQuery, const std::shared_ptr<Scene>& scene, float metersPerUnit) {
 		if (loadingCache.skeletonMap.contains(skel.GetPrim().GetPath().GetString())) {
 			spdlog::info("Skeleton {} already processed, skipping.", skel.GetPrim().GetPath().GetString());
 			return loadingCache.skeletonMap[skel.GetPrim().GetPath().GetString()];
@@ -781,10 +781,10 @@ namespace USDLoader {
 
         std::vector<XMMATRIX>        invBindMats;
         std::vector<flecs::entity>   jointNodes;
-        invBindMats.reserve(jointOrder.size());
-        jointNodes.reserve(jointOrder.size());
+        invBindMats.reserve(rawJointOrder.size());
+        jointNodes.reserve(rawJointOrder.size());
 
-        for (size_t i = 0; i < jointOrder.size(); ++i) {
+        for (size_t i = 0; i < rawJointOrder.size(); ++i) {
             auto& m = bindXforms[i];
 			// Convert GfMatrix4d to XMMATRIX
 
@@ -803,7 +803,7 @@ namespace USDLoader {
             invBindMats.push_back(xm);
 
             // Lookup the node by name
-            std::string jn = jointOrder[i].GetString();
+            std::string jn = rawJointOrder[i].GetString();
             auto it = loadingCache.nodeMap.find(jn);
             if (it != loadingCache.nodeMap.end()) {
                 throw std::runtime_error("Not implemented. Does the USD spec allow this?");
@@ -828,7 +828,7 @@ namespace USDLoader {
         return skeleton;
     }
 
-    std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, float metersPerUnit, VtTokenArray jointOrder) {
+    std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, float metersPerUnit, const VtTokenArray& rawJointOrder, const VtTokenArray& mappedJointOrder) {
         if (!animQuery) {
             return nullptr;
         }
@@ -860,8 +860,8 @@ namespace USDLoader {
                 continue;
             }
 
-            for (size_t j = 0; j < jointOrder.size(); ++j) {
-                const std::string nodeName = jointOrder[j].GetString();
+            for (size_t j = 0; j < mappedJointOrder.size(); ++j) {
+                const std::string nodeName = mappedJointOrder[j].GetString();
 
                 if (animation->nodesMap.find(nodeName) == animation->nodesMap.end()) {
                     animation->nodesMap[nodeName] = std::make_shared<AnimationClip>();
@@ -978,6 +978,7 @@ namespace USDLoader {
                         auto skelQuery = skelCache.GetSkelQuery(skel);
 
                         auto skelJointOrderRaw = skelQuery.GetJointOrder();
+
                         if (!skinningQuery) {
                             throw std::runtime_error(
                                 "Mesh is skinned but no skinning query found.");
@@ -1001,7 +1002,7 @@ namespace USDLoader {
                             spdlog::info("  {}", joint.GetString());
 						}
 
-                        auto skeleton = ProcessSkeleton(skel, skelJointOrderMapped, skelQuery, scene, metersPerUnit);
+                        auto skeleton = ProcessSkeleton(skel, skelJointOrderRaw, skelQuery, scene, metersPerUnit);
 
                         UsdSkelBindingAPI skelAPI(skel.GetPrim());
                         UsdPrim animPrim;
@@ -1018,7 +1019,7 @@ namespace USDLoader {
 							//}
 
                             if (animQuery) {
-                                auto animation = ProcessAnimQuery(animQuery, stage, metersPerUnit, skelJointOrderMapped);
+                                auto animation = ProcessAnimQuery(animQuery, stage, metersPerUnit, skelJointOrderRaw, skelJointOrderMapped);
                                 skeleton->AddAnimation(animation);
                                 // TODO: Should sleletons be applied to all child entities? Or just to this one?
                                 for (auto& mesh : meshes) {
