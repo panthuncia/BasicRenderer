@@ -477,8 +477,34 @@ namespace USDLoader {
         const std::optional<UsdGeomSubset> subset,
         float metersPerUnit,
         const std::string& uvSetName,
-        const std::optional<UsdSkelSkinningQuery>& skinQ)
+        const std::optional<UsdSkelSkinningQuery>& skinQ,
+        const VtTokenArray& skelJointOrderRaw,
+        const VtTokenArray& skelJointOrderMapped)
     {
+
+        // If we have a skeleton, build joint mappings
+        
+        std::unordered_map<unsigned int, unsigned int> jointMapping;
+        // Build integer mapping from mapped to raw joint order
+        for (unsigned int i = 0; i < skelJointOrderMapped.size(); i++) {
+            std::string jointName = skelJointOrderMapped[i].GetString();
+
+            // Find the joint in the raw order
+            auto it = std::find_if(skelJointOrderRaw.begin(), skelJointOrderRaw.end(),
+                [&jointName](const pxr::TfToken& token) {
+                    return token.GetString() == jointName;
+                });
+            // Get index
+            if (it != skelJointOrderRaw.end()) {
+                unsigned int rawIndex = static_cast<unsigned int>(std::distance(skelJointOrderRaw.begin(), it));
+                jointMapping[i] = rawIndex;
+            }
+            else {
+                spdlog::error("Joint {} not found in raw joint order.", jointName);
+                throw std::runtime_error("Invalid joint name in mapped joint orrder");
+            }
+        }
+
         // positions
         VtArray<GfVec3f> usdPts;
         mesh.GetPointsAttr().Get(&usdPts);
@@ -601,7 +627,7 @@ namespace USDLoader {
                 for (unsigned int slot = 0; slot < maxInfluencesPerJoint; ++slot) {
                     if (slot < influencesPerPoint) {
                         if (cursor < jointIndices.size()) {
-                            rawJoints.push_back((uint32_t)jointIndices[cursor]);
+                            rawJoints.push_back((uint32_t)jointMapping[jointIndices[cursor]]);
                             rawWeights.push_back(jointWeights[cursor]);
                             ++cursor;
                         }
@@ -703,7 +729,9 @@ namespace USDLoader {
         GfRotation upRot,
         const std::string& directory,
         bool isUSDZ,
-        const UsdSkelCache& skelCache)
+        const UsdSkelCache& skelCache,
+        VtTokenArray& skelJointOrderRaw,
+        VtTokenArray& skelJointOrderMapped)
     {
         auto& cacheKey = mesh.GetPrim().GetPath().GetString();
         if (loadingCache.meshCache.contains(cacheKey)) {
@@ -726,7 +754,7 @@ namespace USDLoader {
             auto mat = matAPI.ComputeBoundMaterial();
             ProcessMaterial(mat, stage, isUSDZ, directory);
 			MeshData geomData;
-            LoadGeom(geomData, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ);
+            LoadGeom(geomData, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
 			auto mtlPtr = loadingCache.materialCache.find(
 				mat.GetPrim().GetPath().GetString());
             geomData.material = mtlPtr != loadingCache.materialCache.end()
@@ -750,7 +778,9 @@ namespace USDLoader {
                     subset,
                     metersPerUnit,
                     uvSetFor(mat),
-                    skinQ);
+                    skinQ,
+                    skelJointOrderRaw,
+                    skelJointOrderMapped);
 
                 auto mtlPtr = loadingCache.materialCache.find(
 					mat.GetPrim().GetPath().GetString());
@@ -828,7 +858,7 @@ namespace USDLoader {
         return skeleton;
     }
 
-    std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, float metersPerUnit, const VtTokenArray& rawJointOrder, const VtTokenArray& mappedJointOrder) {
+    std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, float metersPerUnit, const VtTokenArray& jointOrder) {
         if (!animQuery) {
             return nullptr;
         }
@@ -860,8 +890,8 @@ namespace USDLoader {
                 continue;
             }
 
-            for (size_t j = 0; j < mappedJointOrder.size(); ++j) {
-                const std::string nodeName = mappedJointOrder[j].GetString();
+            for (size_t j = 0; j < jointOrder.size(); ++j) {
+                const std::string nodeName = jointOrder[j].GetString();
 
                 if (animation->nodesMap.find(nodeName) == animation->nodesMap.end()) {
                     animation->nodesMap[nodeName] = std::make_shared<AnimationClip>();
@@ -889,12 +919,98 @@ namespace USDLoader {
         return animation;
     }
 
+    void ProcessMeshAndAnimations(
+        const UsdPrim& prim, 
+        std::vector<std::shared_ptr<Mesh>>& meshes, 
+        UsdSkelCache& skelCache,
+        const UsdStageRefPtr& stage, 
+        std::shared_ptr<Scene>& scene, 
+        float metersPerUnit,
+        GfRotation upRot,
+        const std::string& directory,
+        bool isUSDZ) {
+
+        UsdGeomMesh mesh(prim);
+		if (!mesh) {
+			return; // Not a mesh prim
+		}
+
+        auto skinningQuery = ExtractSkinningQuery(mesh, skelCache);
+        
+        UsdSkelBindingAPI bindingAPI(prim);
+        std::shared_ptr<Skeleton> skeleton;
+        VtTokenArray skelJointOrderRaw;
+        VtTokenArray skelJointOrderMapped;
+
+        if (bindingAPI) {
+            UsdSkelSkeleton skel;
+            if (bindingAPI.GetSkeleton(&skel)) {
+                spdlog::info("Found skeleton on prim: {}", prim.GetName().GetString());
+                skelCache.Populate(UsdSkelRoot(skel.GetPrim()), UsdPrimDefaultPredicate);
+                auto skelQuery = skelCache.GetSkelQuery(skel);
+
+                skelJointOrderRaw = skelQuery.GetJointOrder();
+
+                if (!skinningQuery) {
+                    throw std::runtime_error(
+                        "Mesh is skinned but no skinning query found.");
+                }
+                auto& mapper = skinningQuery->GetJointMapper();
+                if (mapper && !mapper->IsIdentity()) {
+                    // Map the joint order to the skinning query
+                    mapper->Remap(skelJointOrderRaw, &skelJointOrderMapped);
+                }
+                else {
+                    skelJointOrderMapped = skelJointOrderRaw;
+                }
+
+                spdlog::info("Original skeleton joint order:");
+                for (const auto& joint : skelJointOrderRaw) {
+                    spdlog::info("  {}", joint.GetString());
+                }
+                spdlog::info("Mapped skeleton joint order:");
+                for (const auto& joint : skelJointOrderMapped) {
+                    spdlog::info("  {}", joint.GetString());
+                }
+
+                skeleton = ProcessSkeleton(skel, skelJointOrderRaw, skelQuery, scene, metersPerUnit);
+
+                UsdSkelBindingAPI skelAPI(skel.GetPrim());
+                UsdPrim animPrim;
+                if (skelAPI.GetAnimationSource(&animPrim)) {
+                    spdlog::info("Found animation source for skeleton: {}", animPrim.GetPath().GetString());
+                    UsdSkelAnimation anim(animPrim);
+                    auto animQuery = skelCache.GetAnimQuery(anim);
+
+                    if (animQuery) {
+                        auto animation = ProcessAnimQuery(animQuery, stage, metersPerUnit, skelJointOrderRaw);
+                        skeleton->AddAnimation(animation);
+                        // TODO: Should sleletons be applied to all child entities? Or just to this one?
+                    }
+                }
+            }
+        }
+
+        std::vector<std::shared_ptr<Mesh>> processedMesh = ProcessMesh(mesh, stage, metersPerUnit, upRot, directory, isUSDZ, skelCache, skelJointOrderRaw, skelJointOrderMapped);
+        // Push back all meshes
+        for (auto& m : processedMesh) {
+            meshes.push_back(m);
+        }
+
+        if (skeleton) {
+            for (auto& mesh : meshes) {
+                mesh->SetBaseSkin(skeleton);
+            }
+        }
+        
+    }
+
     void ParseNodeHierarchy(std::shared_ptr<Scene> scene,
         const pxr::UsdStageRefPtr& stage,
         double metersPerUnit,
         GfRotation upRot,
         const std::string& directory,
-		const UsdSkelCache& skelCache,
+		UsdSkelCache& skelCache,
         bool isUSDZ) {
 
         std::function<void(const UsdPrim& prim,
@@ -937,24 +1053,16 @@ namespace USDLoader {
                     rot = xf.GetRotation().GetQuaternion();   // as a quaternion
                     scale = xf.GetScale();
                 }
-                std::vector<std::shared_ptr<Mesh>> meshes;
-				std::optional<UsdSkelSkinningQuery> skinningQuery;
-                if (prim.IsA<UsdGeomMesh>()) {
-                    // Extract skin once
-                    UsdGeomMesh mesh(prim);
-                    auto skinQ = ExtractSkinningQuery(mesh, skelCache);
-                    skinningQuery = skinQ;
-					std::vector<std::shared_ptr<Mesh>> processedMesh = ProcessMesh(mesh, stage, metersPerUnit, upRot, directory, isUSDZ, skelCache);
-                    // Push back all meshes
-                    for (auto& m : processedMesh) {
-                        meshes.push_back(m);
-					}
-                }
+
+                
 
                 std::vector<UsdPrim> childrenToRecurse;
                 for (auto child : prim.GetAllChildren()) {
                         childrenToRecurse.push_back(child);
                 }
+
+                std::vector<std::shared_ptr<Mesh>> meshes;
+				ProcessMeshAndAnimations(prim, meshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
 
                 flecs::entity entity;
                 if (meshes.size() > 0) {
@@ -968,67 +1076,6 @@ namespace USDLoader {
                 entity.set<Components::Position>({ DirectX::XMFLOAT3(translation[0] * metersPerUnit, translation[1] * metersPerUnit, translation[2] * metersPerUnit) });
                 entity.set<Components::Rotation>({ DirectX::XMFLOAT4(rot.GetImaginary()[0], rot.GetImaginary()[1], rot.GetImaginary()[2], rot.GetReal()) });
                 entity.set<Components::Scale>({ DirectX::XMFLOAT3(scale[0], scale[1], scale[2]) });
-
-                UsdSkelBindingAPI bindingAPI(prim);
-                if (bindingAPI) {
-                    UsdSkelSkeleton skel;
-                    if (bindingAPI.GetSkeleton(&skel)) {
-                        spdlog::info("Found skeleton on prim: {}", prim.GetName().GetString());
-                        skelCache.Populate(UsdSkelRoot(skel.GetPrim()), UsdPrimDefaultPredicate);
-                        auto skelQuery = skelCache.GetSkelQuery(skel);
-
-                        auto skelJointOrderRaw = skelQuery.GetJointOrder();
-
-                        if (!skinningQuery) {
-                            throw std::runtime_error(
-                                "Mesh is skinned but no skinning query found.");
-                        }
-                        auto& mapper = skinningQuery->GetJointMapper();
-						VtTokenArray skelJointOrderMapped;
-                        if (mapper && !mapper->IsIdentity()) {
-                            // Map the joint order to the skinning query
-                            mapper->Remap(skelJointOrderRaw, &skelJointOrderMapped);
-                        }
-                        else {
-                            skelJointOrderMapped = skelJointOrderRaw;
-						}
-
-						spdlog::info("Original skeleton joint order:");
-                        for (const auto& joint : skelJointOrderRaw) {
-                            spdlog::info("  {}", joint.GetString());
-                        }
-                        spdlog::info("Mapped skeleton joint order:");
-                        for (const auto& joint : skelJointOrderMapped) {
-                            spdlog::info("  {}", joint.GetString());
-						}
-
-                        auto skeleton = ProcessSkeleton(skel, skelJointOrderRaw, skelQuery, scene, metersPerUnit);
-
-                        UsdSkelBindingAPI skelAPI(skel.GetPrim());
-                        UsdPrim animPrim;
-                        if (skelAPI.GetAnimationSource(&animPrim)) {
-                            spdlog::info("Found animation source for skeleton: {}", animPrim.GetPath().GetString());
-                            UsdSkelAnimation anim(animPrim);
-                            auto animQuery = skelCache.GetAnimQuery(anim);
-
-							//auto animJointOrder = animQuery.GetJointOrder();
-       //                     for (size_t i = 0; i < skelJointOrderMapped.size(); ++i) {
-       //                         if (skelJointOrder[i] != animJointOrder[i]) {
-       //                             spdlog::warn("Skeleton joint order does not match animation joint order for joint: {}", skelJointOrderMapped[i].GetString());
-       //                         }
-							//}
-
-                            if (animQuery) {
-                                auto animation = ProcessAnimQuery(animQuery, stage, metersPerUnit, skelJointOrderRaw, skelJointOrderMapped);
-                                skeleton->AddAnimation(animation);
-                                // TODO: Should sleletons be applied to all child entities? Or just to this one?
-                                for (auto& mesh : meshes) {
-                                    mesh->SetBaseSkin(skeleton);
-                                }
-                            }
-                        }
-                    }
-                }
 
                 if (parent) {
                     auto parentName = parent.name().c_str();
