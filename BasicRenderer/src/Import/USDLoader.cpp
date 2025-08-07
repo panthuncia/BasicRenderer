@@ -191,6 +191,7 @@ namespace USDLoader {
                             srcShader.GetIdAttr().Get(&srcId);
 
                             if (srcId == TfToken("UsdUVTexture") && !loadingCache.textureCache.contains(src.source.GetPath().GetString())) {
+                                spdlog::info("Found texture  {} in material", src.source.GetPrim().GetName().GetString());
                                 // load the texture and stash it
                                 SdfAssetPath asset;
                                 srcShader.GetInput(TfToken("file")).Get(&asset);
@@ -337,6 +338,8 @@ namespace USDLoader {
             spdlog::info("Material {} already processed, skipping.", material.GetPrim().GetPath().GetString());
             return; // Already processed
         }
+
+        spdlog::info("Processing material: {}", material.GetPrim().GetPath().GetString());
 
         auto materialDesc = ParseMaterialGraph(material, directory, stage, isUSDZ);
 
@@ -618,7 +621,7 @@ namespace USDLoader {
 
             unsigned int influencesPerPoint = skinQ.value().GetNumInfluencesPerComponent();
             // reserve numPoints*slots
-            unsigned short maxInfluencesPerJoint = 4;
+            unsigned short maxInfluencesPerJoint = 4; // TODO: Support arbitrary numbers of influences
             rawJoints.reserve(usdPts.size() * maxInfluencesPerJoint);
             rawWeights.reserve(usdPts.size() * maxInfluencesPerJoint);
 
@@ -641,6 +644,8 @@ namespace USDLoader {
                         rawWeights.push_back(0.0f); // padding
                     }
                 }
+                // Jump ahead to match influencesPerPoint
+                cursor += influencesPerPoint - maxInfluencesPerJoint;
             }
 
             // record interpolation tokens
