@@ -17,6 +17,7 @@
 #include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/tokens.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
+#include <pxr/usd/usdShade/utils.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/metrics.h>
@@ -300,26 +301,25 @@ namespace USDLoader {
             }
 
             else if (shaderId == TfToken("UsdPrimvarReader_float2")) {
+
                 std::string varnameStr;
-                UsdShadeInput in = node.shader.GetInput(TfToken("varname"));
-                if (in && in.Get(&varnameStr)) {
-                    TfToken varname(varnameStr);
-                }
-                if (varnameStr.empty()) {
-                    spdlog::info("UsdPrimvarReader_float2 node has no string varname set, checking for inputs:varname token.");
-                    pxr::UsdAttribute attr = node.shader.GetPrim().GetAttribute(pxr::TfToken("inputs:varname"));
-                    if (attr) {
-                        pxr::TfToken varnameValue;
-                        if (attr.Get(&varnameValue)) {
-                            varnameStr = varnameValue.GetString();
+                UsdShadeInput varnameInput = node.shader.GetInput(TfToken("varname"));
+                auto attrs = UsdShadeUtils::GetValueProducingAttributes(varnameInput);
+                if (!attrs.empty()) {
+                    auto& attr = attrs[0];
+                    bool success = attr.Get< std::string >(&varnameStr);
+                    if (!success) {
+                        TfToken t;
+                        if (attr.Get<TfToken>(&t)) {
+                            varnameStr = t.GetString();
                         }
                         else {
-                            spdlog::warn("UsdPrimvarReader_float2 node has no varname set, skipping.");
-                            continue; // No varname set, skip this node
+							spdlog::warn("UsdPrimvarReader_float2 varname input is not a string or token: {}", attr.GetName().GetString());
                         }
-                    }
-				}
-				spdlog::info("Found UsdPrimvarReader_float2 node with varname: {}", varnameStr);
+					}
+                }
+
+				//spdlog::info("Found UsdPrimvarReader_float2 node with varname: {}", varnameStr);
                 auto& path = material.GetPrim().GetPath().GetString();
                 if (loadingCache.uvSetCache.contains(path) && loadingCache.uvSetCache[path] != varnameStr) {
                     throw std::runtime_error(
@@ -645,7 +645,9 @@ namespace USDLoader {
                     }
                 }
                 // Jump ahead to match influencesPerPoint
-                cursor += influencesPerPoint - maxInfluencesPerJoint;
+                if (maxInfluencesPerJoint < influencesPerPoint) {
+                    cursor += influencesPerPoint - maxInfluencesPerJoint;
+                }
             }
 
             // record interpolation tokens
