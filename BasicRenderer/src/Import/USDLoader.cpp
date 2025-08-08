@@ -194,43 +194,45 @@ namespace USDLoader {
 			TfToken srcId;
 			srcShader.GetIdAttr().Get(&srcId);
 
-			if (srcId == TfToken("UsdUVTexture") && !loadingCache.textureCache.contains(src.source.GetPath().GetString())) {
-				spdlog::info("Found texture  {} in material", src.source.GetPrim().GetName().GetString());
+			if (srcId == TfToken("UsdUVTexture")) {
 				// load the texture and stash it
 				SdfAssetPath asset;
 				srcShader.GetInput(TfToken("file")).Get(&asset);
-				//auto texPath = asset.GetAssetPath();
-				//spdlog::info("Loading texture from path: {}", texPath);
-
-				UsdShadeInput csInput = srcShader.GetInput(TfToken("sourceColorSpace"));
-				TfToken colorSpaceToken;
-				std::string colorSpace = "linear";
-				if (csInput && csInput.Get(&colorSpaceToken)) {
-					colorSpace = colorSpaceToken.GetString();
-				} // TODO: Use this to set texture color space instead of correcting in shader
-
-				auto& resolver = ArGetResolver();
-				auto ctx = stage->GetPathResolverContext();
-				ArResolverContextBinder binder(ctx);
-
 				// Resolve asset path
 				std::string logicalPath = asset.GetResolvedPath();
 
-				ArResolvedPath resolved = resolver.Resolve(logicalPath);
+				if (!loadingCache.textureCache.contains(logicalPath)) {
+					spdlog::info("Found texture  {} in material", src.source.GetPrim().GetName().GetString());
+					//auto texPath = asset.GetAssetPath();
+					//spdlog::info("Loading texture from path: {}", texPath);
 
-				// Open the asset
-				std::shared_ptr<ArAsset> arAsset = resolver.OpenAsset(resolved);
-				if (!arAsset) {
-					throw std::runtime_error(
-						"Unable to open asset at " + logicalPath);
+						UsdShadeInput csInput = srcShader.GetInput(TfToken("sourceColorSpace"));
+					TfToken colorSpaceToken;
+					std::string colorSpace = "linear";
+					if (csInput && csInput.Get(&colorSpaceToken)) {
+						colorSpace = colorSpaceToken.GetString();
+					} // TODO: Use this to set texture color space instead of correcting in shader
+
+					auto& resolver = ArGetResolver();
+					auto ctx = stage->GetPathResolverContext();
+					ArResolverContextBinder binder(ctx);
+
+					ArResolvedPath resolved = resolver.Resolve(logicalPath);
+
+					// Open the asset
+					std::shared_ptr<ArAsset> arAsset = resolver.OpenAsset(resolved);
+					if (!arAsset) {
+						throw std::runtime_error(
+							"Unable to open asset at " + logicalPath);
+					}
+
+					auto tex = LoadTextureFromMemory(
+						(void*)arAsset->GetBuffer().get(),
+						arAsset->GetSize());
+
+					loadingCache.textureCache[logicalPath] = tex;
+
 				}
-
-				auto tex = LoadTextureFromMemory(
-					(void*)arAsset->GetBuffer().get(),
-					arAsset->GetSize());
-
-				loadingCache.textureCache[src.source.GetPath().GetString()] = tex;
-
 			}
 
 			// Check if this shader has an "inputs:st" input
@@ -255,7 +257,11 @@ namespace USDLoader {
 			}
 
 			// now map that texture into the correct material slot:
-			auto texIt = loadingCache.textureCache.find(src.source.GetPath().GetString());
+			SdfAssetPath asset;
+			srcShader.GetInput(TfToken("file")).Get(&asset);
+			// Resolve asset path
+			std::string logicalPath = asset.GetResolvedPath();
+			auto texIt = loadingCache.textureCache.find(logicalPath);
 			if (texIt != loadingCache.textureCache.end()) {
 
 				auto tex = texIt->second;
@@ -348,6 +354,9 @@ namespace USDLoader {
 		if (!surfaceShader.GetIdAttr().Get(&id) || id != pxr::TfToken("UsdPreviewSurface"))
 			return result;
 
+		result.name = material.GetPrim().GetName().GetString();
+		result.invertNormals = true; // TODO: What is the best way to deal with this?
+
 		for (auto const& input : surfaceShader.GetInputs()) {
 			const auto name = input.GetBaseName();
 
@@ -373,6 +382,10 @@ namespace USDLoader {
 				else if (name == TfToken("emissiveColor") && input.GetConnectedSources().empty()) {
 					GfVec3f c; input.Get(&c);
 					result.emissiveColor = { c[0],c[1],c[2],1.0f };
+				}
+				else if (name == TfToken("opacityThreshold") && input.GetConnectedSources().empty()) {
+					float v; input.Get(&v);
+					result.alphaCutoff = v;
 				}
 				else {
 					spdlog::warn("Unknown input '{}' with no connections in UsdPreviewSurface", name.GetString());
@@ -596,46 +609,12 @@ namespace USDLoader {
 		mesh.GetFaceVertexIndicesAttr().Get(&faceVertIndices);
 
 		// Apply subset if present
-		bool usingSubset = subset.has_value();
-		if (usingSubset) {
+		std::vector<uint8_t> useFace(faceVertCounts.size(), 0);
+		if (subset) {
 			VtArray<int> subsetFaceIndices;
-			subset.value().GetIndicesAttr().Get(&subsetFaceIndices);
-			const size_t numFaces = faceVertCounts.size();
-			std::vector<size_t> faceStart(numFaces + 1, 0);
-			for (size_t i = 0; i < numFaces; ++i)
-				faceStart[i + 1] = faceStart[i] + static_cast<size_t>(faceVertCounts[i]);
-
-			std::vector<int> subCounts;
-			subCounts.reserve(subsetFaceIndices.size());
-			size_t totalVerts = 0;
-
-			for (int fi : subsetFaceIndices) {
-				if (fi >= 0 && static_cast<size_t>(fi) < numFaces) {
-					int cnt = faceVertCounts[fi];
-					subCounts.push_back(cnt);
-					totalVerts += static_cast<size_t>(cnt);
-				}
-				else {
-					spdlog::warn("Subset face index {} out of range [0,{}]", fi, numFaces);
-				}
-			}
-
-			std::vector<int> subIndices(totalVerts);
-			size_t write = 0;
-
-			const int* fvi = faceVertIndices.cdata();   // avoid extra indirection
-			for (int fi : subsetFaceIndices) {
-				if (fi < 0 || static_cast<size_t>(fi) >= numFaces) continue;
-				size_t start = faceStart[fi];
-				int cnt = faceVertCounts[fi];
-				std::memcpy(subIndices.data() + write, fvi + start, sizeof(int) * cnt);
-				write += static_cast<size_t>(cnt);
-			}
-
-			VtArray<int> subFaceVertCounts(subCounts.begin(), subCounts.end());
-			VtArray<int> subFaceVertIndices(subIndices.begin(), subIndices.end());
-			faceVertCounts.swap(subFaceVertCounts);
-			faceVertIndices.swap(subFaceVertIndices);
+			subset->GetIndicesAttr().Get(&subsetFaceIndices);
+			for (int fi : subsetFaceIndices)
+				if (fi >= 0 && (size_t)fi < useFace.size()) useFace[fi] = 1;
 		}
 
 		// raw index list into control mesh points
@@ -647,21 +626,41 @@ namespace USDLoader {
 		// Reserve final arrays
 		size_t cornerCount = rawIndices.size();
 		meshData.positions.reserve(cornerCount * 3);
-		// normals/texcoords only if present:
-		bool hasNormals = mesh.GetNormalsAttr().Get(
-			&usdPts /* reuse var as scratch GfVec3f*/);
 
 		// normals
+
 		VtArray<GfVec3f> usdNormals;
 		bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals);
+
+		// In case we have "normals:indices"
+		VtIntArray nIdx;
+		UsdAttribute nIdxAttr = mesh.GetPrim().GetAttribute(TfToken("normals:indices"));
+		bool hasNIdx = nIdxAttr && nIdxAttr.Get(&nIdx);
+
+		if (gotNormals && hasNIdx) {
+			VtArray<GfVec3f> deindexed;
+			deindexed.resize(nIdx.size());
+			for (size_t i = 0; i < nIdx.size(); ++i) {
+				int src = nIdx[i];
+				if (src >= 0 && (size_t)src < usdNormals.size()) {
+					deindexed[i] = usdNormals[src];
+				}
+				else {
+					spdlog::warn("Invalid normal index {} in 'normals:indices' for prim '{}'", src, primName);
+				}
+			}
+			usdNormals.swap(deindexed);
+		}
+
+		std::vector<float> rawNormals;
+		if (gotNormals) {
+			FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
+			meshData.flags |= VertexFlags::VERTEX_NORMALS;
+		}
+
 		InterpolationType normInterp = gotNormals
 			? GetInterpolationType(mesh.GetNormalsInterpolation())
 			: InterpolationType::Vertex;
-		std::vector<float> rawNormals;
-		if (gotNormals) {
-			FlattenVecArray<GfVec3f>(usdNormals, rawNormals, /*scale*/1.0f);
-			meshData.flags |= VertexFlags::VERTEX_NORMALS;
-		}
 
 		// texcoords
 		UsdAttribute tcAttr = mesh.GetPrim().GetAttribute(TfToken("primvars:" + uvSetName));
@@ -744,64 +743,48 @@ namespace USDLoader {
 		}
 
 		// Flatten to "vertex" arrays
-		size_t fvOffset = 0; // running sum of faceVertCounts
+		// Triangulate while PRESERVING original fv order
+		size_t fvOffset = 0;
 		uint32_t vtxCounter = 0;
-
 		for (size_t f = 0; f < faceVertCounts.size(); ++f) {
 			int fc = faceVertCounts[f];
-			// fan-triangulate an n-gon: (0, i, i+1)
-			for (int i = 1; i + 1 < fc; ++i) {
-				int cornerIdxs[3] = { 0, i, i + 1 };
-				for (int corner = 0; corner < 3; ++corner) {
-					// Which face vertex and which control point:
-					size_t fvIndex = fvOffset + cornerIdxs[corner];
-					uint32_t vertIdx = faceVertIndices[fvIndex];
+			if (!subset || useFace[f]) {
+				for (int i = 1; i + 1 < fc; ++i) {
+					int cornerIdxs[3] = { 0, i, i + 1 };
+					for (int c = 0; c < 3; ++c) {
+						size_t fvIndex = fvOffset + cornerIdxs[c];
+						uint32_t vertIdx = faceVertIndices[fvIndex];
 
-					// positions (always per-vertex)
-					EmitPrimvar(meshData.positions,
-						ctrlPos,      // flattened [x,y,z]
-						3,            // numComponents
-						InterpolationType::Vertex,
-						f, fvIndex, vertIdx);
+						EmitPrimvar(meshData.positions, ctrlPos, 3, InterpolationType::Vertex, f, fvIndex, vertIdx);
 
-					// normals
-					if (gotNormals) {
-						EmitPrimvar(meshData.normals,
-							rawNormals,   // flattened normals
-							3,
-							normInterp,   // from GetInterpolationType(...)
-							f, fvIndex, vertIdx);
+						if (gotNormals) {
+							EmitPrimvar(meshData.normals, rawNormals, 3, normInterp, f, fvIndex, vertIdx);
+						}
+
+						if (gotTC) {
+							EmitPrimvar(meshData.texcoords, rawTC, 2,
+								tcInterp,
+								f, fvIndex, vertIdx);
+						}
+
+						if (!rawJoints.empty()) {
+							EmitPrimvar(meshData.joints,
+								rawJoints,
+								4,
+								jointInterp,
+								f, fvIndex, vertIdx);
+
+							EmitPrimvar(meshData.weights,
+								rawWeights,
+								4,
+								weightInterp,
+								f, fvIndex, vertIdx);
+						}
+
+						meshData.indices.push_back(vtxCounter++);
 					}
-
-					// texcoords
-					if (gotTC) {
-						EmitPrimvar(meshData.texcoords,
-							rawTC, // flattened uvs
-							2,
-							tcInterp,
-							f, fvIndex, vertIdx);
-					}
-
-					// joints/weights
-					if (!rawJoints.empty()) {
-						EmitPrimvar(meshData.joints,
-							rawJoints,
-							4,
-							jointInterp,
-							f, fvIndex, vertIdx);
-
-						EmitPrimvar(meshData.weights,
-							rawWeights,
-							4,
-							weightInterp,
-							f, fvIndex, vertIdx);
-					}
-
-					// indices
-					meshData.indices.push_back(vtxCounter++);
 				}
 			}
-
 			fvOffset += fc;
 		}
 	}

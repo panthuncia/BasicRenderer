@@ -142,6 +142,18 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
         sampledColor.rgb = SRGBToLinear(sampledColor.rgb);
         baseColor = baseColor * sampledColor;
     }
+    
+    if (materialFlags & MATERIAL_OPACITY_TEXTURE)
+    { 
+        Texture2D<float4> opacityTexture = ResourceDescriptorHeap[materialInfo.opacityTextureIndex];
+        SamplerState opacitySamplerState = SamplerDescriptorHeap[materialInfo.opacitySamplerIndex];
+        float4 opacitySample = opacityTexture.Sample(opacitySamplerState, uv);
+        float opacity = opacitySample.a;
+        baseColor.a *= opacity;
+        if (baseColor.a < materialInfo.alphaCutoff) {
+            discard;
+        }
+    }
 
     // Metallic-roughness
     float metallic = 0.0;
@@ -178,7 +190,7 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
         if (materialFlags & MATERIAL_INVERT_NORMALS)
         {
-            tangentSpaceNormal = -tangentSpaceNormal;
+            tangentSpaceNormal.g = -tangentSpaceNormal.g;
         }
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }

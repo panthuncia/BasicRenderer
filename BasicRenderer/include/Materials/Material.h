@@ -18,6 +18,7 @@ public:
     static std::shared_ptr<Material> CreateShared(const MaterialDescription& desc) {
         uint32_t materialFlags = 0;
 		uint32_t psoFlags = 0;
+        materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
 		BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
         if (desc.baseColor.texture) {
             if (!desc.baseColor.texture->AlphaIsAllOpaque()) {
@@ -40,11 +41,19 @@ public:
             materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
         }
 		auto diffuseColor = desc.diffuseColor;
+		if (desc.opacity.texture) { // TODO: How can we tell if this should be used as a mask or as a blend?
+            psoFlags |= PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_BLEND;
+            materialFlags |= MaterialFlags::MATERIAL_OPACITY_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+			blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
+        }
         if (desc.opacity.factor < 1.0f) {
             materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
             psoFlags |= PSOFlags::PSO_BLEND | PSOFlags::PSO_ALPHA_TEST;
 	        diffuseColor.w = desc.opacity.factor; // Use opacity factor as alpha
 			blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
+		}
+        if (desc.invertNormals) {
+            materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMALS;
 		}
 
         return CreateShared(
@@ -58,6 +67,7 @@ public:
             desc.metallic.texture,
             desc.roughness.texture,
             desc.emissive.texture,
+            desc.opacity.texture,
             desc.metallic.factor,
             desc.roughness.factor,
             diffuseColor,
@@ -96,6 +106,7 @@ private:
     std::shared_ptr<Texture> m_roughnessTexture;
     std::shared_ptr<Texture> m_metallicTexture;
     std::shared_ptr<Texture> m_emissiveTexture;
+	std::shared_ptr<Texture> m_opacityTexture;
     float m_metallicFactor;
     float m_roughnessFactor;
     DirectX::XMFLOAT4 m_baseColorFactor;
@@ -116,6 +127,7 @@ private:
         std::shared_ptr<Texture> metallicTexture,
         std::shared_ptr<Texture> m_roughnessTexture,
         std::shared_ptr<Texture> emissiveTexture,
+		std::shared_ptr<Texture> opacityTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
@@ -139,6 +151,7 @@ private:
         std::shared_ptr<Texture> metallicTexture,
         std::shared_ptr<Texture> roughnessTexture,
         std::shared_ptr<Texture> emissiveTexture,
+		std::shared_ptr<Texture> opacityTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
@@ -154,7 +167,7 @@ private:
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
             baseColorTexture, normalTexture, aoMap, heightMap,
-            metallicTexture, roughnessTexture, emissiveTexture,
+            metallicTexture, roughnessTexture, emissiveTexture, opacityTexture,
             metallicFactor, roughnessFactor, baseColorFactor, emissiveFactor,
 			baseColorChannels, normalChannels, aoChannel, heightChannel,
 			metallicChannel, roughnessChannel, emissiveChannels,

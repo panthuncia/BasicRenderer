@@ -26,6 +26,7 @@ Material::Material(const std::string& name,
     std::shared_ptr<Texture> metallicTexture,
     std::shared_ptr<Texture> roughnessTexture,
     std::shared_ptr<Texture> emissiveTexture,
+    std::shared_ptr<Texture> opacityTexture,
     float metallicFactor,
     float roughnessFactor,
     DirectX::XMFLOAT4 baseColorFactor,
@@ -48,6 +49,7 @@ Material::Material(const std::string& name,
     m_metallicTexture(metallicTexture),
     m_roughnessTexture(roughnessTexture),
     m_emissiveTexture(emissiveTexture),
+	m_opacityTexture(opacityTexture),
     m_metallicFactor(metallicFactor),
     m_roughnessFactor(roughnessFactor),
     m_baseColorFactor(baseColorFactor),
@@ -109,6 +111,12 @@ Material::Material(const std::string& name,
         m_materialData.emissiveSamplerIndex = emissiveTexture->GetSamplerDescriptorIndex();
 		m_materialData.emissiveChannels = { emissiveChannels[0], emissiveChannels[1], emissiveChannels[2] };
         emissiveTexture->GetBuffer()->SetName(L"EmissiveTexture");
+    }
+
+    if (opacityTexture != nullptr) {
+        m_materialData.opacityTextureIndex = opacityTexture->GetBuffer()->GetSRVInfo(0).index;
+        m_materialData.opacitySamplerIndex = opacityTexture->GetSamplerDescriptorIndex();
+		opacityTexture->GetBuffer()->SetName(L"OpacityTexture");
     }
 
     auto& resourceManager = ResourceManager::GetInstance();

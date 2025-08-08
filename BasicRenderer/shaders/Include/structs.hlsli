@@ -117,26 +117,25 @@ struct MaterialInfo {
     uint aoSamplerIndex;
     uint heightMapIndex;
     uint heightSamplerIndex;
-    float metallicFactor;
+    uint opacityTextureIndex;
     
+    uint opacitySamplerIndex;
+    float metallicFactor;
     float roughnessFactor;
     float ambientStrength;
+    
     float specularStrength;
     float textureScale;
-    
     float heightMapScale;
     float alphaCutoff;
-    uint pad0;
-    uint pad1;
     
     float4 baseColorFactor;
     float4 emissiveFactor;
     
-    uint3 baseColorChannels;
-    float pad2;
+    uint4 baseColorChannels;
     
     uint3 normalChannels;
-    float pad3;
+    float pad0;
     
     uint aoChannel;
     uint heightChannel;
@@ -144,7 +143,7 @@ struct MaterialInfo {
     uint roughnessChannel;
 
     uint3 emissiveChannels;
-    float pad4;
+    float pad1;
 };
 
 struct SingleMatrix {

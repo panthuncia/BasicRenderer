@@ -124,25 +124,24 @@ struct PerMaterialCB {
     unsigned int aoSamplerIndex;
     unsigned int heightMapIndex;
     unsigned int heightSamplerIndex;
+	unsigned int opacityTextureIndex;
+	
+    unsigned int opacitySamplerIndex;
     float metallicFactor;
-
     float roughnessFactor;
     float ambientStrength;
+    
     float specularStrength;
     float textureScale;
-
     float heightMapScale;
     float alphaCutoff;
-    unsigned int pad0;
-    unsigned int pad1;
 
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
-
     DirectX::XMUINT4 baseColorChannels;
 
     DirectX::XMUINT3 normalChannels;
-    float pad3;
+    float pad0;
 
 	unsigned int aoChannel;
     unsigned int heightChannel;
@@ -150,7 +149,7 @@ struct PerMaterialCB {
     unsigned int roughnessChannel;
     
     DirectX::XMUINT3 emissiveChannels;
-	float pad4;
+	float pad1;
 };
 
 struct LightInfo {
