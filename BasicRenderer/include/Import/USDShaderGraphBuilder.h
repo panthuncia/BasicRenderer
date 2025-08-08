@@ -8,11 +8,11 @@
 #include <pxr/usd/usdShade/shader.h>
 #include <pxr/usd/usdShade/material.h>
 
-struct ShaderNode {
-    pxr::SdfPath                          path;
-    pxr::UsdShadeShader                   shader;
-    std::vector<pxr::UsdShadeInput>      inputs;
-    std::vector<pxr::UsdShadeOutput>     outputs;
+struct ConnectableNode {
+    pxr::SdfPath path;
+    pxr::UsdShadeConnectableAPI connectable;
+    std::vector<pxr::UsdShadeInput> inputs;
+    std::vector<pxr::UsdShadeOutput> outputs;
 };
 
 class USDShaderGraphBuilder {
@@ -22,28 +22,31 @@ public:
     }
 
     void Build() {
-        // find the surface shader
-        if (auto surf = material.ComputeSurfaceSource()) {
-            rootPath = surf.GetPath();
-            DiscoverShader(surf);
+        // Get the material's terminal OUTPUT for the universal context.
+        if (pxr::UsdShadeOutput surfOut =
+            material.GetSurfaceOutput(pxr::UsdShadeTokens->universalRenderContext)) // valid even if unconnected
+        {
+            // Walk the producers of that OUTPUT
+            for (const auto& src : surfOut.GetConnectedSources()) {
+                DiscoverConnectable(pxr::UsdShadeConnectableAPI(src.source.GetPrim()));
+            }
+            TopoSort();
         }
-        // Ordering
-        TopoSort();
     }
 
     // All discovered nodes in topo order
-    std::vector<ShaderNode> GetTopologicalNodes() const {
+    std::vector<ConnectableNode> GetTopologicalNodes() const {
         return topoSorted;
     }
 
 private:
     pxr::UsdShadeMaterial           material;
-    std::map<pxr::SdfPath, ShaderNode> nodesByPath;
-    std::vector<ShaderNode> topoSorted;
+    std::map<pxr::SdfPath, ConnectableNode> nodesByPath;
+    std::vector<ConnectableNode> topoSorted;
     std::set<pxr::SdfPath> visited;
     pxr::SdfPath rootPath;
 
-    void DiscoverShader(const pxr::UsdShadeShader& sh);
+    void DiscoverConnectable(const pxr::UsdShadeConnectableAPI& c);
 
     // DFS topo sort
     void TopoSort();
