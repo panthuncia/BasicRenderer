@@ -28,7 +28,7 @@ PFunD3D12CreateDevice slD3D12CreateDevice = nullptr;
 decltype(&slUpgradeInterface) slGetUpgradeInterface = nullptr;
 
 void SlLogMessageCallback(sl::LogType level, const char* message) {
-    spdlog::info("Streamline Log: {}", message);
+    //spdlog::info("Streamline Log: {}", message);
 }
 
 ffxFunctions ffxModule;

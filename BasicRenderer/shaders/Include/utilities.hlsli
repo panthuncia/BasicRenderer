@@ -7,6 +7,7 @@
 #include "include/parallax.hlsli"
 #include "include/gammaCorrection.hlsli"
 #include "include/constants.hlsli"
+#include "include/dynamicSwizzle.hlsli"
 
 // Basic blinn-phong for uint visualization
 float4 lightUints(uint meshletIndex, float3 normal, float3 viewDir) {
@@ -141,6 +142,18 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
         sampledColor.rgb = SRGBToLinear(sampledColor.rgb);
         baseColor = baseColor * sampledColor;
     }
+    
+    if (materialFlags & MATERIAL_OPACITY_TEXTURE)
+    { 
+        Texture2D<float4> opacityTexture = ResourceDescriptorHeap[materialInfo.opacityTextureIndex];
+        SamplerState opacitySamplerState = SamplerDescriptorHeap[materialInfo.opacitySamplerIndex];
+        float4 opacitySample = opacityTexture.Sample(opacitySamplerState, uv);
+        float opacity = opacitySample.a;
+        baseColor.a *= opacity;
+        if (baseColor.a < materialInfo.alphaCutoff) {
+            discard;
+        }
+    }
 
     // Metallic-roughness
     float metallic = 0.0;
@@ -154,8 +167,11 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
             SamplerState metallicSamplerState = SamplerDescriptorHeap[materialInfo.metallicSamplerIndex];
             Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[materialInfo.roughnessTextureIndex];
             SamplerState roughnessSamplerState = SamplerDescriptorHeap[materialInfo.roughnessSamplerIndex];
-            metallic = metallicTexture.Sample(metallicSamplerState, uv).b * materialInfo.metallicFactor;
-            roughness = roughnessTexture.Sample(roughnessSamplerState, uv).g * materialInfo.roughnessFactor;
+            
+            float4 metallicSample = metallicTexture.Sample(metallicSamplerState, uv);
+            float4 roughnessSample = roughnessTexture.Sample(roughnessSamplerState, uv);
+            metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
+            roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
         }
         else
         {
@@ -172,9 +188,13 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
         SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
         float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
-        if (materialFlags & MATERIAL_INVERT_NORMALS)
+        if (materialFlags & MATERIAL_NEGATE_NORMALS)
         {
             tangentSpaceNormal = -tangentSpaceNormal;
+        }
+        if (materialFlags & MATERIAL_INVERT_NORMAL_GREEN)
+        {
+            tangentSpaceNormal.g = - tangentSpaceNormal.g;
         }
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }

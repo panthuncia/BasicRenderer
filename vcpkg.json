@@ -11,11 +11,12 @@
     },
     "directx-headers",
     "directx12-agility",
-    "assimp",
     "flecs",
     "nlohmann-json",
     "refl-cpp",
-    "tree-sitter"
+    "tree-sitter",
+    "assimp",
+    "curl"
   ],
   "builtin-baseline": "efcfaaf60d7ec57a159fc3110403d939bfb69729"
 }

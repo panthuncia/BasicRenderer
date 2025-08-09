@@ -1,6 +1,11 @@
 #pragma once
 #include "Mesh/VertexFlags.h"
 
+#include <vector>
+#include <numeric>   // for std::iota
+#include <cstddef>   // for size_t
+#include <cstdint>
+
 class Material;
 
 struct MeshData {

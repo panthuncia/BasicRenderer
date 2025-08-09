@@ -497,7 +497,7 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
 	for (auto& meshPair : meshLibrary) {
 		auto& mesh = meshPair.second;
         MaterialBuckets bucket;
-        switch (mesh->material->m_blendState) {
+        switch (mesh->material->GetBlendState()) {
         case BlendState::BLEND_STATE_OPAQUE:
 			bucket = MaterialBuckets::Opaque;
 			break;
@@ -1027,6 +1027,7 @@ void DX12Renderer::Cleanup() {
 	m_pObjectManager.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
+    Material::DestroyDefaultMaterial();
     DeletionManager::GetInstance().Cleanup();
 }
 

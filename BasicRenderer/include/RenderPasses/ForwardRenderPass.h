@@ -25,22 +25,22 @@ public:
         bool meshShaders,
         bool indirect,
         int aoTextureDescriptorIndex)
-        : m_wireframe(wireframe), 
-        m_meshShaders(meshShaders), 
-        m_indirect(indirect), 
+        : m_wireframe(wireframe),
+        m_meshShaders(meshShaders),
+        m_indirect(indirect),
         m_aoTextureDescriptorIndex(aoTextureDescriptorIndex)
     {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
-		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
+        m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
+        m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
         m_deferred = settingsManager.getSettingGetter<bool>("enableDeferredRendering")();
     }
 
-	~ForwardRenderPass() {
-	}
+    ~ForwardRenderPass() {
+    }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
         builder->WithShaderResource(Builtin::CameraBuffer,
@@ -52,10 +52,10 @@ public:
             Builtin::Light::SpotLightMatrixBuffer,
             Builtin::Environment::InfoBuffer,
             Builtin::Environment::CurrentCubemap,
-            Builtin::NormalMatrixBuffer, 
-            Builtin::PerObjectBuffer, 
-            Builtin::PerMeshBuffer, 
-            Builtin::PerMeshInstanceBuffer, 
+            Builtin::NormalMatrixBuffer,
+            Builtin::PerObjectBuffer,
+            Builtin::PerMeshBuffer,
+            Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices,
             Builtin::Shadows::ShadowMaps)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
@@ -72,7 +72,7 @@ public:
         if (m_meshShaders) {
             builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-                builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, 
+                builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque,
                     Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
             }
         }
@@ -81,37 +81,37 @@ public:
     void Setup() override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
-		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
-        
+        m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+
         // Setup resources
-		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
         RegisterSRV(Builtin::PerObjectBuffer);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::PerMeshInstanceBuffer);
-		RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::CameraBuffer);
+        RegisterSRV(Builtin::PerMeshInstanceBuffer);
+        RegisterSRV(Builtin::PerMeshBuffer);
 
         if (m_clusteredLightingEnabled) {
-			RegisterSRV(Builtin::Light::ClusterBuffer);
-			RegisterSRV(Builtin::Light::PagesBuffer);
+            RegisterSRV(Builtin::Light::ClusterBuffer);
+            RegisterSRV(Builtin::Light::PagesBuffer);
         }
 
         if (m_meshShaders) {
-			RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-			RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-			RegisterSRV(Builtin::MeshResources::MeshletTriangles);
+            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
+            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
         }
 
         RegisterSRV(Builtin::Light::ActiveLightIndices);
-		RegisterSRV(Builtin::Light::InfoBuffer);
-		RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-		RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-		RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-		RegisterSRV(Builtin::Environment::InfoBuffer);
-        
+        RegisterSRV(Builtin::Light::InfoBuffer);
+        RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
+        RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
+        RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
+        RegisterSRV(Builtin::Environment::InfoBuffer);
+
         if (m_indirect) {
             m_primaryCameraOpaqueIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
             m_primaryCameraAlphaTestIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
@@ -165,7 +165,7 @@ private:
 
         // Render targets
         //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
+        auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
         auto dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
@@ -180,7 +180,7 @@ private:
     void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
         commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
-    
+
         if (m_meshShaders) {
             unsigned int misc[NumMiscUintRootConstants] = {};
             misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
@@ -202,7 +202,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -225,7 +225,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -255,7 +255,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -277,7 +277,7 @@ private:
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->m_psoFlags, mesh.material->m_blendState, m_wireframe);
+                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
@@ -318,7 +318,7 @@ private:
         }
 
         // Alpha test indirect draws
-		auto numAlphaTest = context.drawStats.numAlphaTestDraws;
+        auto numAlphaTest = context.drawStats.numAlphaTestDraws;
         if (numAlphaTest > 0) {
 
             auto alphaTestIndirectBuffer = m_primaryCameraAlphaTestIndirectCommandBuffer;
@@ -339,22 +339,22 @@ private:
     }
 
 private:
-	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
-	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
+    flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
+    flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
-	unsigned int m_aoTextureDescriptorIndex;
+    unsigned int m_aoTextureDescriptorIndex;
     bool m_gtaoEnabled = true;
-	bool m_clusteredLightingEnabled = true;
-	bool m_deferred = false;
+    bool m_clusteredLightingEnabled = true;
+    bool m_deferred = false;
 
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
+    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraAlphaTestIndirectCommandBuffer = nullptr;
-	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
-	std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
+    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
+    std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;
