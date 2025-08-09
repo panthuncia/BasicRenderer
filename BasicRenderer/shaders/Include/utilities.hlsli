@@ -188,9 +188,13 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
         SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
         float3 textureNormal = normalTexture.Sample(normalSamplerState, uv).rgb;
         float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
-        if (materialFlags & MATERIAL_INVERT_NORMALS)
+        if (materialFlags & MATERIAL_NEGATE_NORMALS)
         {
-            tangentSpaceNormal.g = -tangentSpaceNormal.g;
+            tangentSpaceNormal = -tangentSpaceNormal;
+        }
+        if (materialFlags & MATERIAL_INVERT_NORMAL_GREEN)
+        {
+            tangentSpaceNormal.g = - tangentSpaceNormal.g;
         }
         normalWS = normalize(mul(tangentSpaceNormal, TBN));
     }

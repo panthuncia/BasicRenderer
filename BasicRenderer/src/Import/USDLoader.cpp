@@ -355,7 +355,8 @@ namespace USDLoader {
 			return result;
 
 		result.name = material.GetPrim().GetName().GetString();
-		result.invertNormals = true; // TODO: What is the best way to deal with this?
+		result.invertNormalGreen = true; // TODO: What is the best way to deal with this?
+		result.negateNormals = false;
 
 		for (auto const& input : surfaceShader.GetInputs()) {
 			const auto name = input.GetBaseName();
@@ -1117,7 +1118,7 @@ namespace USDLoader {
 
 					if (!hasCorrectedAxis) { // Apply axis correction only on root transforms
 						GfMatrix4d rotMat(upRot, GfVec3d(0.0));
-						mat = rotMat * mat;
+						mat = mat * rotMat;
 						hasCorrectedAxis = true;
 					}
 

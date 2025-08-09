@@ -140,7 +140,7 @@ namespace AssimpLoader {
             }
 
             std::string fullPath = (isRelative ? ws2s(GetExePath()) + "\\" : "") + directory + "\\" + texPath;
-			LoadTextureFromFile(s2ws(fullPath), sampler);
+			return LoadTextureFromFile(s2ws(fullPath), sampler);
         }
     }
 
@@ -301,7 +301,7 @@ namespace AssimpLoader {
                 normalTexture = materialTextures[aiTextureType_NORMALS];
                 materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
                 if (normalTexture->GetFileType() == ImageFiletype::DDS) {
-                    materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMALS;
+                    materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;
                 }
             }
             if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
@@ -388,12 +388,15 @@ namespace AssimpLoader {
 			desc.alphaCutoff = alphaCutoff;
 			desc.diffuseColor = baseColorFactor;
 			desc.emissiveColor = emissiveFactor;
+			desc.blendState = blendMode;
+			desc.negateNormals = true; // TODO: How to handle this properly?
+			desc.invertNormalGreen = false;
             desc.aoMap = { aoMap, { 1 }, { 0 } };
 			desc.baseColor = { baseColorTexture, { 1 }, { 0, 1, 2, 3 } };
 			desc.normal = { normalTexture, { 1 }, { 0, 1, 2 } };
 			desc.heightMap = { heightMap, { 1 }, { 0 } };
-			desc.metallic = { metallicTex, { metallicFactor }, { 0 } };
-			desc.roughness = { roughnessTex, { roughnessFactor }, { 0 } };
+			desc.metallic = { metallicTex, { metallicFactor }, { 2 } };
+			desc.roughness = { roughnessTex, { roughnessFactor }, { 1 } };
 			desc.emissive = { emissiveTexture, { 1 }, { 0, 1, 2 } };
 
             auto newMaterial = Material::CreateShared(desc);
@@ -459,7 +462,7 @@ namespace AssimpLoader {
                 for (unsigned int v = 0; v < aMesh->mNumVertices; v++) {
                     const auto& uv = aMesh->mTextureCoords[0][v];
                     geometry.texcoords.push_back(uv.x);
-                    geometry.texcoords.push_back(uv.y);
+                    geometry.texcoords.push_back(-uv.y);
                 }
                 geometry.flags |= VertexFlags::VERTEX_TEXCOORDS;
             }

@@ -52,8 +52,14 @@ public:
 	        diffuseColor.w = desc.opacity.factor; // Use opacity factor as alpha
 			blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
 		}
-        if (desc.invertNormals) {
-            materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMALS;
+        if (desc.negateNormals) {
+            materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;
+		}
+        if (desc.invertNormalGreen) {
+            materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN;
+        }
+        if (desc.blendState != BlendState::BLEND_STATE_UNKNOWN) {
+            blendState = desc.blendState; // Use provided blend state
 		}
 
         return CreateShared(

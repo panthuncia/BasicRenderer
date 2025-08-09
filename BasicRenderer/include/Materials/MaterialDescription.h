@@ -18,7 +18,9 @@ struct MaterialDescription {
     DirectX::XMFLOAT4   diffuseColor = { 1,1,1,1 };
     DirectX::XMFLOAT4   emissiveColor = { 0,0,0,1 };
 	float alphaCutoff = 0.5f;
-	bool invertNormals = false; // DirectX vs OpenGL compatibility
+	bool negateNormals = false; // Some materials may require this
+	bool invertNormalGreen = false; // For OpenGL compatibility
+	BlendState blendState = BlendState::BLEND_STATE_UNKNOWN; // By default, infer from other properties
     TextureAndConstant  baseColor = {};
     TextureAndConstant  metallic = { nullptr, 0.0f };
     TextureAndConstant  roughness = { nullptr, 0.5f };
