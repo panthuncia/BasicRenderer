@@ -44,6 +44,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 ![Meshlet culling example](images/culling.png)
 
 ## Supported file formats
+- USD using OpenUSD, https://github.com/PixarAnimationStudios/OpenUSD
 - Partial assimp loader implemented, https://github.com/assimp/assimp/blob/master/doc/Fileformats.md
 
 ## Third-party dependancies
@@ -59,6 +60,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [FidelityFX SSSR](https://gpuopen.com/fidelityfx-sssr/)
 - [FSR](https://www.amd.com/en/products/graphics/technologies/fidelityfx/super-resolution.html)
 - [DLSS](https://www.nvidia.com/en-us/geforce/technologies/dlss/)
+- [OpenUSD](https://github.com/PixarAnimationStudios/OpenUSD)
   
 ## Notable sources for development ideas
 
