@@ -297,11 +297,12 @@ namespace AssimpLoader {
                     blendMode = BlendState::BLEND_STATE_MASK;
                 }
             }
+			bool negateNormals = false;
             if (materialTextures.find(aiTextureType_NORMALS) != materialTextures.end()) {
                 normalTexture = materialTextures[aiTextureType_NORMALS];
                 materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
                 if (normalTexture->GetFileType() == ImageFiletype::DDS) {
-                    materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;
+                    negateNormals = true;
                 }
             }
             if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
@@ -389,7 +390,7 @@ namespace AssimpLoader {
 			desc.diffuseColor = baseColorFactor;
 			desc.emissiveColor = emissiveFactor;
 			desc.blendState = blendMode;
-			desc.negateNormals = true; // TODO: How to handle this properly?
+			desc.negateNormals = negateNormals; // TODO: How to handle this properly?
 			desc.invertNormalGreen = false;
             desc.aoMap = { aoMap, { 1 }, { 0 } };
 			desc.baseColor = { baseColorTexture, { 1 }, { 0, 1, 2, 3 } };
