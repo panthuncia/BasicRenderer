@@ -46,7 +46,7 @@ public:
             Resize(m_capacity * 2);
             onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this, m_UAV);
         }
-		unsigned int index = m_usedCapacity - 1;
+		size_t index = m_usedCapacity - 1;
         return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T)));
     }
 

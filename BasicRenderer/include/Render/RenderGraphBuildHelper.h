@@ -4,6 +4,24 @@
 #include "../../generated/BuiltinResources.h"
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
+#include "RenderPasses/VisibilityPass.h"
+
+void BuildVisibilityPass(RenderGraph* graph) {
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+
+    TextureDescription visibilityDesc;
+    visibilityDesc.channels = 2;
+    visibilityDesc.format = DXGI_FORMAT_R32G32_UINT;
+    visibilityDesc.hasRTV = true;
+    visibilityDesc.hasUAV = true;
+    visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y);
+    auto visibilityTexture = PixelBuffer::Create(visibilityDesc);
+    visibilityTexture->SetName(L"Visibility buffer");
+    graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityTexture);
+
+    /*graph->BuildRenderPass("Visibility pass")
+        .Build<VisibilityPass>();*/
+}
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources

@@ -336,7 +336,7 @@ PipelineState PSOManager::CreateMeshPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
 	shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
@@ -425,7 +425,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
     shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
@@ -511,7 +511,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
     shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
@@ -608,7 +608,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
     
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.amplificationShader = { L"shaders/mesh.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
     shaderInfoBundle.pixelShader = { L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
@@ -1590,13 +1590,6 @@ void PSOManager::CompileShader(
     result->GetErrorBuffer(&errors);
     std::string errText{ (char*)errors->GetBufferPointer(),
                          errors->GetBufferSize() };
-
-    // scan for lines beginning with "BRSL-CG:" and log them
-    for (auto& line : split(errText, "\n")) {
-        if (line.find("BRSL-CG:") == 0) {
-            spdlog::info("BRSL-CG: {}", line.substr(8));
-        }
-	}
 
     auto obj = ExtractObject(result.Get(), filename, opts.enableDebugInfo);
 

@@ -12,6 +12,8 @@
 #include "Managers/MeshManager.h"
 #include "Animation/Skeleton.h"
 
+#include "../shaders/Common/defines.h"
+
 std::atomic<uint64_t> Mesh::globalMeshCount = 0;
 
 Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
@@ -44,8 +46,8 @@ void Mesh::CreateVertexBuffer() {
 }
 
 void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
-	unsigned int maxVertices = 64;
-	unsigned int maxPrimitives = 64;
+	unsigned int maxVertices = MS_MESHLET_SIZE; // TODO: Separate config for max vertices and max primitives per meshlet
+	unsigned int maxPrimitives = MS_MESHLET_SIZE;
 
 	size_t maxMeshlets = meshopt_buildMeshletsBound(indices.size(), maxVertices, maxPrimitives);
 

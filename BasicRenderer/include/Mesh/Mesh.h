@@ -60,19 +60,19 @@ public:
 	bool HasBaseSkin() const { return m_baseSkeleton != nullptr; }
 	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }
 
-	unsigned int GetMeshletBufferOffset() const {
+	size_t GetMeshletBufferOffset() const {
 		return m_meshletBufferView->GetOffset();
 	}
 
-	unsigned int GetMeshletVerticesBufferOffset() const {
+	size_t GetMeshletVerticesBufferOffset() const {
 		return m_meshletVerticesBufferView->GetOffset();
 	}
 
-	unsigned int GetMeshletTrianglesBufferOffset() const {
+	size_t GetMeshletTrianglesBufferOffset() const {
 		return m_meshletTrianglesBufferView->GetOffset();
 	}
 
-	unsigned int GetMeshletCount() {
+	size_t GetMeshletCount() {
 		return m_meshlets.size();
 	}
 

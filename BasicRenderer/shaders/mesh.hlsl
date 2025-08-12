@@ -4,7 +4,7 @@
 #include "include/structs.hlsli"
 #include "include/loadingUtils.hlsli"
 #include "Common/defines.h"
-#include "PerPassRootConstants/amplificationShaderRootConstants.h"
+#include "include/meshletPayload.hlsli"
 
 PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint prevBlockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
@@ -126,42 +126,15 @@ uint LoadByte(ByteAddressBuffer buffer, uint byteIndex) {
     return byteValue;
 }
 
-struct Payload
-{
-    uint MeshletIndices[AS_GROUP_SIZE];
-};
-groupshared Payload s_Payload;
-[NumThreads(AS_GROUP_SIZE, 1, 1)]
-void ASMain(uint uGroupThreadID : SV_GroupThreadID, uint uDispatchThreadID : SV_DispatchThreadID, uint uGroupID : SV_GroupID)
-{
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
-    
-    ByteAddressBuffer meshletCullingBitfieldBuffer = ResourceDescriptorHeap[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX];
-    unsigned int meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + uDispatchThreadID;
- 
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    PerMeshBuffer meshBuffer = perMeshBuffer[perMeshBufferIndex];
-    // Culling handled in compute shader
-    bool visible = uDispatchThreadID < meshBuffer.numMeshlets && !GetBit(meshletCullingBitfieldBuffer, meshletBitfieldIndex);
-
-    if (visible) {
-        uint index = WavePrefixCountBits(visible);
-        s_Payload.MeshletIndices[index] = uDispatchThreadID;
-    }
-    
-    uint visibleCount = WaveActiveCountBits(visible);
-    DispatchMesh(visibleCount, 1, 1, s_Payload);
-}
-
 [outputtopology("triangle")]
-[numthreads(64, 1, 1)]
+[numthreads(MS_THREAD_GROUP_SIZE, 1, 1)]
 void MSMain(
     const uint uGroupThreadID : SV_GroupThreadID,
     const uint vGroupID : SV_GroupID,
     in payload Payload payload,
-    out vertices PSInput outputVertices[64],
-    out indices uint3 outputTriangles[64]) {
+    out vertices PSInput outputVertices[MS_MESHLET_SIZE],
+    out indices uint3 outputTriangles[MS_MESHLET_SIZE])
+{
 
     uint meshletIndex = payload.MeshletIndices[vGroupID];
     
@@ -199,42 +172,6 @@ void MSMain(
     //    return;
     //}
     
-    uint triOffset = meshBuffer.meshletTrianglesBufferOffset + meshlet.TriOffset + uGroupThreadID * 3;
-    
-    
-    //uint3 meshletIndices = uint3(LoadByte(meshletTrianglesBuffer, triOffset), LoadByte(meshletTrianglesBuffer, triOffset + 1), LoadByte(meshletTrianglesBuffer, triOffset+2)); // Local indices into meshletVerticesBuffer
-    uint alignedOffset = (triOffset / 4) * 4;
-    uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
-
-    // Calculate the starting byte offset within firstWord
-    uint byteOffset = triOffset % 4;
-
-    // Extract the first byte
-    uint b0 = (firstWord >> (byteOffset * 8)) & 0xFF;
-
-    // For the second and third bytes, we may still be within the same 4-byte word or we may cross over.
-    uint b1, b2;
-
-    if (byteOffset <= 1) {
-        // All three bytes are within the same word
-        b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
-        b2 = (firstWord >> ((byteOffset + 2) * 8)) & 0xFF;
-    } else if (byteOffset == 2) {
-        // The second byte is in this word, but the third byte spills into the next word
-        b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
-        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
-        b2 = secondWord & 0xFF; // The first byte of the next word
-    } else {
-        // byteOffset == 3
-        // The first byte is at the last position in firstWord,
-        // The next two bytes must come from the next word.
-        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
-        b1 = secondWord & 0xFF;               // first byte of the next word
-        b2 = (secondWord >> 8) & 0xFF;        // second byte of the next word
-    }
-
-    uint3 meshletIndices = uint3(b0, b1, b2);
-    
     uint vertOffset = meshlet.VertOffset;
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
@@ -247,11 +184,61 @@ void MSMain(
         prevPostSkinningBufferOffset += meshBuffer.vertexByteSize * meshBuffer.numVertices * ((perFrameBuffer.frameIndex + 1) % 2);
     }
     
-    if (uGroupThreadID < meshlet.VertCount) {
-        //uint thisVertex = meshletVerticesBuffer[vertOffset + uGroupThreadID];
-        outputVertices[uGroupThreadID] = GetVertexAttributes(vertexBuffer, postSkinningBufferOffset, prevPostSkinningBufferOffset, vertOffset + uGroupThreadID, meshBuffer.vertexFlags, meshBuffer.vertexByteSize, meshletIndex, objectBuffer);
+    uint mlTriBytesBase = meshBuffer.meshletTrianglesBufferOffset + meshlet.TriOffset;
+    uint mlVertListBase = meshlet.VertOffset; // start in meshlet vertex-index buffer
+    
+    for (uint i = uGroupThreadID; i < vertCount; i += MS_THREAD_GROUP_SIZE)
+    {
+        outputVertices[i] = GetVertexAttributes(
+                                            vertexBuffer, 
+                                            postSkinningBufferOffset, 
+                                            prevPostSkinningBufferOffset, 
+                                            vertOffset + i, 
+                                            meshBuffer.vertexFlags, 
+                                            meshBuffer.vertexByteSize, 
+                                            meshletIndex, 
+                                            objectBuffer);
     }
-    if (uGroupThreadID < meshlet.TriCount) {
-        outputTriangles[uGroupThreadID] = meshletIndices;
+    for (uint t = uGroupThreadID; t < meshlet.TriCount; t += MS_THREAD_GROUP_SIZE)
+    {
+        
+        uint triOffset = meshBuffer.meshletTrianglesBufferOffset + meshlet.TriOffset + t * 3;
+        uint alignedOffset = (triOffset / 4) * 4;
+        uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
+        
+        uint byteOffset = triOffset % 4;
+
+    // Extract the first byte
+        uint b0 = (firstWord >> (byteOffset * 8)) & 0xFF;
+
+    // For the second and third bytes, we may still be within the same 4-byte word or we may cross over.
+        uint b1, b2;
+
+        if (byteOffset <= 1)
+        {
+        // All three bytes are within the same word
+            b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
+            b2 = (firstWord >> ((byteOffset + 2) * 8)) & 0xFF;
+        }
+        else if (byteOffset == 2)
+        {
+        // The second byte is in this word, but the third byte spills into the next word
+            b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
+            uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
+            b2 = secondWord & 0xFF; // The first byte of the next word
+        }
+        else
+        {
+        // byteOffset == 3
+        // The first byte is at the last position in firstWord,
+        // The next two bytes must come from the next word.
+            uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
+            b1 = secondWord & 0xFF; // first byte of the next word
+            b2 = (secondWord >> 8) & 0xFF; // second byte of the next word
+        }
+
+        uint3 meshletIndices = uint3(b0, b1, b2);
+        
+        outputTriangles[t] = meshletIndices;
     }
 }

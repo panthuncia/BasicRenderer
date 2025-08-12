@@ -3,6 +3,7 @@
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},
+      "VisibilityTexture": {},
       "MeshletBitfield": {},
       "IndirectCommandBuffers": {
         "Opaque": {},

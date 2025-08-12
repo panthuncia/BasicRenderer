@@ -1,6 +1,5 @@
 #pragma once
 
-#define NOMINMAX
 #include <windows.h>
 #include <iostream>
 #include <wrl/client.h>

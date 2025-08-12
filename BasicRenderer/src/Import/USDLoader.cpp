@@ -206,7 +206,7 @@ namespace USDLoader {
 					//auto texPath = asset.GetAssetPath();
 					//spdlog::info("Loading texture from path: {}", texPath);
 
-						UsdShadeInput csInput = srcShader.GetInput(TfToken("sourceColorSpace"));
+					UsdShadeInput csInput = srcShader.GetInput(TfToken("sourceColorSpace"));
 					TfToken colorSpaceToken;
 					std::string colorSpace = "linear";
 					if (csInput && csInput.Get(&colorSpaceToken)) {
@@ -252,7 +252,8 @@ namespace USDLoader {
 						spdlog::warn("Unable to resolve 'st' input for texture shader {}", src.source.GetPrim().GetName().GetString());
 					}
 				}
-			} else {
+			}
+			else {
 				spdlog::warn("Shader {} does not have 'st' input for UVs", src.source.GetPrim().GetName().GetString());
 			}
 
@@ -567,7 +568,7 @@ namespace USDLoader {
 		MeshData& meshData,
 		const UsdGeomMesh& mesh,
 		const std::optional<UsdGeomSubset> subset,
-		float metersPerUnit,
+		double metersPerUnit,
 		const std::string& uvSetName,
 		const std::optional<UsdSkelSkinningQuery>& skinQ,
 		const VtTokenArray& skelJointOrderRaw,
@@ -602,7 +603,7 @@ namespace USDLoader {
 		mesh.GetPointsAttr().Get(&usdPts);
 
 		std::vector<float> ctrlPos;
-		FlattenVecArray<GfVec3f>(usdPts, ctrlPos, metersPerUnit);
+		FlattenVecArray<GfVec3f>(usdPts, ctrlPos, static_cast<float>(metersPerUnit));
 
 		// control mesh points
 		VtArray<int> faceVertCounts, faceVertIndices;
@@ -900,9 +901,9 @@ namespace USDLoader {
 			auto& scale = transform.GetScale();
 
 			// Create an XMMATRIX from the translation, rotation, and scale
-			XMMATRIX xm = XMMatrixScaling(scale[0], scale[1], scale[2]) *
-				XMMatrixRotationQuaternion(XMVectorSet(rotation.GetImaginary()[0], rotation.GetImaginary()[1], rotation.GetImaginary()[2], rotation.GetReal())) *
-				XMMatrixTranslation(translation[0], translation[1], translation[2]);
+			XMMATRIX xm = XMMatrixScaling(static_cast<float>(scale[0]), static_cast<float>(scale[1]), static_cast<float>(scale[2])) *
+				XMMatrixRotationQuaternion(XMVectorSet(static_cast<float>(rotation.GetImaginary()[0]), static_cast<float>(rotation.GetImaginary()[1]), static_cast<float>(rotation.GetImaginary()[2]), static_cast<float>(rotation.GetReal()))) *
+				XMMatrixTranslation(static_cast<float>(translation[0]), static_cast<float>(translation[1]), static_cast<float>(translation[2]));
 			xm = XMMatrixInverse(nullptr, xm); // Invert the matrix for the inverse bind pose
 
 			invBindMats.push_back(xm);
@@ -1000,7 +1001,7 @@ namespace USDLoader {
 		UsdSkelCache& skelCache,
 		const UsdStageRefPtr& stage,
 		std::shared_ptr<Scene>& scene,
-		float metersPerUnit,
+		double metersPerUnit,
 		GfRotation upRot,
 		const std::string& directory,
 		bool isUSDZ) {
@@ -1148,9 +1149,9 @@ namespace USDLoader {
 				}
 				loadingCache.nodeMap[prim.GetPath().GetString()] = entity;
 
-				entity.set<Components::Position>({ DirectX::XMFLOAT3(translation[0] * metersPerUnit, translation[1] * metersPerUnit, translation[2] * metersPerUnit) });
-				entity.set<Components::Rotation>({ DirectX::XMFLOAT4(rot.GetImaginary()[0], rot.GetImaginary()[1], rot.GetImaginary()[2], rot.GetReal()) });
-				entity.set<Components::Scale>({ DirectX::XMFLOAT3(scale[0], scale[1], scale[2]) });
+				entity.set<Components::Position>({ DirectX::XMFLOAT3(static_cast<float>(translation[0] * metersPerUnit), static_cast<float>(translation[1] * metersPerUnit), static_cast<float>(translation[2] * metersPerUnit)) });
+				entity.set<Components::Rotation>({ DirectX::XMFLOAT4(static_cast<float>(rot.GetImaginary()[0]), static_cast<float>(rot.GetImaginary()[1]), static_cast<float>(rot.GetImaginary()[2]), static_cast<float>(rot.GetReal())) });
+				entity.set<Components::Scale>({ DirectX::XMFLOAT3(static_cast<float>(scale[0]), static_cast<float>(scale[1]), static_cast<float>(scale[2])) });
 
 				if (parent) {
 					auto parentName = parent.name().c_str();

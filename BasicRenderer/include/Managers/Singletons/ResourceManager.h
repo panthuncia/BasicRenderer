@@ -97,27 +97,27 @@ public:
         return dataBuffer;
     }
 
-    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, size_t elementSize, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
+    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
-        UINT bufferSize = numElements * elementSize;
+        size_t bufferSize = numElements * elementSize;
         unsigned int counterOffset = 0;
 		if (UAVCounter) {
-            UINT requiredSize = (numElements * elementSize) + sizeof(UINT); // Add space for the counter
-            UINT alignment = elementSize; // Buffer should be a multiple of sizeof(T)
+            size_t requiredSize = (numElements * elementSize) + sizeof(UINT); // Add space for the counter
+            unsigned int alignment = elementSize; // Buffer should be a multiple of sizeof(T)
 
             // Ensure bufferSize is a multiple of typeSize and meets requiredSize
             bufferSize = ((requiredSize + alignment - 1) / alignment) * alignment;
 
             // Find the next 4096-aligned address after requiredSize
-            UINT potentialCounterOffset = (requiredSize + 4095) & ~4095;
+            size_t potentialCounterOffset = (requiredSize + 4095) & ~4095;
 
             // If the 4096-aligned address is within the buffer, we can use it
-            if (potentialCounterOffset + sizeof(UINT) <= bufferSize) {
+            if (potentialCounterOffset + sizeof(unsigned int) <= bufferSize) {
                 counterOffset = potentialCounterOffset;
             }
             else {
                 // Otherwise, expand the buffer to fit the 4096-aligned counter offset
-                bufferSize = ((potentialCounterOffset + sizeof(UINT) + alignment - 1) / alignment) * alignment;
+                bufferSize = ((potentialCounterOffset + sizeof(unsigned int) + alignment - 1) / alignment) * alignment;
                 counterOffset = potentialCounterOffset;
             }
 
@@ -138,8 +138,8 @@ public:
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = numElements;
-        srvDesc.Buffer.StructureByteStride = elementSize;
+        srvDesc.Buffer.NumElements = static_cast<UINT>(numElements);
+        srvDesc.Buffer.StructureByteStride = static_cast<UINT>(elementSize);
         srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
@@ -154,8 +154,8 @@ public:
 			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 			uavDesc.Format = DXGI_FORMAT_UNKNOWN;
 			uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-			uavDesc.Buffer.NumElements = numElements; // We will have some wasted memory to allow the counter to be 4096-aligned
-			uavDesc.Buffer.StructureByteStride = elementSize;
+			uavDesc.Buffer.NumElements = static_cast<UINT>(numElements); // We will have some wasted memory to allow the counter to be 4096-aligned
+			uavDesc.Buffer.StructureByteStride = static_cast<UINT>(elementSize);
 			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
             if (UAVCounter) {
                 uavDesc.Buffer.CounterOffsetInBytes = counterOffset;
