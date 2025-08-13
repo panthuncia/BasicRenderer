@@ -612,7 +612,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         device.Get()));
 #endif
 
-#if defined(_DEBUG)
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
     ComPtr<ID3D12InfoQueue1> infoQueue;
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);

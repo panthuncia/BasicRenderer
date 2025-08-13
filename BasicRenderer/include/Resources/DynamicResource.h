@@ -92,6 +92,7 @@ public:
 			//SetState(newState); // Keep the wrapper's state in sync
 			return m_resource->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
 		}
+        return {};
     }
 
     ID3D12Resource* GetAPIResource() const override {

@@ -54,7 +54,7 @@ public:
         return m_data[index];
     }
 
-    void Resize(UINT newCapacity) {
+    void Resize(uint64_t newCapacity) {
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
@@ -75,7 +75,7 @@ public:
     }
 
     UINT Size() {
-        return m_data.size();
+        return static_cast<uint32_t>(m_data.size());
     }
 
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
@@ -119,7 +119,7 @@ private:
 
     UINT m_globalResizableBufferID;
 
-    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)> onResized;
+    std::function<void(UINT, uint64_t, uint64_t, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
     bool m_UAV = false;

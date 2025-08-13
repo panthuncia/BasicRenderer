@@ -22,16 +22,16 @@ namespace Components {
 	struct Position {
 		Position() : pos(DirectX::XMVectorZero()) {}
 		Position(const DirectX::XMVECTOR& position) : pos(position) {}
-		Position(float x, float y, float z) : pos(DirectX::XMVectorSet(x, y, z, 0.0f)) {}
-		Position(float x, float y, float z, float w) : pos(DirectX::XMVectorSet(x, y, z, w)) {}
+		Position(double x, double y, double z) : pos(DirectX::XMVectorSet(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), 0.0f)) {}
+		Position(double x, double y, double z, double w) : pos(DirectX::XMVectorSet(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), static_cast<float>(w))) {}
 		Position(const DirectX::XMFLOAT3& position) : pos(DirectX::XMVectorSet(position.x, position.y, position.z, 0.0f)) {}
 		DirectX::XMVECTOR pos;
 	};
 	struct Rotation {
 		Rotation() : rot(DirectX::XMQuaternionIdentity()) {}
 		Rotation(const DirectX::XMVECTOR& rotation) : rot(rotation) {}
-		Rotation(float roll, float pitch, float yaw) : rot(DirectX::XMQuaternionRotationRollPitchYaw(roll, pitch, yaw)) {}
-		Rotation(float x, float y, float z, float w) : rot(DirectX::XMVectorSet(x, y, z, w)) {}
+		Rotation(double roll, double pitch, double yaw) : rot(DirectX::XMQuaternionRotationRollPitchYaw(static_cast<float>(roll), static_cast<float>(pitch), static_cast<float>(yaw))) {}
+		Rotation(double x, double y, double z, double w) : rot(DirectX::XMVectorSet(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), static_cast<float>(w))) {}
 		Rotation(const DirectX::XMFLOAT4& rotation) : rot(DirectX::XMLoadFloat4(&rotation)) {}
 		Rotation(const DirectX::XMFLOAT3& rotation) : rot(DirectX::XMQuaternionRotationRollPitchYaw(rotation.x, rotation.y, rotation.z)) {}
 		DirectX::XMVECTOR rot;
@@ -39,7 +39,7 @@ namespace Components {
 	struct Scale {
 		Scale() : scale(DirectX::XMVectorSet(1.0f, 1.0f, 1.0f, 0.0f)) {}
 		Scale(DirectX::XMVECTOR scale) : scale(scale) {}
-		Scale(float x, float y, float z) : scale(DirectX::XMVectorSet(x, y, z, 0.0f)) {}
+		Scale(double x, double y, double z) : scale(DirectX::XMVectorSet(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), 0.0f)) {}
 		Scale(DirectX::XMFLOAT3 scale) : scale(DirectX::XMVectorSet(scale.x, scale.y, scale.z, 0.0f)) {}
 		DirectX::XMVECTOR scale;
 	};

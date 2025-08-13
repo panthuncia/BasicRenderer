@@ -327,7 +327,7 @@ namespace AssimpLoader {
 
             if (materialTextures.find(aiTextureType_EMISSIVE) != materialTextures.end()) {
                 emissiveTexture = materialTextures[aiTextureType_EMISSIVE];
-                emissive = aiColor3D(emissive[0] * 10.0, emissive[1] * 10.0, emissive[2] * 10.0);
+                emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
                 materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             }
             if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
@@ -628,14 +628,14 @@ namespace AssimpLoader {
 
                 // For position keys
                 for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
-                    float time = static_cast<float>(channel->mPositionKeys[k].mTime) / aiAnim->mTicksPerSecond;
+                    float time = static_cast<float>(channel->mPositionKeys[k].mTime / aiAnim->mTicksPerSecond);
                     const aiVector3D& v = channel->mPositionKeys[k].mValue;
                     clip->addPositionKeyframe(time, DirectX::XMFLOAT3(v.x, v.y, v.z));
                 }
 
                 // For rotation keys
                 for (unsigned int k = 0; k < channel->mNumRotationKeys; k++) {
-                    float time = static_cast<float>(channel->mRotationKeys[k].mTime) / aiAnim->mTicksPerSecond;
+                    float time = static_cast<float>(channel->mRotationKeys[k].mTime / aiAnim->mTicksPerSecond);
                     const aiQuaternion& q = channel->mRotationKeys[k].mValue;
                     // Convert to XMVECTOR
                     XMVECTOR quat = XMVectorSet(q.x, q.y, q.z, q.w);
@@ -644,7 +644,7 @@ namespace AssimpLoader {
 
                 // For scale keys
                 for (unsigned int k = 0; k < channel->mNumScalingKeys; k++) {
-                    float time = static_cast<float>(channel->mScalingKeys[k].mTime) / aiAnim->mTicksPerSecond;
+                    float time = static_cast<float>(channel->mScalingKeys[k].mTime / aiAnim->mTicksPerSecond);
                     const aiVector3D& s = channel->mScalingKeys[k].mValue;
                     clip->addScaleKeyframe(time, DirectX::XMFLOAT3(s.x, s.y, s.z));
                 }

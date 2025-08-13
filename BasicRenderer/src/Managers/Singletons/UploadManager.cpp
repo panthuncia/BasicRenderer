@@ -249,7 +249,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 			barriers.insert(barriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
 		}
 
-		commandList->Barrier(barriers.size(), barriers.data());
+		commandList->Barrier(static_cast<uint32_t>(barriers.size()), barriers.data());
 
 		// Perform the copy
         commandList->CopyBufferRegion(
@@ -283,7 +283,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 			barriers.insert(barriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
 		}
 
-		commandList->Barrier(barriers.size(), barriers.data());
+		commandList->Barrier(static_cast<uint32_t>(barriers.size()), barriers.data());
 	}
 	DEBUG_ONLY(PIXEndEvent(commandList.Get()));
 	commandList->Close();

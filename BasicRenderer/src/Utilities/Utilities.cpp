@@ -71,7 +71,7 @@ std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) 
     unsigned int materialFlags = meshData.material->GetMaterialFlags();
 
     std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
-    unsigned int numVertices = meshData.positions.size() / 3;
+    uint32_t numVertices = static_cast<uint32_t>(meshData.positions.size()) / 3;
     // position,        normal,            texcoord
     uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
     rawData->resize(numVertices * vertexSize);
@@ -934,7 +934,7 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
 
             device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
 
-            ShaderVisibleIndexInfo uavInfo{ descriptorIndex, gpuHandle };
+            ShaderVisibleIndexInfo uavInfo{ static_cast<int>(descriptorIndex), gpuHandle };
             sliceUAVs.push_back(uavInfo);
         }
     }

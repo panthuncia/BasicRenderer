@@ -12,9 +12,9 @@ void MeshInstance::SetBufferViews(std::unique_ptr<BufferView> postSkinningVertex
 	if (m_postSkinningVertexBufferView == nullptr) {
 		return; // no need to update
 	}
-	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = m_postSkinningVertexBufferView->GetOffset();
+	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = static_cast<uint32_t>(m_postSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer is limited to uint32. We need to expand this, ideally with some kind of buffer pool
 
-	m_perMeshInstanceBufferData.meshletBoundsBufferStartIndex = m_meshletBoundsBufferView->GetOffset() / sizeof(BoundingSphere);
+	m_perMeshInstanceBufferData.meshletBoundsBufferStartIndex = static_cast<uint32_t>(m_meshletBoundsBufferView->GetOffset() / sizeof(BoundingSphere));
 
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
@@ -31,10 +31,10 @@ void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMes
 	//Meshlet bounds
 	auto meshletBoundsView = m_mesh->GetMeshletBoundsBufferView();
 	if (meshletBoundsView != nullptr) {
-		m_perMeshInstanceBufferData.meshletBoundsBufferStartIndex = meshletBoundsView->GetOffset() / sizeof(BoundingSphere);
+		m_perMeshInstanceBufferData.meshletBoundsBufferStartIndex = static_cast<uint32_t>(meshletBoundsView->GetOffset() / sizeof(BoundingSphere));
 	}
 
-	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = postSkinningView->GetOffset();
+	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = static_cast<uint32_t>(postSkinningView->GetOffset());
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}
@@ -54,6 +54,6 @@ void MeshInstance::SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> mesh
 	if (m_meshletBitfieldBufferView == nullptr) {
 		return; // no need to update
 	}
-	m_perMeshInstanceBufferData.meshletBitfieldStartIndex = m_meshletBitfieldBufferView->GetOffset() * 8;
+	m_perMeshInstanceBufferData.meshletBitfieldStartIndex = static_cast<uint32_t>(m_meshletBitfieldBufferView->GetOffset() * 8);
 	m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 }

@@ -45,7 +45,7 @@ std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, s
 	}
 
     bool found = false;
-    for (size_t i = counter; i < keyframes.size() - 1; ++i) {
+    for (uint32_t i = counter; i < keyframes.size() - 1; ++i) {
         if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
             prevKeyframeIndex = i;
             nextKeyframeIndex = i + 1;

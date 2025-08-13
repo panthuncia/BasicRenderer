@@ -1,6 +1,5 @@
 #pragma once
 
-#define NOMINMAX
 #include <Windows.h>
 #include <functional>
 #include <unordered_map>
@@ -46,7 +45,7 @@ public:
         inputData.mouseY = GET_Y_LPARAM(lParam);
         switch (message) {
         case WM_KEYDOWN: {
-            WPARAM key = toupper(wParam);
+            WPARAM key = toupper(static_cast<int>(wParam));
             switch (key) {
 			case 'W':
                 TriggerAction(InputAction::MoveForward, magnitude, inputData);
@@ -80,7 +79,7 @@ public:
 
             break;
         } case WM_KEYUP: {
-            WPARAM key = toupper(wParam);
+            WPARAM key = toupper(static_cast<int>(wParam));
 			switch (key) {
 			case 'W':
 				TriggerAction(InputAction::MoveForward, 0.0f, inputData);

@@ -9,7 +9,6 @@
 #include <imgui_impl_dx12.h>
 #include <functional>
 #include <spdlog/spdlog.h>
-#define NOMINMAX
 #include <windows.h>
 #include <filesystem>
 #include <flecs.h>

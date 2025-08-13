@@ -832,11 +832,11 @@ void BuildFunctionDefs(std::unordered_map<std::string, std::vector<TSNode>>& fun
         TSNode node = ts_node_child(root, i);
         if (std::string(ts_node_type(node)) == "function_definition") {
             // In tree-sitter-hlsl grammar, child #1 is the identifier
-            TSNode topDecl = ts_node_child_by_field_name(node, "declarator", strlen("declarator"));
+            TSNode topDecl = ts_node_child_by_field_name(node, "declarator", static_cast<uint32_t>(strlen("declarator")));
             if (ts_node_is_null(topDecl)) continue;
 
             // From that, get the inner declarator
-            TSNode innerDecl = ts_node_child_by_field_name(topDecl, "declarator", strlen("declarator"));
+            TSNode innerDecl = ts_node_child_by_field_name(topDecl, "declarator", static_cast<uint32_t>(strlen("declarator")));
             if (ts_node_is_null(innerDecl)) continue;
 
             // Now, find the actual identifier inside `innerDecl`
@@ -850,7 +850,7 @@ void BuildFunctionDefs(std::unordered_map<std::string, std::vector<TSNode>>& fun
                 nameNode = ts_node_child_by_field_name(
                     innerDecl,
                     "name",
-                    strlen("name")
+                    static_cast<uint32_t>(strlen("name"))
                 );
             }
 
@@ -879,7 +879,7 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outMandatoryI
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_hlsl());
 
-    TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, sourceSize);
+    TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, static_cast<uint32_t>(sourceSize));
     TSNode root = ts_tree_root_node(tree);
 
     std::unordered_map<std::string, std::vector<TSNode>> functionDefs;
@@ -907,7 +907,7 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outMandatoryI
             if (strcmp(type, "call_expression") == 0) {
                 // Check for ResourceDescriptorIndex(...)
                 TSNode functionNode =
-                    ts_node_child_by_field_name(node, "function", strlen("function"));
+                    ts_node_child_by_field_name(node, "function", static_cast<uint32_t>(strlen("function")));
 
                 if (ts_node_is_null(functionNode)) return;
 
@@ -1007,7 +1007,7 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_hlsl());
     TSTree* tree = ts_parser_parse_string(
-        parser, nullptr, preprocessedSource, sourceSize);
+        parser, nullptr, preprocessedSource, static_cast<uint32_t>(sourceSize));
     TSNode root = ts_tree_root_node(tree);
 
     std::unordered_map<std::string, std::vector<TSNode>> functionDefs;
@@ -1035,7 +1035,7 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
             if (strcmp(type, "call_expression") == 0) {
                 // Check for ResourceDescriptorIndex(...)
                 TSNode functionNode =
-                    ts_node_child_by_field_name(node, "function", strlen("function"));
+                    ts_node_child_by_field_name(node, "function", static_cast<uint32_t>(strlen("function")));
 
                 if (ts_node_is_null(functionNode)) return;
 
@@ -1182,7 +1182,7 @@ pruneUnusedCode(const char* preprocessedSource,
 {
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_hlsl());
-    TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, sourceSize);
+    TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, static_cast<uint32_t>(sourceSize));
     TSNode root = ts_tree_root_node(tree);
 
     std::unordered_map<std::string, std::vector<TSNode>> bodyMap, defMap;
@@ -1192,16 +1192,16 @@ pruneUnusedCode(const char* preprocessedSource,
         if (std::string(ts_node_type(node)) != "function_definition") continue;
 
         // extract the function name
-        TSNode decl1 = ts_node_child_by_field_name(node, "declarator", strlen("declarator"));
+        TSNode decl1 = ts_node_child_by_field_name(node, "declarator", static_cast<uint32_t>(strlen("declarator")));
         TSNode decl2 = !ts_node_is_null(decl1)
-            ? ts_node_child_by_field_name(decl1, "declarator", strlen("declarator"))
+            ? ts_node_child_by_field_name(decl1, "declarator", static_cast<uint32_t>(strlen("declarator")))
             : TSNode{};
         TSNode nameNode = {};
         if (!ts_node_is_null(decl2) && std::string(ts_node_type(decl2)) == "identifier") {
             nameNode = decl2;
         }
         else if (!ts_node_is_null(decl2)) {
-            nameNode = ts_node_child_by_field_name(decl2, "name", strlen("name"));
+            nameNode = ts_node_child_by_field_name(decl2, "name", static_cast<uint32_t>(strlen("name")));
         }
         if (ts_node_is_null(nameNode)) continue;
 
@@ -1220,7 +1220,7 @@ pruneUnusedCode(const char* preprocessedSource,
 		}
 
         defMap[fnName].push_back(node);
-        bodyMap[fnName].push_back(ts_node_child_by_field_name(node, "body", strlen("body")));
+        bodyMap[fnName].push_back(ts_node_child_by_field_name(node, "body", static_cast<uint32_t>(strlen("body"))));
     }
 
     // BFS from entryPointName to find reachable functions
@@ -1231,10 +1231,10 @@ pruneUnusedCode(const char* preprocessedSource,
         std::function<void(TSNode)> walk = [&](TSNode n) {
             if (ts_node_is_null(n)) return;
             if (std::string(ts_node_type(n)) == "call_expression") {
-                TSNode fn = ts_node_child_by_field_name(n, "function", strlen("function"));
+                TSNode fn = ts_node_child_by_field_name(n, "function", static_cast<uint32_t>(strlen("function")));
                 if (!ts_node_is_null(fn)) {
 
-                    TSNode args = ts_node_child_by_field_name(n, "arguments", strlen("arguments"));
+                    TSNode args = ts_node_child_by_field_name(n, "arguments", static_cast<uint32_t>(strlen("arguments")));
 
                     uint32_t start = ts_node_start_byte(fn);
                     uint32_t end = ts_node_end_byte(args);    // include closing ')'

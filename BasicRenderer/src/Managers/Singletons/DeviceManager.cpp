@@ -1,5 +1,5 @@
 #include "Managers/Singletons/DeviceManager.h"
-
+#include "Utilities/Utilities.h"
 static std::string AutoBreadcrumbOpToString(D3D12_AUTO_BREADCRUMB_OP op) {
     switch (op) {
     case D3D12_AUTO_BREADCRUMB_OP_SETMARKER: return "SetMarker";
@@ -78,8 +78,8 @@ void LogBreadcrumbs(const D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT& breadcrumbs) {
         std::wstring commandQueueName = pNode->pCommandQueueDebugNameW ? pNode->pCommandQueueDebugNameW : L"<unnamed>";
 
         spdlog::info("--- AutoBreadcrumb Node ---");
-        spdlog::info("Command List: {}", std::string(commandListName.begin(), commandListName.end()));
-        spdlog::info("Command Queue: {}", std::string(commandQueueName.begin(), commandQueueName.end()));
+        spdlog::info("Command List: {}", ws2s(commandListName));
+        spdlog::info("Command Queue: {}", ws2s(commandQueueName));
         spdlog::info("Breadcrumb Count: {}", pNode->BreadcrumbCount);
         spdlog::info("Operations:");
 
@@ -113,7 +113,7 @@ void LogPageFaults(const D3D12_DRED_PAGE_FAULT_OUTPUT& pageFault) {
             const char* allocTypeStr = DredAllocationTypeToString(current->AllocationType);
             spdlog::info("[{}] ObjectName: {}, AllocationType: {}",
                 nodeType,
-                std::string(objName.begin(), objName.end()),
+                ws2s(objName),
                 allocTypeStr
             );
             current = current->pNext;

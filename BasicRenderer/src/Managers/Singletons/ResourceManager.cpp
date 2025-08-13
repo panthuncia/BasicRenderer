@@ -22,7 +22,7 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 
 	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
-	perFrameCBData.ambientLighting = DirectX::XMVectorSet(0.1, 0.1, 0.1, 1.0);
+	perFrameCBData.ambientLighting = DirectX::XMVectorSet(0.1f, 0.1f, 0.1f, 1.0f);
 	perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
 	auto shadowCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits")();
 	switch (perFrameCBData.numShadowCascades) {
@@ -314,8 +314,8 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	srvDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
 	srvDesc.Buffer.FirstElement = 0;
-	srvDesc.Buffer.NumElements = byteAddress? numElements / 4 : numElements;
-	srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
+	srvDesc.Buffer.NumElements = static_cast<uint32_t>(byteAddress? numElements / 4 : numElements);
+	srvDesc.Buffer.StructureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize);
 	srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
 	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
@@ -334,8 +334,8 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 		uavDesc.Format = DXGI_FORMAT_UNKNOWN;
 		uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-		uavDesc.Buffer.NumElements = numElements;
-		uavDesc.Buffer.StructureByteStride = elementSize;
+		uavDesc.Buffer.NumElements = static_cast<uint32_t>(numElements);
+		uavDesc.Buffer.StructureByteStride = static_cast<uint32_t>(elementSize);
 		uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
 		uavDesc.Buffer.CounterOffsetInBytes = 0;
 
@@ -353,10 +353,10 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	return pDynamicBuffer;
 }
 
-std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(UINT capacity, std::wstring name) {
+std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(uint64_t capacity, std::wstring name) {
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
-	UINT bufferID = GetNextResizableBufferID();
+	UINT bufferID = GetInstance().GetNextResizableBufferID();
 	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(bufferID, capacity, name);
 //	ResourceTransition transition;
 //	transition.resource = pBuffer.get();
@@ -376,7 +376,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	srvDesc.Format = DXGI_FORMAT_UNKNOWN;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
 	srvDesc.Buffer.FirstElement = 0;
-	srvDesc.Buffer.NumElements = capacity;
+	srvDesc.Buffer.NumElements = static_cast<uint32_t>(capacity);
 	srvDesc.Buffer.StructureByteStride = 4;
 	srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
@@ -402,7 +402,7 @@ std::pair<ComPtr<ID3D12Resource>,ComPtr<ID3D12Heap>> ResourceManager::CreateText
 	auto& device = DeviceManager::GetInstance().GetDevice();
 
 	// Determine the number of mip levels
-	unsigned int mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
+	uint16_t mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
 
 	// Determine the array size
 	uint32_t arraySize = desc.arraySize;
@@ -417,10 +417,15 @@ std::pair<ComPtr<ID3D12Resource>,ComPtr<ID3D12Heap>> ResourceManager::CreateText
 		width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(width)))));
 		height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(height)))));
 	}
+
+	if (width > std::numeric_limits<uint32_t>().max() || height > std::numeric_limits<uint32_t>().max()) {
+		spdlog::error("Texture dimensions above uint32_max not implemented");
+	}
+
 	auto textureDesc = CreateTextureResourceDesc(
 		desc.format,
-		width,
-		height,
+		static_cast<uint32_t>(width),
+		static_cast<uint32_t>(height),
 		arraySize,
 		mipLevels,
 		desc.isCubemap,
@@ -477,8 +482,8 @@ void ResourceManager::UploadTextureData(ID3D12Resource* pResource, const Texture
 	if (!initialData.empty()) {
 		auto& device = DeviceManager::GetInstance().GetDevice();
 		// Ensure initialData has the correct size
-		size_t numTextures = arraySize * desc.isCubemap ? 6 : 1;
-		size_t numSubresources = numTextures * mipLevels;
+		uint32_t numTextures = arraySize * desc.isCubemap ? 6 : 1;
+		uint32_t numSubresources = numTextures * mipLevels;
 
 		// Create an upload heap
 		UINT64 uploadBufferSize = GetRequiredIntermediateSize(pResource, 0, numSubresources);
@@ -509,8 +514,8 @@ void ResourceManager::UploadTextureData(ID3D12Resource* pResource, const Texture
 
 				const stbi_uc* imageData = fullInitialData[subresourceIndex];
 
-				UINT width = desc.imageDimensions[i].width >> mip;
-				UINT height = desc.imageDimensions[i].height >> mip;
+				UINT width = static_cast<uint32_t>(desc.imageDimensions[i].width >> mip);
+				UINT height = static_cast<uint32_t>(desc.imageDimensions[i].height >> mip);
 				UINT channels = desc.channels;
 				if ((width * channels != desc.imageDimensions[i].rowPitch) || (width * channels * height != desc.imageDimensions[i].slicePitch)) // Probably compressed texture
 				{

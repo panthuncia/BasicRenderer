@@ -71,7 +71,7 @@ LightManager::~LightManager() {
 
 AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
     auto lightBufferView = m_lightBuffer->Add(*lightInfo);
-    auto lightIndex = lightBufferView->GetOffset() / sizeof(LightInfo);
+    uint32_t lightIndex = static_cast<uint32_t>(lightBufferView->GetOffset() / sizeof(LightInfo));
     m_activeLightIndices->Insert(lightIndex);
 
     Components::LightViewInfo viewInfo;

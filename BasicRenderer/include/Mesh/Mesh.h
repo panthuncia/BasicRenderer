@@ -116,8 +116,8 @@ private:
 	void ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
     static int GetNextGlobalIndex();
 
-    static std::atomic<uint64_t> globalMeshCount;
-    uint64_t m_globalMeshID;
+    static std::atomic<uint32_t> globalMeshCount;
+	uint32_t m_globalMeshID;
 
 	std::unique_ptr<std::vector<std::byte>> m_vertices;
 	std::unique_ptr<std::vector<std::byte>> m_skinningVertices;

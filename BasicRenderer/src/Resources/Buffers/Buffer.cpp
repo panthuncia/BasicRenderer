@@ -20,6 +20,8 @@ D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType) {
 	case ResourceCPUAccessType::NONE:
 		return D3D12_HEAP_TYPE_DEFAULT;
 	}
+	spdlog::error("Invalid ResourceCPUAccessType: {}", static_cast<int>(accessType));
+	throw std::runtime_error("Invalid ResourceCPUAccessType");
 }
 
 Buffer::Buffer(

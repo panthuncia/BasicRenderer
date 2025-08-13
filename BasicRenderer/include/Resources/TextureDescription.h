@@ -5,8 +5,8 @@
 struct ImageDimensions {
     uint32_t width = 0;
     uint32_t height = 0;
-    uint32_t rowPitch = 0;
-    uint32_t slicePitch = 0;
+    uint64_t rowPitch = 0;
+    uint64_t slicePitch = 0;
 };
 
 struct TextureDescription {

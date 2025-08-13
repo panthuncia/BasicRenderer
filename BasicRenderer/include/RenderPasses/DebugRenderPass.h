@@ -32,7 +32,7 @@ public:
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<uint32_t>(context.outputResolution.y));
+        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<float>(context.outputResolution.y));
         CD3DX12_RECT scissorRect(0, 0, context.outputResolution.x, context.outputResolution.y);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);

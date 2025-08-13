@@ -57,10 +57,10 @@ Material::Material(const std::string& name,
     m_blendState(blendState) {
 
     m_materialData.materialFlags = materialFlags;
-    m_materialData.ambientStrength = 0.5;
-    m_materialData.specularStrength = 2.0;
-    m_materialData.heightMapScale = 0.05;
-    m_materialData.textureScale = 1.0;
+    m_materialData.ambientStrength = 0.5f;
+    m_materialData.specularStrength = 2.0f;
+    m_materialData.heightMapScale = 0.05f;
+    m_materialData.textureScale = 1.0f;
     m_materialData.baseColorFactor = baseColorFactor;
     m_materialData.emissiveFactor = emissiveFactor;
     m_materialData.metallicFactor = metallicFactor;

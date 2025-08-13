@@ -356,7 +356,15 @@ public:
 //		}
     }
 
-    void onDynamicBufferResized(UINT bufferID, UINT elementSize, UINT numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
+    void onDynamicBufferResized(UINT bufferID, size_t elementSize, size_t numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
+
+        // If debug mode, check buffer size
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+		if (numElements * elementSize > std::numeric_limits<uint32_t>::max()) {
+			spdlog::error("Buffer size exceeds maximum limit for ID: {}", bufferID);
+			throw std::runtime_error("Buffer size exceeds maximum limit");
+		}
+#endif
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -367,8 +375,8 @@ public:
         srvDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
         srvDesc.Buffer.FirstElement = 0;
-        srvDesc.Buffer.NumElements = byteAddress ? numElements / 4 : numElements;
-        srvDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
+        srvDesc.Buffer.NumElements = static_cast<uint32_t>(byteAddress ? numElements / 4 : numElements);
+        srvDesc.Buffer.StructureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize);
         srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
         device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
@@ -377,8 +385,8 @@ public:
             D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
             uavDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
             uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            uavDesc.Buffer.NumElements = byteAddress ? numElements / 4 : numElements;
-            uavDesc.Buffer.StructureByteStride = byteAddress ? 0 : elementSize;
+            uavDesc.Buffer.NumElements = static_cast<uint32_t>(byteAddress ? numElements / 4 : numElements);
+            uavDesc.Buffer.StructureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize);
             uavDesc.Buffer.CounterOffsetInBytes = 0;
             uavDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_UAV_FLAG_RAW : D3D12_BUFFER_UAV_FLAG_NONE;
 

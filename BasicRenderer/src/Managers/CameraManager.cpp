@@ -27,7 +27,7 @@ Components::RenderView CameraManager::AddCamera(CameraInfo& camera) {
 	view.viewID = viewID;
 	view.indirectCommandBuffers = m_pCommandBufferManager->CreateBuffersForView(viewID);
 	view.cameraBufferView = m_pCameraBuffer->Add();
-	view.cameraBufferIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
+	view.cameraBufferIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
 
 	auto bits = m_currentMeshletBitfieldSize;
 	auto words = (bits + 31) / 32;
@@ -69,7 +69,7 @@ void CameraManager::SetCommandBufferManager(IndirectCommandBufferManager* comman
 	m_pCommandBufferManager = commandBufferManager;
 }
 
-void CameraManager::SetMeshletBitfieldSize(unsigned int numMeshlets) {
+void CameraManager::SetMeshletBitfieldSize(uint64_t numMeshlets) {
 	m_currentMeshletBitfieldSize = numMeshlets;
 	for (auto& pair : m_meshletBitfieldBuffers) {
 		auto& buffer = pair.second;

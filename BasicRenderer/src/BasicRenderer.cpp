@@ -1,6 +1,5 @@
 ﻿#include <directx/d3dx12.h> // Included here to avoid conflicts with Windows SDK headers
 #include <iostream>
-#define NOMINMAX
 #include <Windows.h>
 #include <windowsx.h>
 #include <directx/d3d12.h>
@@ -210,9 +209,9 @@ point getRandomPointInVolume(double xmin, double xmax,
     std::random_device rd;
     std::mt19937 gen(rd());
 
-    std::uniform_real_distribution<> distX(xmin, xmax);
-    std::uniform_real_distribution<> distY(ymin, ymax);
-    std::uniform_real_distribution<> distZ(zmin, zmax);
+    std::uniform_real_distribution<float> distX(static_cast<float>(xmin), static_cast<float>(xmax));
+    std::uniform_real_distribution<float> distY(static_cast<float>(ymin), static_cast<float>(ymax));
+    std::uniform_real_distribution<float> distZ(static_cast<float>(zmin), static_cast<float>(zmax));
 
     point p;
     p.x = distX(gen);
@@ -375,7 +374,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         else {
 
             auto currentTime = std::chrono::system_clock::now();
-            std::chrono::duration<double> elapsedSeconds = currentTime - lastUpdateTime;
+            std::chrono::duration<float> elapsedSeconds = currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
 
             frameIndex += 1;
@@ -395,7 +394,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 // Window callback procedure
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 
-    if (toupper(wParam) == VK_ESCAPE) {
+    if (toupper(static_cast<int>(wParam)) == VK_ESCAPE) {
         message = WM_DESTROY;
     }
 
