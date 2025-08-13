@@ -1,0 +1,7 @@
+#ifndef __BLOOM_FILTER_AND_ASPECT_CONSTANTS_H__
+#define __BLOOM_FILTER_AND_ASPECT_CONSTANTS_H__
+
+#define FILTER_RADIUS FloatRootConstant2
+#define ASPECT_RATIO FloatRootConstant3
+
+#endif // __BLOOM_FILTER_AND_ASPECT_CONSTANTS_H__

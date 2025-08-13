@@ -170,7 +170,7 @@ private:
 		D3D12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLHeadPointerTexture->GetAPIResource());
 		commandList->ResourceBarrier(1, &uavBarrier);
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.renderResolution.x, context.renderResolution.y);
+		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.renderResolution.x, context.renderResolution.y);
 		commandList->RSSetViewports(1, &viewport);
 		commandList->RSSetScissorRects(1, &scissorRect);
@@ -195,7 +195,7 @@ private:
 		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
 
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLNodePoolSize] = m_numPPLLNodes;
+		transparencyInfo[PPLLNodePoolSize] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
 		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
 	
 		if (m_meshShaders) {
@@ -222,7 +222,7 @@ private:
 				commandList->SetPipelineState(pso.GetAPIPipelineState());
 
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-				perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 				commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -249,7 +249,7 @@ private:
 				commandList->SetPipelineState(pso.GetAPIPipelineState());
 
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-				perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
 				commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -283,7 +283,7 @@ private:
 	bool m_gtaoEnabled = true;
 	bool m_clusteredLightingEnabled = true;
 
-	size_t m_numPPLLNodes;
+	uint64_t m_numPPLLNodes;
 
 	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
 	std::shared_ptr<Buffer> m_PPLLCounter;

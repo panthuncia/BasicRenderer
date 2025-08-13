@@ -156,7 +156,7 @@ bool UpscalingManager::InitFFX() {
 	return false;
 }
 
-DirectX::XMFLOAT2 UpscalingManager::GetJitter(unsigned int frameNumber) {
+DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 
     switch (m_upscalingMode)
     {

@@ -19,8 +19,8 @@ public:
 
 	void ProcessDeletions() {
 		m_deletionQueue.back().clear();
-		for (int i = m_deletionQueue.size() - 2; i >= 0; --i) {
-			m_deletionQueue[i + 1].swap(m_deletionQueue[i]);
+		for (size_t i = m_deletionQueue.size() - 1; i >= 1; --i) {
+			m_deletionQueue[i].swap(m_deletionQueue[i-1]);
 		}
 	}
 

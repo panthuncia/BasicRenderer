@@ -37,7 +37,7 @@ public:
         CD3DX12_VIEWPORT viewport(0.0f, 0.0f, skyboxRes, skyboxRes);
         CD3DX12_RECT scissorRect(0, 0, skyboxRes, skyboxRes);
 
-        auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
+        auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0f, 0.1f, 2.0f);
 
 
 		std::vector<ID3D12GraphicsCommandList*> commandLists;

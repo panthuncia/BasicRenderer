@@ -19,7 +19,7 @@ project ("BasicRenderer")
 
 if (MSVC)
   add_compile_options(/Zc:preprocessor)
-  #add_compile_options(/WX)
+  add_compile_options(/WX)
   add_compile_options(/wd4828)
 endif()
 

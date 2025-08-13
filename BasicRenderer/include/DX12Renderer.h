@@ -67,7 +67,7 @@ public:
 
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
-    void Update(double elapsedSeconds);
+    void Update(float elapsedSeconds);
     void Render();
     void Cleanup();
     ComPtr<ID3D12Device10>& GetDevice();

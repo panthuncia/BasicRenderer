@@ -173,7 +173,7 @@ private:
         };
         commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.renderResolution.x, context.renderResolution.y);
+        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
         CD3DX12_RECT scissorRect(0, 0, context.renderResolution.x, context.renderResolution.y);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
@@ -228,7 +228,7 @@ private:
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
                 commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -251,7 +251,7 @@ private:
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
                 commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -281,7 +281,7 @@ private:
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
                 commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -303,7 +303,7 @@ private:
                 commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
                 commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 

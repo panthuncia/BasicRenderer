@@ -89,7 +89,7 @@ public:
 		// opaque buffer
 		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
-			unsigned int numThreadGroups = std::ceil(numOpaqueDraws / 64.0);
+			uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numOpaqueDraws / 64.0));
 			// First, process buffer for main camera
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
@@ -112,7 +112,7 @@ public:
 					int i = 0;
 					for (auto& view : lightViewInfo.renderViews) {
 
-						unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
+						uint32_t lightCameraIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
 						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 
 						miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
@@ -133,7 +133,7 @@ public:
 		// alpha test buffer
 		auto numAlphaTestDraws = context.drawStats.numAlphaTestDraws;
 		if (numAlphaTestDraws > 0) {
-			unsigned int numThreadGroups = std::ceil(numAlphaTestDraws / 64.0);
+			uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numAlphaTestDraws / 64.0));
 
 			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
@@ -156,7 +156,7 @@ public:
 					int i = 0;
 					for (auto& view : lightViewInfo.renderViews) {
 
-						unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
+						uint32_t lightCameraIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
 						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 
 						miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
@@ -180,7 +180,7 @@ public:
 			commandList->SetPipelineState(m_blendPSO.Get());
 			auto numBlendDraws = context.drawStats.numBlendDraws;
 			if (numBlendDraws > 0) {
-				unsigned int numThreadGroups = std::ceil(numBlendDraws / 64.0);
+				uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numBlendDraws / 64.0));
 
 				commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
 
@@ -204,7 +204,7 @@ public:
 						for (auto& view : lightViewInfo.renderViews) {
 							auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
 
-							unsigned int lightCameraIndex = view.cameraBufferView->GetOffset() / sizeof(CameraInfo);
+							unsigned int lightCameraIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
 							commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
 
 							miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;

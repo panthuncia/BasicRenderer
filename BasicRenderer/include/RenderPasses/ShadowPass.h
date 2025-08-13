@@ -182,8 +182,8 @@ private:
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                    perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-                    perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+                    perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+                    perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>((pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
                     commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
                     D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
@@ -229,14 +229,14 @@ private:
                     commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                 }
 
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 drawObjects();
                 break;
             }
             case Components::LightType::Point: {
-                int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < 6; i++) {
                     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
@@ -253,8 +253,8 @@ private:
                 break;
             }
             case Components::LightType::Directional: {
-                int lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
                     auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
@@ -290,7 +290,7 @@ private:
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                    perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                    perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
                     commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -311,7 +311,7 @@ private:
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                    perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                    perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
                     commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -332,7 +332,7 @@ private:
                     commandList->SetPipelineState(pso.GetAPIPipelineState());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                    perMeshIndices[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
+                    perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
                     commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
 
@@ -364,8 +364,8 @@ private:
                 break;
             }
             case Components::LightType::Point: {
-                int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < 6; i++) {
                     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
@@ -387,8 +387,8 @@ private:
                 break;
             }
             case Components::LightType::Directional: {
-                int lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
                     auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
@@ -454,7 +454,7 @@ private:
                     commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
                     commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
                 }
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 auto& views = lightViewInfo.renderViews;
                 auto& opaque = views[0].indirectCommandBuffers.opaqueIndirectCommandBuffer;
@@ -469,8 +469,8 @@ private:
                 break;
             }
             case Components::LightType::Point: {
-                int lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
                 for (int i = 0; i < 6; i++) {
                     D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
@@ -497,8 +497,8 @@ private:
             }
             case Components::LightType::Directional: {
                 //int lightIndex = light->GetCurrentLightBufferIndex();
-                int lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
-                int lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                uint32_t lightViewIndex = static_cast<uint32_t>(lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades());
+                uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
                     auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
                     auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;

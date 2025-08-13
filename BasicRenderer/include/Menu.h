@@ -216,7 +216,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 
 	DirectX::XMUINT2 renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	DirectX::XMUINT2 outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-	io.DisplaySize = ImVec2(outputResolution.x, outputResolution.y);
+	io.DisplaySize = ImVec2(static_cast<float>(outputResolution.x), static_cast<float>(outputResolution.y));
     io.DisplayFramebufferScale = ImVec2(
         2.0, 2.0);
 

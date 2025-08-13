@@ -320,7 +320,7 @@ private:
 			// not aliased
 			return { id };
 		}
-		int group = it->second;
+		uint64_t group = it->second;
 		std::vector<uint64_t> out;
 		// scan for any resource mapped to the same group
 		for (auto const& p : resourceToAliasGroup) {

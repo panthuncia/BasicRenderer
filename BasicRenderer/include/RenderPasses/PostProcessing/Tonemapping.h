@@ -80,7 +80,7 @@ public:
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
 		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.outputResolution.x, context.outputResolution.y);
+		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<float>(context.outputResolution.y));
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.outputResolution.x, context.outputResolution.y);
 		commandList->RSSetViewports(1, &viewport);
 		commandList->RSSetScissorRects(1, &scissorRect);

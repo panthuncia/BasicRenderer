@@ -124,9 +124,9 @@ namespace Components {
 		std::optional<IndirectDrawInfo> alphaTest;
 		std::optional<IndirectDrawInfo> blend;
 		std::shared_ptr<BufferView> perObjectCBView;
-		uint64_t perObjectCBIndex;
+		uint32_t perObjectCBIndex;
 		std::shared_ptr<BufferView> normalMatrixView;
-		uint64_t normalMatrixIndex;
+		uint32_t normalMatrixIndex;
 	};
 
 	struct IndirectCommandBuffers {
@@ -146,9 +146,9 @@ namespace Components {
 		std::shared_ptr<PixelBuffer> linearDepthMap;
 	};
 	struct RenderView {
-		uint64_t viewID;
+		uint32_t viewID;
 		std::shared_ptr<BufferView> cameraBufferView;;
-		uint64_t cameraBufferIndex;
+		uint32_t cameraBufferIndex;
 		IndirectCommandBuffers indirectCommandBuffers;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
@@ -158,8 +158,8 @@ namespace Components {
 	struct LightViewInfo {
 		std::vector<RenderView> renderViews;
 		std::shared_ptr<BufferView> lightBufferView;
-		uint64_t lightBufferIndex;
-		uint64_t viewInfoBufferIndex;
+		uint32_t lightBufferIndex;
+		uint32_t viewInfoBufferIndex;
 		Matrix projectionMatrix;
 		std::shared_ptr<PixelBuffer> depthMap;
 		std::shared_ptr<PixelBuffer> linearDepthMap;

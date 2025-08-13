@@ -32,7 +32,7 @@ public:
 
         commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, context.outputResolution.x, context.outputResolution.y);
+        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<uint32_t>(context.outputResolution.y));
         CD3DX12_RECT scissorRect(0, 0, context.outputResolution.x, context.outputResolution.y);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
@@ -44,7 +44,7 @@ public:
         commandList->SetGraphicsRootSignature(debugRootSignature.Get());
 
         commandList->SetGraphicsRootDescriptorTable(0, m_texture->GetSRVInfo(0).gpuHandle);
-        auto viewMatrix = XMMatrixTranspose(XMMatrixMultiply(XMMatrixScaling(0.2f, 0.2f, 1.0f), XMMatrixTranslation(0.7, -0.7, 0)));
+        auto viewMatrix = XMMatrixTranspose(XMMatrixMultiply(XMMatrixScaling(0.2f, 0.2f, 1.0f), XMMatrixTranslation(0.7f, -0.7f, 0)));
         commandList->SetGraphicsRoot32BitConstants(1, 16, &viewMatrix, 0);
 
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);

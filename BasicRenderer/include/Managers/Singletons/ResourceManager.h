@@ -100,7 +100,7 @@ public:
     std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
         auto& device = DeviceManager::GetInstance().GetDevice();
         size_t bufferSize = numElements * elementSize;
-        unsigned int counterOffset = 0;
+        size_t counterOffset = 0;
 		if (UAVCounter) {
             size_t requiredSize = (numElements * elementSize) + sizeof(UINT); // Add space for the counter
             unsigned int alignment = elementSize; // Buffer should be a multiple of sizeof(T)
@@ -239,7 +239,7 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "", size_t alignment = 1, bool UAV = false) {
+    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(uint32_t capacity = 64, std::wstring name = "", uint64_t alignment = 1, bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
         auto& device = DeviceManager::GetInstance().GetDevice();
@@ -255,7 +255,7 @@ public:
 //        transition.name = L"LazyDynamicStructuredBuffer";
 //#endif
 //        QueueResourceTransition(transition);
-        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer, bool uav) {
+        pDynamicBuffer->SetOnResized([this](UINT bufferID, uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool uav) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, uav);
             });
 
@@ -302,7 +302,7 @@ public:
     }
 
     std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress = false, bool UAV = false);
-	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(UINT capacity, std::wstring name = L"");
+	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(uint64_t capacity, std::wstring name = L"");
 
     UINT GetNextResizableBufferID() {
         UINT val = numResizableBuffers;
@@ -310,7 +310,7 @@ public:
         return val;
     }
 
-    void onDynamicStructuredBufferResized(UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer, bool UAV) {
+    void onDynamicStructuredBufferResized(UINT bufferID, uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool UAV) {
         UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
         auto& device = DeviceManager::GetInstance().GetDevice();

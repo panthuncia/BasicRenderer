@@ -60,20 +60,20 @@ public:
 	bool HasBaseSkin() const { return m_baseSkeleton != nullptr; }
 	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }
 
-	size_t GetMeshletBufferOffset() const {
+	uint64_t GetMeshletBufferOffset() const {
 		return m_meshletBufferView->GetOffset();
 	}
 
-	size_t GetMeshletVerticesBufferOffset() const {
+	uint64_t GetMeshletVerticesBufferOffset() const {
 		return m_meshletVerticesBufferView->GetOffset();
 	}
 
-	size_t GetMeshletTrianglesBufferOffset() const {
+	uint64_t GetMeshletTrianglesBufferOffset() const {
 		return m_meshletTrianglesBufferView->GetOffset();
 	}
 
-	size_t GetMeshletCount() {
-		return m_meshlets.size();
+	uint32_t GetMeshletCount() {
+		return static_cast<uint32_t>(m_meshlets.size()); // TODO: support meshes with >32 bit int meshlets?
 	}
 
 	void SetPerMeshBufferView(std::unique_ptr<BufferView> view) {

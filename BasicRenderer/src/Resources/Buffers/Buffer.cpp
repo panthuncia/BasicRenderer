@@ -25,7 +25,7 @@ D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType) {
 Buffer::Buffer(
 	ID3D12Device* device, 
 	ResourceCPUAccessType accessType, 
-	size_t bufferSize, 
+	uint64_t bufferSize, 
 	bool upload, bool unorderedAccess) : 
 	GloballyIndexedResource(){
 	m_accessType = accessType;

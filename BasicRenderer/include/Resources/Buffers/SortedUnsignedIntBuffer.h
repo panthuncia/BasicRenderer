@@ -141,7 +141,7 @@ private:
 		size_t oldCapacity = m_capacity;
 		size_t sizeDiff = newSize - m_capacity;
 		m_capacity = newSize;
-		onResized(m_globalResizableBufferID, sizeof(unsigned int), m_capacity, this);
+		onResized(m_globalResizableBufferID, static_cast<uint32_t>(sizeof(uint32_t)), m_capacity, this);
 		SetName(name);
     }
 };

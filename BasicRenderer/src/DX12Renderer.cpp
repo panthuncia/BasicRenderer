@@ -307,7 +307,7 @@ void DX12Renderer::SetSettings() {
 	float maxShadowDistance = 30.0f;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
-    settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
+    settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
@@ -427,7 +427,7 @@ void DX12Renderer::SetSettings() {
 		auto& settingsManager = SettingsManager::GetInstance();
 		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
 		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
-        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
 		ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
@@ -828,7 +828,7 @@ void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
     }
 }
 
-void DX12Renderer::Update(double elapsedSeconds) {
+void DX12Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
 	StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, computeQueue.Get()); // Gather statistics for the last iteration of the frame
@@ -858,7 +858,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
     auto& world = ECSManager::GetInstance().GetWorld();
 	world.progress();
 
-    auto camera = currentScene->GetPrimaryCamera();
+    auto& camera = currentScene->GetPrimaryCamera();
     unsigned int cameraIndex = camera.get<Components::RenderView>().cameraBufferIndex;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
@@ -1129,8 +1129,8 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
         });
 
     context.SetActionHandler(InputAction::RotateCamera, [this](float magnitude, const InputData& inputData) {
-        horizontalAngle -= inputData.mouseDeltaX * 0.005;
-        verticalAngle -= inputData.mouseDeltaY * 0.005;
+        horizontalAngle -= static_cast<float>(inputData.mouseDeltaX) * 0.005f;
+        verticalAngle -= static_cast<float>(inputData.mouseDeltaY) * 0.005f;
         });
 
     context.SetActionHandler(InputAction::ZoomIn, [this](float magnitude, const InputData& inputData) {

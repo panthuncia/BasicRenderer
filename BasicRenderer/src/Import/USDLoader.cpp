@@ -875,7 +875,7 @@ namespace USDLoader {
 		return outMeshes;
 	}
 
-	std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const VtTokenArray rawJointOrder, const UsdSkelSkeletonQuery& skelQuery, const std::shared_ptr<Scene>& scene, float metersPerUnit) {
+	std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const VtTokenArray rawJointOrder, const UsdSkelSkeletonQuery& skelQuery, const std::shared_ptr<Scene>& scene, double metersPerUnit) {
 		if (loadingCache.skeletonMap.contains(skel.GetPrim().GetPath().GetString())) {
 			spdlog::info("Skeleton {} already processed, skipping.", skel.GetPrim().GetPath().GetString());
 			return loadingCache.skeletonMap[skel.GetPrim().GetPath().GetString()];
@@ -934,7 +934,7 @@ namespace USDLoader {
 		return skeleton;
 	}
 
-	std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, float metersPerUnit, const VtTokenArray& jointOrder) {
+	std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, double metersPerUnit, const VtTokenArray& jointOrder) {
 		if (!animQuery) {
 			return nullptr;
 		}

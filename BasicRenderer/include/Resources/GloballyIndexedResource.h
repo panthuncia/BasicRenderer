@@ -43,7 +43,7 @@ public:
 		m_SRVViews[static_cast<unsigned int>(type)] = {heap, infos};
 	}
 
-	void SetUAVGPUDescriptors(std::shared_ptr<DescriptorHeap> pUAVHeap, const std::vector<std::vector<ShaderVisibleIndexInfo>>& uavInfos, unsigned int counterOffset = 0) {
+	void SetUAVGPUDescriptors(std::shared_ptr<DescriptorHeap> pUAVHeap, const std::vector<std::vector<ShaderVisibleIndexInfo>>& uavInfos, size_t counterOffset = 0) {
 		m_pUAVShaderVisibleHeap = pUAVHeap;
 		m_UAVShaderVisibleInfos = uavInfos;
 		m_counterOffset = counterOffset;
@@ -98,7 +98,7 @@ public:
 	}
 
 	const ShaderVisibleIndexInfo& GetUAVShaderVisibleInfo(unsigned int mip, unsigned int slice = 0) { return m_UAVShaderVisibleInfos[slice][mip]; }
-	unsigned int GetUAVCounterOffset() { return m_counterOffset; }
+	size_t GetUAVCounterOffset() { return m_counterOffset; }
 	unsigned int GetNumUAVMipLevels() { return static_cast<unsigned int>(m_UAVShaderVisibleInfos[0].size()); }
 	unsigned int GetNumUAVSlices() { return static_cast<unsigned int>(m_UAVShaderVisibleInfos.size()); }
 	const NonShaderVisibleIndexInfo& GetUAVNonShaderVisibleInfo(unsigned int mip, unsigned int slice = 0) { return m_UAVNonShaderVisibleInfos[slice][mip]; }
@@ -187,7 +187,7 @@ private:
 	std::shared_ptr<DescriptorHeap> m_pRTVHeap = nullptr;
 	std::vector<std::vector<NonShaderVisibleIndexInfo>> m_DSVInfos;
 	std::shared_ptr<DescriptorHeap> m_pDSVHeap = nullptr;
-	unsigned int m_counterOffset = 0;
+	size_t m_counterOffset = 0;
 
 	SRVViewType m_primaryViewType = SRVViewType::Invalid;
 

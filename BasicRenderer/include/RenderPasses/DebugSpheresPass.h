@@ -50,7 +50,7 @@ public:
 
 		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, context.outputResolution.x, context.outputResolution.y);
+		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<float>(context.outputResolution.y));
 		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.outputResolution.x, context.outputResolution.y);
 		commandList->RSSetViewports(1, &viewport);
 		commandList->RSSetScissorRects(1, &scissorRect);
@@ -142,9 +142,7 @@ public:
 private:
 
 	void CreateDebugRootSignature() {
-		CD3DX12_DESCRIPTOR_RANGE1 debugDescriptorRangeSRV;
-
-		CD3DX12_ROOT_PARAMETER1 debugRootParameters[1];
+		CD3DX12_ROOT_PARAMETER1 debugRootParameters[1] = {};
 		debugRootParameters[0].InitAsConstants(8, 1, 0, D3D12_SHADER_VISIBILITY_MESH); 
 
 

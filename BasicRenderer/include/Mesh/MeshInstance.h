@@ -31,11 +31,11 @@ public:
         return m_mesh;
     }
 
-    unsigned int GetPostSkinningVertexBufferOffset() const {
+    uint64_t GetPostSkinningVertexBufferOffset() const {
         return m_postSkinningVertexBufferView->GetOffset();
     }
 
-	unsigned int GetPerMeshInstanceBufferOffset() const {
+	uint64_t GetPerMeshInstanceBufferOffset() const {
 		return m_perMeshInstanceBufferView->GetOffset();
 	}
 

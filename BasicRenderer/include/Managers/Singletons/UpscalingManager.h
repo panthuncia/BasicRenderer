@@ -103,7 +103,7 @@ public:
 
     bool InitSL();
 	bool InitFFX();
-    DirectX::XMFLOAT2 GetJitter(unsigned int frameNumber);
+    DirectX::XMFLOAT2 GetJitter(uint64_t frameNumber);
 	UpscalingMode GetCurrentUpscalingMode() const { return m_upscalingMode; }
     UpscaleQualityMode GetCurrentUpscalingQualityMode() const { return m_upscaleQualityMode; }
 

@@ -33,7 +33,7 @@ public:
 
 		auto& commandList = context.commandList;
 
-        auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, 0.1, 2.0);
+        auto projection = XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0f, 0.1f, 2.0f);
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {
             ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(), // The texture descriptor heap
@@ -59,9 +59,9 @@ public:
             unsigned int maxMipLevels = prefilteredEnvironment->GetBuffer()->GetNumRTVMipLevels();
             for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
             {
-                unsigned int mipWidth = prefilteredRes * std::pow(0.5, mip);
-                unsigned int mipHeight = prefilteredRes * std::pow(0.5, mip);
-                CD3DX12_VIEWPORT viewport(0.0f, 0.0f, mipWidth, mipHeight);
+                uint32_t mipWidth = static_cast<uint32_t>(prefilteredRes * std::pow(0.5, mip));
+                uint32_t mipHeight = static_cast<uint32_t>(prefilteredRes * std::pow(0.5, mip));
+                CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(mipWidth), static_cast<float>(mipHeight));
                 CD3DX12_RECT scissorRect(0, 0, mipWidth, mipHeight);
                 commandList->RSSetViewports(1, &viewport);
                 commandList->RSSetScissorRects(1, &scissorRect);

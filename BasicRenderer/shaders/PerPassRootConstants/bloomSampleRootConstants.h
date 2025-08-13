@@ -1,3 +1,5 @@
+#include "bloomFilterAndAspectConstants.h"
+
 #ifndef __BLOOM_DOWNSAMPLE_ROOT_CONSTANTS_H__
 #define __BLOOM_DOWNSAMPLE_ROOT_CONSTANTS_H__
 
@@ -7,7 +9,5 @@
 
 #define SRC_TEXEL_SIZE_X FloatRootConstant0
 #define SRC_TEXEL_SIZE_Y FloatRootConstant1
-#define FILTER_RADIUS FloatRootConstant2
-#define ASPECT_RATIO FloatRootConstant3
 
 #endif // __BLOOM_DOWNSAMPLE_ROOT_CONSTANTS_H__
