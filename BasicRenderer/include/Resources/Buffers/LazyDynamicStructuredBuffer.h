@@ -61,7 +61,7 @@ public:
 		m_freeIndices.push_back(index);
     }
 
-    void Resize(uint64_t newCapacity) {
+    void Resize(uint32_t newCapacity) {
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
@@ -74,7 +74,7 @@ public:
     }
 
 
-    void SetOnResized(const std::function<void(UINT, size_t, size_t, DynamicBufferBase* buffer, bool)>& callback) {
+    void SetOnResized(const std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer, bool)>& callback) {
         onResized = callback;
     }
 
@@ -124,14 +124,14 @@ private:
         }
     }
 
-    uint64_t m_capacity;
+    uint32_t m_capacity;
     uint64_t m_usedCapacity = 0;
     bool m_needsUpdate;
 	std::deque<uint64_t> m_freeIndices;
     UINT m_globalResizableBufferID;
     uint32_t m_elementSize = 0;
 
-    std::function<void(UINT, uint64_t, uint64_t, DynamicBufferBase* buffer, bool)> onResized;
+    std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer, bool)> onResized;
     inline static std::wstring m_name = L"LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;

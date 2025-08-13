@@ -208,8 +208,15 @@ std::shared_ptr<Texture> LoadTextureFromFileDXT(std::wstring filePath, ImageFile
 	// Extract the first mip level
 	const DirectX::Image* img = image.GetImage(0, 0, 0); // mip 0, face 0, slice 0
 	ImageDimensions dim;
-	dim.width = metadata.width;
-	dim.height = metadata.height;
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+    if (metadata.width > std::numeric_limits<uint32_t>().max()|| metadata.height > std::numeric_limits<uint32_t>().max()) {
+		spdlog::error("Texture dimensions exceed maximum limit for file: {}", ws2s(filePath));
+		throw std::runtime_error("Texture dimensions exceed maximum limit");
+    }
+#endif
+	dim.width = static_cast<uint32_t>(metadata.width);
+	dim.height = static_cast<uint32_t>(metadata.height);
 	dim.rowPitch = img->rowPitch;
 	dim.slicePitch = img->slicePitch;
 
@@ -317,10 +324,16 @@ std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allo
     for (size_t face = 0; face < 6; ++face) {
         for (size_t mip = 0; mip < metadata.mipLevels; ++mip) {
             const DirectX::Image* img = image.GetImage(mip, face, 0); // mip 0, face i, slice 0
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+            if (metadata.width > std::numeric_limits<uint32_t>().max() || metadata.height > std::numeric_limits<uint32_t>().max()) {
+                spdlog::error("Texture dimensions exceed maximum limit for file: {}", ws2s(ddsFilePath));
+                throw std::runtime_error("Texture dimensions exceed maximum limit");
+            }
+#endif
             faces.push_back(img->pixels);
 			ImageDimensions dim;
-			dim.width = img->width;
-			dim.height = img->height;
+			dim.width = static_cast<uint32_t>(img->width);
+			dim.height = static_cast<uint32_t>(img->height);
 			dim.rowPitch = img->rowPitch;
 			dim.slicePitch = img->slicePitch;
 			desc.imageDimensions.push_back(dim);
@@ -570,25 +583,71 @@ std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zF
     return splits;
 }
 
-std::wstring to_wstring(const std::string& stringToConvert) {
-    std::wstring wideString =
-        std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes(stringToConvert);
-    return wideString;
+std::wstring s2ws(const std::string_view& utf8)
+{
+    if (utf8.empty()) return {};
+    int needed = ::MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        utf8.data(),
+        static_cast<int>(utf8.size()),
+        nullptr,
+        0
+    );
+    if (needed == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "MultiByteToWideChar(size)");
+
+    std::wstring out(needed, L'\0');
+
+    int written = ::MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        utf8.data(),
+        static_cast<int>(utf8.size()),
+        out.data(),
+        needed
+    );
+    if (written == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "MultiByteToWideChar(data)");
+
+    return out;
 }
 
-std::wstring s2ws(const std::string& str) {
-    using convert_typeX = std::codecvt_utf8<wchar_t>;
-    std::wstring_convert<convert_typeX, wchar_t> converterX;
+std::string ws2s(const std::wstring_view& wide)
+{
+    if (wide.empty()) return {};
 
-    return converterX.from_bytes(str);
-}
+    int needed = ::WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wide.data(),
+        static_cast<int>(wide.size()),
+        nullptr,
+        0,
+        nullptr, nullptr
+    );
+    if (needed == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "WideCharToMultiByte(size)");
 
+    std::string out(needed, '\0');
 
-std::string ws2s(const std::wstring& wstr) {
-    using convert_typeX = std::codecvt_utf8<wchar_t>;
-    std::wstring_convert<convert_typeX, wchar_t> converterX;
+    int written = ::WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wide.data(),
+        static_cast<int>(wide.size()),
+        out.data(),
+        needed,
+        nullptr, nullptr
+    );
+    if (written == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "WideCharToMultiByte(data)");
 
-    return converterX.to_bytes(wstr);
+    return out;
 }
 
 DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV) {
@@ -1325,6 +1384,10 @@ DirectX::XMMATRIX GetProjectionMatrixForLight(LightInfo info) {
     case Components::LightType::Point:
         return XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, info.nearPlane, info.farPlane);
         break;
+    case Components::LightType::Directional:
+		throw std::runtime_error("Implemented elsewhere"); // TODO: Consolidate?
+    default:
+		throw std::runtime_error("Unknown light type for projection matrix");
     }
 }
 

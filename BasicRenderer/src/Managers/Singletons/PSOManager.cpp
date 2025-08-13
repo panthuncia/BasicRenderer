@@ -941,6 +941,9 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outMandatoryI
 
                         return std::move(rawText);
                     }
+                    else {
+						throw std::runtime_error("ResourceDescriptorIndex requires exactly one argument");
+                    }
 					};
 
                 if (funcName == "ResourceDescriptorIndex") {

@@ -76,9 +76,9 @@ std::vector<Cascade> setupCascades(int numCascades, const DirectX::XMVECTOR& lig
 
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda = 0.8f);
 
-std::string ws2s(const std::wstring& wstr);
+std::string ws2s(const std::wstring_view& wstr);
 
-std::wstring s2ws(const std::string& str);
+std::wstring s2ws(const std::string_view& str);
 
 DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV);
 

@@ -120,6 +120,9 @@ ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Devic
         return device.Get();
         break;
     }
+    default:
+		return device.Get();
+		break;
     }
 }
 
@@ -196,6 +199,9 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 
         return { jitterX, jitterY };
     }
+    default:
+		return { 0.0f, 0.0f };
+		break;
     }
 }
 
@@ -436,8 +442,8 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
     // Jitter is calculated earlier in the frame using a callback from the camera update
     dispatchUpscale.jitterOffset.x = camera.jitterPixelSpace.x;
     dispatchUpscale.jitterOffset.y = -camera.jitterPixelSpace.y;
-	dispatchUpscale.motionVectorScale.x = -renderRes.x; // FFX expects left-handed, we use right-handed
-    dispatchUpscale.motionVectorScale.y = renderRes.y;
+	dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x); // FFX expects left-handed, we use right-handed
+    dispatchUpscale.motionVectorScale.y = static_cast<float>(renderRes.y);
     dispatchUpscale.reset = false;
     dispatchUpscale.enableSharpening = false;
     //dispatchUpscale.sharpness = m_Sharpness;

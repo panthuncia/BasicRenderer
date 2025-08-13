@@ -75,7 +75,7 @@ public:
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 				
 				unsigned int numGroups = static_cast<unsigned int>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
@@ -91,7 +91,7 @@ public:
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
 				unsigned int numGroups = static_cast<uint32_t>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
@@ -107,7 +107,7 @@ public:
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
 				unsigned int numGroups = static_cast<unsigned int>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));

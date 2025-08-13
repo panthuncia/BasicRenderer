@@ -113,8 +113,8 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 	auto normalMatrixView = m_normalMatrixBuffer->Add(DirectX::XMFLOAT4X4());
 	drawInfo.normalMatrixView = normalMatrixView;
 	drawInfo.perObjectCBView = perObjectCBview;
-	drawInfo.normalMatrixIndex = normalMatrixView->GetOffset() / sizeof(DirectX::XMFLOAT4X4);
-	drawInfo.perObjectCBIndex = perObjectCBview->GetOffset() / sizeof(PerObjectCB);
+	drawInfo.normalMatrixIndex = static_cast<uint32_t>(normalMatrixView->GetOffset() / sizeof(DirectX::XMFLOAT4X4));
+	drawInfo.perObjectCBIndex = static_cast<uint32_t>(perObjectCBview->GetOffset() / sizeof(PerObjectCB));
 	return drawInfo;
 }
 

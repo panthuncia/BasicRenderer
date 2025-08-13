@@ -11,7 +11,7 @@ void Environment::SetHDRI(std::shared_ptr<Texture> hdriTexture) {
 }
 
 unsigned int Environment::GetEnvironmentIndex() const {
-	return m_environmentBufferView->GetOffset()/sizeof(EnvironmentInfo);
+	return static_cast<uint32_t>(m_environmentBufferView->GetOffset()/sizeof(EnvironmentInfo));
 }
 
 void Environment::SetEnvironmentCubemap(std::shared_ptr<Texture> texture) {
