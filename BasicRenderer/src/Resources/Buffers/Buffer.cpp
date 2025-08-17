@@ -20,19 +20,20 @@ D3D12_HEAP_TYPE TranslateAccessType(ResourceCPUAccessType accessType) {
 	case ResourceCPUAccessType::NONE:
 		return D3D12_HEAP_TYPE_DEFAULT;
 	}
+	spdlog::error("Invalid ResourceCPUAccessType: {}", static_cast<int>(accessType));
+	throw std::runtime_error("Invalid ResourceCPUAccessType");
 }
 
 Buffer::Buffer(
 	ID3D12Device* device, 
 	ResourceCPUAccessType accessType, 
-	size_t bufferSize, 
+	uint64_t bufferSize, 
 	bool upload, bool unorderedAccess) : 
 	GloballyIndexedResource(){
 	m_accessType = accessType;
 	D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(TranslateAccessType(accessType));
 	D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
 	unorderedAccess ? bufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
 	auto hr = device->CreateCommittedResource(
 		&heapProps,
 		D3D12_HEAP_FLAG_NONE,

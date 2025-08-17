@@ -42,9 +42,7 @@ static std::string recurse_structs(
 
 static std::string recurse_structs_hlsl(
     const json& node,
-    const std::string& prefix,
-    const std::string& indent,
-    std::vector<std::string>& types)
+    const std::string& prefix)
 {
     std::string out;
     for (auto& [key, child] : node.items()) {
@@ -118,7 +116,7 @@ int generate_hlsl(json& data, const char* out_path) {
 
         result += "struct " + nsName + " {\n";
         // recurse to fill in nested structs and members
-        result += recurse_structs_hlsl(nsObj, nsName, "  ", types);
+        result.append(recurse_structs_hlsl(nsObj, nsName));
         result += "};\n\n";
     }
 

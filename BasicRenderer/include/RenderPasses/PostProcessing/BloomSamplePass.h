@@ -54,10 +54,10 @@ public:
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         // Calculate viewport from mip level
-        unsigned int width = m_pHDRTarget->GetWidth() >> m_mipIndex + mipOffset;
-        unsigned int height = m_pHDRTarget->GetHeight() >> m_mipIndex + mipOffset;
+        unsigned int width = m_pHDRTarget->GetWidth() >> (m_mipIndex + mipOffset);
+        unsigned int height = m_pHDRTarget->GetHeight() >> (m_mipIndex + mipOffset);
 
-        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, width, height);
+        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
         CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, width, width);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
@@ -89,8 +89,8 @@ public:
             miscFloats[ASPECT_RATIO] = misc[MIP_WIDTH] / (float)misc[MIP_HEIGHT]; // Aspect ratio
         }
         else {
-            miscFloats[SRC_TEXEL_SIZE_X] = 1.0 / misc[MIP_WIDTH]; // Texel size X
-            miscFloats[SRC_TEXEL_SIZE_Y] = 1.0 / misc[MIP_HEIGHT]; // Texel size Y
+            miscFloats[SRC_TEXEL_SIZE_X] = 1.0f / misc[MIP_WIDTH]; // Texel size X
+            miscFloats[SRC_TEXEL_SIZE_Y] = 1.0f / misc[MIP_HEIGHT]; // Texel size Y
         }
         commandList->SetGraphicsRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, &miscFloats, 0);
 

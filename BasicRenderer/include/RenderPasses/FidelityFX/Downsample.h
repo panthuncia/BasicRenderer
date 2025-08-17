@@ -236,7 +236,7 @@ private:
         spdConstants.workGroupOffset[0] = workGroupOffset[0];
         spdConstants.workGroupOffset[1] = workGroupOffset[1];
 
-		for (int i = 0; i < (std::min)(11u, shadowMap.linearDepthMap->GetNumUAVMipLevels()-1); i++) {
+		for (unsigned i = 0; i < (std::min)(11u, shadowMap.linearDepthMap->GetNumUAVMipLevels()-1); i++) {
 			spdConstants.mipUavDescriptorIndices[i] = shadowMap.linearDepthMap->GetUAVShaderVisibleInfo(i+1).index;
 		}
 
@@ -244,7 +244,7 @@ private:
         m_pDownsampleConstants->UpdateView(view.get(), &spdConstants);
 
         PerMapInfo mapInfo;
-        mapInfo.constantsIndex = view.get()->GetOffset() / sizeof(spdConstants);
+        mapInfo.constantsIndex = static_cast<unsigned int>(view.get()->GetOffset() / sizeof(spdConstants));
         mapInfo.pConstantsBufferView = view;
         mapInfo.dispatchThreadGroupCountXY[0] = threadGroupCountXY[0];
         mapInfo.dispatchThreadGroupCountXY[1] = threadGroupCountXY[1];

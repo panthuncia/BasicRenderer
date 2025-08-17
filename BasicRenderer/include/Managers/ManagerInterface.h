@@ -24,7 +24,6 @@ public:
 		m_pLightManager(lightManager), 
 		m_pEnvironmentManager(environmentManager){
 	}
-	~ManagerInterface() = default;
 
 	void SetManagers(MeshManager* meshManager,
 		ObjectManager* objectManager,

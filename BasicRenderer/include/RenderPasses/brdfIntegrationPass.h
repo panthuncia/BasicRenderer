@@ -20,7 +20,6 @@ public:
     }
 
     PassReturn Execute(RenderContext& context) override {
-        auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
         ID3D12DescriptorHeap* descriptorHeaps[] = {
             context.textureDescriptorHeap, // The texture descriptor heap

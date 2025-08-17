@@ -182,7 +182,6 @@ void IndirectCommandBufferManager::UpdateBuffersForBucket(MaterialBuckets bucket
 			bufferComponent.blendIndirectCommandBuffer->SetResource(ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_blendCommandBufferSize, sizeof(DispatchMeshIndirectCommand), false, true, true));
 			break;
 		}
-		auto& deletionManager = DeletionManager::GetInstance();
 		deletionManager.MarkForDelete(bufferComponent.meshletCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 		//deletionManager.MarkForDelete(bufferComponent.meshletOcclusionCullingIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame
 		deletionManager.MarkForDelete(bufferComponent.meshletCullingResetIndirectCommandBuffer->GetResource()); // Delay deletion until after the current frame

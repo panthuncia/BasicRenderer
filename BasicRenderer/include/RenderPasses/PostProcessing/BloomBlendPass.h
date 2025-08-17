@@ -45,7 +45,7 @@ public:
         unsigned int width = m_pHDRTarget->GetWidth();
         unsigned int height = m_pHDRTarget->GetHeight();
 
-        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, width, height);
+        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
         CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, width, width);
         commandList->RSSetViewports(1, &viewport);
         commandList->RSSetScissorRects(1, &scissorRect);
@@ -144,8 +144,6 @@ private:
         depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
         depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
         depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
-
-        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.InputLayout = inputLayoutDesc;

@@ -34,7 +34,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 
 	m_width  = desc.imageDimensions[0].width;
 	m_height = desc.imageDimensions[0].height;
-	m_mipLevels   = desc.generateMipMaps ? CalculateMipLevels(m_width, m_height) : 1;
+	m_mipLevels   = desc.generateMipMaps ? CalculateMipLevels(static_cast<uint16_t>(m_width), static_cast<uint16_t>(m_height)) : 1;
 	m_arraySize   = desc.isCubemap ? 6 * desc.arraySize : (desc.isArray ? desc.arraySize : 1);
 
 	if (desc.padInternalResolution) {

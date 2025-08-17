@@ -48,10 +48,10 @@ inline DeviceManager& DeviceManager::GetInstance() {
     return instance;
 }
 
-inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue) {
-    this->device = device;
-	this->graphicsQueue = graphicsQueue;
-	this->computeQueue = computeQueue;
+inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> pDevice, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pGraphicsQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pComputeQueue) {
+    this->device = pDevice;
+	this->graphicsQueue = pGraphicsQueue;
+	this->computeQueue = pComputeQueue;
 	CheckGPUFeatures();
 
 	if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dred)))) {

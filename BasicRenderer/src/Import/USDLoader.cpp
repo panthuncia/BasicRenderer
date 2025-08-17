@@ -50,7 +50,6 @@
 #include "Animation/AnimationController.h"
 
 #include "Import/USDLoader.h"
-#include "Import/USDShaderGraphBuilder.h"
 
 namespace USDLoader {
 
@@ -293,6 +292,8 @@ namespace USDLoader {
 				}
 				else if (name == TfToken("normal")) {
 					result.normal.texture = tex;
+					result.negateNormals = tex->GetFileType() == ImageFiletype::DDS ? true : false;
+					result.invertNormalGreen = false;
 					result.normal.channels = SwizzleToIndices(swizzle);
 				}
 				else if (name == TfToken("displacement")) {
@@ -329,7 +330,7 @@ namespace USDLoader {
 		bool isUSDZ)
 	{
 		MaterialDescription result;
-
+		
 		// Get terminal output
 		pxr::UsdShadeOutput surfOut =
 			material.GetSurfaceOutput(pxr::UsdShadeTokens->universalRenderContext);
@@ -364,28 +365,28 @@ namespace USDLoader {
 
 			// Read constants if unconnected
 			if (input.GetConnectedSources().empty()) {
-				TfToken name = input.GetBaseName();
-				if (name == TfToken("diffuseColor") && input.GetConnectedSources().empty()) {
+				TfToken texName = input.GetBaseName();
+				if (texName == TfToken("diffuseColor") && input.GetConnectedSources().empty()) {
 					GfVec3f c; input.Get(&c);
 					result.diffuseColor = { c[0],c[1],c[2],1.0f };
 				}
-				else if (name == TfToken("metallic") && input.GetConnectedSources().empty()) {
+				else if (texName == TfToken("metallic") && input.GetConnectedSources().empty()) {
 					float v; input.Get(&v);
 					result.metallic.factor = v;
 				}
-				else if (name == TfToken("roughness") && input.GetConnectedSources().empty()) {
+				else if (texName == TfToken("roughness") && input.GetConnectedSources().empty()) {
 					float v; input.Get(&v);
 					result.roughness.factor = v;
 				}
-				else if (name == TfToken("opacity") && input.GetConnectedSources().empty()) {
+				else if (texName == TfToken("opacity") && input.GetConnectedSources().empty()) {
 					float v; input.Get(&v);
 					result.opacity.factor = v;
 				}
-				else if (name == TfToken("emissiveColor") && input.GetConnectedSources().empty()) {
+				else if (texName == TfToken("emissiveColor") && input.GetConnectedSources().empty()) {
 					GfVec3f c; input.Get(&c);
 					result.emissiveColor = { c[0],c[1],c[2],1.0f };
 				}
-				else if (name == TfToken("opacityThreshold") && input.GetConnectedSources().empty()) {
+				else if (texName == TfToken("opacityThreshold") && input.GetConnectedSources().empty()) {
 					float v; input.Get(&v);
 					result.alphaCutoff = v;
 				}
@@ -875,7 +876,7 @@ namespace USDLoader {
 		return outMeshes;
 	}
 
-	std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const VtTokenArray rawJointOrder, const UsdSkelSkeletonQuery& skelQuery, const std::shared_ptr<Scene>& scene, float metersPerUnit) {
+	std::shared_ptr<Skeleton> ProcessSkeleton(const UsdSkelSkeleton& skel, const VtTokenArray rawJointOrder, const UsdSkelSkeletonQuery& skelQuery, const std::shared_ptr<Scene>& scene, double metersPerUnit) {
 		if (loadingCache.skeletonMap.contains(skel.GetPrim().GetPath().GetString())) {
 			spdlog::info("Skeleton {} already processed, skipping.", skel.GetPrim().GetPath().GetString());
 			return loadingCache.skeletonMap[skel.GetPrim().GetPath().GetString()];
@@ -934,7 +935,7 @@ namespace USDLoader {
 		return skeleton;
 	}
 
-	std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, float metersPerUnit, const VtTokenArray& jointOrder) {
+	std::shared_ptr<Animation> ProcessAnimQuery(const UsdSkelAnimQuery& animQuery, const UsdStageRefPtr& stage, double metersPerUnit, const VtTokenArray& jointOrder) {
 		if (!animQuery) {
 			return nullptr;
 		}
@@ -1074,8 +1075,8 @@ namespace USDLoader {
 		}
 
 		if (skeleton) {
-			for (auto& mesh : meshes) {
-				mesh->SetBaseSkin(skeleton);
+			for (auto& skelMesh : meshes) {
+				skelMesh->SetBaseSkin(skeleton);
 			}
 		}
 
@@ -1103,8 +1104,9 @@ namespace USDLoader {
 					UsdGeomXformable::XformQuery query(xformable);
 
 					GfMatrix4d mat;
-					bool result = query.GetLocalTransformation(&mat, UsdTimeCode::Default());
-					bool resets = query.GetResetXformStack(); // TODO: Handle reset xform stack
+
+					query.GetLocalTransformation(&mat, UsdTimeCode::Default());
+					//bool resets = query.GetResetXformStack(); // TODO: Handle reset xform stack
 
 					// Serialize mat
 					std::string matStr;
@@ -1154,7 +1156,6 @@ namespace USDLoader {
 				entity.set<Components::Scale>({ DirectX::XMFLOAT3(static_cast<float>(scale[0]), static_cast<float>(scale[1]), static_cast<float>(scale[2])) });
 
 				if (parent) {
-					auto parentName = parent.name().c_str();
 					entity.child_of(parent);
 				}
 				else {
@@ -1173,8 +1174,6 @@ namespace USDLoader {
 	std::shared_ptr<Scene> LoadModel(std::string filePath) {
 
 		UsdStageRefPtr stage = UsdStage::Open(filePath);
-
-		auto& resolver = ArGetResolver();
 
 		// Grab the context USD created for this stage:
 		auto ctx = stage->GetPathResolverContext();

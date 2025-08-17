@@ -73,7 +73,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 	// Set W to intensity
 	lightColor = XMVectorSetW(lightColor, intensity);
 	lightInfo.color = lightColor;
-	float nearPlane = 0.01;
+	float nearPlane = 0.01f;
 	float farPlane = maxRange;
 	lightInfo.attenuation = normalizedAttenuationVec;
 	lightInfo.dirWorldSpace = XMLoadFloat3(&direction);
@@ -167,8 +167,8 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
-		drawStats.numOpaqueDraws += opaqueMeshInstances->meshInstances.size();
-		drawStats.numDrawsInScene += opaqueMeshInstances->meshInstances.size();
+		drawStats.numOpaqueDraws += static_cast<uint32_t>(opaqueMeshInstances->meshInstances.size());
+		drawStats.numDrawsInScene += static_cast<uint32_t>(opaqueMeshInstances->meshInstances.size());
 	}
 	if (alphaTestMeshInstances) {
 		//e.add<Components::AlphaTestMeshInstances>(drawInfo.alphaTest.value());
@@ -179,8 +179,8 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
-		drawStats.numAlphaTestDraws += alphaTestMeshInstances->meshInstances.size();
-		drawStats.numDrawsInScene += alphaTestMeshInstances->meshInstances.size();
+		drawStats.numAlphaTestDraws += static_cast<uint32_t>(alphaTestMeshInstances->meshInstances.size());
+		drawStats.numDrawsInScene += static_cast<uint32_t>(alphaTestMeshInstances->meshInstances.size());
 	}
 	if (blendMeshInstances) {
 		//e.add<Components::BlendMeshInstances>(drawInfo.blend.value());
@@ -191,8 +191,8 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 		}
-		drawStats.numBlendDraws += blendMeshInstances->meshInstances.size();
-		drawStats.numDrawsInScene += blendMeshInstances->meshInstances.size();
+		drawStats.numBlendDraws += static_cast<uint32_t>(blendMeshInstances->meshInstances.size());
+		drawStats.numDrawsInScene += static_cast<uint32_t>(blendMeshInstances->meshInstances.size());
 	}
 
 	auto drawInfo = m_managerInterface.GetObjectManager()->AddObject(buffer, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
@@ -440,7 +440,7 @@ flecs::entity Scene::GetRoot() const {
 
 void Scene::Update() {
     auto currentTime = std::chrono::system_clock::now();
-    std::chrono::duration<double> elapsed_seconds = currentTime - lastUpdateTime;
+    std::chrono::duration<float> elapsed_seconds = currentTime - lastUpdateTime;
     lastUpdateTime = currentTime;
 
 	for (auto& node : animatedEntitiesByID) {
@@ -555,8 +555,6 @@ void Scene::PostUpdate() {
 
 std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {
 
-	auto& world = ECSManager::GetInstance().GetWorld();
-
 	auto root = scene->GetRoot();
 
 	root.child_of(ECSSceneRoot);
@@ -635,7 +633,6 @@ void Scene::ActivateAllAnimatedEntities() {
 
 void Scene::Activate(ManagerInterface managerInterface) {
 	m_managerInterface = managerInterface;
-	auto& world = ECSManager::GetInstance().GetWorld();
 
 	ActivateHierarchy(ECSSceneRoot);
 	ActivateAllAnimatedEntities();
@@ -670,7 +667,6 @@ void CloneHierarchy(flecs::entity src, flecs::entity dst_parent) {
 
 std::shared_ptr<Scene> Scene::Clone() const {
 	auto newScene = std::make_shared<Scene>();
-	auto& world = ECSManager::GetInstance().GetWorld();
 	newScene->ECSSceneRoot = ECSSceneRoot.clone();
 	CloneHierarchy(ECSSceneRoot, newScene->ECSSceneRoot);
 	for (auto& childScene : m_childScenes) {

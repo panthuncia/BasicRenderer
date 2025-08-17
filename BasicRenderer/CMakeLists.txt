@@ -72,7 +72,7 @@ add_custom_target(GenerateBuiltinResources
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
+if (CMAKE_VERSION VERSION_GREATER 3.14)
   set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 endif()
 
@@ -163,6 +163,17 @@ add_symlink_or_copy_per_config(
     "${TEXTURES_DEST_PATH}"
     TRUE  # IS_DIRECTORY
     "textures"
+)
+
+
+set(tex_dir "${CMAKE_BINARY_DIR}/BasicRenderer/Textures")
+set(tex_link "${CMAKE_BINARY_DIR}/BasicRenderer/textures")
+
+INSTALL(CODE "execute_process( \
+    COMMAND ${CMAKE_COMMAND} -E create_symlink \
+    ${tex_dir} \
+    ${tex_link}   \
+    )"
 )
 
 set(COMPILER_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxcompiler.dll")
@@ -441,6 +452,37 @@ add_symlink_or_copy_per_config(
     "USD_PLUGINS"
 )
 
+if (MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE /Zc:preprocessor)
+  target_compile_options(${PROJECT_NAME} PRIVATE /WX)
+  target_compile_options(${PROJECT_NAME} PRIVATE 
+      /wd4828 
+      /wd4514 
+      /wd5038 
+      /wd4100 
+      /wd5219 
+      /wd4625 
+      /wd4626 
+      /wd4820 
+      /wd4365 
+      /wd4464 
+      /wd4062 
+      /wd5026 
+      /wd5027 
+      /wd5246
+      /wd4191
+      /wd4061
+      /wd4623
+      /wd4710
+      /wd4324
+      /wd5267
+      /wd5045
+  )
+  #target_compile_options(${PROJECT_NAME} PRIVATE /Wall)
+  target_compile_options(${PROJECT_NAME} PRIVATE /external:anglebrackets /external:W0) # Disable warnings in external headers
+endif()
+
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${CMAKE_SOURCE_DIR}/ThirdParty/usd/include/")
 # Heck off Microsoft

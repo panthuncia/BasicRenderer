@@ -98,9 +98,9 @@ namespace AssimpLoader {
             {
                 // If mHeight != 0, then it's raw (uncompressed) pixels in BGRA format
                 // aiTex->mWidth * aiTex->mHeight is the total resolution
-                int width = aiTex->mWidth;
-                int height = aiTex->mHeight;
-                int channels = 4;
+                unsigned int width = aiTex->mWidth;
+                unsigned int height = aiTex->mHeight;
+                unsigned int channels = 4;
 
                 TextureDescription desc;
                 ImageDimensions dims;
@@ -109,15 +109,15 @@ namespace AssimpLoader {
                 dims.rowPitch = width * 4;
                 dims.slicePitch = width * height * 4;
                 desc.imageDimensions.push_back(dims);
-                desc.channels = channels;
+                desc.channels = static_cast<unsigned short>(channels);
                 desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
                 // Create a container for the raw bytes
                 // aiTex->pcData is an array of aiTexel => each aiTexel has b,g,r,a
                 std::vector<uint8_t> rawData(width * height * channels);
-                for (int y = 0; y < height; ++y) {
-                    for (int x = 0; x < width; ++x) {
-                        int idx = (y * width + x);
+                for (unsigned int y = 0; y < height; ++y) {
+                    for (unsigned int x = 0; x < width; ++x) {
+                        unsigned int idx = (y * width + x);
                         rawData[idx * 4 + 0] = aiTex->pcData[idx].b;
                         rawData[idx * 4 + 1] = aiTex->pcData[idx].g;
                         rawData[idx * 4 + 2] = aiTex->pcData[idx].r;
@@ -304,6 +304,8 @@ namespace AssimpLoader {
                 if (normalTexture->GetFileType() == ImageFiletype::DDS) {
                     negateNormals = true;
                 }
+                negateNormals = false;
+
             }
             if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
                 metallicTex = materialTextures[aiTextureType_METALNESS];
@@ -327,9 +329,10 @@ namespace AssimpLoader {
 
             if (materialTextures.find(aiTextureType_EMISSIVE) != materialTextures.end()) {
                 emissiveTexture = materialTextures[aiTextureType_EMISSIVE];
-                emissive = aiColor3D(emissive[0] * 10.0, emissive[1] * 10.0, emissive[2] * 10.0);
                 materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             }
+            //emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
+
             if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
                 if (emissiveTexture != nullptr) {
                     spdlog::warn("Material {} has both EMISSION_COLOR and EMISSIVE textures. Using EMISSION_COLOR", mIndex);
@@ -571,7 +574,6 @@ namespace AssimpLoader {
 
         // Attach to parent
         if (parent) {
-            auto parentName = parent.name().c_str();
             entity.child_of(parent);
         }
         else {
@@ -628,14 +630,14 @@ namespace AssimpLoader {
 
                 // For position keys
                 for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
-                    float time = static_cast<float>(channel->mPositionKeys[k].mTime) / aiAnim->mTicksPerSecond;
+                    float time = static_cast<float>(channel->mPositionKeys[k].mTime / aiAnim->mTicksPerSecond);
                     const aiVector3D& v = channel->mPositionKeys[k].mValue;
                     clip->addPositionKeyframe(time, DirectX::XMFLOAT3(v.x, v.y, v.z));
                 }
 
                 // For rotation keys
                 for (unsigned int k = 0; k < channel->mNumRotationKeys; k++) {
-                    float time = static_cast<float>(channel->mRotationKeys[k].mTime) / aiAnim->mTicksPerSecond;
+                    float time = static_cast<float>(channel->mRotationKeys[k].mTime / aiAnim->mTicksPerSecond);
                     const aiQuaternion& q = channel->mRotationKeys[k].mValue;
                     // Convert to XMVECTOR
                     XMVECTOR quat = XMVectorSet(q.x, q.y, q.z, q.w);
@@ -644,7 +646,7 @@ namespace AssimpLoader {
 
                 // For scale keys
                 for (unsigned int k = 0; k < channel->mNumScalingKeys; k++) {
-                    float time = static_cast<float>(channel->mScalingKeys[k].mTime) / aiAnim->mTicksPerSecond;
+                    float time = static_cast<float>(channel->mScalingKeys[k].mTime / aiAnim->mTicksPerSecond);
                     const aiVector3D& s = channel->mScalingKeys[k].mValue;
                     clip->addScaleKeyframe(time, DirectX::XMFLOAT3(s.x, s.y, s.z));
                 }
@@ -763,7 +765,7 @@ namespace AssimpLoader {
             scene->AddSkeleton(skeleton);
         }
 
-        for (int i = 0; i < meshSkinIndices.size(); i++) {
+        for (unsigned int i = 0; i < meshSkinIndices.size(); i++) {
             int skinIndex = meshSkinIndices[i];
             if (skinIndex != -1) {
                 meshes[i]->SetBaseSkin(skeletons[skinIndex]);

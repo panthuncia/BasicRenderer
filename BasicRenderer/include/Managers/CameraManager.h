@@ -38,7 +38,7 @@ public:
 
 	void SetCommandBufferManager(IndirectCommandBufferManager* commandBufferManager);
 
-	void SetMeshletBitfieldSize(unsigned int numMeshlets);
+	void SetMeshletBitfieldSize(uint64_t numMeshlets);
 	const std::shared_ptr<ResourceGroup>& GetMeshletCullingBitfieldGroup() const {
 		return m_meshletCullingBitfieldGroup;
 	}
@@ -55,7 +55,7 @@ private:
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 	std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_pCameraBuffer;
 	std::mutex m_cameraUpdateMutex;
-	std::atomic<uint64_t> m_viewIDCounter = 0;
+	std::atomic<uint32_t> m_viewIDCounter = 0;
 	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshletBitfieldBuffers;
 	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshInstanceMeshletCullingBitfieldBuffers;
 	std::unordered_map<uint64_t, std::shared_ptr<DynamicGloballyIndexedResource>> m_meshInstanceOcclusionCullingBitfieldBuffers;
@@ -65,6 +65,6 @@ private:
 	std::shared_ptr<ResourceGroup> m_meshInstanceMeshletCullingBitfieldGroup;
 	std::shared_ptr<ResourceGroup> m_meshInstanceOcclusionCullingBitfieldGroup;
 
-	unsigned int m_currentMeshletBitfieldSize = 1;
-	unsigned int m_currentMeshInstanceBitfieldSize = 1;
+	uint64_t m_currentMeshletBitfieldSize = 1;
+	uint32_t m_currentMeshInstanceBitfieldSize = 1;
 };

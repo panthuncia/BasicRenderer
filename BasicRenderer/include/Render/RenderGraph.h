@@ -252,7 +252,7 @@ private:
 
 		// handle the "transition" wait
 		if (lastTransBatch != -1) {
-			if (lastTransBatch == currentBatchIndex) {
+			if (static_cast<unsigned int>(lastTransBatch) == currentBatchIndex) {
 				// same batch, signal & immediate wait
 				if (isComputePass) {
 					currentBatch.renderTransitionSignal = true;
@@ -320,7 +320,7 @@ private:
 			// not aliased
 			return { id };
 		}
-		int group = it->second;
+		uint64_t group = it->second;
 		std::vector<uint64_t> out;
 		// scan for any resource mapped to the same group
 		for (auto const& p : resourceToAliasGroup) {

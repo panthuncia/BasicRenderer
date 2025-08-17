@@ -26,7 +26,7 @@ public:
     }
     BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
 
-    virtual void SetName(const std::wstring& name) { this->name = name; m_texture->SetName(name.c_str()); }
+    virtual void SetName(const std::wstring& newName) { name = newName; m_texture->SetName(newName.c_str()); }
 
 	ID3D12Resource* GetAPIResource() const override { return m_texture.Get(); }
 

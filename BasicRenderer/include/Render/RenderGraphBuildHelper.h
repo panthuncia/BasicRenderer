@@ -122,7 +122,6 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool shadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows")();
 	bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
-	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
         .Build<ClearIndirectDrawCommandUAVsPass>(false);
@@ -200,12 +199,10 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
 }
 
 void BuildZPrepass(RenderGraph* graph) {
-    bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
     bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
-	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     bool clearRTVs = false;
@@ -373,7 +370,6 @@ void BuildMainShadowPass(RenderGraph* graph) {
 void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
 	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
-	bool clusteredLighting = SettingsManager::GetInstance().getSettingGetter<bool>("enableClusteredLighting")();
 	bool gtaoEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableGTAO")();
 	bool meshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
@@ -395,13 +391,10 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 }
 
 void BuildPPLLPipeline(RenderGraph* graph) {
-	bool drawShadows = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows")();
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
-	bool clusteredLighting = SettingsManager::GetInstance().getSettingGetter<bool>("enableClusteredLighting")();
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
-	bool gtao = SettingsManager::GetInstance().getSettingGetter<bool>("enableGTAO")();
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = resolution.x * resolution.y * aveFragsPerPixel;

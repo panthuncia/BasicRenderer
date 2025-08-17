@@ -307,7 +307,7 @@ void DX12Renderer::SetSettings() {
 	float maxShadowDistance = 30.0f;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
-    settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
+    settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
@@ -374,7 +374,7 @@ void DX12Renderer::SetSettings() {
 		SetEnvironmentInternal(s2ws(newValue));
 		rebuildRenderGraph = true;
 		}));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [](const unsigned int& newValue) {
 		ResourceManager::GetInstance().SetOutputType(newValue);
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
@@ -423,13 +423,13 @@ void DX12Renderer::SetSettings() {
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
         m_jitter = newValue;
         }));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [this](const float& newValue) {
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [](const float& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();
 		auto numDirectionalCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades")();
 		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
-        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1, 100, maxShadowDistance));
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
         }));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [](const std::vector<float>& newValue) {
 		ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscalingMode>("upscalingMode", [this](const UpscalingMode& newValue) {
@@ -496,7 +496,7 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
 	// Re-add them to the mesh manager
 	for (auto& meshPair : meshLibrary) {
 		auto& mesh = meshPair.second;
-        MaterialBuckets bucket;
+        MaterialBuckets bucket = {};
         switch (mesh->material->GetBlendState()) {
         case BlendState::BLEND_STATE_OPAQUE:
 			bucket = MaterialBuckets::Opaque;
@@ -506,6 +506,10 @@ void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
 			break;
 		case BlendState::BLEND_STATE_BLEND:
 			bucket = MaterialBuckets::Blend;
+			break;
+        case BlendState::BLEND_STATE_UNKNOWN:
+            spdlog::warn("Unknown blend state for mesh, defaulting to opaque");
+            bucket = MaterialBuckets::Opaque; // Default to opaque if unknown
 			break;
         }
         m_pMeshManager->AddMesh(mesh, bucket, useMeshShaders);
@@ -612,7 +616,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         device.Get()));
 #endif
 
-#if defined(_DEBUG)
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
     ComPtr<ID3D12InfoQueue1> infoQueue;
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
         infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
@@ -684,7 +688,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     // We do not support fullscreen transitions
     ThrowIfFailed(factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
 
-    m_frameIndex = swapChain->GetCurrentBackBufferIndex();
+    m_frameIndex = static_cast<uint8_t>(swapChain->GetCurrentBackBufferIndex());
 
     // Create RTV descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
@@ -793,7 +797,7 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
         DXGI_FORMAT_R8G8B8A8_UNORM,
         DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
 
-    m_frameIndex = swapChain->GetCurrentBackBufferIndex();
+    m_frameIndex = static_cast<uint8_t>(swapChain->GetCurrentBackBufferIndex());
 
     // Recreate the render target views
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
@@ -828,7 +832,7 @@ void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
     }
 }
 
-void DX12Renderer::Update(double elapsedSeconds) {
+void DX12Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
 	StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, computeQueue.Get()); // Gather statistics for the last iteration of the frame
@@ -858,7 +862,7 @@ void DX12Renderer::Update(double elapsedSeconds) {
     auto& world = ECSManager::GetInstance().GetWorld();
 	world.progress();
 
-    auto camera = currentScene->GetPrimaryCamera();
+    auto& camera = currentScene->GetPrimaryCamera();
     unsigned int cameraIndex = camera.get<Components::RenderView>().cameraBufferIndex;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
@@ -1007,7 +1011,7 @@ void DX12Renderer::FlushCommandQueue() {
 }
 
 void DX12Renderer::StallPipeline() {
-    for (int i = 0; i < m_numFramesInFlight; ++i) {
+    for (uint8_t i = 0; i < m_numFramesInFlight; ++i) {
         WaitForFrame(i);
     }
     FlushCommandQueue();
@@ -1063,7 +1067,6 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	if (currentScene) {
 		DeletionManager::GetInstance().MarkForDelete(currentScene);
 	}
-	auto& ecs_world = ECSManager::GetInstance().GetWorld();
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
     //currentScene->SetDepthMap(m_depthMap);
@@ -1090,14 +1093,15 @@ void DX12Renderer::SetInputMode(InputMode mode) {
         inputManager.SetInputContext(&orbitalContext);
         break;
     }
-    SetupInputHandlers(inputManager, *inputManager.GetCurrentContext());
+    SetupInputHandlers();
 }
 
 void DX12Renderer::MoveForward() {
     spdlog::info("Moving forward!");
 }
 
-void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& context) {
+void DX12Renderer::SetupInputHandlers() {
+	auto& context = *inputManager.GetCurrentContext();
     context.SetActionHandler(InputAction::MoveForward, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving forward!");
         movementState.forwardMagnitude = magnitude * getCameraSpeed();
@@ -1129,26 +1133,26 @@ void DX12Renderer::SetupInputHandlers(InputManager& inputManager, InputContext& 
         });
 
     context.SetActionHandler(InputAction::RotateCamera, [this](float magnitude, const InputData& inputData) {
-        horizontalAngle -= inputData.mouseDeltaX * 0.005;
-        verticalAngle -= inputData.mouseDeltaY * 0.005;
+        horizontalAngle -= static_cast<float>(inputData.mouseDeltaX) * 0.005f;
+        verticalAngle -= static_cast<float>(inputData.mouseDeltaY) * 0.005f;
         });
 
-    context.SetActionHandler(InputAction::ZoomIn, [this](float magnitude, const InputData& inputData) {
+    context.SetActionHandler(InputAction::ZoomIn, [](float magnitude, const InputData& inputData) {
         // TODO
         });
 
-    context.SetActionHandler(InputAction::ZoomOut, [this](float magnitude, const InputData& inputData) {
+    context.SetActionHandler(InputAction::ZoomOut, [](float magnitude, const InputData& inputData) {
         // TODO
         });
 
-	context.SetActionHandler(InputAction::Reset, [this](float magnitude, const InputData& inputData) {
+	context.SetActionHandler(InputAction::Reset, [](float magnitude, const InputData& inputData) {
         PSOManager::GetInstance().ReloadShaders();
 		});
 
-    context.SetActionHandler(InputAction::X, [this](float magnitude, const InputData& inputData) {
+    context.SetActionHandler(InputAction::X, [](float magnitude, const InputData& inputData) {
         });
 
-    context.SetActionHandler(InputAction::Z, [this](float magnitude, const InputData& inputData) {
+    context.SetActionHandler(InputAction::Z, [](float magnitude, const InputData& inputData) {
         });
 }
 

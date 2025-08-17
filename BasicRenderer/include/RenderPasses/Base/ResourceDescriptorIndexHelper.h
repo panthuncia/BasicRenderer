@@ -89,7 +89,7 @@ public:
 		auto it = m_resourceMap.find(hash);
 		if (it == m_resourceMap.end()) {
 			if (allowFail) {
-				return -1; // Return max value if the resource is not found and allowFail is true
+				return std::numeric_limits<unsigned int>().max(); // Return max value if the resource is not found and allowFail is true
 			}
 			std::string resourceName = name ? *name : "Unknown";
 			throw std::runtime_error("Resource "+ resourceName +" not found!");

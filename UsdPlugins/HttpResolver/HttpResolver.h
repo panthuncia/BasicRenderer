@@ -25,11 +25,13 @@ public:
         spdlog::set_default_logger(file_logger);
         file_logger->flush_on(spdlog::level::info);
     }
+    HttpResolver(const HttpResolver&) = delete;
+	HttpResolver& operator=(const HttpResolver&) = delete;
     ~HttpResolver() override = default;
 
 protected:
     // Write callback for libcurl, writes directly into ofstream
-    static size_t _WriteData(void* ptr, size_t size, size_t nmemb, void* userp);
+    static size_t _WriteData(void* ptr, size_t size, size_t nmemb, void* userp) noexcept;
 
     static bool _IsHttpURL(const std::string& path);
 

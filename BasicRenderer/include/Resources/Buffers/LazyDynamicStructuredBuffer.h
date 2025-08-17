@@ -31,15 +31,15 @@ template <typename T>
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 
-	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false) {
+	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false) {
 		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(id, capacity, name, alignment, UAV));
 	}
 
     std::shared_ptr<BufferView> Add() {
 		if (!m_freeIndices.empty()) { // Reuse a free index
-			unsigned int index = m_freeIndices.front();
+			uint64_t index = m_freeIndices.front();
 			m_freeIndices.pop_front();
-            return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T)));
+            return BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T));
         }
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
@@ -47,7 +47,7 @@ public:
             onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this, m_UAV);
         }
 		size_t index = m_usedCapacity - 1;
-        return std::move(BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T)));
+        return BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T));
     }
 
 	std::shared_ptr<BufferView> Add(const T& data) {
@@ -57,11 +57,11 @@ public:
 	}
 
     void Remove(BufferView* view) {
-		unsigned int index = view->GetOffset() / m_elementSize;
+		uint64_t index = view->GetOffset() / m_elementSize;
 		m_freeIndices.push_back(index);
     }
 
-    void Resize(size_t newCapacity) {
+    void Resize(uint32_t newCapacity) {
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
@@ -74,7 +74,7 @@ public:
     }
 
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer, bool)>& callback) {
+    void SetOnResized(const std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer, bool)>& callback) {
         onResized = callback;
     }
 
@@ -103,12 +103,12 @@ protected:
     }
 
 private:
-    LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", size_t alignment = 1, bool UAV = false)
+    LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
         if (alignment == 0) {
 			alignment = 1;
         }
-		m_elementSize = ((sizeof(T) + alignment - 1) / alignment) * alignment;
+		m_elementSize = static_cast<uint32_t>(((sizeof(T) + alignment - 1) / alignment) * alignment);
         CreateBuffer(capacity);
 		SetName(name);
         m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
@@ -124,19 +124,19 @@ private:
         }
     }
 
-    size_t m_capacity;
-	size_t m_usedCapacity = 0;
+    uint32_t m_capacity;
+    uint64_t m_usedCapacity = 0;
     bool m_needsUpdate;
-	std::deque<unsigned int> m_freeIndices;
+	std::deque<uint64_t> m_freeIndices;
     UINT m_globalResizableBufferID;
-    size_t m_elementSize = 0;
+    uint32_t m_elementSize = 0;
 
-    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer, bool)> onResized;
+    std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer, bool)> onResized;
     inline static std::wstring m_name = L"LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;
 
-    void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
+    void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
         auto& device = DeviceManager::GetInstance().GetDevice();
 
         auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, m_elementSize * capacity, false, m_UAV);

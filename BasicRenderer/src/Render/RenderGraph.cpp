@@ -113,7 +113,7 @@ void RenderGraph::Compile() {
 	}
 
 	for (auto& v : m_passBuilders) {
-		std::visit([this](auto& builder) {
+		std::visit([](auto& builder) {
 			builder.Finalize();
 			}, v);
 	}

@@ -41,12 +41,12 @@ float CalculateLightRadius(float intensity, float constant, float linear, float 
     float d = 0.0;
     // If quadratic term is significant, solve via quadratic formula
     if (abs(a) > 1e-6) {
-        float discriminant = b * b - 4.0 * a * c;
+        float discriminant = static_cast<float>(b * b - 4.0 * a * c);
         // In case of a negative discriminant, there is no real solution. Return 0.
         if (discriminant < 0.0)
             d = 0.0;
         else
-            d = (-b + sqrt(discriminant)) / (2.0 * a);
+            d = (-b + sqrt(discriminant)) / (2.0f * a);
     } 
     else if (abs(b) > 1e-6) {  // Fall back to linear solution if a is negligible
         d = -c / b;

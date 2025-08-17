@@ -27,7 +27,6 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();
 
 		RegisterSRV(Builtin::CameraBuffer);
@@ -50,10 +49,6 @@ public:
 
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
-
-		auto& meshManager = context.meshManager;
-		auto& objectManager = context.objectManager;
-		auto& cameraManager = context.cameraManager;
 
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 

@@ -7,7 +7,9 @@
 #include <filesystem>
 #include <optional>
 
+#pragma warning(push, 0)   // Disable all warnings for dxc header
 #include "ThirdParty/DirectX/dxcapi.h"
+#pragma warning(pop)
 #include "Materials/BlendState.h"
 #include "Render/PSOFlags.h"
 #include "Render/PipelineState.h"

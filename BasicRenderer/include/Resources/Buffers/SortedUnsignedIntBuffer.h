@@ -16,7 +16,7 @@ using Microsoft::WRL::ComPtr;
 
 class SortedUnsignedIntBuffer : public DynamicBufferBase {
 public:
-    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(UINT id = 0, uint64_t capacity = 64, std::wstring name = L"", bool UAV = false) {
         return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(id, capacity, name, UAV));
     }
 
@@ -28,7 +28,7 @@ public:
         }
         // Find the insertion point
         auto it = std::lower_bound(m_data.begin(), m_data.end(), element);
-        size_t index = std::distance(m_data.begin(), it);
+        uint32_t index = static_cast<uint32_t>(std::distance(m_data.begin(), it));
 
         m_data.insert(it, element);
 
@@ -52,7 +52,7 @@ public:
 
             // Update the earliest modified index
             if (index < m_earliestModifiedIndex) {
-                m_earliestModifiedIndex = index;
+                m_earliestModifiedIndex = static_cast<uint32_t>(index);
             }
         }
     }
@@ -92,7 +92,7 @@ protected:
     }
 
 private:
-    SortedUnsignedIntBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
+    SortedUnsignedIntBuffer(UINT id = 0, uint64_t capacity = 64, std::wstring name = L"", bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
         CreateBuffer(capacity);
         SetName(name);
@@ -113,8 +113,8 @@ private:
     // Sorted list of unsigned integers
     std::vector<unsigned int> m_data;
 
-    size_t m_capacity;
-	size_t m_earliestModifiedIndex; // To avoid updating the entire buffer every time
+    uint64_t m_capacity;
+    uint64_t m_earliestModifiedIndex; // To avoid updating the entire buffer every time
 
     UINT m_globalResizableBufferID;
 
@@ -123,13 +123,13 @@ private:
 
 	bool m_UAV = false;
 
-    void CreateBuffer(size_t capacity) {
+    void CreateBuffer(uint64_t capacity) {
 		auto& device = DeviceManager::GetInstance().GetDevice();
 		m_capacity = capacity;
 		m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity * sizeof(unsigned int), false, m_UAV);
     }
 
-    void GrowBuffer(size_t newSize) {
+    void GrowBuffer(uint64_t newSize) {
 		auto& device = DeviceManager::GetInstance().GetDevice();
 		if (m_dataBuffer != nullptr) {
 			DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
@@ -138,10 +138,8 @@ private:
 		UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity*sizeof(unsigned int));
 		m_dataBuffer = newDataBuffer;
 
-		size_t oldCapacity = m_capacity;
-		size_t sizeDiff = newSize - m_capacity;
 		m_capacity = newSize;
-		onResized(m_globalResizableBufferID, sizeof(unsigned int), m_capacity, this);
+		onResized(m_globalResizableBufferID, static_cast<uint32_t>(sizeof(uint32_t)), static_cast<uint32_t>(m_capacity), this);
 		SetName(name);
     }
 };

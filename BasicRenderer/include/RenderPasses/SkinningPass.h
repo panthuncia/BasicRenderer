@@ -59,9 +59,6 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.meshManager;
-		auto& objectManager = context.objectManager;
-
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		auto meshShadersEnabled = getMeshShadersEnabled();
@@ -74,11 +71,11 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 				
-				unsigned int numGroups = std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0);
+				unsigned int numGroups = static_cast<unsigned int>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
 				commandList->Dispatch(numGroups, 1, 1);
 			}
 			});
@@ -90,11 +87,11 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
-				unsigned int numGroups = std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0);
+				unsigned int numGroups = static_cast<uint32_t>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
 				commandList->Dispatch(numGroups, 1, 1);
 			}
 			});
@@ -106,11 +103,11 @@ public:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				perMeshConstants[PerMeshBufferIndex] = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-				perMeshConstants[PerMeshInstanceBufferIndex] = pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB);
+				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
 
-				unsigned int numGroups = std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0);
+				unsigned int numGroups = static_cast<unsigned int>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
 				commandList->Dispatch(numGroups, 1, 1);
 			}
 			});

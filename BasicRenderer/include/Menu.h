@@ -9,7 +9,6 @@
 #include <imgui_impl_dx12.h>
 #include <functional>
 #include <spdlog/spdlog.h>
-#define NOMINMAX
 #include <windows.h>
 #include <filesystem>
 #include <flecs.h>
@@ -176,11 +175,11 @@ inline Menu& Menu::GetInstance() {
 }
 
 inline bool Menu::HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    return ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
+    return static_cast<bool>(ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam));
 }
 
-inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain) {
-    this->device = device;
+inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> pDevice, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain) {
+    this->device = pDevice;
     this->commandQueue = queue;
 	m_swapChain = swapChain;
 
@@ -216,7 +215,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> dev
 
 	DirectX::XMUINT2 renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	DirectX::XMUINT2 outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-	io.DisplaySize = ImVec2(outputResolution.x, outputResolution.y);
+	io.DisplaySize = ImVec2(static_cast<float>(outputResolution.x), static_cast<float>(outputResolution.y));
     io.DisplayFramebufferScale = ImVec2(
         2.0, 2.0);
 
@@ -501,10 +500,10 @@ inline FrameContext* Menu::WaitForNextFrameResources() {
     return frameCtx;
 }
 
-inline int Menu::FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile) {
-    for (int i = 0; i < hdrFiles.size(); ++i)
+inline int Menu::FindFileIndex(const std::vector<std::string>& inputHdrFiles, const std::string& existingFile) {
+    for (unsigned int i = 0; i < inputHdrFiles.size(); ++i)
     {
-        if (hdrFiles[i] == existingFile)
+        if (inputHdrFiles[i] == existingFile)
         {
             return i;
         }
@@ -538,9 +537,9 @@ inline void Menu::DrawEnvironmentsDropdown() {
 }
 
 inline void Menu::DrawOutputTypeDropdown() {
-	static int selectedItemIndex = 0;
+	static unsigned int selectedItemIndex = 0;
     if (ImGui::BeginCombo("Output Type", OutputTypeNames[selectedItemIndex].c_str())) {
-		for (int i = 0; i < OutputTypeNames.size(); ++i) {
+		for (unsigned int i = 0; i < OutputTypeNames.size(); ++i) {
 			bool isSelected = (selectedItemIndex == i);
 			if (ImGui::Selectable(OutputTypeNames[i].c_str(), isSelected)) {
 				selectedItemIndex = i;
@@ -577,10 +576,10 @@ inline void Menu::DrawUpscalingQualityCombo()
 }
 
 inline void Menu::DrawTonemapTypeDropdown() {
-    static int selectedItemIndex = 0;
+    static unsigned int selectedItemIndex = 0;
 	selectedItemIndex = getTonemapType();
     if (ImGui::BeginCombo("Tonemap Type", TonemapTypeNames[selectedItemIndex].c_str())) {
-        for (int i = 0; i < TonemapTypeNames.size(); ++i) {
+        for (unsigned int i = 0; i < TonemapTypeNames.size(); ++i) {
             bool isSelected = (selectedItemIndex == i);
             if (ImGui::Selectable(TonemapTypeNames[i].c_str(), isSelected)) {
                 selectedItemIndex = i;

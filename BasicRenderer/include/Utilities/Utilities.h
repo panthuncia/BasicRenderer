@@ -10,6 +10,7 @@
 #include <DirectXMath.h>
 #include <unordered_map>
 #include <directx/d3dx12.h>
+#include <DirectXTex.h>
 
 #include "Import/MeshData.h"
 #include "Render/DescriptorHeap.h"
@@ -40,10 +41,16 @@ void print(Args... args) {
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
 DirectX::XMMATRIX RemoveScalingFromMatrix(DirectX::XMMATRIX& initialMatrix);
-std::shared_ptr<Texture> LoadTextureFromFile(std::wstring filePath, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> LoadTextureFromMemory(void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> LoadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> LoadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
+
+struct LoadFlags {
+	DirectX::DDS_FLAGS dds = DirectX::DDS_FLAGS_NONE;
+	DirectX::TGA_FLAGS tga = DirectX::TGA_FLAGS_NONE;
+	DirectX::WIC_FLAGS wic = DirectX::WIC_FLAGS_IGNORE_SRGB;
+	// HDR has no flags
+};
+
+std::shared_ptr<Texture> LoadTextureFromFile(const std::wstring& filePath, std::shared_ptr<Sampler> sampler = nullptr);
+std::shared_ptr<Texture> LoadTextureFromMemory(const void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler = nullptr, const LoadFlags& flags = {});
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
 std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
 template <typename T1, typename T2>
@@ -76,9 +83,9 @@ std::vector<Cascade> setupCascades(int numCascades, const DirectX::XMVECTOR& lig
 
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda = 0.8f);
 
-std::string ws2s(const std::wstring& wstr);
+std::string ws2s(const std::wstring_view& wstr);
 
-std::wstring s2ws(const std::string& str);
+std::wstring s2ws(const std::string_view& str);
 
 DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV);
 
@@ -91,7 +98,7 @@ CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
 	int width,
 	int height,
 	int arraySize = 1,
-	int mipLevels = 1,
+	uint16_t mipLevels = 1,
 	bool isCubemap = false,
 	bool allowRTV = false,
 	bool allowDSV = false,
@@ -249,7 +256,7 @@ DirectX::XMVECTOR QuaternionFromAxisAngle(const DirectX::XMFLOAT3& dir);
 
 DirectX::XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat);
 
-Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, unsigned int isCubemap);
+Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, bool isCubemap);
 
 uint32_t NumMips(uint32_t width, uint32_t height);
 

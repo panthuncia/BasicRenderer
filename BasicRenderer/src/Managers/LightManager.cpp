@@ -71,7 +71,7 @@ LightManager::~LightManager() {
 
 AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
     auto lightBufferView = m_lightBuffer->Add(*lightInfo);
-    auto lightIndex = lightBufferView->GetOffset() / sizeof(LightInfo);
+    uint32_t lightIndex = static_cast<uint32_t>(lightBufferView->GetOffset() / sizeof(LightInfo));
     m_activeLightIndices->Insert(lightIndex);
 
     Components::LightViewInfo viewInfo;
@@ -229,7 +229,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 			static_cast<float>(cameraInfo.depthResX) / static_cast<float>(GetNextPowerOfTwo(cameraInfo.depthResX)),
 			static_cast<float>(cameraInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(cameraInfo.depthResY))
 		};
-		cameraInfo.numDepthMips = CalculateMipLevels(cameraInfo.depthResX, cameraInfo.depthResY);
+		cameraInfo.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(cameraInfo.depthResX), static_cast<uint16_t>(cameraInfo.depthResY));
 		cameraInfo.isOrtho = true; // Directional lights use orthographic projection for shadows.
 		// TODO: Needs near and far for depth unprojection
 		auto renderView = m_pCameraManager->AddCamera(cameraInfo);
@@ -272,7 +272,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 				static_cast<float>(viewInfo.depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResX)),
 				static_cast<float>(viewInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResY))
 			};
-			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
+			info.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(info.depthResX), static_cast<uint16_t>(info.depthResY));
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}
 		break;
@@ -298,7 +298,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			static_cast<float>(viewInfo.depthResX) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResX)),
 			static_cast<float>(viewInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResY))
 		};
-		camera.numDepthMips = CalculateMipLevels(camera.depthResX, camera.depthResY);
+		camera.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(camera.depthResX), static_cast<uint16_t>(camera.depthResY));
 
 		m_pCameraManager->UpdateCamera(renderViews[0], camera);
 		break;
@@ -336,7 +336,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 				static_cast<float>(viewInfo.depthResX) / static_cast<float>(nextPowerOfTwoX),
 				static_cast<float>(viewInfo.depthResY) / static_cast<float>(nextPowerOfTwoY)
 			};
-			info.numDepthMips = CalculateMipLevels(info.depthResX, info.depthResY);
+			info.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(info.depthResX), static_cast<uint16_t>(info.depthResY));
 			info.isOrtho = true; // Directional lights use orthographic projection for shadows.
 			m_pCameraManager->UpdateCamera(renderViews[i], info);
 		}

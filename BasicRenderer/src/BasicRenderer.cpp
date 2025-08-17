@@ -1,6 +1,5 @@
 ﻿#include <directx/d3dx12.h> // Included here to avoid conflicts with Windows SDK headers
 #include <iostream>
-#define NOMINMAX
 #include <Windows.h>
 #include <windowsx.h>
 #include <directx/d3d12.h>
@@ -14,8 +13,8 @@
 #include <io.h>        // _pipe, _dup2, _read, _close
 #include <fcntl.h>     // _O_BINARY
 #include <thread>
+#include <ThirdParty/pix/pix3.h>
 
-#include "ThirdParty/pix/pix3.h"
 #include "Mesh/Mesh.h"
 #include "DX12Renderer.h"
 #include "Utilities/Utilities.h"
@@ -210,9 +209,9 @@ point getRandomPointInVolume(double xmin, double xmax,
     std::random_device rd;
     std::mt19937 gen(rd());
 
-    std::uniform_real_distribution<> distX(xmin, xmax);
-    std::uniform_real_distribution<> distY(ymin, ymax);
-    std::uniform_real_distribution<> distZ(zmin, zmax);
+    std::uniform_real_distribution<float> distX(static_cast<float>(xmin), static_cast<float>(xmax));
+    std::uniform_real_distribution<float> distY(static_cast<float>(ymin), static_cast<float>(ymax));
+    std::uniform_real_distribution<float> distZ(static_cast<float>(zmin), static_cast<float>(zmax));
 
     point p;
     p.x = distX(gen);
@@ -303,24 +302,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    auto dragonScene = LoadModel("models/dragon.glb");
-    dragonScene->GetRoot().set<Components::Scale>({ 5, 5, 5 });
-    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
+    //auto dragonScene = LoadModel("models/dragon.glb");
+    //dragonScene->GetRoot().set<Components::Scale>({ 5, 5, 5 });
+    //dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
 
-    auto carScene = LoadModel("models/porche.glb");
-    carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
-    carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
+    //auto carScene = LoadModel("models/porche.glb");
+    //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
+    //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
 
-    auto mountainScene = LoadModel("models/terrain.glb");
-    mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-    mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+    //auto mountainScene = LoadModel("models/terrain.glb");
+    //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+    //mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
-    auto tigerScene = LoadModel("models/tiger.glb");
-    tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+    //auto tigerScene = LoadModel("models/tiger.glb");
+    //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    //auto bistro = LoadModel("models/BistroExterior.fbx");
+    auto bistro = LoadModel("models/BistroExterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     renderer.SetCurrentScene(baseScene);
@@ -328,12 +327,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(curtains->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(carScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(bistro);
+    renderer.GetCurrentScene()->AppendScene(bistro);
 
     renderer.SetEnvironment("sky");
 
@@ -375,7 +374,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         else {
 
             auto currentTime = std::chrono::system_clock::now();
-            std::chrono::duration<double> elapsedSeconds = currentTime - lastUpdateTime;
+            std::chrono::duration<float> elapsedSeconds = currentTime - lastUpdateTime;
             lastUpdateTime = currentTime;
 
             frameIndex += 1;
@@ -395,7 +394,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 // Window callback procedure
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 
-    if (toupper(wParam) == VK_ESCAPE) {
+    if (toupper(static_cast<int>(wParam)) == VK_ESCAPE) {
         message = WM_DESTROY;
     }
 

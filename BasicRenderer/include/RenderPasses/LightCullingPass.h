@@ -27,7 +27,6 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		CreatePSO();
 
 		m_pLightPagesCounter = m_resourceRegistryView->Request<Buffer>(Builtin::Light::PagesCounter);
@@ -58,10 +57,6 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.meshManager;
-		auto& objectManager = context.objectManager;
-		auto& cameraManager = context.cameraManager;
-
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
@@ -69,7 +64,7 @@ public:
 		commandList->SetComputeRoot32BitConstants(LightClusterRootSignatureIndex, NumLightClusterRootConstants, lightClusterConstants, 0);
 
 		auto clusterSize = getClusterSize();
-		unsigned int numThreadGroups = std::ceil(((float)(clusterSize.x * clusterSize.y * clusterSize.z)) / 128);
+		unsigned int numThreadGroups = static_cast<unsigned int>(std::ceil(((float)(clusterSize.x * clusterSize.y * clusterSize.z)) / 128));
 		commandList->Dispatch(numThreadGroups, 1, 1);
 		return {};
 	}

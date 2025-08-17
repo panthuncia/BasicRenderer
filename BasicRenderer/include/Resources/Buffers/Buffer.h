@@ -24,7 +24,7 @@ public:
 	static std::shared_ptr<Buffer> CreateShared(
 		ID3D12Device* device,
 		ResourceCPUAccessType accessType, 
-		size_t bufferSize, 
+		uint64_t bufferSize, 
 		bool upload,
 		bool unorderedAccess) {
 		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
@@ -32,7 +32,7 @@ public:
 	static std::unique_ptr<Buffer> CreateUnique(
 		ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
-		size_t bufferSize,
+		uint64_t bufferSize,
 		bool upload,
 		bool unorderedAccess) {
 		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
@@ -62,6 +62,6 @@ private:
 
 	Buffer(ID3D12Device* device, 
 		ResourceCPUAccessType accessType, 
-		size_t bufferSize, 
+		uint64_t bufferSize, 
 		bool upload = false, bool unorderedAccess = false);
 };

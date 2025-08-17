@@ -3,15 +3,15 @@
 #include "Resources/ResourceStates.h"
 
 struct ImageDimensions {
-    int width = 0;
-    int height = 0;
-    int rowPitch = 0;
-    int slicePitch = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint64_t rowPitch = 0;
+    uint64_t slicePitch = 0;
 };
 
 struct TextureDescription {
 	std::vector<ImageDimensions> imageDimensions;
-    int channels = 0; // Number of channels in the data (e.g., 3 for RGB, 4 for RGBA)
+    unsigned short channels = 0; // Number of channels in the data (e.g., 3 for RGB, 4 for RGBA)
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     bool isCubemap = false;
     bool isArray = false;

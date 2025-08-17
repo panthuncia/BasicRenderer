@@ -120,6 +120,9 @@ ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Devic
         return device.Get();
         break;
     }
+    default:
+		return device.Get();
+		break;
     }
 }
 
@@ -149,14 +152,14 @@ bool UpscalingManager::InitFFX() {
         createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
         createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
 
-        ffx::ReturnCode retCode = ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+        ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
 
 		return true;
     }
 	return false;
 }
 
-DirectX::XMFLOAT2 UpscalingManager::GetJitter(unsigned int frameNumber) {
+DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 
     switch (m_upscalingMode)
     {
@@ -196,6 +199,9 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(unsigned int frameNumber) {
 
         return { jitterX, jitterY };
     }
+    default:
+		return { 0.0f, 0.0f };
+		break;
     }
 }
 
@@ -322,7 +328,7 @@ void UpscalingManager::Setup() {
         queryDesc.pOutRenderWidth = &optimalRenderRes.x;
         queryDesc.pOutRenderHeight = &optimalRenderRes.y;
 
-		ffx::ReturnCode retCode = ffx::Query(m_fsrUpscalingContext, queryDesc);
+		ffx::Query(m_fsrUpscalingContext, queryDesc);
 
         SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(optimalRenderRes);
         
@@ -436,8 +442,8 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
     // Jitter is calculated earlier in the frame using a callback from the camera update
     dispatchUpscale.jitterOffset.x = camera.jitterPixelSpace.x;
     dispatchUpscale.jitterOffset.y = -camera.jitterPixelSpace.y;
-	dispatchUpscale.motionVectorScale.x = -renderRes.x; // FFX expects left-handed, we use right-handed
-    dispatchUpscale.motionVectorScale.y = renderRes.y;
+	dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x); // FFX expects left-handed, we use right-handed
+    dispatchUpscale.motionVectorScale.y = static_cast<float>(renderRes.y);
     dispatchUpscale.reset = false;
     dispatchUpscale.enableSharpening = false;
     //dispatchUpscale.sharpness = m_Sharpness;
@@ -466,7 +472,7 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
         dispatchUpscale.cameraNear = camera.zNear;
     }
 
-    ffx::ReturnCode retCode = ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
+    ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
 }
 
 void UpscalingManager::EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {

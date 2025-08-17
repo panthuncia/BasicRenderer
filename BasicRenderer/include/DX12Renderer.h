@@ -5,7 +5,6 @@
 #ifndef DX12RENDERER_H
 #define DX12RENDERER_H
 
-#define NOMINMAX
 #include <windows.h>
 #include <wrl.h>
 #include <directx/d3d12.h>
@@ -67,7 +66,7 @@ public:
 
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
-    void Update(double elapsedSeconds);
+    void Update(float elapsedSeconds);
     void Render();
     void Cleanup();
     ComPtr<ID3D12Device10>& GetDevice();
@@ -143,7 +142,7 @@ private:
     void CreateTextures();
 	void TagDLSSResources(ID3D12Resource* pDepthTexture);
     void MoveForward();
-    void SetupInputHandlers(InputManager& inputManager, InputContext& context);
+    void SetupInputHandlers();
     void CreateGlobalResources();
     void CreateRenderGraph();
     void SetSettings();

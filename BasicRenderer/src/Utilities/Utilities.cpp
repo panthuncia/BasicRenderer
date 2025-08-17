@@ -4,7 +4,6 @@
 #include <stdexcept>
 #include <algorithm>
 #include <codecvt>
-#include <DirectXTex.h>
 #include <future>
 #include <functional>
 #include <filesystem>
@@ -12,6 +11,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <optional>
+#include <gsl/gsl>
 
 #include "Render/PSOFlags.h"
 #include "DirectX/d3dx12.h"
@@ -68,10 +68,9 @@ void ThrowIfFailed(HRESULT hr) {
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {
     bool hasTexcoords = !meshData.texcoords.empty();
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
-    unsigned int materialFlags = meshData.material->GetMaterialFlags();
 
     std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
-    unsigned int numVertices = meshData.positions.size() / 3;
+    uint32_t numVertices = static_cast<uint32_t>(meshData.positions.size()) / 3;
     // position,        normal,            texcoord
     uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
     rawData->resize(numVertices * vertexSize);
@@ -152,122 +151,242 @@ ImageData LoadSTBImage(const char* filename) {
     return img;
 }
 
-std::shared_ptr<Texture> LoadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler) {
-	ImageData img = LoadSTBImage(filename.c_str());
-    // Determine DXGI_FORMAT based on number of channels
-	DXGI_FORMAT format;
-    switch (img.channels) {
-        case 1:
-            format = DXGI_FORMAT_R8_UNORM;
-            break;
-        case 2:
-            format = DXGI_FORMAT_R8G8_UNORM;
-            break;
-        case 3:
-        case 4:
-            format = DXGI_FORMAT_R8G8B8A8_UNORM; // RGBA
-            break;
-		default:
-			throw std::runtime_error("Unsupported channel count");
-    }
+struct RawImage {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t channels = 4;               // 1,2,3,4
+    DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    uint32_t rowPitch = 0;
+    uint32_t slicePitch = 0;
+    const uint8_t* pixels = nullptr;
+    bool alphaAllOpaque = true;
 
-	ImageDimensions dim;
-	dim.width = img.width;
-	dim.height = img.height;
-	dim.rowPitch = img.width * img.channels;
-	dim.slicePitch = img.height * img.width * img.channels;
+    std::string filepathUtf8;
+    std::optional<ImageFiletype> fileType;
+};
 
-    TextureDescription desc;
-	desc.imageDimensions.push_back(dim);
-	desc.channels = img.channels;
-	desc.format = format;
-	auto buffer = PixelBuffer::Create(desc, { img.data });
+static std::shared_ptr<Texture>
+CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler)
+{
+    ImageDimensions dim{};
+    dim.width = img.width;
+    dim.height = img.height;
+    dim.rowPitch = img.rowPitch;
+    dim.slicePitch = img.slicePitch;
 
-    if (!sampler) {
-        sampler = Sampler::GetDefaultSampler();
-    }
-    return std::make_shared<Texture>(buffer, sampler);
-}
-
-std::shared_ptr<Texture> LoadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler) {
-	DirectX::ScratchImage image;
-	DirectX::TexMetadata metadata;
-    HRESULT hr;
-    switch (format) {
-	case ImageFiletype::DDS:
-        hr = DirectX::LoadFromDDSFile(filePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
-		break;
-	case ImageFiletype::PNG:
-		hr = DirectX::LoadFromWICFile(filePath.c_str(), DirectX::WIC_FLAGS_NONE, &metadata, image);
-        break;
-    }
-
-	if (FAILED(hr)) {
-		throw std::runtime_error("Failed to load texture: " + ws2s(filePath));
-	}
-	// Extract the first mip level
-	const DirectX::Image* img = image.GetImage(0, 0, 0); // mip 0, face 0, slice 0
-	ImageDimensions dim;
-	dim.width = metadata.width;
-	dim.height = metadata.height;
-	dim.rowPitch = img->rowPitch;
-	dim.slicePitch = img->slicePitch;
-
-	TextureDescription desc;
-	desc.imageDimensions.push_back(dim);
-	desc.channels = 4;
-	desc.format = metadata.format;
-    desc.generateMipMaps = false;// metadata.mipLevels != 1;
-	auto buffer = PixelBuffer::Create(desc, { img->pixels });
-	if (!sampler) {
-		sampler = Sampler::GetDefaultSampler();
-	}
-    auto texture = std::make_shared<Texture>(buffer, sampler);
-	texture->SetFilepath(ws2s(filePath));
-    texture->SetFileType(format);
-	texture->SetAlphaIsAllOpaque(image.IsAlphaAllOpaque());
-	return texture;
-}
-
-std::shared_ptr<Texture> LoadTextureFromFile(std::wstring filePath, std::shared_ptr<Sampler> sampler) {
-    auto fileExtension = GetFileExtension(ws2s(filePath));
-    ImageFiletype format = extensionToFiletype[fileExtension];
-    ImageLoader loader = imageFiletypeToLoader[format];
-
-    switch (loader) {
-    case ImageLoader::STBImage:
-        return LoadTextureFromFileSTBI(ws2s(filePath), sampler);
-    case ImageLoader::DirectXTex:
-        return LoadTextureFromFileDXT(filePath, format, sampler);
-    default:
-        throw std::runtime_error("Unsupported texture format: " + ws2s(filePath));
-    }
-}
-
-std::shared_ptr<Texture> LoadTextureFromMemory(void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler) {
-    int   w, h, n;
-    unsigned char* pixels = stbi_load_from_memory(
-        reinterpret_cast<const stbi_uc*>(bytes),
-        (int)byteCount, &w, &h, &n, 4);
-
-    if (!pixels) {
-        throw std::runtime_error("Failed to load texture from memory");
-    }
-	ImageDimensions dim;
-	dim.width = w;
-	dim.height = h;
-	dim.rowPitch = w * 4; // Assuming RGBA format
-	dim.slicePitch = dim.rowPitch * h;
-    TextureDescription desc;
+    TextureDescription desc{};
     desc.imageDimensions.push_back(dim);
-    desc.channels = 4; // RGBA
-    desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    auto buffer = PixelBuffer::Create(desc, { pixels });
-    stbi_image_free(pixels);
-    if (!sampler) {
-        sampler = Sampler::GetDefaultSampler();
+    desc.channels = static_cast<unsigned short>(img.channels);
+    desc.format = img.format;
+    desc.generateMipMaps = false; // TODO: Allow mipmapping
+
+    auto buffer = PixelBuffer::Create(desc, { img.pixels });
+
+    if (!sampler) sampler = Sampler::GetDefaultSampler();
+
+    auto texture = std::make_shared<Texture>(buffer, sampler);
+    if (!img.filepathUtf8.empty()) texture->SetFilepath(img.filepathUtf8);
+    if (img.fileType.has_value())  texture->SetFileType(*img.fileType);
+    texture->SetAlphaIsAllOpaque(img.alphaAllOpaque);
+    return texture;
+}
+
+//static RawImage RawFromSTBI(const ImageData& in)
+//{
+//    RawImage out{};
+//    out.width = static_cast<uint32_t>(in.width);
+//    out.height = static_cast<uint32_t>(in.height);
+//    out.channels = static_cast<uint32_t>(in.channels);
+//
+//    // Map channels to DXGI_FORMAT (simple 8 bit path)
+//    switch (out.channels) {
+//    case 1: out.format = DXGI_FORMAT_R8_UNORM;        break;
+//    case 2: out.format = DXGI_FORMAT_R8G8_UNORM;      break;
+//    case 3: // fallthrough
+//    case 4: out.format = DXGI_FORMAT_R8G8B8A8_UNORM; break; // force RGBA upload
+//    default: throw std::runtime_error("Unsupported channel count");
+//    }
+//
+//    out.rowPitch = out.width * out.channels;
+//    out.slicePitch = out.rowPitch * out.height;
+//    out.pixels = reinterpret_cast<const uint8_t*>(in.data);
+//    out.alphaAllOpaque = false; // No way to detect with stbi
+//
+//    return out;
+//}
+
+
+static RawImage RawFromDXT(const DirectX::ScratchImage& image,
+    const DirectX::TexMetadata& meta,
+    std::string filepathUtf8,
+    std::optional<ImageFiletype> fileType)
+{
+    const DirectX::Image* img0 = image.GetImage(0, 0, 0); // mip 0, array 0, depth 0
+    if (!img0) throw std::runtime_error("DirectXTex: missing base image");
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+    if (meta.width > std::numeric_limits<uint32_t>::max() ||
+        meta.height > std::numeric_limits<uint32_t>::max())
+    {
+        spdlog::error("Texture dimensions exceed maximum limit for file: {}", filepathUtf8);
+        throw std::runtime_error("Texture dimensions exceed maximum limit");
     }
-	return std::make_shared<Texture>(buffer, sampler);
+#endif
+
+    RawImage out{};
+    out.width = static_cast<uint32_t>(meta.width);
+    out.height = static_cast<uint32_t>(meta.height);
+    out.channels = 4; // TODO: DXT files with different channel counts?
+    out.format = meta.format;
+    out.rowPitch = static_cast<uint32_t>(img0->rowPitch);
+    out.slicePitch = static_cast<uint32_t>(img0->slicePitch);
+    out.pixels = img0->pixels;
+    out.alphaAllOpaque = image.IsAlphaAllOpaque();
+    out.filepathUtf8 = std::move(filepathUtf8);
+    out.fileType = fileType;
+    return out;
+}
+
+//std::shared_ptr<Texture>
+//LoadTextureFromFileSTBI(const std::string& filenameUtf8, std::shared_ptr<Sampler> sampler)
+//{
+//    ImageData img = LoadSTBImage(filenameUtf8.c_str());
+//    if (!img.data) {
+//		throw std::runtime_error("Failed to load texture from file (stb): " + filenameUtf8);
+//    }
+//
+//    RawImage raw = RawFromSTBI(img);
+//    raw.filepathUtf8 = filenameUtf8;
+//    return CreateTextureFromRaw(raw, sampler);
+//    stbi_image_free(img.data);
+//}
+//
+//std::shared_ptr<Texture>
+//LoadTextureFromMemorySTBI(const void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler)
+//{
+//    int w = 0, h = 0, n = 0;
+//    // Force 4 channels: TODO: Don't I handle this elsewhere already?
+//    unsigned char* pixels = stbi_load_from_memory(
+//        reinterpret_cast<const stbi_uc*>(bytes), static_cast<int>(byteCount), &w, &h, &n, 4);
+//    if (!pixels) throw std::runtime_error("Failed to load texture from memory (stb)");
+//
+//    ImageData img{};
+//    img.width = w; img.height = h; img.channels = 4; img.data = pixels;
+//    auto guard = gsl::finally([&]() { stbi_image_free(img.data); });
+//
+//    RawImage raw = RawFromSTBI(img);
+//    return CreateTextureFromRaw(raw, sampler);
+//}
+
+
+namespace detail {
+
+    inline std::vector<std::byte> ReadFileBytes(const std::wstring& path)
+    {
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f) { throw std::runtime_error("Failed to open file: " + ws2s(path)); }
+        const auto size = static_cast<size_t>(f.tellg());
+        f.seekg(0, std::ios::beg);
+        std::vector<std::byte> data(size);
+        if (size && !f.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(size))) {
+            throw std::runtime_error("Failed to read file: " + ws2s(path));
+        }
+        return data;
+    }
+
+    inline bool ProbeImageContainer(const void* bytes, size_t byteCount,
+        ImageFiletype& outKind,
+        DirectX::TexMetadata& outMeta,
+        const LoadFlags& flags = {})
+    {
+        using namespace DirectX;
+
+        // DDS
+        if (SUCCEEDED(GetMetadataFromDDSMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, flags.dds, outMeta))) {
+            outKind = ImageFiletype::DDS;
+            return true;
+        }
+
+        // HDR/Radiance
+        if (SUCCEEDED(GetMetadataFromHDRMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, outMeta))) {
+            outKind = ImageFiletype::HDR;
+            return true;
+        }
+
+        // TGA
+        if (SUCCEEDED(GetMetadataFromTGAMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, outMeta))) {
+            outKind = ImageFiletype::TGA;
+            return true;
+        }
+
+        // WIC fallback: PNG/JPEG/BMP/TIFF/
+        if (SUCCEEDED(GetMetadataFromWICMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, flags.wic, outMeta))) {
+            outKind = ImageFiletype::WIC;
+            return true;
+        }
+
+        return false;
+    }
+}
+
+std::shared_ptr<Texture>
+LoadTextureFromMemory(const void* bytes, size_t byteCount,
+    std::shared_ptr<Sampler> sampler,
+    const LoadFlags& flags)
+{
+    if (!bytes || !byteCount)
+        throw std::runtime_error("LoadTextureFromMemoryDXT: null/empty buffer");
+
+    DirectX::TexMetadata meta{};
+    ImageFiletype kind{};
+    if (!detail::ProbeImageContainer(bytes, byteCount, kind, meta, flags)) {
+        throw std::runtime_error("Unrecognized image container in memory buffer");
+    }
+
+    DirectX::ScratchImage img;
+    HRESULT hr = E_FAIL;
+
+    switch (kind) {
+    case ImageFiletype::DDS:
+        hr = DirectX::LoadFromDDSMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, flags.dds, &meta, img);
+        if (FAILED(hr)) throw std::runtime_error("Failed to load DDS from memory");
+        return CreateTextureFromRaw(RawFromDXT(img, meta, "", ImageFiletype::DDS), sampler);
+
+    case ImageFiletype::HDR:
+        hr = DirectX::LoadFromHDRMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
+        if (FAILED(hr)) throw std::runtime_error("Failed to load HDR from memory");
+        return CreateTextureFromRaw(RawFromDXT(img, meta, "", ImageFiletype::HDR), sampler);
+
+    case ImageFiletype::TGA:
+        hr = DirectX::LoadFromTGAMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
+        if (FAILED(hr)) throw std::runtime_error("Failed to load TGA from memory");
+        return CreateTextureFromRaw(RawFromDXT(img, meta, "", ImageFiletype::TGA), sampler);
+
+    case ImageFiletype::WIC:
+        hr = DirectX::LoadFromWICMemory(
+            static_cast<const uint8_t*>(bytes), byteCount, flags.wic, &meta, img);
+        if (FAILED(hr)) throw std::runtime_error("Failed to load WIC image from memory");
+        return CreateTextureFromRaw(RawFromDXT(img, meta, "", std::nullopt), sampler);
+    }
+
+    throw std::runtime_error("Unhandled container type");
+}
+
+std::shared_ptr<Texture>
+LoadTextureFromFile(const std::wstring& filePath,
+    std::shared_ptr<Sampler> sampler)
+{
+    const std::string utf8 = ws2s(filePath);
+
+    const auto data = detail::ReadFileBytes(filePath);
+    return LoadTextureFromMemory(data.data(), data.size(), sampler);
 }
 
 
@@ -288,7 +407,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bo
 
 	TextureDescription desc;
 	desc.imageDimensions.push_back(dim);
-	desc.channels = top.channels;
+	desc.channels = static_cast<unsigned short>(top.channels);
 	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	desc.isCubemap = true;
 
@@ -317,10 +436,16 @@ std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allo
     for (size_t face = 0; face < 6; ++face) {
         for (size_t mip = 0; mip < metadata.mipLevels; ++mip) {
             const DirectX::Image* img = image.GetImage(mip, face, 0); // mip 0, face i, slice 0
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+            if (metadata.width > std::numeric_limits<uint32_t>().max() || metadata.height > std::numeric_limits<uint32_t>().max()) {
+                spdlog::error("Texture dimensions exceed maximum limit for file: {}", ws2s(ddsFilePath));
+                throw std::runtime_error("Texture dimensions exceed maximum limit");
+            }
+#endif
             faces.push_back(img->pixels);
 			ImageDimensions dim;
-			dim.width = img->width;
-			dim.height = img->height;
+			dim.width = static_cast<uint32_t>(img->width);
+			dim.height = static_cast<uint32_t>(img->height);
 			dim.rowPitch = img->rowPitch;
 			dim.slicePitch = img->slicePitch;
 			desc.imageDimensions.push_back(dim);
@@ -570,25 +695,71 @@ std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zF
     return splits;
 }
 
-std::wstring to_wstring(const std::string& stringToConvert) {
-    std::wstring wideString =
-        std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes(stringToConvert);
-    return wideString;
+std::wstring s2ws(const std::string_view& utf8)
+{
+    if (utf8.empty()) return {};
+    int needed = ::MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        utf8.data(),
+        static_cast<int>(utf8.size()),
+        nullptr,
+        0
+    );
+    if (needed == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "MultiByteToWideChar(size)");
+
+    std::wstring out(needed, L'\0');
+
+    int written = ::MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        utf8.data(),
+        static_cast<int>(utf8.size()),
+        out.data(),
+        needed
+    );
+    if (written == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "MultiByteToWideChar(data)");
+
+    return out;
 }
 
-std::wstring s2ws(const std::string& str) {
-    using convert_typeX = std::codecvt_utf8<wchar_t>;
-    std::wstring_convert<convert_typeX, wchar_t> converterX;
+std::string ws2s(const std::wstring_view& wide)
+{
+    if (wide.empty()) return {};
 
-    return converterX.from_bytes(str);
-}
+    int needed = ::WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wide.data(),
+        static_cast<int>(wide.size()),
+        nullptr,
+        0,
+        nullptr, nullptr
+    );
+    if (needed == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "WideCharToMultiByte(size)");
 
+    std::string out(needed, '\0');
 
-std::string ws2s(const std::wstring& wstr) {
-    using convert_typeX = std::codecvt_utf8<wchar_t>;
-    std::wstring_convert<convert_typeX, wchar_t> converterX;
+    int written = ::WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wide.data(),
+        static_cast<int>(wide.size()),
+        out.data(),
+        needed,
+        nullptr, nullptr
+    );
+    if (written == 0)
+        throw std::system_error(::GetLastError(), std::system_category(),
+            "WideCharToMultiByte(data)");
 
-    return converterX.to_bytes(wstr);
+    return out;
 }
 
 DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV) {
@@ -612,7 +783,7 @@ CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
     int width,
     int height,
     int arraySize,
-    int mipLevels,
+    uint16_t mipLevels,
     bool isCubemap,
     bool allowRTV,
     bool allowDSV,
@@ -934,7 +1105,7 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
 
             device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
 
-            ShaderVisibleIndexInfo uavInfo{ descriptorIndex, gpuHandle };
+            ShaderVisibleIndexInfo uavInfo{ static_cast<int>(descriptorIndex), gpuHandle };
             sliceUAVs.push_back(uavInfo);
         }
     }
@@ -1325,6 +1496,10 @@ DirectX::XMMATRIX GetProjectionMatrixForLight(LightInfo info) {
     case Components::LightType::Point:
         return XMMatrixPerspectiveFovRH(XM_PI / 2, 1.0, info.nearPlane, info.farPlane);
         break;
+    case Components::LightType::Directional:
+		throw std::runtime_error("Implemented elsewhere"); // TODO: Consolidate?
+    default:
+		throw std::runtime_error("Unknown light type for projection matrix");
     }
 }
 
@@ -1357,7 +1532,7 @@ XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat) {
     return XMFLOAT3(matFloats._41, matFloats._42, matFloats._43);
 }
 
-Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, unsigned int isCubemap) {
+Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, bool isCubemap) {
 	TextureDescription desc;
 	ImageDimensions dims;
 	dims.width = xRes;

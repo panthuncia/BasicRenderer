@@ -1,5 +1,6 @@
 #include "Managers/Singletons/UploadManager.h"
 
+#include <ThirdParty/pix/pix3.h>
 
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
@@ -7,7 +8,6 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "ThirdParty/pix/pix3.h"
 
 void UploadManager::Initialize() {
 	auto& device = DeviceManager::GetInstance().GetDevice();
@@ -249,7 +249,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 			barriers.insert(barriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
 		}
 
-		commandList->Barrier(barriers.size(), barriers.data());
+		commandList->Barrier(static_cast<uint32_t>(barriers.size()), barriers.data());
 
 		// Perform the copy
         commandList->CopyBufferRegion(
@@ -283,7 +283,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 			barriers.insert(barriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
 		}
 
-		commandList->Barrier(barriers.size(), barriers.data());
+		commandList->Barrier(static_cast<uint32_t>(barriers.size()), barriers.data());
 	}
 	DEBUG_ONLY(PIXEndEvent(commandList.Get()));
 	commandList->Close();

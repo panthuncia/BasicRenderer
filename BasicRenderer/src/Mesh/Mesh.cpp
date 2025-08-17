@@ -14,7 +14,7 @@
 
 #include "../shaders/Common/defines.h"
 
-std::atomic<uint64_t> Mesh::globalMeshCount = 0;
+std::atomic<uint32_t> Mesh::globalMeshCount = 0;
 
 Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
     m_vertices = std::move(vertices);
@@ -24,7 +24,7 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
-	m_perMeshBufferData.numVertices = m_vertices->size() / vertexSize;
+	m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_vertices->size() / vertexSize);
 	m_perMeshBufferData.skinningVertexByteSize = skinningVertexSize;
 
 	m_skinningVertexSize = skinningVertexSize;
@@ -124,7 +124,6 @@ void Mesh::ComputeBoundingSphere(const std::vector<UINT32>& indices) {
 }
 
 void Mesh::CreateMeshletReorderedVertices() {
-	const size_t meshletCount    = m_meshlets.size();
 	const size_t vertexByteSize  = m_perMeshBufferData.vertexByteSize;
 
 	size_t totalVerts = 0;
@@ -174,7 +173,7 @@ void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
 	ComputeBoundingSphere(indices);
 
     const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT32));
-    m_indexCount = indices.size();
+    m_indexCount = static_cast<uint32_t>(indices.size());
 
 	m_indexBufferHandle = ResourceManager::GetInstance().CreateBuffer(indexBufferSize, (void*)indices.data());
 
@@ -205,7 +204,7 @@ uint64_t Mesh::GetGlobalID() const {
 
 void Mesh::SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
 	m_preSkinningVertexBufferView = std::move(view);
-	m_perMeshBufferData.vertexBufferOffset = m_preSkinningVertexBufferView->GetOffset();
+	m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_preSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
 
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
@@ -222,7 +221,7 @@ BufferView* Mesh::GetPostSkinningVertexBufferView() {
 
 void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletBufferView = std::move(view);
-	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset();
+	m_perMeshBufferData.meshletBufferOffset = static_cast<uint32_t>(m_meshletBufferView->GetOffset());
 
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
@@ -230,7 +229,7 @@ void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
 }
 void Mesh::SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletVerticesBufferView = std::move(view);
-	m_perMeshBufferData.meshletVerticesBufferOffset = m_meshletVerticesBufferView->GetOffset();
+	m_perMeshBufferData.meshletVerticesBufferOffset = static_cast<uint32_t>(m_meshletVerticesBufferView->GetOffset());
 
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
@@ -238,7 +237,7 @@ void Mesh::SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
 }
 void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
 	m_meshletTrianglesBufferView = std::move(view);
-	m_perMeshBufferData.meshletTrianglesBufferOffset = m_meshletTrianglesBufferView->GetOffset();
+	m_perMeshBufferData.meshletTrianglesBufferOffset = static_cast<uint32_t>(m_meshletTrianglesBufferView->GetOffset());
 
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
@@ -256,14 +255,14 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferVie
 		return; // We're probably deleting the mesh
 	}
 	if (m_preSkinningVertexBufferView != nullptr) { // If the mesh is skinned
-		m_perMeshBufferData.vertexBufferOffset = m_preSkinningVertexBufferView->GetOffset();
+		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_preSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
 	}
 	else { // If the mesh is not skinned
-		m_perMeshBufferData.vertexBufferOffset = m_postSkinningVertexBufferView->GetOffset();
+		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_postSkinningVertexBufferView->GetOffset()); // same
 	}
-	m_perMeshBufferData.meshletBufferOffset = m_meshletBufferView->GetOffset() / sizeof(meshopt_Meshlet);
-	m_perMeshBufferData.meshletVerticesBufferOffset = m_meshletVerticesBufferView->GetOffset() / 4;
-	m_perMeshBufferData.meshletTrianglesBufferOffset = m_meshletTrianglesBufferView->GetOffset();
+	m_perMeshBufferData.meshletBufferOffset = static_cast<uint32_t>(m_meshletBufferView->GetOffset() / sizeof(meshopt_Meshlet));
+	m_perMeshBufferData.meshletVerticesBufferOffset = static_cast<uint32_t>(m_meshletVerticesBufferView->GetOffset() / 4);
+	m_perMeshBufferData.meshletTrianglesBufferOffset = static_cast<uint32_t>(m_meshletTrianglesBufferView->GetOffset());
 	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
@@ -280,7 +279,7 @@ void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 }
 
 void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {
-	m_perMeshBufferData.numVertices = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
+	m_perMeshBufferData.numVertices = static_cast<uint32_t>(meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize);
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}

@@ -8,8 +8,8 @@ AnimationController::AnimationController(const AnimationController& other)
 	: animationClip(other.animationClip), currentTime(other.currentTime), isPlaying(other.isPlaying) {
 }
 
-void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> animationClip) {
-    this->animationClip = animationClip;
+void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> newAnimationClip) {
+    animationClip = newAnimationClip;
     //node->ForceUpdate();
     UpdateTransform();
 }
@@ -45,7 +45,7 @@ std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, s
 	}
 
     bool found = false;
-    for (size_t i = counter; i < keyframes.size() - 1; ++i) {
+    for (uint32_t i = counter; i < keyframes.size() - 1; ++i) {
         if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
             prevKeyframeIndex = i;
             nextKeyframeIndex = i + 1;
@@ -120,3 +120,6 @@ void AnimationController::UpdateTransform() {
         }
     }
 }
+
+void AnimationController::SetAnimationSpeed(float speed) { m_animationSpeed = speed; }
+float AnimationController::GetAnimationSpeed() { return m_animationSpeed; }

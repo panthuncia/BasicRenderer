@@ -32,7 +32,7 @@ public:
         m_data.push_back(element);
         m_needsUpdate = true;
 
-        unsigned int index = m_data.size() - 1;
+        unsigned int index = static_cast<uint32_t>(m_data.size()) - 1; // TODO: Fix buffer max sizes
 
 		UploadManager::GetInstance().UploadData(&element, sizeof(T), this, index * sizeof(T));
 
@@ -54,7 +54,7 @@ public:
         return m_data[index];
     }
 
-    void Resize(UINT newCapacity) {
+    void Resize(uint32_t newCapacity) {
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
@@ -75,7 +75,7 @@ public:
     }
 
     UINT Size() {
-        return m_data.size();
+        return static_cast<uint32_t>(m_data.size());
     }
 
 	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
@@ -114,12 +114,12 @@ private:
     }
 
     std::vector<T> m_data;
-    size_t m_capacity;
+    uint32_t m_capacity;
     bool m_needsUpdate;
 
     UINT m_globalResizableBufferID;
 
-    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)> onResized;
+    std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
     bool m_UAV = false;
