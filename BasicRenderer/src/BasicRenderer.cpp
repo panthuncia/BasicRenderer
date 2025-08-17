@@ -319,7 +319,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    auto bistro = LoadModel("models/BistroExterior.gltf");
+    auto bistro = LoadModel("models/BistroExterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     renderer.SetCurrentScene(baseScene);

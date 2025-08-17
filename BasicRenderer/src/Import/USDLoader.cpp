@@ -331,7 +331,7 @@ namespace USDLoader {
 		bool isUSDZ)
 	{
 		MaterialDescription result;
-
+		
 		// Get terminal output
 		pxr::UsdShadeOutput surfOut =
 			material.GetSurfaceOutput(pxr::UsdShadeTokens->universalRenderContext);
