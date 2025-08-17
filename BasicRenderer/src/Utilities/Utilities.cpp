@@ -111,7 +111,7 @@ std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) 
     return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, meshData.material, meshData.flags);
 }
 
-XMMATRIX RemoveScalingFromMatrix(XMMATRIX& initialMatrix) {
+XMMATRIX RemoveScalingFromMatrix(const XMMATRIX& initialMatrix) {
     XMVECTOR translation = initialMatrix.r[3];
     XMVECTOR right = initialMatrix.r[0];
     XMVECTOR up = initialMatrix.r[1];
@@ -1313,7 +1313,7 @@ std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& 
     return filePath.wstring();
 }
 
-std::string tolower(const std::string& str) {
+std::string ToLower(const std::string& str) {
 	std::string lower = str;
 	std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
 	return lower;

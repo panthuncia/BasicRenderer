@@ -22,7 +22,7 @@ static constexpr ColorSpace Rec709 = {
 };
 
 static ColorSpaces StringToColorSpace(const std::string& str) {
-	auto lowerStr = tolower(str);
+	auto lowerStr = ToLower(str);
 	if (lowerStr == "linear") {
 		return ColorSpaces::linear;
 	} else if (lowerStr == "rec709" || lowerStr == "srgb") {

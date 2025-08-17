@@ -65,6 +65,7 @@ std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment(std::wstring 
 }
 
 void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
+	std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
 
 	// Check if this environment has been processed and cached. If it has, load the cache. If it hasn't, load the environment and process it.
 	auto& name = e->GetName();
@@ -115,7 +116,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	}
 
 	//Re-create environment cubemap at full res
-	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentCubemap().get());
+	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentPrefilteredCubemap().get());
 	ImageDimensions dims;
 	dims.height = res;
 	dims.width = res;

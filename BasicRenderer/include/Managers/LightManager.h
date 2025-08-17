@@ -24,7 +24,7 @@ class SortedUnsignedIntBuffer;
 struct AddLightReturn {
 	Components::LightViewInfo lightViewInfo;
 	std::optional<Components::DepthMap> shadowMap;
-	std::optional<Components::FrustrumPlanes> frustrumPlanes;
+	std::optional<Components::FrustumPlanes> frustumPlanes;
 };
 
 class LightManager: public IResourceProvider {
@@ -77,11 +77,11 @@ private:
 
 	std::mutex m_lightUpdateMutex;
 
-    std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+    std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
         CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId);
-	std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+	std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
 		CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId);
-	std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+	std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
 		CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t entityId);
 
 	void RemoveLightViewInfo(flecs::entity light);

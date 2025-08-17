@@ -46,10 +46,10 @@ public:
             materialFlags |= MaterialFlags::MATERIAL_OPACITY_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
 			blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
         }
-        if (desc.opacity.factor < 1.0f) {
+        if (desc.opacity.factor.Get() < 1.0f) {
             materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
             psoFlags |= PSOFlags::PSO_BLEND | PSOFlags::PSO_ALPHA_TEST;
-	        diffuseColor.w = desc.opacity.factor; // Use opacity factor as alpha
+	        diffuseColor.w = desc.opacity.factor.Get(); // Use opacity factor as alpha
 			blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
 		}
         if (desc.negateNormals) {
@@ -74,8 +74,8 @@ public:
             desc.roughness.texture,
             desc.emissive.texture,
             desc.opacity.texture,
-            desc.metallic.factor,
-            desc.roughness.factor,
+            desc.metallic.factor.Get(),
+            desc.roughness.factor.Get(),
             diffuseColor,
             desc.emissiveColor,
 			desc.baseColor.channels,

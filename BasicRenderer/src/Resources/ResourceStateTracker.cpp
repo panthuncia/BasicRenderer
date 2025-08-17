@@ -23,7 +23,7 @@ SubresourceRange ResolveRangeSpec(RangeSpec spec,
     }
 
     // clamp to [0..totalMips-1]
-    firstMip = std::min(firstMip,  totalMips);
+    firstMip = std::min(firstMip,  totalMips - 1);
     lastMip  = std::min(lastMip,   totalMips - 1);
 
     uint32_t numMips = (lastMip >= firstMip)
@@ -49,7 +49,7 @@ SubresourceRange ResolveRangeSpec(RangeSpec spec,
     }
 
     // clamp to [0..totalSlices-1]
-    firstSlice = std::min(firstSlice, totalSlices);
+    firstSlice = std::min(firstSlice, totalSlices - 1);
     lastSlice  = std::min(lastSlice,  totalSlices - 1);
 
     uint32_t numSlices = (lastSlice >= firstSlice)

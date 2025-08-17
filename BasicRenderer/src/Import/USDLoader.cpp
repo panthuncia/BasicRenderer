@@ -421,6 +421,13 @@ namespace USDLoader {
 			}
 		}
 
+		//Post-process to assign 1.0 to undefined factors with a valid texture
+		for (auto& tex : { &result.baseColor, &result.metallic, &result.roughness, &result.opacity, &result.emissive, &result.normal, &result.heightMap, &result.aoMap }) {
+			if (tex->texture && !tex->factor.HasValue()) {
+				tex->factor = 1.0f; // Unlike glTF, USD does not require a factor to be set if a texture is present
+			}
+		}
+
 		return result;
 	}
 

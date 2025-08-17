@@ -1,5 +1,7 @@
 #include "Utilities/MathUtils.h"
 
+#include <spdlog/spdlog.h>
+
 using namespace DirectX;
 
 void ApplyMovement(Components::Position& pos, const Components::Rotation& rot, const MovementState& movement, float deltaTime){
@@ -33,9 +35,16 @@ XMVECTOR GetUpFromMatrix(const DirectX::XMMATRIX& matrix) {
 
 float CalculateLightRadius(float intensity, float constant, float linear, float quadratic, float threshold) {
 
-    // Rearranged equation: quadratic * d^2 + linear * d + (constant - intensity/threshold) = 0
+    // quadratic * d^2 + linear * d + (constant - intensity/threshold) = 0
     float a = quadratic;
     float b = linear;
+
+	// If threshold is zero, we cannot divide by it.
+    if (threshold == 0.0f) {
+		spdlog::warn("Light threshold is zero. Is this intentional?");
+        return 0.0f;
+    }
+
     float c = constant - (intensity / threshold);
 
     float d = 0.0;

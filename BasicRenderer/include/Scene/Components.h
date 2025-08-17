@@ -87,13 +87,13 @@ namespace Components {
 
 	struct Camera {
 		Camera() = default;
-		Camera(float aspect, float fov, float zNear, float zFar, const CameraInfo& info) : info(info) {}
+		Camera(float aspect, float fov, float zNear, float zFar, const CameraInfo& info) : aspect(aspect), fov(fov), zNear(zNear), zFar(zFar), info(info) {}
 		float aspect;
 		float fov;
 		float zNear;
 		float zFar;
-		DirectX::XMFLOAT2 jitterPixelSpace; // Jitter in pixel space for temporal anti-aliasing
-		DirectX::XMFLOAT2 jitterNDC; // Jitter in normalized device coordinates
+		DirectX::XMFLOAT2 jitterPixelSpace = {}; // Jitter in pixel space for temporal anti-aliasing
+		DirectX::XMFLOAT2 jitterNDC = {}; // Jitter in normalized device coordinates
 		CameraInfo info;
 	};
 
@@ -106,9 +106,9 @@ namespace Components {
 		DirectX::XMMATRIX matrix;
 	}; // Represents a projection matrix
 
-	struct FrustrumPlanes {
-		FrustrumPlanes() = default;
-		FrustrumPlanes(std::vector<std::array<ClippingPlane, 6>> frustumPlanes)
+	struct FrustumPlanes {
+		FrustumPlanes() = default;
+		FrustumPlanes(std::vector<std::array<ClippingPlane, 6>> frustumPlanes)
 			: frustumPlanes(std::move(frustumPlanes)) {
 		}
 		std::vector<std::array<ClippingPlane, 6>> frustumPlanes;

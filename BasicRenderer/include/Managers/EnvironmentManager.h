@@ -33,7 +33,6 @@ public:
 	}
 
 	void UpdateEnvironmentView(const Environment& environment) {
-		std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
 		m_environmentInfoBuffer->UpdateView(environment.GetEnvironmentBufferView(), &environment.m_environmentInfo);
 	}
 

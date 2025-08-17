@@ -76,7 +76,7 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
 
     Components::LightViewInfo viewInfo;
     std::optional<Components::DepthMap> shadowMapComponent = std::nullopt;
-    std::optional<Components::FrustrumPlanes> planes = std::nullopt;
+    std::optional<Components::FrustumPlanes> planes = std::nullopt;
 
     if (lightInfo->shadowCaster) {
         switch (lightInfo->type) {
@@ -122,7 +122,7 @@ unsigned int LightManager::GetNumLights() {
 	return m_activeLightIndices->Size();
 }
 
-std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
 LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId) {
 	Components::LightViewInfo viewInfo = {};
 	// Assume each cubemap face uses the same projection but different view matrices.
@@ -153,7 +153,7 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 	return { viewInfo, std::nullopt }; // Point lights don't need extra frustum data.
 }
 
-std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
 LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) {
 	Components::LightViewInfo viewInfo = {};
 	viewInfo.viewInfoBufferIndex = m_spotViewInfo->Size();
@@ -177,10 +177,10 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	return { viewInfo, std::nullopt };
 }
 
-std::pair<Components::LightViewInfo, std::optional<Components::FrustrumPlanes>>
+std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
 LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t entityId) {
 	Components::LightViewInfo viewInfo = {};
-	std::optional<Components::FrustrumPlanes> cascadePlanes = std::nullopt;
+	std::optional<Components::FrustumPlanes> cascadePlanes = std::nullopt;
 	auto numCascades = getNumDirectionalLightCascades();
 	viewInfo.viewInfoBufferIndex = m_directionalViewInfo->Size() / numCascades;
 
@@ -202,7 +202,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		getDirectionalLightCascadeSplits());
 
 	// Collect the frustum planes from each cascade.
-	cascadePlanes = Components::FrustrumPlanes();
+	cascadePlanes = Components::FrustumPlanes();
 	for (const auto& cascade : cascades) {
 		cascadePlanes->frustumPlanes.push_back(cascade.frustumPlanes);
 	}
@@ -246,7 +246,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	auto& renderViews = viewInfo.renderViews;
 	auto& lightInfo = light.get<Components::Light>();
 	auto& lightMatrix = light.get<Components::Matrix>();
-	auto& planes = light.get<Components::FrustrumPlanes>().frustumPlanes;
+	auto& planes = light.get<Components::FrustumPlanes>().frustumPlanes;
 	auto globalPos = GetGlobalPositionFromMatrix(lightMatrix.matrix);
 	switch (lightInfo.type) {
 	case Components::LightType::Point: {

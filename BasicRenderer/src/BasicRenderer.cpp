@@ -68,7 +68,7 @@ void ProcessRawInput(LPARAM lParam) {
     if (raw->header.dwType == RIM_TYPEKEYBOARD) {
         // Process keyboard input
         RAWKEYBOARD& rawKB = raw->data.keyboard;
-        std::cout << "Virtual key: " << rawKB.VKey << ", Scan code: " << rawKB.MakeCode << std::endl;
+        //std::cout << "Virtual key: " << rawKB.VKey << ", Scan code: " << rawKB.MakeCode << std::endl;
 
         // Check if the escape key is pressed
         if (rawKB.VKey == VK_ESCAPE) {
@@ -79,11 +79,6 @@ void ProcessRawInput(LPARAM lParam) {
     else if (raw->header.dwType == RIM_TYPEMOUSE) {
         // Process mouse input
         RAWMOUSE& rawMouse = raw->data.mouse;
-        std::cout << "Mouse move: (" << rawMouse.lLastX << ", " << rawMouse.lLastY << ")" << std::endl;
-
-        if (rawMouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) {
-            std::cout << "Left mouse button down" << std::endl;
-        }
     }
 
     delete[] lpb;
@@ -168,12 +163,6 @@ HWND InitWindow(HINSTANCE hInstance, int nCmdShow) {
 
     RegisterRawInputDevices(hwnd);
 
-    int screen_width = GetSystemMetrics(SM_CXSCREEN);
-    int screen_height = GetSystemMetrics(SM_CYSCREEN);
-
-    // Set window size to screen dimensions
-    SetWindowPos(hwnd, nullptr, 0, 0, screen_width, screen_height, SWP_NOZORDER | SWP_NOACTIVATE);
-
     return hwnd;
 }
 
@@ -227,36 +216,6 @@ float randomFloat(float min, float max) {
 	return dist(gen);
 }
 
-void redirectStdoutToSpdlog(std::shared_ptr<spdlog::logger> logger) {
-    int fds[2];
-    // create a binary pipe with a 4 KB buffer
-    if (_pipe(fds, 4096, _O_BINARY) != 0) {
-        logger->error("Failed to create pipe for stdout redirection");
-        return;
-    }
-
-    // flush C library buffers so nothing's lost
-    fflush(stdout);
-
-    // dup the pipe's write end onto STDOUT_FILENO
-    _dup2(fds[1], _fileno(stdout));
-
-    // we no longer need the original write handle
-    _close(fds[1]);
-
-    // spawn a thread to read from the pipe's read end
-    std::thread([logger, readFd = fds[0]]() {
-        std::vector<char> buf(1024);
-        while (true) {
-            int n = _read(readFd, buf.data(), (int)buf.size());
-            if (n <= 0) break;
-
-            logger->info(std::string(buf.data(), n));
-        }
-        _close(readFd);
-        }).detach();
-}
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
@@ -266,7 +225,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     static spdlog_streambuf sci{ file_logger };
     std::cout.rdbuf(&sci);
     std::cerr.rdbuf(&sci);
-    redirectStdoutToSpdlog(file_logger);
 
     HINSTANCE hGetPixDLL = LoadLibrary(L"WinPixEventRuntime.dll");
 
@@ -280,7 +238,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
     if (!pixLoaded) {
         // Print the error code for debugging purposes
-        spdlog::warn("Could not load PIX! Error: ", GetLastError());
+        spdlog::warn("Could not load PIX! Error: {}", GetLastError());
     }
 #endif
 
@@ -322,6 +280,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto bistro = LoadModel("models/BistroExterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
+    //auto robot = LoadModel("models/robot.usdz");
+
+
     renderer.SetCurrentScene(baseScene);
 
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
@@ -332,7 +293,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro);
+    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    
+	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     renderer.SetEnvironment("sky");
 
@@ -394,22 +357,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 // Window callback procedure
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 
-    if (toupper(static_cast<int>(wParam)) == VK_ESCAPE) {
-        message = WM_DESTROY;
-    }
-
 	if (Menu::GetInstance().HandleInput(hWnd, message, wParam, lParam)) {
 		return true;
     }
 
-    ImGuiIO& io = ImGui::GetIO();
+    bool isMouseOverAnyWindow = false;
+	bool isMouseCaptured = false;
+	bool isKeyboardCaptured = false;
 
-    // Check if the mouse is hovering any ImGui window
-    bool isMouseOverAnyWindow = ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || ImGui::IsAnyItemHovered();
+    if (ImGui::GetCurrentContext() != nullptr) {
 
-    // Otherwise, we rely on ImGui's own input capture logic
-    bool isMouseCaptured = io.WantCaptureMouse;
-    bool isKeyboardCaptured = io.WantCaptureKeyboard;
+        ImGuiIO& io = ImGui::GetIO();
+
+        // Check if the mouse is hovering any ImGui window
+        isMouseOverAnyWindow = ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || ImGui::IsAnyItemHovered();
+
+        // Otherwise, we rely on ImGui's own input capture logic
+        isMouseCaptured = io.WantCaptureMouse;
+        isKeyboardCaptured = io.WantCaptureKeyboard;
+    }
 
     // If neither the mouse nor the keyboard is captured by ImGui, pass input to the renderer
 	// Also allow the renderer to process key up events to prevent the camera from getting stuck moving.
@@ -431,6 +397,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         break;
     case WM_DESTROY:
         PostQuitMessage(0);
+        break;
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if (toupper(static_cast<int>(wParam)) == VK_ESCAPE) {
+            PostQuitMessage(0);
+        }
         break;
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);

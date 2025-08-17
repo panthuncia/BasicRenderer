@@ -100,7 +100,7 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 		.set<Components::Matrix>(DirectX::XMMatrixIdentity())
 		.set<Components::Name>(ws2s(name));
 
-	if (direction.x != 0 || direction.y != 0 || direction.z || 0) {
+	if (direction.x != 0 || direction.y != 0 || direction.z != 0) {
 		entity.set<Components::Rotation>(QuaternionFromAxisAngle(direction));
 	}
 	else {
@@ -124,19 +124,19 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 		break;
 	}
 
-	std::vector<std::array<ClippingPlane, 6>> frustrumPlanes;
+	std::vector<std::array<ClippingPlane, 6>> frustumPlanes;
 	switch (type) {
 	case Components::LightType::Directional:
 		break; // Directional is special-cased, frustrums are in world space, calculated during cascade setup
 	case Components::LightType::Spot: {
-		frustrumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, outerConeAngle * 2, nearPlane, farPlane));
-		entity.set<Components::FrustrumPlanes>({ frustrumPlanes });
+		frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, outerConeAngle * 2, nearPlane, farPlane));
+		entity.set<Components::FrustumPlanes>({ frustumPlanes });
 		break;
 	case Components::LightType::Point: {
 		for (int i = 0; i < 6; i++) {
-			frustrumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, XM_PI / 2, nearPlane, farPlane)); // TODO: All of these are the same.
+			frustumPlanes.push_back(GetFrustumPlanesPerspective(1.0f, XM_PI / 2, nearPlane, farPlane)); // TODO: All of these are the same.
 		}
-		entity.set<Components::FrustrumPlanes>({ frustrumPlanes });
+		entity.set<Components::FrustumPlanes>({ frustumPlanes });
 		break;
 	}
 	}
@@ -223,8 +223,8 @@ void Scene::ActivateLight(flecs::entity& entity) {
 		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), newInfo.lightInfo);
 		entity.set<Components::Light>(newInfo);
 	}
-	if (addInfo.frustrumPlanes.has_value()) {
-		entity.set<Components::FrustrumPlanes>({ addInfo.frustrumPlanes.value() });
+	if (addInfo.frustumPlanes.has_value()) {
+		entity.set<Components::FrustumPlanes>({ addInfo.frustumPlanes.value() });
 	}
 }
 

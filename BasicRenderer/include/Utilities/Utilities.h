@@ -40,7 +40,7 @@ void print(Args... args) {
 
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
-DirectX::XMMATRIX RemoveScalingFromMatrix(DirectX::XMMATRIX& initialMatrix);
+DirectX::XMMATRIX RemoveScalingFromMatrix(const DirectX::XMMATRIX& initialMatrix);
 
 struct LoadFlags {
 	DirectX::DDS_FLAGS dds = DirectX::DDS_FLAGS_NONE;
@@ -118,16 +118,6 @@ Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
 	D3D12_HEAP_TYPE heapType,
 	Microsoft::WRL::ComPtr<ID3D12Heap>& heap,
 	D3D12_BARRIER_LAYOUT initialLayout);
-
-std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
-	ID3D12Device*      device,
-	ID3D12Resource*    resource,
-	DXGI_FORMAT        format,
-	DescriptorHeap*    rtvHeap,
-	bool               isCubemap,
-	bool               isArray,
-	int                arraySize,
-	int                mipLevels);
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip(
 	ID3D12Device* device,
@@ -218,7 +208,7 @@ inline uint16_t CalculateMipLevels(uint16_t width, uint16_t height) {
 	return static_cast<uint16_t>(std::floor(std::log2((std::max)(width, height)))) + 1;
 }
 
-std::string tolower(const std::string& str);
+std::string ToLower(const std::string& str);
 
 std::vector<std::string> GetFilesInDirectoryMatchingExtension(const std::wstring& directory, const std::wstring& extension);
 
