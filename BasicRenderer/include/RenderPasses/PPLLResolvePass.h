@@ -72,7 +72,6 @@ public:
 		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
 		unsigned int settings[2] = { getShadowsEnabled(), getPunctualLightingEnabled() }; // HLSL bools are 32 bits
-		unsigned int punctualLightingEnabled = getPunctualLightingEnabled();
 		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, 2, &settings, 0);
 
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);

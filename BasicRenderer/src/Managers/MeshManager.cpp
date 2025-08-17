@@ -44,7 +44,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, b
 		throw std::runtime_error("Mesh vertices are empty");
     }
 
-	auto& manager = ResourceManager::GetInstance();
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
 	std::unique_ptr<BufferView> meshletBoundsView = nullptr;

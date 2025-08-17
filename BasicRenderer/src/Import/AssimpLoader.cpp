@@ -98,9 +98,9 @@ namespace AssimpLoader {
             {
                 // If mHeight != 0, then it's raw (uncompressed) pixels in BGRA format
                 // aiTex->mWidth * aiTex->mHeight is the total resolution
-                int width = aiTex->mWidth;
-                int height = aiTex->mHeight;
-                int channels = 4;
+                unsigned int width = aiTex->mWidth;
+                unsigned int height = aiTex->mHeight;
+                unsigned int channels = 4;
 
                 TextureDescription desc;
                 ImageDimensions dims;
@@ -109,15 +109,15 @@ namespace AssimpLoader {
                 dims.rowPitch = width * 4;
                 dims.slicePitch = width * height * 4;
                 desc.imageDimensions.push_back(dims);
-                desc.channels = channels;
+                desc.channels = static_cast<unsigned short>(channels);
                 desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
                 // Create a container for the raw bytes
                 // aiTex->pcData is an array of aiTexel => each aiTexel has b,g,r,a
                 std::vector<uint8_t> rawData(width * height * channels);
-                for (int y = 0; y < height; ++y) {
-                    for (int x = 0; x < width; ++x) {
-                        int idx = (y * width + x);
+                for (unsigned int y = 0; y < height; ++y) {
+                    for (unsigned int x = 0; x < width; ++x) {
+                        unsigned int idx = (y * width + x);
                         rawData[idx * 4 + 0] = aiTex->pcData[idx].b;
                         rawData[idx * 4 + 1] = aiTex->pcData[idx].g;
                         rawData[idx * 4 + 2] = aiTex->pcData[idx].r;
@@ -574,7 +574,6 @@ namespace AssimpLoader {
 
         // Attach to parent
         if (parent) {
-            auto parentName = parent.name().c_str();
             entity.child_of(parent);
         }
         else {
@@ -766,7 +765,7 @@ namespace AssimpLoader {
             scene->AddSkeleton(skeleton);
         }
 
-        for (int i = 0; i < meshSkinIndices.size(); i++) {
+        for (unsigned int i = 0; i < meshSkinIndices.size(); i++) {
             int skinIndex = meshSkinIndices[i];
             if (skinIndex != -1) {
                 meshes[i]->SetBaseSkin(skeletons[skinIndex]);

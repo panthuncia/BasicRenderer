@@ -24,6 +24,8 @@ public:
         actionHandlers[action] = handler;
     }
 
+	virtual ~InputContext() = default;
+
 protected:
     void TriggerAction(InputAction action, float magnitude, InputData inputData) {
 

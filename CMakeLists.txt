@@ -17,12 +17,6 @@ project ("BasicRenderer")
 
 #set(CMAKE_VS_JUST_MY_CODE_DEBUGGING ON) # Skip external code in the debugger.
 
-if (MSVC)
-  add_compile_options(/Zc:preprocessor)
-  add_compile_options(/WX)
-  add_compile_options(/wd4828)
-endif()
-
 # Gather precompiled dependencies
 set(USD_BASE_URL
   "https://github.com/panthuncia/OpenUSDArtifacts/releases/download/25.05.01"

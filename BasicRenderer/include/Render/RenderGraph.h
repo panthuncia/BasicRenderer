@@ -252,7 +252,7 @@ private:
 
 		// handle the "transition" wait
 		if (lastTransBatch != -1) {
-			if (lastTransBatch == currentBatchIndex) {
+			if (static_cast<unsigned int>(lastTransBatch) == currentBatchIndex) {
 				// same batch, signal & immediate wait
 				if (isComputePass) {
 					currentBatch.renderTransitionSignal = true;

@@ -70,19 +70,14 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.meshManager;
-		auto& objectManager = context.objectManager;
-		auto& cameraManager = context.cameraManager;
-
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		unsigned int drawRootConstants[NumDrawInfoRootConstants] = {};
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
 
-		unsigned int numCascades = getNumDirectionalLightCascades();
-		auto primaryView = context.currentScene->GetPrimaryCamera().get<Components::RenderView>();
-		auto primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
+		auto& primaryView = context.currentScene->GetPrimaryCamera().get<Components::RenderView>();
+		auto& primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
 		unsigned int cameraIndex = primaryView.cameraBufferIndex;
 
 		bool shadows = getShadowsEnabled();
@@ -202,7 +197,6 @@ public:
 					lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 						int i = 0;
 						for (auto& view : lightViewInfo.renderViews) {
-							auto& buffer = view.indirectCommandBuffers.blendIndirectCommandBuffer;
 
 							unsigned int lightCameraIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
 							commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);

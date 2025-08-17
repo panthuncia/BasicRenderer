@@ -138,8 +138,6 @@ private:
 		UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity*sizeof(unsigned int));
 		m_dataBuffer = newDataBuffer;
 
-        uint64_t oldCapacity = m_capacity;
-        uint64_t sizeDiff = newSize - m_capacity;
 		m_capacity = newSize;
 		onResized(m_globalResizableBufferID, static_cast<uint32_t>(sizeof(uint32_t)), static_cast<uint32_t>(m_capacity), this);
 		SetName(name);

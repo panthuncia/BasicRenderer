@@ -152,7 +152,7 @@ bool UpscalingManager::InitFFX() {
         createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
         createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
 
-        ffx::ReturnCode retCode = ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+        ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
 
 		return true;
     }
@@ -328,7 +328,7 @@ void UpscalingManager::Setup() {
         queryDesc.pOutRenderWidth = &optimalRenderRes.x;
         queryDesc.pOutRenderHeight = &optimalRenderRes.y;
 
-		ffx::ReturnCode retCode = ffx::Query(m_fsrUpscalingContext, queryDesc);
+		ffx::Query(m_fsrUpscalingContext, queryDesc);
 
         SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("renderResolution")(optimalRenderRes);
         
@@ -472,7 +472,7 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
         dispatchUpscale.cameraNear = camera.zNear;
     }
 
-    ffx::ReturnCode retCode = ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
+    ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
 }
 
 void UpscalingManager::EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {

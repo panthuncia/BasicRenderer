@@ -84,9 +84,6 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_frustrumCullingPSO.Get());
 
-		auto& meshManager = context.meshManager;
-		auto& objectManager = context.objectManager;
-		auto& cameraManager = context.cameraManager;
 
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 

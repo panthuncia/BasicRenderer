@@ -555,8 +555,6 @@ void Scene::PostUpdate() {
 
 std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {
 
-	auto& world = ECSManager::GetInstance().GetWorld();
-
 	auto root = scene->GetRoot();
 
 	root.child_of(ECSSceneRoot);
@@ -635,7 +633,6 @@ void Scene::ActivateAllAnimatedEntities() {
 
 void Scene::Activate(ManagerInterface managerInterface) {
 	m_managerInterface = managerInterface;
-	auto& world = ECSManager::GetInstance().GetWorld();
 
 	ActivateHierarchy(ECSSceneRoot);
 	ActivateAllAnimatedEntities();
@@ -670,7 +667,6 @@ void CloneHierarchy(flecs::entity src, flecs::entity dst_parent) {
 
 std::shared_ptr<Scene> Scene::Clone() const {
 	auto newScene = std::make_shared<Scene>();
-	auto& world = ECSManager::GetInstance().GetWorld();
 	newScene->ECSSceneRoot = ECSSceneRoot.clone();
 	CloneHierarchy(ECSSceneRoot, newScene->ECSSceneRoot);
 	for (auto& childScene : m_childScenes) {

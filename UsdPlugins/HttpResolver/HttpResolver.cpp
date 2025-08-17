@@ -6,9 +6,14 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-size_t HttpResolver::_WriteData(void* ptr, size_t size, size_t nmemb, void* userp) {
+size_t HttpResolver::_WriteData(void* ptr, size_t size, size_t nmemb, void* userp) noexcept {
     auto* stream = static_cast<std::ofstream*>(userp);
-    stream->write(static_cast<char*>(ptr), size * nmemb);
+    try {
+        stream->write(static_cast<char*>(ptr), static_cast<std::streamsize>(size * nmemb));
+    } catch (const std::ofstream::failure& e) {
+        spdlog::error("Failed to write data to file: {}", e.what());
+        return 0;
+	}
     return size * nmemb;
 }
 

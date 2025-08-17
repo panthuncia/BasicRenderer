@@ -121,8 +121,6 @@ public:
     }
 
     PassReturn Execute(RenderContext& context) override {
-        auto& psoManager = PSOManager::GetInstance();
-
         auto& commandList = context.commandList;
 
         SetupCommonState(context, commandList);
@@ -192,8 +190,6 @@ private:
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
 
-        auto& meshManager = context.meshManager;
-
         // Opaque objects
         m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
             auto& meshes = opaqueMeshes.meshInstances;
@@ -245,7 +241,6 @@ private:
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
 
-        auto& meshManager = context.meshManager;
 
         // Opaque objects
         m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
@@ -295,7 +290,6 @@ private:
         // Mesh shading with ExecuteIndirect
         auto& psoManager = PSOManager::GetInstance();
 
-        auto& meshManager = context.meshManager;
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
         // Opaque indirect draws

@@ -28,7 +28,7 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
             }
 
             // Return BufferView
-            return std::move(BufferView::CreateUnique(this, offset, requiredSize, elementSize));
+            return BufferView::CreateUnique(this, offset, requiredSize, elementSize);
         }
     }
 
@@ -135,8 +135,6 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
 	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
 	m_dataBuffer = newDataBuffer;
 
-    size_t oldCapacity = m_capacity;
-    size_t sizeDiff = newSize - m_capacity;
     m_capacity = newSize;
     onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, this, m_UAV);
 	SetName(m_name);

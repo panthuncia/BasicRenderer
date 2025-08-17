@@ -111,37 +111,37 @@ public:
 	unsigned int GetNumDSVSlices() { return static_cast<unsigned int>(m_DSVInfos.size()); }
 
 	void SetDefaultSRVViewType(SRVViewType type) {
-		if (static_cast<unsigned int>(type) < 0 || type >= SRVViewType::NumSRVViewTypes) {
+		if (type >= SRVViewType::NumSRVViewTypes) {
 			spdlog::error("Invalid SRV view type specified.");
 			return;
 		}
 		m_primaryViewType = type;
 	}
 
-	~GloballyIndexedResource() {
+	virtual ~GloballyIndexedResource() {
 		// Release SRV, UAV, and CBV
 		if (m_pSRVHeap) {
-			for (int i = 0; i < m_SRVViews.size(); i++) {
+			for (unsigned int i = 0; i < m_SRVViews.size(); i++) {
 				if (m_SRVViews[i].heap == nullptr) {
 					continue;
 				}
-				for (auto& srvInfo : m_SRVViews[i].infos) {
-					for (auto& srvInfo : srvInfo) {
+				for (auto& srvInfos : m_SRVViews[i].infos) {
+					for (auto& srvInfo : srvInfos) {
 						m_pSRVHeap->ReleaseDescriptor(srvInfo.index);
 					}
 				}
 			}
 		}
 		if (m_pUAVShaderVisibleHeap) {
-			for (auto& uavInfo : m_UAVShaderVisibleInfos) {
-				for (auto& uavInfo : uavInfo) {
+			for (auto& uavInfos : m_UAVShaderVisibleInfos) {
+				for (auto& uavInfo : uavInfos) {
 					m_pUAVShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
 				}
 			}
 		}
 		if (m_pUAVNonShaderVisibleHeap) {
-			for (auto& uavInfo : m_UAVNonShaderVisibleInfos) {
-				for (auto& uavInfo : uavInfo) {
+			for (auto& uavInfos : m_UAVNonShaderVisibleInfos) {
+				for (auto& uavInfo : uavInfos) {
 					// Release the non-shader visible UAVs
 					m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
 				}
@@ -153,16 +153,16 @@ public:
 
 		// Release RTVs and DSVs
 		if (m_pRTVHeap) {
-			for (auto& rtvInfo : m_RTVInfos) {
-				for (auto& rtvInfo : rtvInfo) {
+			for (auto& rtvInfos : m_RTVInfos) {
+				for (auto& rtvInfo : rtvInfos) {
 					m_pRTVHeap->ReleaseDescriptor(rtvInfo.index);
 				}
 			}
 		}
 
 		if (m_pDSVHeap) {
-			for (auto& dsvInfo : m_DSVInfos) {
-				for (auto& dsvInfo : dsvInfo) {
+			for (auto& dsvInfos : m_DSVInfos) {
+				for (auto& dsvInfo : dsvInfos) {
 					m_pDSVHeap->ReleaseDescriptor(dsvInfo.index);
 				}
 			}

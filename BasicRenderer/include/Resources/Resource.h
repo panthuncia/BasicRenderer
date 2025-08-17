@@ -29,10 +29,11 @@ public:
     Resource() {
         m_globalResourceID = globalResourceCount.fetch_add(1, std::memory_order_relaxed);
     }
+	virtual ~Resource() = default;
 
 
     const std::wstring& GetName() const { return name; }
-    virtual void SetName(const std::wstring& name) { this->name = name; OnSetName(); }
+    virtual void SetName(const std::wstring& newName) { this->name = newName; OnSetName(); }
 	virtual ID3D12Resource* GetAPIResource() const = 0;
     virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
 	virtual ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_subresourceAccessTypes[subresourceIndex] ; }

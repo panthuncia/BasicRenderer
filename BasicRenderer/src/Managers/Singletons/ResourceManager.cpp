@@ -554,12 +554,12 @@ void ResourceManager::UploadTextureData(ID3D12Resource* pResource, const Texture
 		// Update only subresources with valid data
 		std::vector<D3D12_SUBRESOURCE_DATA> validSubresourceData;
 		UINT firstValidSubresource = UINT_MAX;
-		for (UINT i = 0; i < subresourceData.size(); ++i) {
-			if (subresourceData[i].pData != nullptr) {
+		for (UINT j = 0; j < subresourceData.size(); ++j) {
+			if (subresourceData[j].pData != nullptr) {
 				if (firstValidSubresource == UINT_MAX) {
-					firstValidSubresource = i;
+					firstValidSubresource = j;
 				}
-				validSubresourceData.push_back(subresourceData[i]);
+				validSubresourceData.push_back(subresourceData[j]);
 			}
 		}
 

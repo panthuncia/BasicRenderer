@@ -98,7 +98,7 @@ CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
 	int width,
 	int height,
 	int arraySize = 1,
-	int mipLevels = 1,
+	uint16_t mipLevels = 1,
 	bool isCubemap = false,
 	bool allowRTV = false,
 	bool allowDSV = false,
@@ -256,7 +256,7 @@ DirectX::XMVECTOR QuaternionFromAxisAngle(const DirectX::XMFLOAT3& dir);
 
 DirectX::XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat);
 
-Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, unsigned int isCubemap);
+Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, bool isCubemap);
 
 uint32_t NumMips(uint32_t width, uint32_t height);
 

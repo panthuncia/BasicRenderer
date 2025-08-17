@@ -27,7 +27,6 @@ public:
         m_indirect(indirect),
         m_drawBlendShadows(drawBlendShadows),
         m_clearDepths(clearDepths) {
-        auto& settingsManager = SettingsManager::GetInstance();
         getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
         getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
     }
@@ -87,7 +86,6 @@ public:
     }
 
     PassReturn Execute(RenderContext& context) override {
-        auto& psoManager = PSOManager::GetInstance();
 
         auto& commandList = context.commandList;
 

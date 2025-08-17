@@ -124,7 +124,6 @@ void Mesh::ComputeBoundingSphere(const std::vector<UINT32>& indices) {
 }
 
 void Mesh::CreateMeshletReorderedVertices() {
-	const size_t meshletCount    = m_meshlets.size();
 	const size_t vertexByteSize  = m_perMeshBufferData.vertexByteSize;
 
 	size_t totalVerts = 0;

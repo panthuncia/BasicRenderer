@@ -68,7 +68,6 @@ void ThrowIfFailed(HRESULT hr) {
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {
     bool hasTexcoords = !meshData.texcoords.empty();
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
-    unsigned int materialFlags = meshData.material->GetMaterialFlags();
 
     std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
     uint32_t numVertices = static_cast<uint32_t>(meshData.positions.size()) / 3;
@@ -177,7 +176,7 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler)
 
     TextureDescription desc{};
     desc.imageDimensions.push_back(dim);
-    desc.channels = img.channels;
+    desc.channels = static_cast<unsigned short>(img.channels);
     desc.format = img.format;
     desc.generateMipMaps = false; // TODO: Allow mipmapping
 
@@ -408,7 +407,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bo
 
 	TextureDescription desc;
 	desc.imageDimensions.push_back(dim);
-	desc.channels = top.channels;
+	desc.channels = static_cast<unsigned short>(top.channels);
 	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	desc.isCubemap = true;
 
@@ -784,7 +783,7 @@ CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
     int width,
     int height,
     int arraySize,
-    int mipLevels,
+    uint16_t mipLevels,
     bool isCubemap,
     bool allowRTV,
     bool allowDSV,
@@ -1533,7 +1532,7 @@ XMFLOAT3 GetGlobalPositionFromMatrix(const DirectX::XMMATRIX& mat) {
     return XMFLOAT3(matFloats._41, matFloats._42, matFloats._43);
 }
 
-Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, unsigned int isCubemap) {
+Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRes, unsigned int arraySize, bool isCubemap) {
 	TextureDescription desc;
 	ImageDimensions dims;
 	dims.width = xRes;

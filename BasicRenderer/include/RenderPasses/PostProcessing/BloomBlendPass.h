@@ -145,8 +145,6 @@ private:
         depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
         depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
 
-        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
-
         D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
         psoDesc.InputLayout = inputLayoutDesc;
         psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();

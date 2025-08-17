@@ -13,8 +13,8 @@
 #include <io.h>        // _pipe, _dup2, _read, _close
 #include <fcntl.h>     // _O_BINARY
 #include <thread>
+#include <ThirdParty/pix/pix3.h>
 
-#include "ThirdParty/pix/pix3.h"
 #include "Mesh/Mesh.h"
 #include "DX12Renderer.h"
 #include "Utilities/Utilities.h"

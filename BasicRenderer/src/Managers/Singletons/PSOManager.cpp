@@ -9,7 +9,6 @@
 #include "Managers/Singletons/DeviceManager.h"
 
 #pragma comment(lib, "dxcompiler.lib")
-//#pragma comment(lib, "dxil.lib")
 
 extern "C" const TSLanguage* tree_sitter_hlsl();
 
@@ -894,7 +893,6 @@ void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outMandatoryI
     // Wherever we discover ResourceDescriptorIndex, we record replacements
     std::vector<Replacement> replacements;
     std::unordered_map<std::string, std::string> indexMap;
-    uint32_t nextIndex = 0;
 
     // Helper to process one function body
     auto processBody = [&](const TSNode& bodyNode, auto&& processBodyRef) -> void {

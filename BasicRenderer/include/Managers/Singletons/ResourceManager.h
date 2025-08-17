@@ -274,7 +274,7 @@ public:
         device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
 
 		ShaderVisibleIndexInfo srvInfo;
-		srvInfo.index = index;
+		srvInfo.index = static_cast<int>(index);
 		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
         pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
@@ -293,7 +293,7 @@ public:
             device->CreateUnorderedAccessView(pDynamicBuffer->GetAPIResource(), nullptr, &uavDesc, uavShaderVisibleHandle);
 
             ShaderVisibleIndexInfo uavInfo;
-            uavInfo.index = uavShaderVisibleIndex;
+            uavInfo.index = static_cast<int>(uavShaderVisibleIndex);
             uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
             pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
         }

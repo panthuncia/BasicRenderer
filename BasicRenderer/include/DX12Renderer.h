@@ -142,7 +142,7 @@ private:
     void CreateTextures();
 	void TagDLSSResources(ID3D12Resource* pDepthTexture);
     void MoveForward();
-    void SetupInputHandlers(InputManager& inputManager, InputContext& context);
+    void SetupInputHandlers();
     void CreateGlobalResources();
     void CreateRenderGraph();
     void SetSettings();

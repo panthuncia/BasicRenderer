@@ -8,8 +8,8 @@ AnimationController::AnimationController(const AnimationController& other)
 	: animationClip(other.animationClip), currentTime(other.currentTime), isPlaying(other.isPlaying) {
 }
 
-void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> animationClip) {
-    this->animationClip = animationClip;
+void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> newAnimationClip) {
+    animationClip = newAnimationClip;
     //node->ForceUpdate();
     UpdateTransform();
 }
@@ -120,3 +120,6 @@ void AnimationController::UpdateTransform() {
         }
     }
 }
+
+void AnimationController::SetAnimationSpeed(float speed) { m_animationSpeed = speed; }
+float AnimationController::GetAnimationSpeed() { return m_animationSpeed; }

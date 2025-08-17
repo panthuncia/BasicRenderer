@@ -1,5 +1,6 @@
 #include "Managers/Singletons/UploadManager.h"
 
+#include <ThirdParty/pix/pix3.h>
 
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
@@ -7,7 +8,6 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "ThirdParty/pix/pix3.h"
 
 void UploadManager::Initialize() {
 	auto& device = DeviceManager::GetInstance().GetDevice();

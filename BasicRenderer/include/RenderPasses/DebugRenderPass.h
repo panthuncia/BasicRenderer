@@ -21,7 +21,6 @@ public:
         if (m_texture == nullptr) {
             return {};
         }
-        auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {

@@ -452,6 +452,36 @@ add_symlink_or_copy_per_config(
     "USD_PLUGINS"
 )
 
+if (MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE /Zc:preprocessor)
+  target_compile_options(${PROJECT_NAME} PRIVATE /WX)
+  target_compile_options(${PROJECT_NAME} PRIVATE 
+      /wd4828 
+      /wd4514 
+      /wd5038 
+      /wd4100 
+      /wd5219 
+      /wd4625 
+      /wd4626 
+      /wd4820 
+      /wd4365 
+      /wd4464 
+      /wd4062 
+      /wd5026 
+      /wd5027 
+      /wd5246
+      /wd4191
+      /wd4061
+      /wd4623
+      /wd4710
+      /wd4324
+      /wd5267
+      /wd5045
+  )
+  #target_compile_options(${PROJECT_NAME} PRIVATE /Wall)
+  target_compile_options(${PROJECT_NAME} PRIVATE /external:anglebrackets /external:W0) # Disable warnings in external headers
+endif()
+
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${CMAKE_SOURCE_DIR}/ThirdParty/usd/include/")

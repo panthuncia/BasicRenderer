@@ -59,9 +59,6 @@ public:
 		// Set the compute pipeline state
 		commandList->SetPipelineState(m_PSO.Get());
 
-		auto& meshManager = context.meshManager;
-		auto& objectManager = context.objectManager;
-
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		auto meshShadersEnabled = getMeshShadersEnabled();

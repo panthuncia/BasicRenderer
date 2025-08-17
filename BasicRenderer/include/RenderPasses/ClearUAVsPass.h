@@ -39,11 +39,6 @@ public:
 		// Reset and get the appropriate command list
 		auto& commandList = context.commandList;
 
-		auto currentScene = context.currentScene;
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-
-		auto& objectManager = *context.objectManager;
-		auto& meshManager = *context.meshManager;
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 
 		// Opaque buffer
@@ -109,12 +104,6 @@ public:
 	PassReturn Execute(RenderContext& context) override {
 		// Reset and get the appropriate command list
 		auto& commandList = context.commandList;
-
-		auto currentScene = context.currentScene;
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-
-		auto& objectManager = *context.objectManager;
-		auto& meshManager = *context.meshManager;
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 
 		// Meshlet frustrum culling buffer

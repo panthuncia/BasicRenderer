@@ -72,8 +72,8 @@ private:
     void OnSetName() override {
         if (name != L"") {
 			m_name = name;
-			std::wstring name = m_baseName + L": " + m_name;
-            m_dataBuffer->SetName(name.c_str());
+			std::wstring newname = m_baseName + L": " + m_name;
+            m_dataBuffer->SetName(newname.c_str());
         }
         else {
             m_dataBuffer->SetName(m_baseName.c_str());
