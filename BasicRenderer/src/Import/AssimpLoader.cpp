@@ -304,6 +304,8 @@ namespace AssimpLoader {
                 if (normalTexture->GetFileType() == ImageFiletype::DDS) {
                     negateNormals = true;
                 }
+                negateNormals = false;
+
             }
             if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
                 metallicTex = materialTextures[aiTextureType_METALNESS];
@@ -327,9 +329,10 @@ namespace AssimpLoader {
 
             if (materialTextures.find(aiTextureType_EMISSIVE) != materialTextures.end()) {
                 emissiveTexture = materialTextures[aiTextureType_EMISSIVE];
-                emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
                 materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             }
+            //emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
+
             if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
                 if (emissiveTexture != nullptr) {
                     spdlog::warn("Material {} has both EMISSION_COLOR and EMISSIVE textures. Using EMISSION_COLOR", mIndex);

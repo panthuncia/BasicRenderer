@@ -80,7 +80,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		e->SetEnvironmentCubemap(skybox);
 	}
 	else {
-		auto skyHDR = LoadTextureFromFileSTBI(hdriPath);
+		auto skyHDR = LoadTextureFromFile(s2ws(hdriPath));
 
 		TextureDescription skyboxDesc;
 		ImageDimensions dims;

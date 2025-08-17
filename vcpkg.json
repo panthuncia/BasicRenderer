@@ -16,7 +16,8 @@
     "refl-cpp",
     "tree-sitter",
     "assimp",
-    "curl"
+    "curl",
+    "ms-gsl"
   ],
   "builtin-baseline": "efcfaaf60d7ec57a159fc3110403d939bfb69729"
 }

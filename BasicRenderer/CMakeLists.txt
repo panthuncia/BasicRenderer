@@ -72,7 +72,7 @@ add_custom_target(GenerateBuiltinResources
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
+if (CMAKE_VERSION VERSION_GREATER 3.14)
   set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 endif()
 
@@ -163,6 +163,17 @@ add_symlink_or_copy_per_config(
     "${TEXTURES_DEST_PATH}"
     TRUE  # IS_DIRECTORY
     "textures"
+)
+
+
+set(tex_dir "${CMAKE_BINARY_DIR}/BasicRenderer/Textures")
+set(tex_link "${CMAKE_BINARY_DIR}/BasicRenderer/textures")
+
+INSTALL(CODE "execute_process( \
+    COMMAND ${CMAKE_COMMAND} -E create_symlink \
+    ${tex_dir} \
+    ${tex_link}   \
+    )"
 )
 
 set(COMPILER_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxcompiler.dll")
@@ -441,6 +452,7 @@ add_symlink_or_copy_per_config(
     "USD_PLUGINS"
 )
 
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${CMAKE_SOURCE_DIR}/ThirdParty/usd/include/")
 # Heck off Microsoft

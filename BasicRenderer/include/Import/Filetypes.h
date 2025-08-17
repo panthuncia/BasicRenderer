@@ -4,10 +4,10 @@
 
 enum class ImageFiletype {
 	UNKNOWN,
-	PNG,
-	JPEG,
-	BMP,
-	DDS
+	HDR,
+	DDS,
+	TGA,
+	WIC
 };
 
 enum class ImageLoader {
@@ -17,23 +17,26 @@ enum class ImageLoader {
 };
 
 static std::unordered_map<ImageFiletype, ImageLoader> imageFiletypeToLoader = {
-	{ImageFiletype::PNG, ImageLoader::DirectXTex},
-	{ImageFiletype::JPEG, ImageLoader::STBImage},
-	{ImageFiletype::BMP, ImageLoader::STBImage},
+	{ImageFiletype::WIC, ImageLoader::DirectXTex},
+	{ImageFiletype::UNKNOWN, ImageLoader::STBImage},
 	{ImageFiletype::DDS, ImageLoader::DirectXTex}
 };
 
 static std::unordered_map<std::string, ImageFiletype> extensionToFiletype = {
-	{".png", ImageFiletype::PNG},
-	{".jpg", ImageFiletype::JPEG},
-	{".jpeg", ImageFiletype::JPEG},
-	{".bmp", ImageFiletype::BMP},
+	{".png", ImageFiletype::WIC},
+	{".jpg", ImageFiletype::WIC},
+	{".jpeg", ImageFiletype::WIC},
+	{".bmp", ImageFiletype::WIC},
 	{".dds", ImageFiletype::DDS},
-	{"png", ImageFiletype::PNG},
-	{"jpg", ImageFiletype::JPEG},
-	{"jpeg", ImageFiletype::JPEG},
-	{"bmp", ImageFiletype::BMP},
-	{"dds", ImageFiletype::DDS}
+	{".hdr", ImageFiletype::HDR},
+	{".tga", ImageFiletype::TGA},
+	{"png", ImageFiletype::WIC},
+	{"jpg", ImageFiletype::WIC},
+	{"jpeg", ImageFiletype::WIC},
+	{"bmp", ImageFiletype::WIC},
+	{"dds", ImageFiletype::DDS},
+	{"hdr", ImageFiletype::HDR},
+	{"tga", ImageFiletype::TGA }
 };
 
 static std::unordered_set<ImageFiletype> DirectXTexSupportedFiletypes = {
@@ -41,9 +44,7 @@ static std::unordered_set<ImageFiletype> DirectXTexSupportedFiletypes = {
 };
 
 static std::unordered_set<ImageFiletype> STBImageSupportedFiletypes = {
-	ImageFiletype::PNG,
-	ImageFiletype::JPEG,
-	ImageFiletype::BMP
+	ImageFiletype::UNKNOWN
 };
 
 enum class SceneFiletype {

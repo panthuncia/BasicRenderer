@@ -10,6 +10,7 @@
 #include <DirectXMath.h>
 #include <unordered_map>
 #include <directx/d3dx12.h>
+#include <DirectXTex.h>
 
 #include "Import/MeshData.h"
 #include "Render/DescriptorHeap.h"
@@ -40,10 +41,16 @@ void print(Args... args) {
 std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
 
 DirectX::XMMATRIX RemoveScalingFromMatrix(DirectX::XMMATRIX& initialMatrix);
-std::shared_ptr<Texture> LoadTextureFromFile(std::wstring filePath, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> LoadTextureFromMemory(void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> LoadTextureFromFileDXT(std::wstring filePath, ImageFiletype format, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> LoadTextureFromFileSTBI(std::string filename, std::shared_ptr<Sampler> sampler = nullptr);
+
+struct LoadFlags {
+	DirectX::DDS_FLAGS dds = DirectX::DDS_FLAGS_NONE;
+	DirectX::TGA_FLAGS tga = DirectX::TGA_FLAGS_NONE;
+	DirectX::WIC_FLAGS wic = DirectX::WIC_FLAGS_IGNORE_SRGB;
+	// HDR has no flags
+};
+
+std::shared_ptr<Texture> LoadTextureFromFile(const std::wstring& filePath, std::shared_ptr<Sampler> sampler = nullptr);
+std::shared_ptr<Texture> LoadTextureFromMemory(const void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler = nullptr, const LoadFlags& flags = {});
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
 std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
 template <typename T1, typename T2>

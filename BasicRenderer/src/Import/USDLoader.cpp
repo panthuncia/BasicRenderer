@@ -293,6 +293,8 @@ namespace USDLoader {
 				}
 				else if (name == TfToken("normal")) {
 					result.normal.texture = tex;
+					result.negateNormals = tex->GetFileType() == ImageFiletype::DDS ? true : false;
+					result.invertNormalGreen = false;
 					result.normal.channels = SwizzleToIndices(swizzle);
 				}
 				else if (name == TfToken("displacement")) {
