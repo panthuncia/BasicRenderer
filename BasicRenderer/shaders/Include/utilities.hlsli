@@ -139,7 +139,6 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
             discard;
         }
 #endif // PSO_ALPHA_TEST || PSO_BLEND
-        sampledColor.rgb = SRGBToLinear(sampledColor.rgb);
         baseColor = baseColor * sampledColor;
     }
     
@@ -212,7 +211,7 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
     {
         Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];
         SamplerState emissiveSamplerState = SamplerDescriptorHeap[materialInfo.emissiveSamplerIndex];
-        emissive = SRGBToLinear(emissiveTexture.Sample(emissiveSamplerState, uv).rgb) * materialInfo.emissiveFactor.rgb;
+        emissive = emissiveTexture.Sample(emissiveSamplerState, uv).rgb * materialInfo.emissiveFactor.rgb;
     }
     else
     {

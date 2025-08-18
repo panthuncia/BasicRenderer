@@ -23,84 +23,60 @@ namespace AssimpLoader {
 
     D3D12_TEXTURE_ADDRESS_MODE aiTextureMapModeToD3D12(aiTextureMapMode mode) {
         switch (mode) {
-        case aiTextureMapMode_Wrap:
-            return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-            break;
-        case aiTextureMapMode_Clamp:
-            return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-            break;
-        case aiTextureMapMode_Mirror:
-            return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-            break;
-        default:
-            return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-            break;
+        case aiTextureMapMode_Wrap:   return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        case aiTextureMapMode_Clamp:  return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        case aiTextureMapMode_Mirror: return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+        default:                      return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         }
     }
 
-    // Helper: loads raw image data with stb_image, creates a PixelBuffer, then wraps in a Texture
+    static bool isSRGBTextureType(aiTextureType t) {
+        switch (t) {
+        case aiTextureType_DIFFUSE:
+        case aiTextureType_BASE_COLOR:
+        case aiTextureType_EMISSIVE:
+        case aiTextureType_EMISSION_COLOR:
+            return true; // color space textures
+        default:
+            return false; // data textures: normals, metalness, roughness, ao, height, etc.
+        }
+    }
+
     static std::shared_ptr<Texture> loadAiTexture(
         const aiScene* scene,
-        const std::string& texPath,          // Could be an embedded reference "*0" or a real file path
-        const std::string& directory,        // Base directory for external textures
-        std::shared_ptr<Sampler> sampler,    // Optional sampler
-        bool sRGB
+        const std::string& texPath,          // "*0" for embedded or file path
+        const std::string& directory,        // base directory for external textures
+        std::shared_ptr<Sampler> sampler,
+        bool preferSRGB
     )
     {
-        // 1. Determine if texture is EMBEDDED or EXTERNAL
-        if (!texPath.empty() && texPath[0] == '*')
-        {
-            // Embedded texture
-            // Convert the number after '*' into an index
+        // Embedded?
+        if (!texPath.empty() && texPath[0] == '*') {
             unsigned int textureIndex = std::atoi(texPath.c_str() + 1);
             if (textureIndex >= scene->mNumTextures) {
                 throw std::runtime_error("Embedded texture index out of range: " + texPath);
             }
 
             aiTexture* aiTex = scene->mTextures[textureIndex];
-
-            if (aiTex == nullptr) {
+            if (!aiTex) {
                 throw std::runtime_error("Null embedded texture at index: " + std::to_string(textureIndex));
             }
 
-            // If it's compressed (e.g. PNG/JPG), we need to decode from aiTex->pcData as memory
-            if (aiTex->mHeight == 0)
-            {
-                // mHeight == 0 means it's compressed data in a single block of size mWidth
-                int width, height, channels;
-                stbi_uc* data = stbi_load_from_memory(
-                    reinterpret_cast<stbi_uc*>(aiTex->pcData),
-                    aiTex->mWidth, // size of the compressed data block
-                    &width, &height, &channels, 4
-                );
-
-                if (!data) {
-                    throw std::runtime_error("Failed to load embedded compressed texture: " + texPath);
-                }
-
-                // Convert to PixelBuffer
-                TextureDescription desc;
-                ImageDimensions dims;
-                dims.width = width;
-                dims.height = height;
-                dims.rowPitch = width * 4;
-                dims.slicePitch = width * height * 4;
-                desc.imageDimensions.push_back(dims);
-                desc.channels = 4;
-                desc.format = DXGI_FORMAT_R8G8B8A8_UNORM; // TODO: SRGB?
-
-                auto pBuffer = PixelBuffer::Create(desc, { data });
-                stbi_image_free(data);
-
-                return std::make_shared<Texture>(pBuffer, sampler);
+            // Compressed (mHeight==0): directly feed container bytes to LoadTextureFromMemory
+            if (aiTex->mHeight == 0) {
+                const void* bytes = reinterpret_cast<const void*>(aiTex->pcData);
+                const size_t byteCount = static_cast<size_t>(aiTex->mWidth);
+                LoadFlags lf{};
+                // WIC decode is most common; FORCE_* handles PNG/JPG without relying on file metadata.
+                lf.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
+                return LoadTextureFromMemory(bytes, byteCount, sampler, lf, preferSRGB);
             }
-            else
+
+            // Raw BGRA (mHeight != 0): create PixelBuffer directly; choose sRGB format when requested
             {
-                // If mHeight != 0, then it's raw (uncompressed) pixels in BGRA format
-                // aiTex->mWidth * aiTex->mHeight is the total resolution
-                unsigned int width = aiTex->mWidth;
-                unsigned int height = aiTex->mHeight;
-                unsigned int channels = 4;
+                const unsigned int width = aiTex->mWidth;
+                const unsigned int height = aiTex->mHeight;
+                const unsigned int channels = 4;
 
                 TextureDescription desc;
                 ImageDimensions dims;
@@ -110,10 +86,9 @@ namespace AssimpLoader {
                 dims.slicePitch = width * height * 4;
                 desc.imageDimensions.push_back(dims);
                 desc.channels = static_cast<unsigned short>(channels);
-                desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                desc.format = preferSRGB ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
 
-                // Create a container for the raw bytes
-                // aiTex->pcData is an array of aiTexel => each aiTexel has b,g,r,a
+                // aiTex->pcData is BGRA
                 std::vector<uint8_t> rawData(width * height * channels);
                 for (unsigned int y = 0; y < height; ++y) {
                     for (unsigned int x = 0; x < width; ++x) {
@@ -129,25 +104,24 @@ namespace AssimpLoader {
                 return std::make_shared<Texture>(pBuffer, sampler);
             }
         }
-        else
-        {
-            // EXTERNAL file: load from (directory + texPath)
 
-            //Check if directory is absolute or relative
+        // External file: load from disk
+        {
+            // Absolute vs relative directory handling
             bool isRelative = true;
-            if (directory.find("://") != std::string::npos || directory.find(":/") != std::string::npos || directory.find(":\\\\") != std::string::npos || directory.find(":\\") != std::string::npos) {
-                isRelative = false; // Absolute path
+            if (directory.find("://") != std::string::npos || directory.find(":/") != std::string::npos
+                || directory.find(":\\\\") != std::string::npos || directory.find(":\\") != std::string::npos) {
+                isRelative = false;
             }
 
             std::string fullPath = (isRelative ? ws2s(GetExePath()) + "\\" : "") + directory + "\\" + texPath;
-			return LoadTextureFromFile(s2ws(fullPath), sampler);
+            return LoadTextureFromFile(s2ws(fullPath), sampler, preferSRGB);
         }
     }
 
     std::vector<std::shared_ptr<Material>> LoadMaterialsFromAssimpScene(
         const aiScene* scene,
-        const std::string& directory, // folder containing the model
-        bool sRGB
+        const std::string& directory // folder containing the model
     )
     {
         std::vector<std::shared_ptr<Texture>> textures;
@@ -198,6 +172,8 @@ namespace AssimpLoader {
                         std::string texPath = aiTexPath.C_Str(); // e.g. "*0" or "texture.png"
                         // Check if we already loaded it:
                         auto it = loadedTextures.find(texPath);
+                        const bool preferSRGB = isSRGBTextureType(tType);
+
                         if (it == loadedTextures.end())
                         {
                             D3D12_SAMPLER_DESC samplerDesc = {};
@@ -224,7 +200,7 @@ namespace AssimpLoader {
                                     texPath,
                                     directory,
                                     sampler,
-                                    sRGB
+                                    preferSRGB
                                 );
                                 if (newTex) {
                                     loadedTextures[texPath] = newTex;
@@ -232,7 +208,6 @@ namespace AssimpLoader {
                                 }
                             }
                             catch (const std::exception& e) {
-                                // handle or log the error
                                 spdlog::error("Failed loading texture {}: {}", texPath, e.what());
                             }
                         }
@@ -752,7 +727,7 @@ namespace AssimpLoader {
         // Directory of the model file, allowing both / and \\ as separators
         std::string directory = GetDirectoryFromPath(filePath);
 
-        auto materials = LoadMaterialsFromAssimpScene(pScene, directory, false);
+        auto materials = LoadMaterialsFromAssimpScene(pScene, directory);
         auto [meshes, meshSkinIndices] = parseAiMeshes(pScene, materials);
         std::vector<flecs::entity> nodes;
         std::unordered_map<std::string, flecs::entity> nodeMap;

@@ -215,11 +215,25 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler)
 //    return out;
 //}
 
+static DXGI_FORMAT ToLinearIfSRGB(DXGI_FORMAT fmt) {
+    switch (fmt) {
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: return DXGI_FORMAT_B8G8R8X8_UNORM;
+    case DXGI_FORMAT_BC1_UNORM_SRGB:      return DXGI_FORMAT_BC1_UNORM;
+    case DXGI_FORMAT_BC2_UNORM_SRGB:      return DXGI_FORMAT_BC2_UNORM;
+    case DXGI_FORMAT_BC3_UNORM_SRGB:      return DXGI_FORMAT_BC3_UNORM;
+    case DXGI_FORMAT_BC7_UNORM_SRGB:      return DXGI_FORMAT_BC7_UNORM;
+    default: return fmt;
+    }
+}
 
-static RawImage RawFromDXT(const DirectX::ScratchImage& image,
+static RawImage RawFromDXT(
+    const DirectX::ScratchImage& image,
     const DirectX::TexMetadata& meta,
     std::string filepathUtf8,
-    std::optional<ImageFiletype> fileType)
+    std::optional<ImageFiletype> fileType,
+    DXGI_FORMAT overrideFormat = DXGI_FORMAT_UNKNOWN)
 {
     const DirectX::Image* img0 = image.GetImage(0, 0, 0); // mip 0, array 0, depth 0
     if (!img0) throw std::runtime_error("DirectXTex: missing base image");
@@ -236,8 +250,8 @@ static RawImage RawFromDXT(const DirectX::ScratchImage& image,
     RawImage out{};
     out.width = static_cast<uint32_t>(meta.width);
     out.height = static_cast<uint32_t>(meta.height);
-    out.channels = 4; // TODO: DXT files with different channel counts?
-    out.format = meta.format;
+    out.channels = 4; // treat as 4-channel upload path
+    out.format = (overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat;
     out.rowPitch = static_cast<uint32_t>(img0->rowPitch);
     out.slicePitch = static_cast<uint32_t>(img0->slicePitch);
     out.pixels = img0->pixels;
@@ -336,10 +350,11 @@ namespace detail {
 std::shared_ptr<Texture>
 LoadTextureFromMemory(const void* bytes, size_t byteCount,
     std::shared_ptr<Sampler> sampler,
-    const LoadFlags& flags)
+    const LoadFlags& flags,
+    bool preferSRGB)
 {
     if (!bytes || !byteCount)
-        throw std::runtime_error("LoadTextureFromMemoryDXT: null/empty buffer");
+        throw std::runtime_error("LoadTextureFromMemory: null/empty buffer");
 
     DirectX::TexMetadata meta{};
     ImageFiletype kind{};
@@ -351,29 +366,44 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
     HRESULT hr = E_FAIL;
 
     switch (kind) {
-    case ImageFiletype::DDS:
+    case ImageFiletype::DDS: {
         hr = DirectX::LoadFromDDSMemory(
             static_cast<const uint8_t*>(bytes), byteCount, flags.dds, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load DDS from memory");
-        return CreateTextureFromRaw(RawFromDXT(img, meta, "", ImageFiletype::DDS), sampler);
-
-    case ImageFiletype::HDR:
+        DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
+        auto raw = RawFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
+        return CreateTextureFromRaw(raw, sampler);
+    }
+    case ImageFiletype::HDR: {
         hr = DirectX::LoadFromHDRMemory(
             static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load HDR from memory");
-        return CreateTextureFromRaw(RawFromDXT(img, meta, "", ImageFiletype::HDR), sampler);
-
-    case ImageFiletype::TGA:
+        // HDR stays in float formats; do not force sRGB
+        auto raw = RawFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
+        return CreateTextureFromRaw(raw, sampler);
+    }
+    case ImageFiletype::TGA: {
         hr = DirectX::LoadFromTGAMemory(
             static_cast<const uint8_t*>(bytes), byteCount, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load TGA from memory");
-        return CreateTextureFromRaw(RawFromDXT(img, meta, "", ImageFiletype::TGA), sampler);
+        DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
+        auto raw = RawFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
+        return CreateTextureFromRaw(raw, sampler);
+    }
+    case ImageFiletype::WIC: {
+        // WIC: let caller preference drive sRGB/linear
+        DirectX::TexMetadata wicMeta{};
+        DirectX::ScratchImage wicImg;
+        HRESULT wicHr = DirectX::LoadFromWICMemory(
+            static_cast<const uint8_t*>(bytes), byteCount,
+            preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR,
+            &wicMeta, wicImg);
+        if (FAILED(wicHr)) throw std::runtime_error("Failed to load WIC image from memory");
 
-    case ImageFiletype::WIC:
-        hr = DirectX::LoadFromWICMemory(
-            static_cast<const uint8_t*>(bytes), byteCount, flags.wic, &meta, img);
-        if (FAILED(hr)) throw std::runtime_error("Failed to load WIC image from memory");
-        return CreateTextureFromRaw(RawFromDXT(img, meta, "", std::nullopt), sampler);
+        DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(wicMeta.format) : ToLinearIfSRGB(wicMeta.format);
+        auto raw = RawFromDXT(wicImg, wicMeta, "", std::nullopt, chosen);
+        return CreateTextureFromRaw(raw, sampler);
+    }
     }
 
     throw std::runtime_error("Unhandled container type");
@@ -381,14 +411,19 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
 
 std::shared_ptr<Texture>
 LoadTextureFromFile(const std::wstring& filePath,
-    std::shared_ptr<Sampler> sampler)
+    std::shared_ptr<Sampler> sampler,
+    bool preferSRGB,
+    const LoadFlags& flagsIn)
 {
     const std::string utf8 = ws2s(filePath);
 
-    const auto data = detail::ReadFileBytes(filePath);
-    return LoadTextureFromMemory(data.data(), data.size(), sampler);
-}
+    auto localFlags = flagsIn;
+    // For WIC paths, FORCE_* ensures consistent format choice even if the file has metadata
+    localFlags.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
 
+    const auto data = detail::ReadFileBytes(filePath);
+    return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB);
+}
 
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
     ImageData top = LoadSTBImage(topPath);

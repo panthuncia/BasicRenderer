@@ -211,6 +211,10 @@ namespace USDLoader {
 					if (csInput && csInput.Get(&colorSpaceToken)) {
 						colorSpace = colorSpaceToken.GetString();
 					} // TODO: Use this to set texture color space instead of correcting in shader
+					std::string csLower = colorSpace;
+					std::transform(csLower.begin(), csLower.end(), csLower.begin(),
+						[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+					const bool preferSRGB = (csLower == "srgb");
 
 					auto& resolver = ArGetResolver();
 					auto ctx = stage->GetPathResolverContext();
@@ -226,8 +230,11 @@ namespace USDLoader {
 					}
 
 					auto tex = LoadTextureFromMemory(
-						(void*)arAsset->GetBuffer().get(),
-						arAsset->GetSize());
+						static_cast<const void*>(arAsset->GetBuffer().get()),
+						arAsset->GetSize(),
+						nullptr,
+						{},              // default flags; loader will force WIC sRGB/linear as needed
+						preferSRGB);
 
 					loadingCache.textureCache[logicalPath] = tex;
 

@@ -49,8 +49,18 @@ struct LoadFlags {
 	// HDR has no flags
 };
 
-std::shared_ptr<Texture> LoadTextureFromFile(const std::wstring& filePath, std::shared_ptr<Sampler> sampler = nullptr);
-std::shared_ptr<Texture> LoadTextureFromMemory(const void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler = nullptr, const LoadFlags& flags = {});
+std::shared_ptr<Texture> LoadTextureFromFile(
+	const std::wstring& filePath,
+	std::shared_ptr<Sampler> sampler = nullptr,
+	bool preferSRGB = false,
+	const LoadFlags& flags = {});
+
+std::shared_ptr<Texture> LoadTextureFromMemory(
+	const void* bytes,
+	size_t byteCount,
+	std::shared_ptr<Sampler> sampler = nullptr,
+	const LoadFlags& flags = {},
+	bool preferSRGB = false);
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
 std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
 template <typename T1, typename T2>

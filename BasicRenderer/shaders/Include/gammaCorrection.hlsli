@@ -6,9 +6,9 @@ float3 LinearToSRGB(float3 color) {
     return pow(color, float3(invGamma, invGamma, invGamma));
 }
 
-float3 SRGBToLinear(float3 color) {
+/*float3 SRGBToLinear(float3 color) {
     float gamma = 2.2;
     return pow(color, float3(gamma, gamma, gamma));
-}
+}*/
 
 #endif // __GAMMA_CORRECTION_HLSLI__
