@@ -64,3 +64,23 @@ endif()
 
 add_subdirectory ("BasicRenderer")
 add_subdirectory("UsdPlugins")
+
+# ---- libktx options (keep build small) ---------------------------------
+set(KTX_FEATURE_STATIC_LIBRARY ON  CACHE BOOL "" FORCE) # build static libktx
+# set(KTX_FEATURE_STATIC_LIBRARY OFF CACHE BOOL "" FORCE) # build shared libktx
+
+# Don't build tools, tests, docs, etc.
+set(KTX_FEATURE_TOOLS  OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_TESTS  OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_DOC    OFF CACHE BOOL "" FORCE)
+
+set(KTX_FEATURE_KTX1   ON  CACHE BOOL "" FORCE)
+set(KTX_FEATURE_KTX2   ON  CACHE BOOL "" FORCE)
+
+set(KTX_FEATURE_VULKAN OFF CACHE BOOL "" FORCE)
+
+# Turn on Basis Universal transcoder
+set(KTX_FEATURE_BASISU ON  CACHE BOOL "" FORCE)
+
+# bring the project in
+add_subdirectory(ThirdParty/KTX EXCLUDE_FROM_ALL)

@@ -26,6 +26,7 @@
 #include "Mesh/Mesh.h"
 #include "Scene/Components.h"
 #include "NsightAftermathHelpers.h"
+#include "Utilities/TextureFormats.h"
 
 using namespace DirectX;
 
@@ -247,37 +248,61 @@ static RawImage RawFromDXT(const DirectX::ScratchImage& image,
     return out;
 }
 
-//std::shared_ptr<Texture>
-//LoadTextureFromFileSTBI(const std::string& filenameUtf8, std::shared_ptr<Sampler> sampler)
-//{
-//    ImageData img = LoadSTBImage(filenameUtf8.c_str());
-//    if (!img.data) {
-//		throw std::runtime_error("Failed to load texture from file (stb): " + filenameUtf8);
-//    }
-//
-//    RawImage raw = RawFromSTBI(img);
-//    raw.filepathUtf8 = filenameUtf8;
-//    return CreateTextureFromRaw(raw, sampler);
-//    stbi_image_free(img.data);
-//}
-//
-//std::shared_ptr<Texture>
-//LoadTextureFromMemorySTBI(const void* bytes, size_t byteCount, std::shared_ptr<Sampler> sampler)
-//{
-//    int w = 0, h = 0, n = 0;
-//    // Force 4 channels: TODO: Don't I handle this elsewhere already?
-//    unsigned char* pixels = stbi_load_from_memory(
-//        reinterpret_cast<const stbi_uc*>(bytes), static_cast<int>(byteCount), &w, &h, &n, 4);
-//    if (!pixels) throw std::runtime_error("Failed to load texture from memory (stb)");
-//
-//    ImageData img{};
-//    img.width = w; img.height = h; img.channels = 4; img.data = pixels;
-//    auto guard = gsl::finally([&]() { stbi_image_free(img.data); });
-//
-//    RawImage raw = RawFromSTBI(img);
-//    return CreateTextureFromRaw(raw, sampler);
-//}
+inline RawImage RawFromKTX2(ktxTexture2* tex2, std::string filepathUtf8) {
+    RawImage out{};
+    out.width = static_cast<uint32_t>(tex2->baseWidth);
+    out.height = static_cast<uint32_t>(tex2->baseHeight);
+    out.channels = 4; // Most GPU targets we transcode to are 4-channel logical (BCn or RGBA8)
+    out.filepathUtf8 = std::move(filepathUtf8);
+    out.fileType = ImageFiletype::KTX2;
 
+    DXGI_FORMAT dxgi = DXGI_FORMAT_UNKNOWN;
+
+    // If not transcoded (true VkFormat present), prefer that mapping:
+    if (tex2->vkFormat != VK_FORMAT_UNDEFINED) {
+        dxgi = MapVkToDxgi(static_cast<VkFormat>(tex2->vkFormat));
+    }
+
+    // If still unknown (e.g., transcoded to a Basis target), default to BC7
+    if (dxgi == DXGI_FORMAT_UNKNOWN) {
+        dxgi = DXGI_FORMAT_BC7_UNORM;
+    }
+
+    out.format = dxgi;
+
+    // Locate the base mip / first layer / first face payload
+    ktx_size_t offset = 0;
+    KTX_error_code e = ktxTexture_GetImageOffset(ktxTexture(tex2),
+        /*level*/0, /*layer*/0, /*faceSlice*/0,
+        &offset);
+    if (e != KTX_SUCCESS) {
+        throw std::runtime_error("ktxTexture_GetImageOffset failed");
+    }
+
+    const uint8_t* dataBegin = static_cast<const uint8_t*>(ktxTexture_GetData(ktxTexture(tex2)));
+    if (!dataBegin) {
+        throw std::runtime_error("ktxTexture_GetData returned null");
+    }
+    out.pixels = dataBegin + offset;
+
+    // Row/slice pitch
+    out.rowPitch = ComputeRowPitch(out.format, out.width);
+    // For 2D textures, slice = rowPitch * number of rows (block rows for BC)
+    const bool bc =
+        out.format == DXGI_FORMAT_BC1_UNORM || out.format == DXGI_FORMAT_BC1_UNORM_SRGB ||
+        out.format == DXGI_FORMAT_BC3_UNORM || out.format == DXGI_FORMAT_BC3_UNORM_SRGB ||
+        out.format == DXGI_FORMAT_BC4_UNORM || out.format == DXGI_FORMAT_BC4_SNORM ||
+        out.format == DXGI_FORMAT_BC5_UNORM || out.format == DXGI_FORMAT_BC5_SNORM ||
+        out.format == DXGI_FORMAT_BC7_UNORM || out.format == DXGI_FORMAT_BC7_UNORM_SRGB;
+
+    const uint32_t rows = bc ? std::max(1u, (out.height + 3u) / 4u) : out.height;
+    out.slicePitch = out.rowPitch * rows;
+
+	// TODO: How to determine alphaAllOpaque in libKTX?
+    out.alphaAllOpaque = false;
+
+    return out;
+}
 
 namespace detail {
 
@@ -322,6 +347,31 @@ namespace detail {
             return true;
         }
 
+        {
+            ktxTexture2* probe = nullptr;
+            KTX_error_code ek = ktxTexture2_CreateFromMemory(
+                reinterpret_cast<const ktx_uint8_t*>(bytes),
+                static_cast<ktx_size_t>(byteCount),
+                0, // don't load data for probe
+                &probe);
+            if (ek == KTX_SUCCESS && probe) {
+                outKind = ImageFiletype::KTX2;
+
+                // Fill minimal metadata so your debug checks don’t trip (width/height/format)
+                outMeta.width = probe->baseWidth;
+                outMeta.height = probe->baseHeight;
+                outMeta.depth = probe->baseDepth ? probe->baseDepth : 1;
+                outMeta.arraySize = std::max<ktx_uint32_t>(1, probe->numLayers ? probe->numLayers : probe->numFaces);
+                outMeta.mipLevels = std::max<ktx_uint32_t>(1, probe->numLevels);
+
+                // Attempt a vk->dxgi guess for meta.format (not used by KTX path later)
+                outMeta.format = MapVkToDxgi(static_cast<VkFormat>(probe->vkFormat));
+
+                ktxTexture_Destroy(ktxTexture(probe));
+                return true;
+            }
+        }
+
         // WIC fallback: PNG/JPEG/BMP/TIFF/
         if (SUCCEEDED(GetMetadataFromWICMemory(
             static_cast<const uint8_t*>(bytes), byteCount, flags.wic, outMeta))) {
@@ -331,6 +381,45 @@ namespace detail {
 
         return false;
     }
+}
+
+inline ktxTexture2* LoadKTX2FromMemory(const void* bytes, size_t byteCount) {
+    ktxTexture2* tex2 = nullptr;
+    ktxTextureCreateInfo createInfo{};
+    KTX_error_code e = ktxTexture2_CreateFromMemory(
+        reinterpret_cast<const ktx_uint8_t*>(bytes),
+        static_cast<ktx_size_t>(byteCount),
+        KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, // load data now
+        &tex2);
+
+    if (e != KTX_SUCCESS || tex2 == nullptr) {
+        throw std::runtime_error("ktxTexture2_CreateFromMemory failed");
+    }
+
+    // If the payload is BasisU supercompressed (UASTC/ETC1S), transcode to a GPU format.
+    if (ktxTexture2_NeedsTranscoding(tex2)) {
+        // sRGB heuristic: detect if declared vkFormat is SRGB, or if colorModel==KTX_DF_MODEL_RGBSDA
+        bool preferSrgb = false;
+        if (tex2->vkFormat == VK_FORMAT_R8G8B8A8_SRGB ||
+            tex2->vkFormat == VK_FORMAT_B8G8R8A8_SRGB ||
+            tex2->vkFormat == VK_FORMAT_BC1_RGB_SRGB_BLOCK ||
+            tex2->vkFormat == VK_FORMAT_BC1_RGBA_SRGB_BLOCK ||
+            tex2->vkFormat == VK_FORMAT_BC3_SRGB_BLOCK ||
+            tex2->vkFormat == VK_FORMAT_BC7_SRGB_BLOCK) {
+            preferSrgb = true;
+        }
+
+        const auto tgt = ChooseBasisTranscodeTarget(preferSrgb);
+        e = ktxTexture2_TranscodeBasis(tex2, tgt, KTX_TF_HIGH_QUALITY);
+        if (e != KTX_SUCCESS) {
+            ktxTexture_Destroy(ktxTexture(tex2));
+            throw std::runtime_error("ktxTexture2_TranscodeBasis failed");
+        }
+
+        //(void)preferSrgb;
+    }
+
+    return tex2;
 }
 
 std::shared_ptr<Texture>
@@ -374,6 +463,17 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
             static_cast<const uint8_t*>(bytes), byteCount, flags.wic, &meta, img);
         if (FAILED(hr)) throw std::runtime_error("Failed to load WIC image from memory");
         return CreateTextureFromRaw(RawFromDXT(img, meta, "", std::nullopt), sampler);
+    case ImageFiletype::KTX2:
+    {
+        // Full load and transcode if needed
+        std::unique_ptr<ktxTexture2, void(*)(ktxTexture2*)> tex2(
+            LoadKTX2FromMemory(bytes, byteCount),
+            [](ktxTexture2* t) { if (t) ktxTexture_Destroy(ktxTexture(t)); });
+
+        // Build RawImage from KTX2 (mip0/layer0/face0)
+        RawImage raw = RawFromKTX2(tex2.get(), /*filepathUtf8*/"");
+        return CreateTextureFromRaw(std::move(raw), sampler);
+    }
     }
 
     throw std::runtime_error("Unhandled container type");
@@ -1553,7 +1653,6 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	depthBuffer->SetName(L"Depth Buffer");
 
     TextureDescription downsampledDesc;
-    // Pad yres and xres to power of two
 	dims.height = yRes;
 	dims.width = xRes;
 	downsampledDesc.imageDimensions.push_back(dims);

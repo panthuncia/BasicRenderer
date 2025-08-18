@@ -1,3 +1,6 @@
 [submodule "ThirdParty/assimp"]
 	path = ThirdParty/assimp
 	url = https://github.com/assimp/assimp.git
+[submodule "ThirdParty/KTX"]
+	path = ThirdParty/KTX
+	url = https://github.com/KhronosGroup/KTX-Software.git

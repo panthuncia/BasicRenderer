@@ -21,6 +21,9 @@ find_package(fmt CONFIG REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(pxr CONFIG REQUIRED)
+#find_package(KTX CONFIG REQUIRED)
+
+find_package(Vulkan REQUIRED)
 
 # Build tool for code generation
 add_executable(resource_codegen
@@ -544,6 +547,8 @@ PRIVATE
     ar
     usdShade
     usdSkel
+    Vulkan::Vulkan
+    ktx
     "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 

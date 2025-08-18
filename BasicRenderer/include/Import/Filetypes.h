@@ -7,7 +7,8 @@ enum class ImageFiletype {
 	HDR,
 	DDS,
 	TGA,
-	WIC
+	WIC,
+	KTX2
 };
 
 enum class ImageLoader {
@@ -19,7 +20,10 @@ enum class ImageLoader {
 static std::unordered_map<ImageFiletype, ImageLoader> imageFiletypeToLoader = {
 	{ImageFiletype::WIC, ImageLoader::DirectXTex},
 	{ImageFiletype::UNKNOWN, ImageLoader::STBImage},
-	{ImageFiletype::DDS, ImageLoader::DirectXTex}
+	{ImageFiletype::DDS, ImageLoader::DirectXTex},
+	{ ImageFiletype::HDR, ImageLoader::DirectXTex },
+	{ ImageFiletype::TGA, ImageLoader::DirectXTex },
+	{ ImageFiletype::KTX2, ImageLoader::DirectXTex }
 };
 
 static std::unordered_map<std::string, ImageFiletype> extensionToFiletype = {
