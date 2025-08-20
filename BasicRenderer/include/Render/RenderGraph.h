@@ -16,6 +16,8 @@
 #include "Resources/ResourceStateTracker.h"
 #include "Interfaces/IResourceProvider.h"
 #include "Render/ResourceRegistry.h"
+#include "Render/CommandListPool.h"
+#include "Managers/CommandRecordingManager.h"
 
 class Resource;
 class RenderPassBuilder;
@@ -189,11 +191,9 @@ private:
 	std::vector<PassBatch> batches;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 
-	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_graphicsCommandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsCommandLists;
-	//std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_graphicsBatchEndTransitionCommandLists;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_computeCommandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_computeCommandLists;
+	std::unique_ptr<CommandListPool> m_graphicsCommandListPool;
+	std::unique_ptr<CommandListPool> m_computeCommandListPool;
+	std::unique_ptr<CommandListPool> m_copyCommandListPool;
 
 	//Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> initialTransitionCommandList;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> initialTransitionCommandAllocator;
@@ -204,6 +204,9 @@ private:
 
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_graphicsQueueFence;
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_computeQueueFence;
+	Microsoft::WRL::ComPtr<ID3D12Fence> m_copyQueueFence;
+
+	std::unique_ptr<CommandRecordingManager> m_pCommandRecordingManager;
 
 	UINT64 m_graphicsQueueFenceValue = 0;
 	UINT64 GetNextGraphicsQueueFenceValue() {

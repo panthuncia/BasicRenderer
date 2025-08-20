@@ -90,6 +90,7 @@ private:
     ComPtr<IDXGISwapChain4> swapChain;
     ComPtr<ID3D12CommandQueue> graphicsQueue;
 	ComPtr<ID3D12CommandQueue> computeQueue;
+	ComPtr<ID3D12CommandQueue> copyQueue;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;

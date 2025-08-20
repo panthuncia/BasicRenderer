@@ -447,7 +447,7 @@ void DX12Renderer::SetSettings() {
                 factory = slProxyFactory;
             }
 
-            DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue); // Re-init device manager with correct device 
+            DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue, copyQueue); // Re-init device manager with correct device 
 
             UpscalingManager::GetInstance().Setup();
 
@@ -659,8 +659,13 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 	computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
 	ThrowIfFailed(device->CreateCommandQueue(&computeQueueDesc, IID_PPV_ARGS(&computeQueue)));
 
+	D3D12_COMMAND_QUEUE_DESC copyQueueDesc = {};
+	copyQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	copyQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+	ThrowIfFailed(device->CreateCommandQueue(&copyQueueDesc, IID_PPV_ARGS(&copyQueue)));
+
     // Initialize device manager and PSO manager
-    DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue);
+    DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue, copyQueue);
 
     // Describe and create the swap chain
     auto numFramesInFlight = getNumFramesInFlight();
@@ -823,7 +828,8 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
 void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
     // Check if the fence value for the current frame is complete
-    if (m_frameFence->GetCompletedValue() < m_frameFenceValues[currentFrameIndex]) {
+	auto completedValue = m_frameFence->GetCompletedValue();
+    if (completedValue < m_frameFenceValues[currentFrameIndex]) {
         // Set the event to be triggered when the GPU reaches the required fence value
         ThrowIfFailed(m_frameFence->SetEventOnCompletion(m_frameFenceValues[currentFrameIndex], m_frameFenceEvent));
 
@@ -1255,7 +1261,7 @@ void DX12Renderer::CreateRenderGraph() {
 	// Start of post-processing passes
 
 	if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
-        BuildSSRPasses(newGraph.get());
+        //BuildSSRPasses(newGraph.get());
     }
 
 	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), false, true, false);
