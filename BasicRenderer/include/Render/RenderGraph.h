@@ -20,6 +20,7 @@
 #include "Managers/CommandRecordingManager.h"
 
 class Resource;
+class ResourceGroup;
 class RenderPassBuilder;
 class ComputePassBuilder;
 
@@ -28,12 +29,80 @@ concept DerivedResource = std::derived_from<T, Resource>;
 
 class RenderGraph {
 public:
+	struct RenderPassAndResources {
+		std::shared_ptr<RenderPass> pass;
+		RenderPassParameters resources;
+		std::string name;
+		int statisticsIndex = -1;
+	};
+
+	struct ComputePassAndResources {
+		std::shared_ptr<ComputePass> pass;
+		ComputePassParameters resources;
+		std::string name;
+		int statisticsIndex = -1;
+	};
+
+	enum class CommandQueueType {
+		Graphics,
+		Compute
+	};
+
+	enum class PassType {
+		Unknown,
+		Render,
+		Compute
+	};
+
+	struct PassBatch {
+		std::vector<RenderPassAndResources> renderPasses;
+		std::vector<ComputePassAndResources> computePasses;
+		//std::unordered_map<uint64_t, ResourceAccessType> resourceAccessTypes; // Desired access types in this batch
+		//std::unordered_map<uint64_t, ResourceLayout> resourceLayouts; // Desired layouts in this batch
+		std::unordered_map<uint64_t, CommandQueueType> transitionQueue; // Queue to transition resources on
+		std::vector<ResourceTransition> renderTransitions; // Transitions needed to reach desired states on the render queue
+		std::vector<ResourceTransition> computeTransitions; // Transitions needed to reach desired states on the compute queue
+		std::vector<ResourceTransition> passEndTransitions; // A special case to deal with resources that need to be used by the compute queue, but are in graphics-queue-only states
+
+		// Resources that passes in this batch transition internally
+		// Cannot be batched with other passes which use these resources
+		// Ideally, would be tracked per-subresource, but that sounds hard to implement
+		std::unordered_set<uint64_t> internallyTransitionedResources;
+		std::unordered_set<uint64_t> allResources; // All resources used in this batch, including those that are not transitioned internally
+
+		// For each queue, we need to allow a fence to wait on before transitioning, in case a previous batch is still using a resource
+		// Also, we need to allow a separate fence to wait on before *executing* the batch, in case the compute and render queue use the same resource in this batch
+		bool renderQueueWaitOnComputeQueueBeforeTransition = false;
+		UINT64 renderQueueWaitOnComputeQueueBeforeTransitionFenceValue = 0;
+		bool renderQueueWaitOnComputeQueueBeforeExecution = false;
+		UINT64 renderQueueWaitOnComputeQueueBeforeExecutionFenceValue = 0;
+
+		bool computeQueueWaitOnRenderQueueBeforeTransition = false;
+		UINT64 computeQueueWaitOnRenderQueueBeforeTransitionFenceValue = 0;
+		bool computeQueueWaitOnRenderQueueBeforeExecution = false;
+		UINT64 computeQueueWaitOnRenderQueueBeforeExecutionFenceValue = 0;
+
+		// Fences to signal, after transition and after completion, for each queue
+		bool renderTransitionSignal = false;
+		UINT64 renderTransitionFenceValue = 0;
+		bool computeTransitionSignal = false;
+		UINT64 computeTransitionFenceValue = 0;
+
+		bool renderCompletionSignal = false;
+		UINT64 renderCompletionFenceValue = 0;
+		bool computeCompletionSignal = false;
+		UINT64 computeCompletionFenceValue = 0;
+
+		std::unordered_map<uint64_t, SymbolicTracker*> passBatchTrackers; // Trackers for the resources in this batch
+	};
+
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
 	void Update();
 	void Execute(RenderContext& context);
 	void Compile();
 	void Setup();
+	const std::vector<PassBatch>& GetBatches() const { return batches; }
 	//void AllocateResources(RenderContext& context);
 	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
@@ -75,75 +144,6 @@ public:
 	RenderPassBuilder BuildRenderPass(std::string const& name);
 
 private:
-	struct RenderPassAndResources {
-		std::shared_ptr<RenderPass> pass;
-		RenderPassParameters resources;
-		std::string name;
-		int statisticsIndex = -1;
-	};
-
-	struct ComputePassAndResources {
-		std::shared_ptr<ComputePass> pass;
-		ComputePassParameters resources;
-		std::string name;
-		int statisticsIndex = -1;
-	};
-
-	enum class CommandQueueType {
-		Graphics,
-		Compute
-	};
-
-	struct PassBatch {
-		std::vector<RenderPassAndResources> renderPasses;
-		std::vector<ComputePassAndResources> computePasses;
-		//std::unordered_map<uint64_t, ResourceAccessType> resourceAccessTypes; // Desired access types in this batch
-		//std::unordered_map<uint64_t, ResourceLayout> resourceLayouts; // Desired layouts in this batch
-		std::unordered_map<uint64_t, CommandQueueType> transitionQueue; // Queue to transition resources on
-		std::vector<ResourceTransition> renderTransitions; // Transitions needed to reach desired states on the render queue
-        std::vector<ResourceTransition> computeTransitions; // Transitions needed to reach desired states on the compute queue
-		std::vector<ResourceTransition> passEndTransitions; // A special case to deal with resources that need to be used by the compute queue, but are in graphics-queue-only states
-
-		// Resources that passes in this batch transition internally
-		// Cannot be batched with other passes which use these resources
-		// Ideally, would be tracked per-subresource, but that sounds hard to implement
-		std::unordered_set<uint64_t> internallyTransitionedResources;
-		std::unordered_set<uint64_t> allResources; // All resources used in this batch, including those that are not transitioned internally
-
-		// For each queue, we need to allow a fence to wait on before transitioning, in case a previous batch is still using a resource
-		// Also, we need to allow a separate fence to wait on before *executing* the batch, in case the compute and render queue use the same resource in this batch
-		bool renderQueueWaitOnComputeQueueBeforeTransition = false;
-		UINT64 renderQueueWaitOnComputeQueueBeforeTransitionFenceValue = 0;
-		bool renderQueueWaitOnComputeQueueBeforeExecution = false;
-		UINT64 renderQueueWaitOnComputeQueueBeforeExecutionFenceValue = 0;
-
-		bool computeQueueWaitOnRenderQueueBeforeTransition = false;
-		UINT64 computeQueueWaitOnRenderQueueBeforeTransitionFenceValue = 0;
-		bool computeQueueWaitOnRenderQueueBeforeExecution = false;
-		UINT64 computeQueueWaitOnRenderQueueBeforeExecutionFenceValue = 0;
-
-		// Fences to signal, after transition and after completion, for each queue
-		bool renderTransitionSignal = false;
-		UINT64 renderTransitionFenceValue = 0;
-		bool computeTransitionSignal = false;
-		UINT64 computeTransitionFenceValue = 0;
-
-		bool renderCompletionSignal = false;
-		UINT64 renderCompletionFenceValue = 0;
-		bool computeCompletionSignal = false;
-		UINT64 computeCompletionFenceValue = 0;
-
-		std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> renderCommandLists;
-		std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> computeCommandLists;
-
-		std::unordered_map<uint64_t, SymbolicTracker*> passBatchTrackers; // Trackers for the resources in this batch
-	};
-
-    enum class PassType {
-        Unknown,
-        Render,
-        Compute
-    };
 
 	struct AnyPassAndResources {
 		PassType type = PassType::Unknown;
@@ -229,8 +229,16 @@ private:
 		const std::unordered_set<uint64_t>& otherQueueUAVs);
 	
 
-	std::pair<int, int> GetBatchesToWaitOn(const ComputePassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);
-    std::pair<int, int> GetBatchesToWaitOn(const RenderPassAndResources& pass, const std::unordered_map<uint64_t, unsigned int>& transitionHistory, const std::unordered_map<uint64_t, unsigned int>& producerHistory);
+	std::tuple<int, int, int> GetBatchesToWaitOn(const ComputePassAndResources& pass, 
+		const std::unordered_map<uint64_t, unsigned int>& transitionHistory, 
+		const std::unordered_map<uint64_t, unsigned int>& producerHistory,
+		std::unordered_map<uint64_t, unsigned int> const& usageHistory,
+		std::unordered_set<uint64_t> const& resourcesTransitionedThisPass);
+    std::tuple<int, int, int> GetBatchesToWaitOn(const RenderPassAndResources& pass, 
+		const std::unordered_map<uint64_t, unsigned int>& transitionHistory, 
+		const std::unordered_map<uint64_t, unsigned int>& producerHistory,
+		std::unordered_map<uint64_t, unsigned int> const& usageHistory,
+		std::unordered_set<uint64_t> const& resourcesTransitionedThisPass);
 
 	void ProcessResourceRequirements(
 		bool isCompute,
@@ -238,7 +246,8 @@ private:
 		std::unordered_map<uint64_t, unsigned int>&  batchOfLastRenderQueueUsage,
 		std::unordered_map<uint64_t, unsigned int>& producerHistory,
 		unsigned int batchIndex,
-		PassBatch& currentBatch);
+		PassBatch& currentBatch,
+		std::unordered_set<uint64_t>& outTransitionedResourceIDs);
 
 	template<typename PassRes>
 	void applySynchronization(
@@ -247,13 +256,15 @@ private:
 		unsigned int                      currentBatchIndex,
 		const PassRes&                    pass, // either ComputePassAndResources or RenderPassAndResources
 		const std::unordered_map<uint64_t, unsigned int>& oppTransHist,
-		const std::unordered_map<uint64_t, unsigned int>& oppProdHist)
+		const std::unordered_map<uint64_t, unsigned int>& oppProdHist,
+		const std::unordered_map<uint64_t, unsigned int>& oppUsageHist,
+		const std::unordered_set<uint64_t> resourcesTransitionedThisPass)
 	{
 		// figure out which two numbers we wait on
-		auto [lastTransBatch, lastProdBatch] =
-			GetBatchesToWaitOn(pass, oppTransHist, oppProdHist);
+		auto [lastTransBatch, lastProdBatch, lastUsageBatch] =
+			GetBatchesToWaitOn(pass, oppTransHist, oppProdHist, oppUsageHist, resourcesTransitionedThisPass);
 
-		// handle the "transition" wait
+		// Handle the "transition" wait
 		if (lastTransBatch != -1) {
 			if (static_cast<unsigned int>(lastTransBatch) == currentBatchIndex) {
 				// same batch, signal & immediate wait
@@ -286,7 +297,7 @@ private:
 			}
 		}
 
-		// handle the "producer" wait
+		// Handle the "producer" wait
 #if defined(_DEBUG)
 		if (lastProdBatch == currentBatchIndex) {
 			spdlog::error("Producer batch is the same as current batch");
@@ -308,6 +319,23 @@ private:
 						batches[lastProdBatch].computeCompletionFenceValue);
 			}
 		}
+
+		// Handle the "usage" wait
+		if (lastUsageBatch != -1) {
+			if (isComputePass) {
+				batches[lastUsageBatch].renderCompletionSignal = true;
+				currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true;
+				currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue =
+					std::max(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
+						batches[lastUsageBatch].renderCompletionFenceValue);
+			} else {
+				batches[lastUsageBatch].computeCompletionSignal = true;
+				currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true;
+				currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue =
+					std::max(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
+						batches[lastUsageBatch].computeCompletionFenceValue);
+			}
+		}
 	}
 
 	void AddTransition(
@@ -315,7 +343,8 @@ private:
 		unsigned int batchIndex,
 		PassBatch& currentBatch,
 		bool isComputePass,
-		const ResourceRequirement& r);
+		const ResourceRequirement& r,
+		std::unordered_set<uint64_t>& outTransitionedResourceIDs);
 
 	std::vector<uint64_t> GetAllAliasIDs(uint64_t id) const {
 		auto it = resourceToAliasGroup.find(id);

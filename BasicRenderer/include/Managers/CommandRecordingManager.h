@@ -4,8 +4,7 @@
 #include <wrl/client.h>
 #include <d3d12.h>
 #include "Render/CommandListPool.h"
-
-enum class QueueKind : uint8_t { Graphics = 0, Compute = 1, Copy = 2, Count };
+#include "Render/QueueKind.h"
 
 struct Signal {
     bool     enable = false;

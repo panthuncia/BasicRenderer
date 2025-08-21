@@ -52,7 +52,7 @@
 #include "RenderPasses/PostProcessing/luminanceHistogram.h"
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "Resources/TextureDescription.h"
-#include "Menu.h"
+#include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "NsightAftermathGpuCrashTracker.h"
@@ -1261,7 +1261,7 @@ void DX12Renderer::CreateRenderGraph() {
 	// Start of post-processing passes
 
 	if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
-        //BuildSSRPasses(newGraph.get());
+        BuildSSRPasses(newGraph.get());
     }
 
 	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), false, true, false);
@@ -1304,6 +1304,7 @@ void DX12Renderer::CreateRenderGraph() {
     DeletionManager::GetInstance().MarkForDelete(currentRenderGraph);
 	currentRenderGraph = std::move(newGraph);
 
+	Menu::GetInstance().SetRenderGraph(currentRenderGraph);
 	rebuildRenderGraph = false;
 }
 

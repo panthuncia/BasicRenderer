@@ -7,6 +7,7 @@
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
+#include <implot.h>
 #include <functional>
 #include <spdlog/spdlog.h>
 #include <windows.h>
@@ -23,6 +24,7 @@
 #include "Render/TonemapTypes.h"
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
+#include "Menu/RenderGraphInspector.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -46,16 +48,22 @@ public:
     void Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain);
     void Render(const RenderContext& context);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+	void SetRenderGraph(std::shared_ptr<RenderGraph> renderGraph) { m_renderGraph = renderGraph; }
 
 private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> g_pd3dSrvDescHeap = nullptr;
-    Menu() { ImGui::CreateContext(); };
+    Menu() { 
+        ImGui::CreateContext();
+		ImPlot::CreateContext();
+    };
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swapChain = nullptr;
     Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
 
     flecs::entity selectedNode;
+
+	std::weak_ptr<RenderGraph> m_renderGraph;
 
     FrameContext* WaitForNextFrameResources();
 
@@ -322,11 +330,35 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> pDe
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 }
 
+static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, bool isCompute) {
+    if (isCompute) {
+        auto& pr = *reinterpret_cast<const RenderGraph::ComputePassAndResources*>(passAndRes);
+		bool found = false;
+        for (const auto& req : pr.resources.resourceRequirements) {
+            if (req.resourceAndRange.resource->GetGlobalResourceID() == resourceId) {
+				found = true;
+            }
+        }
+		return found;
+    }
+    else {
+        auto& pr = *reinterpret_cast<const RenderGraph::RenderPassAndResources*>(passAndRes);
+        bool found = false;
+        for (const auto& req : pr.resources.resourceRequirements) {
+            if (req.resourceAndRange.resource->GetGlobalResourceID() == resourceId) {
+                found = true;
+            }
+        }
+        return found;
+    }
+}
+
 inline void Menu::Render(const RenderContext& context) {
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 
 	ImGui::NewFrame();
+    static bool showRG = true;
 
 	{
 		static float f = 0.0f;
@@ -431,7 +463,7 @@ inline void Menu::Render(const RenderContext& context) {
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();
         DrawLoadModelButton();
-
+        ImGui::Checkbox("Render Graph Inspector", &showRG);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();
 	}
@@ -444,6 +476,18 @@ inline void Menu::Render(const RenderContext& context) {
 		DisplaySelectedNode();
 
         DrawPassTimingWindow();
+    }
+
+    if (showRG) {
+		ImGui::Begin("Render Graph Inspector", nullptr);
+        if (!m_renderGraph.expired()) {
+            RGInspectorOptions opts; // tweak layout if you like
+            RGInspector::Show(m_renderGraph.lock()->GetBatches(),
+                PassUsesResourceAdapter,
+                opts);
+        }
+        ImGui::End();
+
     }
 
 	// Rendering

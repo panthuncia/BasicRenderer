@@ -19,12 +19,18 @@ void RenderGraph::AddTransition(
 	unsigned int batchIndex,
 	PassBatch& currentBatch,
 	bool isComputePass, 
-	const ResourceRequirement& r)
+	const ResourceRequirement& r,
+	std::unordered_set<uint64_t>& outTransitionedResourceIDs)
 {
+
 	auto& resource = r.resourceAndRange.resource;
 
 	std::vector<ResourceTransition> transitions;
 	resource->GetStateTracker()->Apply(r.resourceAndRange.range, resource.get(), r.state, transitions);
+
+	if (!transitions.empty()) {
+		outTransitionedResourceIDs.insert(resource->GetGlobalResourceID());
+	}
 
 	currentBatch.passBatchTrackers[resource->GetGlobalResourceID()] = resource->GetStateTracker(); // We will need to chack subsequent passes against this
 
@@ -79,7 +85,7 @@ void RenderGraph::ProcessResourceRequirements(
 	std::unordered_map<uint64_t, unsigned int>& batchOfLastRenderQueueUsage,
 	std::unordered_map<uint64_t, unsigned int>& producerHistory,
 	unsigned int batchIndex,
-	PassBatch& currentBatch) {
+	PassBatch& currentBatch, std::unordered_set<uint64_t>& outTransitionedResourceIDs) {
 
 	for (auto& resourceRequirement : resourceRequirements) {
 
@@ -90,7 +96,7 @@ void RenderGraph::ProcessResourceRequirements(
 
 		const auto& id = resourceRequirement.resourceAndRange.resource->GetGlobalResourceID();
 
-		AddTransition(batchOfLastRenderQueueUsage, batchIndex, currentBatch, isCompute, resourceRequirement);
+		AddTransition(batchOfLastRenderQueueUsage, batchIndex, currentBatch, isCompute, resourceRequirement, outTransitionedResourceIDs);
 
 		if (AccessTypeIsWriteType(resourceRequirement.state.access)) {
 			if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
@@ -202,7 +208,7 @@ void RenderGraph::Compile() {
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueProducer;
 
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueUsage;
-	//std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueUsage;
+	std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueUsage;
 
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
@@ -250,7 +256,7 @@ void RenderGraph::Compile() {
 				++currentBatchIndex;
 			}
 		}
-
+		std::unordered_set<uint64_t> resourcesTransitionedThisPass;
 		// dispatch categories
 		if (isCompute) {
 			auto& pass = std::get<ComputePassAndResources>(pr.pass);
@@ -260,7 +266,8 @@ void RenderGraph::Compile() {
 				batchOfLastRenderQueueUsage,
 				batchOfLastComputeQueueTransition,
 				currentBatchIndex,
-				currentBatch);
+				currentBatch,
+				resourcesTransitionedThisPass);
 			currentBatch.computePasses.push_back(pass);
 			for (auto& exit : pass.resources.internalTransitions) { // If this pass transitions internally, update to the exit state
 				std::vector<ResourceTransition> _; // Ignored
@@ -269,7 +276,7 @@ void RenderGraph::Compile() {
 			}
 			for (auto& req : pass.resources.resourceRequirements) {
 				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
-				//batchOfLastComputeQueueUsage[req.resourceAndRange.resource->GetGlobalResourceID()] = currentBatchIndex;
+				batchOfLastComputeQueueUsage[req.resourceAndRange.resource->GetGlobalResourceID()] = currentBatchIndex;
 			}
 		} else {
 			auto& pass = std::get<RenderPassAndResources>(pr.pass);
@@ -279,7 +286,8 @@ void RenderGraph::Compile() {
 				batchOfLastRenderQueueUsage,
 				batchOfLastRenderQueueTransition,
 				currentBatchIndex,
-				currentBatch);
+				currentBatch,
+				resourcesTransitionedThisPass);
 			currentBatch.renderPasses.push_back(pass);
 			for (auto& exit : pass.resources.internalTransitions) {
 				std::vector<ResourceTransition> _;
@@ -287,6 +295,9 @@ void RenderGraph::Compile() {
 				currentBatch.internallyTransitionedResources.insert(exit.first.resource->GetGlobalResourceID());
 			}
 			for (auto& req : pass.resources.resourceRequirements) {
+				if (req.resourceAndRange.resource->GetGlobalResourceID() == 2) {
+					spdlog::info("2");
+				}
 				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
 				batchOfLastRenderQueueUsage[req.resourceAndRange.resource->GetGlobalResourceID()] = currentBatchIndex;
 			}
@@ -299,7 +310,9 @@ void RenderGraph::Compile() {
 				currentBatchIndex,
 				std::get<ComputePassAndResources>(pr.pass),
 				batchOfLastRenderQueueTransition,
-				batchOfLastRenderQueueProducer
+				batchOfLastRenderQueueProducer,
+				batchOfLastRenderQueueUsage,
+				resourcesTransitionedThisPass
 			);
 		} else {
 			applySynchronization(
@@ -308,7 +321,9 @@ void RenderGraph::Compile() {
 				currentBatchIndex,
 				std::get<RenderPassAndResources>(pr.pass),
 				batchOfLastComputeQueueTransition,
-				batchOfLastComputeQueueProducer
+				batchOfLastComputeQueueProducer,
+				batchOfLastComputeQueueUsage,
+				resourcesTransitionedThisPass
 			);
 		}
     }
@@ -337,12 +352,14 @@ void RenderGraph::Compile() {
 	}
 }
 
-std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
+std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 	const ComputePassAndResources& pass,
 	std::unordered_map<uint64_t, unsigned int> const& transitionHistory,
-	std::unordered_map<uint64_t, unsigned int> const& producerHistory)
+	std::unordered_map<uint64_t, unsigned int> const& producerHistory,
+	std::unordered_map<uint64_t, unsigned int> const& usageHistory,
+	std::unordered_set<uint64_t> const& resourcesTransitionedThisPass)
 {
-	int latestTransition = -1, latestProducer = -1;
+	int latestTransition = -1, latestProducer = -1, latestUsage = -1;
 
 	auto processResource = [&](Resource* const& res) {
 		uint64_t id = res->GetGlobalResourceID();
@@ -362,15 +379,25 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
 	for (auto const& req : pass.resources.resourceRequirements)
 		processResource(req.resourceAndRange.resource.get());
 
-	return { latestTransition, latestProducer };
+	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
+		for (auto rid : GetAllAliasIDs(transitionID)) {
+			if (usageHistory.contains(rid)) {
+				latestUsage = std::max(latestUsage, (int)usageHistory.at(rid));
+			}
+		}
+	}
+
+	return { latestTransition, latestProducer, latestUsage };
 }
 
-std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
+std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 	const RenderPassAndResources& pass,
 	std::unordered_map<uint64_t, unsigned int> const& transitionHistory,
-	std::unordered_map<uint64_t, unsigned int> const& producerHistory)
+	std::unordered_map<uint64_t, unsigned int> const& producerHistory,
+	std::unordered_map<uint64_t, unsigned int> const& usageHistory,
+	std::unordered_set<uint64_t> const& resourcesTransitionedThisPass)
 {
-	int latestTransition = -1, latestProducer = -1;
+	int latestTransition = -1, latestProducer = -1, latestUsage = -1;
 
 	auto processResource = [&](Resource* const& res) {
 		uint64_t id = res->GetGlobalResourceID();
@@ -388,7 +415,15 @@ std::pair<int, int> RenderGraph::GetBatchesToWaitOn(
 	for (auto const& req : pass.resources.resourceRequirements)
 		processResource(req.resourceAndRange.resource.get());
 
-	return { latestTransition, latestProducer };
+	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
+		for (auto rid : GetAllAliasIDs(transitionID)) {
+			if (usageHistory.contains(rid)) {
+				latestUsage = std::max(latestTransition, (int)usageHistory.at(rid));
+			}
+		}
+	}
+
+	return { latestTransition, latestProducer, latestUsage };
 }
 
 void RenderGraph::Setup() {
@@ -653,7 +688,9 @@ void RenderGraph::Execute(RenderContext& context) {
 
 	auto& statisticsManager = StatisticsManager::GetInstance();
 
+	unsigned int batchIndex = 0;
 	for (auto& batch : batches) {
+
 		if (batch.computeQueueWaitOnRenderQueueBeforeTransition) {
 			WaitIfDistinct(computeQueue, m_graphicsQueueFence.Get(),
 				currentGraphicsQueueFenceOffset +
@@ -731,6 +768,7 @@ void RenderGraph::Execute(RenderContext& context) {
 				batch.renderCompletionSignal, 
 				batch.renderCompletionFenceValue);
 		}
+		++batchIndex;
 	}
 	crm->Flush(QueueKind::Graphics, { false, 0 });
 	crm->Flush(QueueKind::Compute, { false, 0 });

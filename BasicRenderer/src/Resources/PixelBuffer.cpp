@@ -189,8 +189,8 @@ BarrierGroups PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAcce
     textureBarrierDesc.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
     textureBarrierDesc.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
     textureBarrierDesc.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
-    textureBarrierDesc.LayoutBefore = (D3D12_BARRIER_LAYOUT)prevLayout;
-    textureBarrierDesc.LayoutAfter = (D3D12_BARRIER_LAYOUT)newLayout;
+    textureBarrierDesc.LayoutBefore = ResourceLayoutToD3D12(prevLayout);
+    textureBarrierDesc.LayoutAfter = ResourceLayoutToD3D12(newLayout);
 	textureBarrierDesc.Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE;
     textureBarrierDesc.pResource = m_texture.Get();
 
