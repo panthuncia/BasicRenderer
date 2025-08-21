@@ -477,7 +477,7 @@ inline void Menu::Render(const RenderContext& context) {
 
         DrawPassTimingWindow();
     }
-
+    
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
         if (!m_renderGraph.expired()) {

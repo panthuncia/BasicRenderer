@@ -418,7 +418,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
 		for (auto rid : GetAllAliasIDs(transitionID)) {
 			if (usageHistory.contains(rid)) {
-				latestUsage = std::max(latestTransition, (int)usageHistory.at(rid));
+				latestUsage = std::max(latestUsage, (int)usageHistory.at(rid));
 			}
 		}
 	}
