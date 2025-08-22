@@ -174,6 +174,10 @@ private:
 	std::function<UpscaleQualityMode()> getUpscalingQualityMode;
     std::function<void(UpscaleQualityMode)> setUpscalingQualityMode;
 
+	bool m_useAsyncCompute = true;
+	std::function<bool()> getUseAsyncCompute;
+    std::function<void(bool)> setUseAsyncCompute;
+
 	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
 };
 
@@ -325,6 +329,10 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> pDe
     setUpscalingQualityMode = settingsManager.getSettingSetter<UpscaleQualityMode>("upscalingQualityMode");
     m_currentUpscalingQualityMode = getUpscalingQualityMode();
 
+	getUseAsyncCompute = settingsManager.getSettingGetter<bool>("useAsyncCompute");
+    setUseAsyncCompute = settingsManager.getSettingSetter<bool>("useAsyncCompute");
+    m_useAsyncCompute = getUseAsyncCompute();
+
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
@@ -463,6 +471,9 @@ inline void Menu::Render(const RenderContext& context) {
         DrawBrowseButton(environmentsDir.wstring());
 		DrawOutputTypeDropdown();
         DrawLoadModelButton();
+		if (ImGui::Checkbox("Use Async Compute", &m_useAsyncCompute)) {
+			setUseAsyncCompute(m_useAsyncCompute);
+		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();

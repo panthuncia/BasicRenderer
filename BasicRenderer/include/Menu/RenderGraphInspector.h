@@ -17,6 +17,7 @@ struct RGInspectorOptions {
     float blockWidthTransitions = 0.20f;
     float blockGap = 0.05f;
     float blockWidthPasses = 0.60f; // passes span
+    float blockWidthBatchEnd = 0.20f; // width of batch-end transitions
     float rowHeight = 1.0f;  // ImPlot units
     float laneSpacing = 1.2f;  // extra space between lanes
 };

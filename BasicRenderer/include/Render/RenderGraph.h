@@ -62,7 +62,7 @@ public:
 		std::unordered_map<uint64_t, CommandQueueType> transitionQueue; // Queue to transition resources on
 		std::vector<ResourceTransition> renderTransitions; // Transitions needed to reach desired states on the render queue
 		std::vector<ResourceTransition> computeTransitions; // Transitions needed to reach desired states on the compute queue
-		std::vector<ResourceTransition> passEndTransitions; // A special case to deal with resources that need to be used by the compute queue, but are in graphics-queue-only states
+		std::vector<ResourceTransition> batchEndTransitions; // A special case to deal with resources that need to be used by the compute queue, but are in graphics-queue-only states
 
 		// Resources that passes in this batch transition internally
 		// Cannot be batched with other passes which use these resources
@@ -364,6 +364,19 @@ private:
 
 	void RegisterPassBuilder(RenderPassBuilder&& builder);
 	void RegisterPassBuilder(ComputePassBuilder&& builder);
+
+	std::unordered_set<uint64_t> GetAllIndependantlyManagedResourcesFromGroup(
+		uint64_t groupGlobalResourceID) const
+	{
+		std::unordered_set<uint64_t> outResources;
+		auto it = resourcesFromGroupToManageIndependantly.find(groupGlobalResourceID);
+		if (it != resourcesFromGroupToManageIndependantly.end()) {
+			for (auto& resID : it->second) {
+				outResources.insert(resID);
+			}
+		}
+		return outResources;
+	}
 
 	friend class RenderPassBuilder;
 	friend class ComputePassBuilder;

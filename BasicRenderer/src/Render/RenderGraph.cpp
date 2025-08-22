@@ -13,6 +13,8 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/CommandRecordingManager.h"
 
+//
+
 // Factory for the transition lambda
 void RenderGraph::AddTransition(
 	std::unordered_map<uint64_t, unsigned int>&  batchOfLastRenderQueueUsage,
@@ -24,7 +26,12 @@ void RenderGraph::AddTransition(
 {
 
 	auto& resource = r.resourceAndRange.resource;
-
+	if (resource->GetName() == L"Environment prefiltered cubemap") {
+		spdlog::info("0");
+	}
+	if (resource->GetName() == L"EnvironmentPrefilteredCubemapGroup") {
+		spdlog::info("0");
+	}
 	std::vector<ResourceTransition> transitions;
 	resource->GetStateTracker()->Apply(r.resourceAndRange.range, resource.get(), r.state, transitions);
 
@@ -60,7 +67,7 @@ void RenderGraph::AddTransition(
 		unsigned int gfxBatch = batchOfLastRenderQueueUsage[resource->GetGlobalResourceID()];
 		for (auto& transition : transitions) {
 			batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()] = gfxBatch; // Can this cause transition overlaps?
-			batches[gfxBatch].passEndTransitions.push_back(transition);
+			batches[gfxBatch].batchEndTransitions.push_back(transition);
 		}
 	}
 	else {
@@ -213,6 +220,10 @@ void RenderGraph::Compile() {
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
 
+		if (pr.name == "Screen-Space Reflections Pass") {
+			spdlog::info("Screen-Space Reflections Pass");
+		}
+
 		bool isCompute = (pr.type == PassType::Compute);
 
 		if (isCompute) {
@@ -275,8 +286,12 @@ void RenderGraph::Compile() {
 				currentBatch.internallyTransitionedResources.insert(exit.first.resource->GetGlobalResourceID());
 			}
 			for (auto& req : pass.resources.resourceRequirements) {
-				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
-				batchOfLastComputeQueueUsage[req.resourceAndRange.resource->GetGlobalResourceID()] = currentBatchIndex;
+				auto resourceID = req.resourceAndRange.resource->GetGlobalResourceID();
+				currentBatch.allResources.insert(resourceID);
+				batchOfLastComputeQueueUsage[resourceID] = currentBatchIndex;
+				for (auto& child : GetAllIndependantlyManagedResourcesFromGroup(resourceID)) {
+					batchOfLastComputeQueueUsage[child] = currentBatchIndex;
+				}
 			}
 		} else {
 			auto& pass = std::get<RenderPassAndResources>(pr.pass);
@@ -295,11 +310,12 @@ void RenderGraph::Compile() {
 				currentBatch.internallyTransitionedResources.insert(exit.first.resource->GetGlobalResourceID());
 			}
 			for (auto& req : pass.resources.resourceRequirements) {
-				if (req.resourceAndRange.resource->GetGlobalResourceID() == 2) {
-					spdlog::info("2");
+				auto resourceID = req.resourceAndRange.resource->GetGlobalResourceID();
+				currentBatch.allResources.insert(resourceID);
+				batchOfLastRenderQueueUsage[resourceID] = currentBatchIndex;
+				for (auto& child : GetAllIndependantlyManagedResourcesFromGroup(resourceID)) {
+					batchOfLastRenderQueueUsage[child] = currentBatchIndex;
 				}
-				currentBatch.allResources.insert(req.resourceAndRange.resource->GetGlobalResourceID());
-				batchOfLastRenderQueueUsage[req.resourceAndRange.resource->GetGlobalResourceID()] = currentBatchIndex;
 			}
 		}
 
@@ -350,6 +366,45 @@ void RenderGraph::Compile() {
 		readbackBatch.renderPasses.push_back(readbackPassAndResources);
 		batches.push_back(readbackBatch);
 	}
+
+	// Cut out repeat waits on the same fence
+	uint64_t lastRenderWaitFenceValue = 0;
+	uint64_t lastComputeWaitFenceValue = 0;
+	for (auto& batch : batches) {
+		if (batch.computeQueueWaitOnRenderQueueBeforeTransition) {
+			if (batch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue <= lastComputeWaitFenceValue) {
+				batch.computeQueueWaitOnRenderQueueBeforeTransition = false;
+			}
+			else {
+				lastComputeWaitFenceValue = batch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue;
+			}
+		}
+		if (batch.computeQueueWaitOnRenderQueueBeforeExecution) {
+			if (batch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue <= lastComputeWaitFenceValue) {
+				batch.computeQueueWaitOnRenderQueueBeforeExecution = false;
+			}
+			else {
+				lastComputeWaitFenceValue = batch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue;
+			}
+		}
+		if (batch.renderQueueWaitOnComputeQueueBeforeTransition) {
+			if (batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue <= lastRenderWaitFenceValue) {
+				batch.renderQueueWaitOnComputeQueueBeforeTransition = false;
+			}
+			else {
+				lastRenderWaitFenceValue = batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue;
+			}
+		}
+		if (batch.renderQueueWaitOnComputeQueueBeforeExecution) {
+			if (batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue <= lastRenderWaitFenceValue) {
+				batch.renderQueueWaitOnComputeQueueBeforeExecution = false;
+			}
+			else {
+				lastRenderWaitFenceValue = batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue;
+			}
+		}
+	}
+
 }
 
 std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
@@ -461,7 +516,7 @@ void RenderGraph::Setup() {
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copyQueueFence));
 	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameStartSyncFence));
 
-	bool useAsyncCompute = true;
+	bool useAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute")();
 
 	CommandRecordingManager::Init init{
 		.graphicsQ = manager.GetGraphicsQueue(),
@@ -746,7 +801,7 @@ void RenderGraph::Execute(RenderContext& context) {
 				batch.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue);
 		}
 
-		bool signalNow = batch.passEndTransitions.size() == 0 && batch.renderCompletionSignal ? true : false;
+		bool signalNow = batch.batchEndTransitions.size() == 0 && batch.renderCompletionSignal ? true : false;
 
 		ExecutePasses(batch.renderPasses, 
 			crm,
@@ -759,13 +814,13 @@ void RenderGraph::Execute(RenderContext& context) {
 			context, 
 			statisticsManager);
 
-		if (batch.passEndTransitions.size() > 0) {
-			ExecuteTransitions(batch.passEndTransitions, 
+		if (batch.batchEndTransitions.size() > 0) {
+			ExecuteTransitions(batch.batchEndTransitions, 
 				crm,
 				QueueKind::Graphics,
 				graphicsCommandList,
 				currentGraphicsQueueFenceOffset,
-				batch.renderCompletionSignal, 
+				true, 
 				batch.renderCompletionFenceValue);
 		}
 		++batchIndex;

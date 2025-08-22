@@ -480,7 +480,7 @@ void BuildSSRPasses(RenderGraph* graph) {
     ssrTexture->SetName(L"SSR Texture");
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 
-    graph->BuildRenderPass("Screen-Space Reflections Pass")
+    graph->BuildComputePass("Screen-Space Reflections Pass")
 		.Build<ScreenSpaceReflectionsPass>();
 
     graph->BuildRenderPass("Specular IBL & SSR Composite Pass")

@@ -348,6 +348,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
+    settingsManager.registerSetting<bool>("useAsyncCompute", false);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -364,7 +365,7 @@ void DX12Renderer::SetSettings() {
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 	getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
-
+    
 
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
@@ -473,6 +474,9 @@ void DX12Renderer::SetSettings() {
 	m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableScreenSpaceReflections", [this](const bool& newValue) {
 		m_screenSpaceReflections = newValue;
 		rebuildRenderGraph = true;
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("useAsyncCompute", [this](const bool& newValue) {
+        rebuildRenderGraph = true;
 		}));
     m_numFramesInFlight = getNumFramesInFlight();
 }

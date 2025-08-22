@@ -8,7 +8,62 @@
 #include "Render/QueueKind.h"
 #include "Resources/ResourceStates.h"
 
-enum class SignalPhase : uint8_t { AfterTransitions, AfterPasses };
+struct BatchLayout {
+    // Absolute X (plot coords) for this batch
+    double baseX = 0.0;  // left edge of the batch slot
+    double width = 0.0;  // total width
+
+    // Absolute X sub-ranges (all absolute)
+    double t0 = 0.0, t1 = 0.0; // pre-pass transitions
+    double p0 = 0.0, p1 = 0.0; // passes
+    double e0 = 0.0, e1 = 0.0; // batch-end transitions (only valid if present)
+    bool   hasEnd = false;
+};
+
+static std::vector<BatchLayout>
+BuildBatchLayouts(const std::vector<RenderGraph::PassBatch>& batches, const RGInspectorOptions& opts)
+{
+    // Fixed block sizes
+    const double wT = opts.blockWidthTransitions;
+    const double wP = opts.blockWidthPasses;
+    const double wE = opts.blockWidthBatchEnd; // only used if hasEnd
+    const double g = opts.blockGap;
+    const double l = opts.blockLeftTransitions;
+    const double rGutter = 0.02; // tiny right gutter so adjacent borders don't fuse
+
+    std::vector<BatchLayout> out;
+    out.resize(batches.size());
+
+    double cursor = 0.0;
+    for (int i = 0; i < (int)batches.size(); ++i) {
+        const auto& b = batches[i];
+        BatchLayout bl;
+        bl.baseX = cursor;
+
+        bl.t0 = bl.baseX + l;
+        bl.t1 = bl.t0 + wT;
+
+        bl.p0 = bl.t1 + g;
+        bl.p1 = bl.p0 + wP;
+
+        bl.hasEnd = !b.batchEndTransitions.empty();
+        if (bl.hasEnd) {
+            bl.e0 = bl.p1 + g;
+            bl.e1 = bl.e0 + wE;
+            bl.width = (bl.e1 - bl.baseX) + rGutter;
+        }
+        else {
+            bl.width = (bl.p1 - bl.baseX) + rGutter;
+        }
+
+        out[i] = bl;
+        cursor += bl.width;
+    }
+    return out;
+}
+
+
+enum class SignalPhase : uint8_t { AfterTransitions, AfterPasses, AfterBatchEndTransitions };
 
 struct SignalSite {
     int        batchIndex = -1;
@@ -35,9 +90,13 @@ static SignalIndex BuildSignalIndex(const std::vector<RenderGraph::PassBatch>& b
             { i, QueueKind::Graphics, SignalPhase::AfterTransitions };
         }
         if (b.renderCompletionSignal) {
+            auto phase = b.batchEndTransitions.empty()
+                ? SignalPhase::AfterPasses
+                : SignalPhase::AfterBatchEndTransitions;
             idx[{QueueKind::Graphics, b.renderCompletionFenceValue}] =
-            { i, QueueKind::Graphics, SignalPhase::AfterPasses };
+            { i, QueueKind::Graphics, phase };
         }
+
         if (b.computeTransitionSignal) {
             idx[{QueueKind::Compute, b.computeTransitionFenceValue}] =
             { i, QueueKind::Compute, SignalPhase::AfterTransitions };
@@ -46,7 +105,6 @@ static SignalIndex BuildSignalIndex(const std::vector<RenderGraph::PassBatch>& b
             idx[{QueueKind::Compute, b.computeCompletionFenceValue}] =
             { i, QueueKind::Compute, SignalPhase::AfterPasses };
         }
-        // (Add copy lane when you have it.)
     }
     return idx;
 }
@@ -114,28 +172,31 @@ static void DrawArrowBetweenLanes(ImDrawList* dl,
     ImU32 color,
     const char* label)
 {
-    // Convert to screen space once
+    // Enforce left->right
+    const float kEps = 1e-3f;
+    if (x0 >= x1) {
+        // Nudge the end to the right slightly to avoid a vertical/degenerate arrow.
+        x1 = x0 + kEps;
+    }
+
+    // Convert to screen
     ImVec2 p0 = ImPlot::PlotToPixels(ImPlotPoint(x0, y0));
     ImVec2 p1 = ImPlot::PlotToPixels(ImPlotPoint(x1, y1));
 
-    // Build gentle horizontal-ish bezier (handles either direction)
-    float dx = (p1.x - p0.x);
-    float dy = (p1.y - p0.y);
+    const float dy_px = std::fabs(p1.y - p0.y);
+    const float cx = 0.30f * dy_px + 16.0f;  // tweakable
 
-    // Curve magnitude: bias by |dy| so farther lanes arc more
-    float cx = 0.30f * std::fabs(dy) + 12.0f;
-
-    // Control points nudge horizontally toward the middle
-    ImVec2 c0 = ImVec2(p0.x + (dx >= 0 ? cx : -cx), p0.y);
-    ImVec2 c1 = ImVec2(p1.x - (dx >= 0 ? cx : -cx), p1.y);
+    // Ensure rightward tangents by construction:
+    ImVec2 c0 = ImVec2(p0.x + cx, p0.y);  // start handle to the right
+    ImVec2 c1 = ImVec2(p1.x - cx, p1.y);  // end handle from the left
 
     dl->AddBezierCubic(p0, c0, c1, p1, color, 2.0f);
 
-    // Arrow head at the end, aligned to outgoing tangent
-    ImVec2 tan = ImVec2(p1.x - c1.x, p1.y - c1.y);
+    // Arrow head aligned to the (rightward) end tangent.
+    ImVec2 tan = ImVec2(p1.x - c1.x, p1.y - c1.y); // guaranteed to have positive x
     float len = std::sqrt(tan.x * tan.x + tan.y * tan.y);
-    if (len > 1e-3f) { tan.x /= len; tan.y /= len; }
-    else { tan = ImVec2(1, 0); }
+    if (len < 1e-6f) { tan = ImVec2(1, 0); len = 1.0f; } // fallback
+    tan.x /= len; tan.y /= len;
     ImVec2 nrm = ImVec2(-tan.y, tan.x);
 
     const float headLen = 10.0f;
@@ -147,7 +208,6 @@ static void DrawArrowBetweenLanes(ImDrawList* dl,
         p1.y - tan.y * headLen - nrm.y * headWide);
     dl->AddTriangleFilled(a, b, c, color);
 
-    // Optional label near the mid of the curve
     if (label && *label) {
         ImVec2 mid = ImVec2((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f - 12.0f);
         dl->AddText(mid, color, label);
@@ -163,6 +223,8 @@ namespace RGInspector {
         if (!ImGui::Begin("Render Graph Inspector")) { ImGui::End(); return; }
 
         SignalIndex sigIdx = BuildSignalIndex(batches);
+        auto layouts = BuildBatchLayouts(batches, opts);
+        double totalW = layouts.empty() ? 1.0 : (layouts.back().baseX + layouts.back().width);
 
         // --- Left panel: resource picker ---
         static uint64_t s_selectedRes = 0;
@@ -198,7 +260,7 @@ namespace RGInspector {
         if (ImPlot::BeginPlot("##RGPlot", ImVec2(-1, -1), ImPlotFlags_CanvasOnly)) {
             // Axes: X = batch index [0..N], Y = lanes
             ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_NoTickLabels);
-            ImPlot::SetupAxisLimits(ImAxis_X1, -0.25, (double)batches.size() + 0.25, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_X1, -0.1, totalW + 0.1, ImGuiCond_Always);
             // Three lanes stacked (Copy at bottom, Compute middle, Graphics top)
             const float H = opts.rowHeight;
             const float S = opts.laneSpacing;
@@ -221,28 +283,25 @@ namespace RGInspector {
             draw_lane_bg(QueueKind::Graphics, "Graphics");
 
             // X grid lines per batch
-            for (int i = 0; i <= (int)batches.size(); ++i) {
-                ImVec2 p0 = ImPlot::PlotToPixels(ImPlotPoint(i, -S));
-                ImVec2 p1 = ImPlot::PlotToPixels(ImPlotPoint(i, LaneY(QueueKind::Graphics, H, S) + H + S));
+            for (int i = 0; i <= (int)layouts.size(); ++i) {
+                double x = (i == (int)layouts.size()) ? totalW : layouts[i].baseX;
+                ImVec2 p0 = ImPlot::PlotToPixels(ImPlotPoint(x, -S));
+                ImVec2 p1 = ImPlot::PlotToPixels(ImPlotPoint(x, LaneY(QueueKind::Graphics, H, S) + H + S));
                 dl->AddLine(p0, p1, IM_COL32(180, 180, 180, 64), (i % 5 == 0) ? 2.0f : 1.0f);
             }
-
-            // Draw passes + transitions per batch
-            const float xT0 = opts.blockLeftTransitions;
-            const float xT1 = xT0 + opts.blockWidthTransitions;
-            const float xP0 = xT1 + opts.blockGap;
-            const float xP1 = xP0 + opts.blockWidthPasses;
 
             const float yG = LaneY(QueueKind::Graphics, H, S) + H * 0.5f;
             const float yC = LaneY(QueueKind::Compute, H, S) + H * 0.5f;
 
-            auto draw_transitions = [&](const std::vector<ResourceTransition>& v, QueueKind qk, int batchIndex) {
+            auto draw_transitions = [&](const std::vector<ResourceTransition>& v,
+                QueueKind qk, int batchIndex,
+                double absX0, double absX1) {
                 if (v.empty()) return;
 
                 const bool haveSelection = (s_selectedRes != 0);
                 float y = LaneY(qk, H, S);
-                ImPlotPoint minP(batchIndex + xT0, y);
-                ImPlotPoint maxP(batchIndex + xT1, y + H);
+                ImPlotPoint minP(absX0, y);
+                ImPlotPoint maxP(absX1, y + H);
 
                 // Find which transitions in this block touch the selected resource
                 std::vector<int> matchIdx;
@@ -257,12 +316,11 @@ namespace RGInspector {
                 const bool touchesSelected = !matchIdx.empty();
                 DrawBlock(dl, minP, maxP, touchesSelected ? ColHighlight() : ColTrans(), ColBorder());
 
-                // Draw thin inner bars for each *matching* transition so you can see count/position
+                // Draw thin inner bars for each *matching* transition
                 if (!matchIdx.empty()) {
-                    const int n = (int)v.size();
-                    for (int k = 0; k < (int)matchIdx.size(); ++k) {
-                        int i = matchIdx[k];
-                        double xi = (batchIndex + xT0) + (opts.blockWidthTransitions) * ((i + 0.5) / (double)n);
+                    int n = (int)v.size();
+                    for (int i = 0; i < n; ++i) {
+                        double xi = absX0 + (absX1 - absX0) * ((i + 0.5) / (double)n);
                         ImPlotPoint p0(xi - 0.012, y + 0.15 * H);
                         ImPlotPoint p1(xi + 0.012, y + 0.85 * H);
                         DrawBlock(dl, p0, p1, IM_COL32(20, 20, 20, 220), IM_COL32(255, 255, 255, 200), 3.0f);
@@ -282,7 +340,6 @@ namespace RGInspector {
                             std::string name = ws2s(t.pResource->GetName());
                             ImGui::Text("%s (%llu)", name.c_str(),
                                 (unsigned long long)t.pResource->GetGlobalResourceID());
-                            // Adjust these fields to your actual range struct
                             ImGui::BulletText("Subresource: mip[%u..%u], array[%u..%u]",
                                 t.range.mipLower, t.range.mipUpper,
                                 t.range.sliceLower, t.range.sliceUpper);
@@ -308,11 +365,12 @@ namespace RGInspector {
                 }
                 };
 
-            auto draw_passes = [&](auto const& passesVec, QueueKind qk, int batchIndex, bool isCompute) {
+            auto draw_passes = [&](auto const& passesVec, QueueKind qk, int bi, bool isCompute) {
                 if (passesVec.empty()) return;
+                const auto& L = layouts[bi];
                 float y = LaneY(qk, H, S);
-                ImPlotPoint minP(batchIndex + xP0, y);
-                ImPlotPoint maxP(batchIndex + xP1, y + H);
+                ImPlotPoint minP(L.p0, y);
+                ImPlotPoint maxP(L.p1, y + H);
 
                 // Does any pass use the selected resource?
                 bool touchesSelected = false;
@@ -329,8 +387,8 @@ namespace RGInspector {
 
                 // Pass labels (stacked vertically)
                 int n = (int)passesVec.size();
-                ImVec2 tp = ImPlot::PlotToPixels(ImPlotPoint(batchIndex + (xP0 + xP1) * 0.5, y + 0.1 + 0.5 * (H - 0.2)));
-                dl->AddText(tp, IM_COL32_BLACK, std::to_string(n).c_str());
+                ImVec2 tp = ImPlot::PlotToPixels(ImPlotPoint((L.p0 + L.p1) * 0.5, y + 0.1 + 0.5f * (H - 0.2f)));
+                dl->AddText(tp, IM_COL32_BLACK, std::to_string((int)passesVec.size()).c_str());
                 //for (int i = 0; i < n; ++i) {
                 //    double u = (i + 0.5) / std::max(1, n);
                 //    ImVec2 tp = ImPlot::PlotToPixels(ImPlotPoint(batchIndex + (xP0 + xP1) * 0.5, y + 0.1 + u * (H - 0.2)));
@@ -349,19 +407,31 @@ namespace RGInspector {
 
             // Draw all batches
             for (int bi = 0; bi < (int)batches.size(); ++bi) {
+
                 const auto& b = batches[bi];
+                const auto& L = layouts[bi];
+
+                if (b.computePasses.size() > 0 && b.computePasses[0].name == "Screen-Space Reflections Pass") {
+                    spdlog::info("Here");
+                }
 
                 // Compute lane
-                draw_transitions(b.computeTransitions, QueueKind::Compute, bi);
+                draw_transitions(b.computeTransitions, QueueKind::Compute, bi, L.t0, L.t1);
                 draw_passes(b.computePasses, QueueKind::Compute, bi, /*isCompute*/true);
 
                 // Graphics lane
-                draw_transitions(b.renderTransitions, QueueKind::Graphics, bi);
+                draw_transitions(b.renderTransitions, QueueKind::Graphics, bi, L.t0, L.t1);
                 draw_passes(b.renderPasses, QueueKind::Graphics, bi, /*isCompute*/false);
 
-                // Optional Copy lane (you can add b.copyTransitions/passes later)
+                if (L.hasEnd) {
+                    draw_transitions(b.batchEndTransitions, QueueKind::Graphics, bi, L.e0, L.e1);
+                    //ImVec2 tp = ImPlot::PlotToPixels(ImPlotPoint((L.e0 + L.e1) * 0.5, LaneY(QueueKind::Graphics, H, S) + 0.08f * H));
+                    //dl->AddText(tp, IM_COL32_BLACK, "End Transitions");
+                }
 
-                // Cross-queue waits/signals (we draw at the left edge of the “execution” in each lane)
+                // TODO: Copy lane
+
+                // Cross-queue waits/signals (we draw at the left edge of the "execution" in each lane)
                 auto laneYG = LaneY(QueueKind::Graphics, H, S) + H * 0.5f;
                 auto laneYC = LaneY(QueueKind::Compute, H, S) + H * 0.5f;
 
@@ -370,73 +440,77 @@ namespace RGInspector {
                     std::ostringstream o; o << "#" << val; return o.str();
                     };
 
-                auto siteToX = [&](const SignalSite& s)->float {
-                    if (s.phase == SignalPhase::AfterTransitions) return s.batchIndex + xT1;
-                    else                                          return s.batchIndex + xP1;
+                auto siteToX = [&](const SignalSite& s)->double {
+                    const auto& SL = layouts[s.batchIndex];
+                    switch (s.phase) {
+                    case SignalPhase::AfterTransitions:         return SL.t1;
+                    case SignalPhase::AfterPasses:              return SL.p1;
+                    case SignalPhase::AfterBatchEndTransitions: return SL.e1; // only valid if hasEnd=true
+                    default:                                    return SL.p1;
+                    }
                     };
                 auto laneCenterY = [&](QueueKind q)->float {
-                    return (q == QueueKind::Graphics) ? yG : (q == QueueKind::Compute ? yC : (yC - (yG - yC))); // adjust if/when you add Copy
+                    return (q == QueueKind::Graphics) ? yG : (q == QueueKind::Compute ? yC : (yC - (yG - yC)));
                     };
 
+                auto waitX_Transitions = [&](int bi)->double { return layouts[bi].t0; };
+                auto waitX_Passes = [&](int bi)->double { return layouts[bi].p0; };
+
+                // Compute waits on Graphics BEFORE TRANSITIONS
                 if (b.computeQueueWaitOnRenderQueueBeforeTransition) {
                     uint64_t fv = b.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue;
                     auto it = sigIdx.find({ QueueKind::Graphics, fv });
                     if (it != sigIdx.end()) {
-                        const SignalSite& src = it->second;
-                        float x0 = siteToX(src);             // where GRAPHICS actually signaled 'fv'
-                        float y0 = laneCenterY(src.queue);
-                        float x1 = bi + xT0;                 // COMPUTE waits at the start of its transitions
-                        float y1 = yC;
-                        auto lbl = labelFence(true, fv);
-                        DrawArrowBetweenLanes(dl, x0, y0, x1, y1, ColArrowWait(), lbl.c_str());
-                    }
-                    else {
-                        // Optional: draw a small warning glyph at (bi + xT0, yC)
+                        const auto& src = it->second;
+                        DrawArrowBetweenLanes(dl,
+                            (float)siteToX(src), (float)yG,
+                            (float)waitX_Transitions(bi), (float)yC,
+                            ColArrowWait(), labelFence(true, fv).c_str());
                     }
                 }
 
-                // --- Compute waits on Graphics, BEFORE EXECUTION ---
+                // Compute waits on Graphics BEFORE EXECUTION
                 if (b.computeQueueWaitOnRenderQueueBeforeExecution) {
                     uint64_t fv = b.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue;
                     auto it = sigIdx.find({ QueueKind::Graphics, fv });
                     if (it != sigIdx.end()) {
-                        const SignalSite& src = it->second;
-                        float x0 = siteToX(src);
-                        float y0 = laneCenterY(src.queue);
-                        float x1 = bi + xP0;                 // COMPUTE waits at the start of its passes
-                        float y1 = yC;
-                        auto lbl = labelFence(true, fv);
-                        DrawArrowBetweenLanes(dl, x0, y0, x1, y1, ColArrowWait(), lbl.c_str());
+                        const auto& src = it->second;
+                        DrawArrowBetweenLanes(dl,
+                            (float)siteToX(src), 
+                            (float)yG,
+                            (float)waitX_Passes(bi), 
+                            (float)yC,
+                            ColArrowWait(), 
+                            labelFence(true, fv).c_str());
                     }
                 }
 
-                // --- Graphics waits on Compute, BEFORE TRANSITIONS ---
+                // Graphics waits on Compute BEFORE TRANSITIONS
                 if (b.renderQueueWaitOnComputeQueueBeforeTransition) {
                     uint64_t fv = b.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue;
                     auto it = sigIdx.find({ QueueKind::Compute, fv });
                     if (it != sigIdx.end()) {
-                        const SignalSite& src = it->second;
-                        float x0 = siteToX(src);
-                        float y0 = laneCenterY(src.queue);
-                        float x1 = bi + xT0;                 // GRAPHICS waits at the start of its transitions
-                        float y1 = yG;
-                        auto lbl = labelFence(true, fv);
-                        DrawArrowBetweenLanes(dl, x0, y0, x1, y1, ColArrowWait(), lbl.c_str());
+                        const auto& src = it->second;
+                        DrawArrowBetweenLanes(dl,
+                            (float)siteToX(src), 
+                            (float)yC,
+                            (float)waitX_Transitions(bi), 
+                            (float)yG,
+                            ColArrowWait(), labelFence(true, fv).c_str());
                     }
                 }
 
-                // --- Graphics waits on Compute, BEFORE EXECUTION ---
+                // Graphics waits on Compute BEFORE EXECUTION
                 if (b.renderQueueWaitOnComputeQueueBeforeExecution) {
                     uint64_t fv = b.renderQueueWaitOnComputeQueueBeforeExecutionFenceValue;
                     auto it = sigIdx.find({ QueueKind::Compute, fv });
                     if (it != sigIdx.end()) {
-                        const SignalSite& src = it->second;
-                        float x0 = siteToX(src);
-                        float y0 = laneCenterY(src.queue);
-                        float x1 = bi + xP0;                 // GRAPHICS waits at the start of its passes
-                        float y1 = yG;
-                        auto lbl = labelFence(true, fv);
-                        DrawArrowBetweenLanes(dl, x0, y0, x1, y1, ColArrowWait(), lbl.c_str());
+                        const auto& src = it->second;
+                        DrawArrowBetweenLanes(dl,
+                            (float)siteToX(src), (float)yC,
+                            (float)waitX_Passes(bi), (float)yG,
+                            ColArrowWait(),
+                            labelFence(true, fv).c_str());
                     }
                 }
             }
