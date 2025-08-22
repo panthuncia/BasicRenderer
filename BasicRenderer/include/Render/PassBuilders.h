@@ -1077,7 +1077,7 @@ private:
             auto pRes = ptrMap[id];
             for(auto const& seg : tracker.GetSegments()) {
                 if (seg.state.access == ResourceAccessType::COMMON && seg.state.layout == ResourceLayout::LAYOUT_COMMON) {
-                    continue; // TODO: Will we ever need explicit transitions to common for declared resources?
+                    //continue; // TODO: Will we ever need explicit transitions to common for declared resources?
                 }
                 // build a ResourceAndRange for this segment
                 ResourceAndRange rr(pRes);

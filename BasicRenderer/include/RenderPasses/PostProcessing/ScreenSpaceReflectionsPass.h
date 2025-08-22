@@ -13,12 +13,12 @@
 #include "Managers/Singletons/FFXManager.h"
 #include "Utilities/MathUtils.h"
 
-class ScreenSpaceReflectionsPass : public RenderPass {
+class ScreenSpaceReflectionsPass : public ComputePass {
 public:
     ScreenSpaceReflectionsPass() {
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) {
+    void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithLegacyInterop(Builtin::Color::HDRColorTarget,
             Builtin::GBuffer::MotionVectors,
             Builtin::PrimaryCamera::DepthTexture,

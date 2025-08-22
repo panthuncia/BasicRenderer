@@ -52,7 +52,7 @@
 #include "RenderPasses/PostProcessing/luminanceHistogram.h"
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "Resources/TextureDescription.h"
-#include "Menu.h"
+#include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "NsightAftermathGpuCrashTracker.h"
@@ -348,6 +348,7 @@ void DX12Renderer::SetSettings() {
 	settingsManager.registerSetting<UpscalingMode>("upscalingMode", UpscalingManager::GetInstance().GetCurrentUpscalingMode());
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
+    settingsManager.registerSetting<bool>("useAsyncCompute", false);
 	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
     setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -364,7 +365,7 @@ void DX12Renderer::SetSettings() {
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 	getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
-
+    
 
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableShadows", [this](const bool& newValue) {
         // Trigger recompilation of the render graph when setting changes
@@ -447,7 +448,7 @@ void DX12Renderer::SetSettings() {
                 factory = slProxyFactory;
             }
 
-            DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue); // Re-init device manager with correct device 
+            DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue, copyQueue); // Re-init device manager with correct device 
 
             UpscalingManager::GetInstance().Setup();
 
@@ -473,6 +474,9 @@ void DX12Renderer::SetSettings() {
 	m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableScreenSpaceReflections", [this](const bool& newValue) {
 		m_screenSpaceReflections = newValue;
 		rebuildRenderGraph = true;
+		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("useAsyncCompute", [this](const bool& newValue) {
+        rebuildRenderGraph = true;
 		}));
     m_numFramesInFlight = getNumFramesInFlight();
 }
@@ -659,8 +663,13 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 	computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
 	ThrowIfFailed(device->CreateCommandQueue(&computeQueueDesc, IID_PPV_ARGS(&computeQueue)));
 
+	D3D12_COMMAND_QUEUE_DESC copyQueueDesc = {};
+	copyQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	copyQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+	ThrowIfFailed(device->CreateCommandQueue(&copyQueueDesc, IID_PPV_ARGS(&copyQueue)));
+
     // Initialize device manager and PSO manager
-    DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue);
+    DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue, copyQueue);
 
     // Describe and create the swap chain
     auto numFramesInFlight = getNumFramesInFlight();
@@ -823,7 +832,8 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
 void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
     // Check if the fence value for the current frame is complete
-    if (m_frameFence->GetCompletedValue() < m_frameFenceValues[currentFrameIndex]) {
+	auto completedValue = m_frameFence->GetCompletedValue();
+    if (completedValue < m_frameFenceValues[currentFrameIndex]) {
         // Set the event to be triggered when the GPU reaches the required fence value
         ThrowIfFailed(m_frameFence->SetEventOnCompletion(m_frameFenceValues[currentFrameIndex], m_frameFenceEvent));
 
@@ -1298,6 +1308,7 @@ void DX12Renderer::CreateRenderGraph() {
     DeletionManager::GetInstance().MarkForDelete(currentRenderGraph);
 	currentRenderGraph = std::move(newGraph);
 
+	Menu::GetInstance().SetRenderGraph(currentRenderGraph);
 	rebuildRenderGraph = false;
 }
 

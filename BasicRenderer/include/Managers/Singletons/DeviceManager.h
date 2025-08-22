@@ -12,7 +12,7 @@ class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
-    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue,  Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue);
+    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue,  Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pCopyQueue);
 	void DiagnoseDeviceRemoval();
     Microsoft::WRL::ComPtr<ID3D12Device10>& GetDevice() {
         return device;
@@ -26,6 +26,10 @@ public:
 		return computeQueue.Get();
 	}
 
+	ID3D12CommandQueue* GetCopyQueue() {
+		return copyQueue.Get();
+	}
+
 	bool GetMeshShadersSupported() {
 		return m_meshShadersSupported;
 	}
@@ -37,6 +41,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Device10> device = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12CommandQueue> copyQueue = nullptr;
 	bool m_meshShadersSupported = false;
 
     void CheckGPUFeatures();
@@ -48,10 +53,12 @@ inline DeviceManager& DeviceManager::GetInstance() {
     return instance;
 }
 
-inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> pDevice, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pGraphicsQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pComputeQueue) {
+inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> pDevice, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pGraphicsQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pComputeQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pCopyQueue) {
     this->device = pDevice;
 	this->graphicsQueue = pGraphicsQueue;
 	this->computeQueue = pComputeQueue;
+	this->copyQueue = pCopyQueue;
+
 	CheckGPUFeatures();
 
 	if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dred)))) {
