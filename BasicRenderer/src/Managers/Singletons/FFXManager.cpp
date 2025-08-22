@@ -92,7 +92,7 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
     sssrDesc.commandList = context.commandList;
     auto renderSize = m_getRenderRes();
     sssrDesc.renderSize = { renderSize.x, renderSize.y };
-	sssrDesc.motionVectorScale = { -0.5f, 0.5f };
+	sssrDesc.motionVectorScale = { -1.f, 1.f }; // TODO: I think these should be -.5f, .5f, but that produces black fringing in motion
     sssrDesc.normalUnPackMul = 1.0f;
 	sssrDesc.normalUnPackAdd = 0.0f;
 	sssrDesc.roughnessChannel = 1; // metallic roughness texture, roughness is in channel 1
@@ -100,7 +100,7 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
 	sssrDesc.temporalStabilityFactor = 0.7f; // TODO: make everything below configurable
     sssrDesc.iblFactor = 1.0f;
 	sssrDesc.depthBufferThickness = 0.015f;
-	sssrDesc.roughnessThreshold = 0.4f;
+	sssrDesc.roughnessThreshold = 0.3f;
 	sssrDesc.varianceThreshold = 0.1f;
 	sssrDesc.maxTraversalIntersections = 128;
     sssrDesc.minTraversalOccupancy = 4;

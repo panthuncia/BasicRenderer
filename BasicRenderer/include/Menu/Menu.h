@@ -366,7 +366,7 @@ inline void Menu::Render(const RenderContext& context) {
 	ImGui_ImplWin32_NewFrame();
 
 	ImGui::NewFrame();
-    static bool showRG = true;
+    static bool showRG = false;
 
 	{
 		static float f = 0.0f;
