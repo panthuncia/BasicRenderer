@@ -5,6 +5,18 @@
 #include "Utilities/Utilities.h"
 
 void CommandSignatureManager::Initialize() {
+
+    auto device = DeviceManager::GetInstance().GetDevice();
+
+    rhi::IndirectArg args[] = {
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 0, 0, 1 } } },
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 1, 0, 2 } } },
+        { .kind = rhi::IndirectArgKind::DispatchMesh }
+    };
+    rhi::CommandSignatureHandle sig = device.CreateCommandSignature(
+        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 3), sizeof(DispatchMeshIndirectCommand) },
+        layout);
+
     // Dispatch mesh command, for primary draws
     D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[3] = {};
     argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
@@ -24,9 +36,8 @@ void CommandSignatureManager::Initialize() {
     commandSignatureDesc.NumArgumentDescs = _countof(argumentDescs);
     commandSignatureDesc.ByteStride = sizeof(DispatchMeshIndirectCommand);
 
-    auto device = DeviceManager::GetInstance().GetDevice();
     auto rootSignature = PSOManager::GetInstance().GetRootSignature();
-    ThrowIfFailed(device->CreateCommandSignature(&commandSignatureDesc, rootSignature.Get(), IID_PPV_ARGS(&m_dispatchMeshCommandSignature)));
+    ThrowIfFailed(device.CreateCommandSignature(&commandSignatureDesc, rootSignature.Get(), IID_PPV_ARGS(&m_dispatchMeshCommandSignature)));
 
     // dispatch command for meshlet culling
 	D3D12_INDIRECT_ARGUMENT_DESC argumentDescs2[3] = {};
@@ -50,6 +61,6 @@ void CommandSignatureManager::Initialize() {
 	ThrowIfFailed(device->CreateCommandSignature(&commandSignatureDesc2, rootSignature.Get(), IID_PPV_ARGS(&m_dispatchCommandSignature)));
 }
 
-ID3D12CommandSignature* CommandSignatureManager::GetDispatchMeshCommandSignature() {
-	return m_dispatchMeshCommandSignature.Get();
+rhi::CommandSignatureHandle& CommandSignatureManager::GetDispatchMeshCommandSignature() {
+	return m_dispatchMeshCommandSignature;
 }

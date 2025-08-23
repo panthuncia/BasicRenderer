@@ -2,7 +2,7 @@
 // Created by matth on 6/25/2024.
 //
 
-#include "DX12Renderer.h"
+#include "Renderer.h"
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -10,8 +10,9 @@
 #include <atlbase.h>
 #include <filesystem>
 
+#include <rhi_interop_dx12.h>
+
 #include "Utilities/Utilities.h"
-#include "DirectX/d3dx12.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/ResourceManager.h"
@@ -143,7 +144,7 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
     return bestAdapter;
 }
 
-void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
+void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
@@ -160,7 +161,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
-    Menu::GetInstance().Initialize(hwnd, device, graphicsQueue, swapChain);
+    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_device(m_device), graphicsQueue, swapChain);
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
 	StatisticsManager::GetInstance().Initialize();
@@ -290,7 +291,7 @@ void DX12Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             });
 }
 
-void DX12Renderer::CreateGlobalResources() {
+void Renderer::CreateGlobalResources() {
     m_coreResourceProvider.m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
     m_coreResourceProvider.m_linearShadowMaps = std::make_shared<LinearShadowMaps>(L"linearShadowMaps");
     //m_shadowMaps->AddAliasedResource(m_downsampledShadowMaps.get());
@@ -300,7 +301,7 @@ void DX12Renderer::CreateGlobalResources() {
 	setLinearShadowMaps(m_coreResourceProvider.m_linearShadowMaps.get());
 }
 
-void DX12Renderer::SetSettings() {
+void Renderer::SetSettings() {
 	auto& settingsManager = SettingsManager::GetInstance();
 
     uint8_t numDirectionalCascades = 4;
@@ -481,7 +482,7 @@ void DX12Renderer::SetSettings() {
     m_numFramesInFlight = getNumFramesInFlight();
 }
 
-void DX12Renderer::ToggleMeshShaders(bool useMeshShaders) {
+void Renderer::ToggleMeshShaders(bool useMeshShaders) {
     // We need to:
     // 1. Remove all meshes in the global mesh library from the mesh manager
 	// 2. Re-add them to the mesh manager
@@ -564,7 +565,7 @@ void EnableShaderBasedValidation() {
     spDebugController1->SetEnableGPUBasedValidation(true);
 }
 
-void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
+void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
@@ -743,7 +744,7 @@ void DX12Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
 }
 
-void DX12Renderer::CreateTextures() {
+void Renderer::CreateTextures() {
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     // Create HDR color target
     TextureDescription hdrDesc;
@@ -787,7 +788,7 @@ void DX12Renderer::CreateTextures() {
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
 
-void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
+void Renderer::OnResize(UINT newWidth, UINT newHeight) {
     if (!device) return;
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
@@ -830,7 +831,7 @@ void DX12Renderer::OnResize(UINT newWidth, UINT newHeight) {
 }
 
 
-void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
+void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
     // Check if the fence value for the current frame is complete
 	auto completedValue = m_frameFence->GetCompletedValue();
     if (completedValue < m_frameFenceValues[currentFrameIndex]) {
@@ -842,7 +843,7 @@ void DX12Renderer::WaitForFrame(uint8_t currentFrameIndex) {
     }
 }
 
-void DX12Renderer::Update(float elapsedSeconds) {
+void Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
 	StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, computeQueue.Get()); // Gather statistics for the last iteration of the frame
@@ -893,7 +894,7 @@ void DX12Renderer::Update(float elapsedSeconds) {
     ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
 }
 
-void DX12Renderer::Render() {
+void Renderer::Render() {
     auto deltaTime = m_frameTimer.tick();
     // Record all the commands we need to render the scene into the command list
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
@@ -979,7 +980,7 @@ void DX12Renderer::Render() {
     DeletionManager::GetInstance().ProcessDeletions();
 }
 
-void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t frameIndexToSignal) {
+void Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t frameIndexToSignal) {
     // Signal the fence
     m_currentFrameFenceValue++;
     ThrowIfFailed(commandQueue->Signal(m_frameFence.Get(), m_currentFrameFenceValue));
@@ -988,12 +989,12 @@ void DX12Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t 
     m_frameFenceValues[frameIndexToSignal] = m_currentFrameFenceValue;
 }
 
-void DX12Renderer::AdvanceFrameIndex() {
+void Renderer::AdvanceFrameIndex() {
     m_frameIndex = (m_frameIndex + 1) % m_numFramesInFlight;
     m_totalFramesRendered += 1;
 }
 
-void DX12Renderer::FlushCommandQueue() {
+void Renderer::FlushCommandQueue() {
     // Create a fence and an event to wait on
     Microsoft::WRL::ComPtr<ID3D12Fence> flushFence;
     ThrowIfFailed(DeviceManager::GetInstance().GetDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&flushFence)));
@@ -1020,14 +1021,14 @@ void DX12Renderer::FlushCommandQueue() {
     CloseHandle(flushEvent);
 }
 
-void DX12Renderer::StallPipeline() {
+void Renderer::StallPipeline() {
     for (uint8_t i = 0; i < m_numFramesInFlight; ++i) {
         WaitForFrame(i);
     }
     FlushCommandQueue();
 }
 
-void DX12Renderer::Cleanup() {
+void Renderer::Cleanup() {
     spdlog::info("In cleanup");
     // Wait for all GPU frames to complete
 	StallPipeline();
@@ -1045,7 +1046,7 @@ void DX12Renderer::Cleanup() {
     DeletionManager::GetInstance().Cleanup();
 }
 
-void DX12Renderer::CheckDebugMessages() {
+void Renderer::CheckDebugMessages() {
     ComPtr<ID3D12InfoQueue> infoQueue;
     if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
         UINT64 messageCount = infoQueue->GetNumStoredMessages();
@@ -1061,19 +1062,19 @@ void DX12Renderer::CheckDebugMessages() {
     }
 }
 
-void DX12Renderer::SetEnvironment(std::string environmentName) {
+void Renderer::SetEnvironment(std::string environmentName) {
 	setEnvironment(environmentName);
 }
 
-ComPtr<ID3D12Device10>& DX12Renderer::GetDevice() {
+ComPtr<ID3D12Device10>& Renderer::GetDevice() {
     return device;
 }
 
-std::shared_ptr<Scene>& DX12Renderer::GetCurrentScene() {
+std::shared_ptr<Scene>& Renderer::GetCurrentScene() {
     return currentScene;
 }
 
-void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
+void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	if (currentScene) {
 		DeletionManager::GetInstance().MarkForDelete(currentScene);
 	}
@@ -1084,15 +1085,15 @@ void DX12Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	rebuildRenderGraph = true;
 }
 
-std::shared_ptr<Scene> DX12Renderer::AppendScene(std::shared_ptr<Scene> scene) {
+std::shared_ptr<Scene> Renderer::AppendScene(std::shared_ptr<Scene> scene) {
 	return GetCurrentScene()->AppendScene(scene);
 }
 
-InputManager& DX12Renderer::GetInputManager() {
+InputManager& Renderer::GetInputManager() {
     return inputManager;
 }
 
-void DX12Renderer::SetInputMode(InputMode mode) {
+void Renderer::SetInputMode(InputMode mode) {
     static WASDContext wasdContext;
     static OrbitalCameraContext orbitalContext;
     switch (mode) {
@@ -1106,11 +1107,11 @@ void DX12Renderer::SetInputMode(InputMode mode) {
     SetupInputHandlers();
 }
 
-void DX12Renderer::MoveForward() {
+void Renderer::MoveForward() {
     spdlog::info("Moving forward!");
 }
 
-void DX12Renderer::SetupInputHandlers() {
+void Renderer::SetupInputHandlers() {
 	auto& context = *inputManager.GetCurrentContext();
     context.SetActionHandler(InputAction::MoveForward, [this](float magnitude, const InputData& inputData) {
         //spdlog::info("Moving forward!");
@@ -1166,7 +1167,7 @@ void DX12Renderer::SetupInputHandlers() {
         });
 }
 
-void DX12Renderer::CreateRenderGraph() {
+void Renderer::CreateRenderGraph() {
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
@@ -1312,7 +1313,7 @@ void DX12Renderer::CreateRenderGraph() {
 	rebuildRenderGraph = false;
 }
 
-void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
+void Renderer::SetEnvironmentInternal(std::wstring name) {
 
     std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
 
@@ -1328,7 +1329,7 @@ void DX12Renderer::SetEnvironmentInternal(std::wstring name) {
     }
 }
 
-void DX12Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
+void Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
     m_coreResourceProvider.m_currentDebugTexture = texture;
 	if (currentRenderGraph == nullptr) {
 		return;

@@ -14,6 +14,8 @@
 #include <functional>
 #include <flecs.h>
 
+#include <rhi.h>
+
 #include <ThirdParty/Streamline/sl.h>
 #include <ThirdParty/Streamline/sl_consts.h>
 #include <ThirdParty/Streamline/sl_dlss.h>
@@ -59,9 +61,9 @@ private:
     std::vector<std::function<void()>> _queue;
 };
 
-class DX12Renderer {
+class Renderer {
 public:
-    DX12Renderer() : m_gpuCrashTracker(m_markerMap){
+    Renderer() : m_gpuCrashTracker(m_markerMap){
     }
 
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
@@ -83,7 +85,7 @@ private:
     ComPtr<IDXGIFactory7> factory;
     ComPtr<IDXGIFactory7> nativeFactory;
     ComPtr<IDXGIFactory7> slProxyFactory;
-    ComPtr<ID3D12Device10> device;
+    rhi::Device m_device;
     ComPtr<ID3D12Device10> nativeDevice;
     ComPtr<ID3D12Device10> slProxyDevice;
 

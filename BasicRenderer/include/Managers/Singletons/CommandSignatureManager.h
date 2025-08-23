@@ -5,16 +5,18 @@
 #include <d3d12.h>
 #include <string>
 
+#include <rhi.h>
+
 class CommandSignatureManager {
 public:
 	static CommandSignatureManager& GetInstance();
 	void Initialize();
-	ID3D12CommandSignature* GetDispatchMeshCommandSignature();
-	ID3D12CommandSignature* GetDispatchCommandSignature() { return m_dispatchCommandSignature.Get(); }
+	rhi::CommandSignatureHandle& GetDispatchMeshCommandSignature();
+	rhi::CommandSignatureHandle& GetDispatchCommandSignature() { return m_dispatchCommandSignature; }
 
 private:
-	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchMeshCommandSignature;
-	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchCommandSignature;
+	rhi::CommandSignatureHandle m_dispatchMeshCommandSignature;
+	rhi::CommandSignatureHandle m_dispatchCommandSignature;
 };
 
 inline CommandSignatureManager& CommandSignatureManager::GetInstance() {

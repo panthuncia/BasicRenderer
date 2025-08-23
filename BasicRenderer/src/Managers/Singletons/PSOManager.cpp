@@ -5,6 +5,7 @@
 #include <tree_sitter/api.h>
 
 #include <directx/d3dx12.h>
+
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 
@@ -105,493 +106,509 @@ PipelineState PSOManager::GetDeferredPSO(UINT psoFlags) {
     return m_deferredPSOCache[psoFlags];
 }
 
-PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    // Define shader macros
+PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe)
+{
     auto defines = GetShaderDefines(psoFlags);
 
-    // Compile shaders
-    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-
-	ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
-	shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
-	shaderInfoBundle.defines = defines;
-	auto compiledBundle = CompileShaders(shaderInfoBundle);
-	vertexShader = compiledBundle.vertexShader;
-	pixelShader = compiledBundle.pixelShader;
-
-    // Create the pipeline state object
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
-    psoDesc.pRootSignature = rootSignature.Get();
-    psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-    psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    //}
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    }
-    psoDesc.RasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    }
-    psoDesc.BlendState = GetBlendDesc(blendState);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
-	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = psoFlags & PSOFlags::PSO_SHADOW ? 0 : 1;
-    if(!(psoFlags & PSOFlags::PSO_SHADOW)) {
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    }
-
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
-
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
-
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
-}
-
-PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    // Define shader macros
-    auto defines = GetShaderDefines(psoFlags);
-
-    // Compile shaders
-    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
     shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
+
     auto compiledBundle = CompileShaders(shaderInfoBundle);
-	vertexShader = compiledBundle.vertexShader;
-	pixelShader = compiledBundle.pixelShader;
+    vsBlob = compiledBundle.vertexShader;
+    psBlob = compiledBundle.pixelShader;
 
-    // Create the pipeline state object
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
-    psoDesc.pRootSignature = rootSignature.Get();
-    psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-    psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    //}
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    }
-    psoDesc.RasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    }
-    psoDesc.BlendState = GetBlendDesc(blendState);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout };
 
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT; // Linear depth
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
 
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
+    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::SubobjBlend soBlend{ rhiBlend };
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
-}
+    // Depth: Equal, no writes
+    rhi::DepthStencilState ds{};
+    ds.depthEnable = true;
+    ds.depthWrite = false;                  // D3D12_DEPTH_WRITE_MASK_ZERO
+    ds.depthFunc = rhi::CompareOp::Equal;  // D3D12_COMPARISON_FUNC_EQUAL
+    rhi::SubobjDepth soDepth{ ds };
 
-
-PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    // Define shader macros
-    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
-
-    // Compile shaders
-    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-
-    ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6" };
-    shaderInfoBundle.defines = defines;
-    auto compiledBundle = CompileShaders(shaderInfoBundle);
-	vertexShader = compiledBundle.vertexShader;
-	pixelShader = compiledBundle.pixelShader;
-
-    // Create the pipeline state object
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
-    psoDesc.pRootSignature = rootSignature.Get();
-    psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    }
-    psoDesc.RasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    }
-    psoDesc.BlendState = GetBlendDesc(blendState);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    if (psoFlags & PSO_DEFERRED) {
-        psoDesc.NumRenderTargets = 6;
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
-		psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // Motion vector
-		psoDesc.RTVFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
-        psoDesc.RTVFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-        psoDesc.RTVFormats[4] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		psoDesc.RTVFormats[5] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
-	}
-	else {
-		psoDesc.NumRenderTargets = 3;
-		psoDesc.RTVFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT;
-		psoDesc.RTVFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // Motion vector
-        psoDesc.RTVFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
-	}
-
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
-
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
-
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
-}
-
-PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    // Define shader macros
-    auto defines = GetShaderDefines(psoFlags);
-
-    // Compile shaders
-    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-
-    ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/PPLL.hlsl", L"PPLLFillPS", L"ps_6_6" };
-    shaderInfoBundle.defines = defines;
-    auto compiledBundle = CompileShaders(shaderInfoBundle);
-    vertexShader = compiledBundle.vertexShader;
-    pixelShader = compiledBundle.pixelShader;
-
-    // Create the pipeline state object
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { nullptr, 0 }; // We use vertex pulling
-    psoDesc.pRootSignature = rootSignature.Get();
-    psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-    //if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-    psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-    //}
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    }
-    psoDesc.RasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    }
-    psoDesc.BlendState = GetBlendDesc(blendState);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
+    rhi::RenderTargets rts{};
     if (psoFlags & PSOFlags::PSO_SHADOW) {
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT;
+        rts.count = 0;
     }
     else {
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        rts.count = 1;
+        rts.formats[0] = rhi::Format::R16G16B16A16_Float;
+    }
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soVS),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create PSO (RHI)");
     }
 
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.DSVFormat = psoFlags & PSOFlags::PSO_SHADOW ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
+PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe)
+{
+    auto defines = GetShaderDefines(psoFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    vsBlob = compiledBundle.vertexShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout };
+
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{};
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    rts.count = 1;
+    rts.formats[0] = rhi::Format::R32_Float;
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soVS),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create Shadow PSO (RHI)");
+    }
+
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+
+PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe)
+{
+    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain",        L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    vsBlob = compiledBundle.vertexShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature(); // PipelineLayoutHandle
+    rhi::SubobjLayout soLayout{ layout };
+
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{}; // defaults: depth test on, write on, LessEqual
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    if (psoFlags & PSO_DEFERRED) {
+        rts.count = 6;
+        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+        rts.formats[2] = rhi::Format::R32_Float;            // Depth
+        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
+        rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
+        rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
+    }
+    else {
+        rts.count = 3;
+        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+        rts.formats[2] = rhi::Format::R32_Float;            // Depth
+    }
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soVS),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create PrePass PSO");
+    }
+
+    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe)
+{
+    auto defines = GetShaderDefines(psoFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VSMain", L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/PPLL.hlsl",    L"PPLLFillPS", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    vsBlob = compiledBundle.vertexShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature(); // PipelineLayoutHandle
+    rhi::SubobjLayout soLayout{ layout };
+
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{};
+    ds.depthEnable = true;
+    ds.depthWrite = false; // D3D12_DEPTH_WRITE_MASK_ZERO
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    rts.count = 1;
+    rts.formats[0] = (psoFlags & PSOFlags::PSO_SHADOW)
+        ? rhi::Format::R32_Float
+        : rhi::Format::R16G16B16A16_Float;
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soVS),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create PPLL PSO");
+    }
 
     return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPSO(
-    UINT psoFlags, BlendState blendState, bool wireframe) {
-    // Define shader macros
+    UINT psoFlags, BlendState blendState, bool wireframe)
+{
     auto defines = GetShaderDefines(psoFlags);
 
-    // Compile shaders
-	Microsoft::WRL::ComPtr<ID3D10Blob> amplificationShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
-    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
-	shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl",          L"MSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",       L"PSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
+
     auto compiledBundle = CompileShaders(shaderInfoBundle);
-    amplificationShader = compiledBundle.amplificationShader;
-	meshShader = compiledBundle.meshShader;
-	pixelShader = compiledBundle.pixelShader;
+    asBlob = compiledBundle.amplificationShader;
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
 
-    // Create rasterizer state
-    CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    auto& layout = GetRootSignature(); // your PipelineLayoutHandle
+    rhi::SubobjLayout soLayout{ layout };
+
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()) };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{};
+    ds.depthEnable = true;
+    ds.depthWrite = false;                   // D3D12_DEPTH_WRITE_MASK_ZERO
+    ds.depthFunc = rhi::CompareOp::Equal;   // D3D12_COMPARISON_FUNC_EQUAL
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    if (psoFlags & PSOFlags::PSO_SHADOW) {
+        rts.count = 0;
     }
-    rasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    else {
+        rts.count = 1;
+        rts.formats[0] = rhi::Format::R16G16B16A16_Float; // DXGI_FORMAT_R16G16B16A16_FLOAT
     }
+    rhi::SubobjRTVs soRTV{ rts };
 
-    // Set up the blend state
-    CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(GetBlendDesc(blendState));
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
 
-    // Set up the depth stencil state
-    CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    depthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
-    depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-
-    // Set the render target format
-    DXGI_FORMAT rtvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
-
-    // Define the pipeline state stream subobjects
-    struct PipelineStateStream {
-        CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-		CD3DX12_PIPELINE_STATE_STREAM_AS AS;
-        CD3DX12_PIPELINE_STATE_STREAM_MS MS;
-        CD3DX12_PIPELINE_STATE_STREAM_PS PS;
-        CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
-        CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
-        CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soTask),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
     };
 
-    PipelineStateStream pipelineStateStream = {};
-    pipelineStateStream.RootSignature = rootSignature.Get();
-	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
-    pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-
-    pipelineStateStream.RasterizerState = rasterizerState;
-    pipelineStateStream.BlendState = blendDesc;
-    pipelineStateStream.DepthStencilState = depthStencilState;
-
-    D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    rtvFormats.NumRenderTargets = psoFlags & PSO_SHADOW ? 0 : 1;
-	if (!(psoFlags & PSOFlags::PSO_SHADOW)) {
-        rtvFormats.RTFormats[0] = rtvFormat;
+    auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create Mesh PSO");
     }
-	pipelineStateStream.RTVFormats = rtvFormats;
-
-	pipelineStateStream.DSVFormat = dsvFormat;
-
-    // Create the pipeline state stream descriptor
-    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-    streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-    streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-    // Create the pipeline state
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ID3D12Device2* device2 = nullptr;
-    ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-    ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
 
     return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateShadowMeshPSO(
-    UINT psoFlags, BlendState blendState, bool wireframe) {
-    // Define shader macros
+    UINT psoFlags, BlendState blendState, bool wireframe)
+{
     auto defines = GetShaderDefines(psoFlags);
 
-    // Compile shaders
-	Microsoft::WRL::ComPtr<ID3D10Blob> amplificationShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
-    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl",          L"MSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",       L"PSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
+
     auto compiledBundle = CompileShaders(shaderInfoBundle);
-    amplificationShader = compiledBundle.amplificationShader;
-    meshShader = compiledBundle.meshShader;
-	pixelShader = compiledBundle.pixelShader;
+    asBlob = compiledBundle.amplificationShader;
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
 
-    // Create rasterizer state
-    CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    }
-    rasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    }
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout };
 
-    // Set up the blend state
-    CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(GetBlendDesc(blendState));
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()) };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
 
-    // Set up the depth stencil state
-    CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
 
-    // Set the render target format
-    DXGI_FORMAT rtvFormat = DXGI_FORMAT_R32_FLOAT;
-    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
+    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::SubobjBlend soBlend{ rhiBlend };
 
-    // Define the pipeline state stream subobjects
-    struct PipelineStateStream {
-        CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-		CD3DX12_PIPELINE_STATE_STREAM_AS AS;
-        CD3DX12_PIPELINE_STATE_STREAM_MS MS;
-        CD3DX12_PIPELINE_STATE_STREAM_PS PS;
-        CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
-        CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
-        CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
+
+    rhi::DepthStencilState ds{};
+    rhi::SubobjDepth soDepth{ ds };
+
+    // Render target formats
+    rhi::RenderTargets rts{};
+    rts.count = 1;
+    rts.formats[0] = rhi::Format::R32_Float;
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float }; // DXGI_FORMAT_D32_FLOAT
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soTask),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
     };
 
-    PipelineStateStream pipelineStateStream = {};
-    pipelineStateStream.RootSignature = rootSignature.Get();
-	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
-    pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-
-    pipelineStateStream.RasterizerState = rasterizerState;
-    pipelineStateStream.BlendState = blendDesc;
-    pipelineStateStream.DepthStencilState = depthStencilState;
-
-    D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    rtvFormats.NumRenderTargets = 1;
-    rtvFormats.RTFormats[0] = rtvFormat;
-
-    pipelineStateStream.RTVFormats = rtvFormats;
-
-    pipelineStateStream.DSVFormat = dsvFormat;
-
-    // Create the pipeline state stream descriptor
-    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-    streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-    streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-    // Create the pipeline state
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ID3D12Device2* device2 = nullptr;
-    ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-    ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
+    auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create Shadow Mesh PSO");
+    }
 
     return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPrePassPSO(
     UINT psoFlags, BlendState blendState, bool wireframe) {
-    // Define shader macros
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
-    // Compile shaders
-    Microsoft::WRL::ComPtr<ID3DBlob> amplificationShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
-    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"MSMain", L"ms_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PrepassPSMain", L"ps_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl",          L"MSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",       L"PrepassPSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
+
     auto compiledBundle = CompileShaders(shaderInfoBundle);
-    amplificationShader = compiledBundle.amplificationShader;
-    meshShader = compiledBundle.meshShader;
-	pixelShader = compiledBundle.pixelShader;
+    asBlob = compiledBundle.amplificationShader;
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
 
-    // Create rasterizer state
-    CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+	auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task, rhi::DXIL(asBlob.Get()) };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{};
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    if (psoFlags & PSO_DEFERRED) {
+        rts.count = 6;
+        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+        rts.formats[2] = rhi::Format::R32_Float;            // Depth
+        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
+        rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
+        rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
     }
-    rasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    else {
+        rts.count = 3;
+        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+        rts.formats[2] = rhi::Format::R32_Float;            // Depth
     }
+    rhi::SubobjRTVs soRTV{ rts };
 
-    // Set up the blend state
-    CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(GetBlendDesc(blendState));
+    rhi::SubobjDSV   soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
 
-    // Set up the depth stencil state
-    CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-
-    // Set the render target format
-    DXGI_FORMAT dsvFormat = DXGI_FORMAT_D32_FLOAT;
-
-    // Define the pipeline state stream subobjects
-    struct PipelineStateStream {
-        CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-        CD3DX12_PIPELINE_STATE_STREAM_AS AS;
-        CD3DX12_PIPELINE_STATE_STREAM_MS MS;
-        CD3DX12_PIPELINE_STATE_STREAM_PS PS;
-        CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
-        CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
-        CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soTask),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
     };
 
-    PipelineStateStream pipelineStateStream = {};
-    pipelineStateStream.RootSignature = rootSignature.Get();
-	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
-    pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-
-    pipelineStateStream.RasterizerState = rasterizerState;
-    pipelineStateStream.BlendState = blendDesc;
-    pipelineStateStream.DepthStencilState = depthStencilState;
-
-    D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-    if (psoFlags & PSO_DEFERRED) {
-        rtvFormats.NumRenderTargets = 6;
-        rtvFormats.RTFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
-        rtvFormats.RTFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // motion vector
-		rtvFormats.RTFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
-        rtvFormats.RTFormats[3] = DXGI_FORMAT_R8G8B8A8_UNORM; // Albedo
-        rtvFormats.RTFormats[4] = DXGI_FORMAT_R8G8_UNORM; // Metallic and Roughness
-		rtvFormats.RTFormats[5] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Emissive
-	}
-	else {
-        rtvFormats.NumRenderTargets = 3;
-        rtvFormats.RTFormats[0] = DXGI_FORMAT_R32G32B32A32_FLOAT; // Normals
-		rtvFormats.RTFormats[1] = DXGI_FORMAT_R16G16_FLOAT; // motion vector
-		rtvFormats.RTFormats[2] = DXGI_FORMAT_R32_FLOAT; // Depth
-	}
-    pipelineStateStream.RTVFormats = rtvFormats;
-
-    pipelineStateStream.DSVFormat = dsvFormat;
-
-    // Create the pipeline state stream descriptor
-    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-    streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-    streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-    // Create the pipeline state
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ID3D12Device2* device2 = nullptr;
-    ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-    ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
+	auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create Mesh PrePass PSO");
+    }
 
     return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
@@ -616,145 +633,139 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     meshShader = compiledBundle.meshShader;
 	pixelShader = compiledBundle.pixelShader;
 
-    // Create rasterizer state
-    CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    if (wireframe) {
-        rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout    soLayout{ layout };
+
+    rhi::SubobjShader    soAS{ rhi::ShaderStage::Task, { amplificationShader->GetBufferPointer(), (uint32_t)amplificationShader->GetBufferSize() } };
+    rhi::SubobjShader    soMS{ rhi::ShaderStage::Mesh, { meshShader->GetBufferPointer(),          (uint32_t)meshShader->GetBufferSize() } };
+    rhi::SubobjShader    soPS{ rhi::ShaderStage::Pixel, { pixelShader->GetBufferPointer(),         (uint32_t)pixelShader->GetBufferSize() } };
+
+    rhi::RasterState     rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (psoFlags & PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster    soRaster{ rs };
+
+    rhi::BlendState      bs = GetBlendDesc(blendState); // trivial mapping helper
+    rhi::SubobjBlend     soBlend{ bs };
+
+    rhi::DepthStencilState ds{};
+    ds.depthEnable = true;
+    ds.depthWrite = true;
+    ds.depthFunc = rhi::CompareOp::LessEqual; // default
+    rhi::SubobjDepth     soDepth{ ds };
+
+    rhi::RenderTargets   rts{};
+    if (psoFlags & PSO_DEFERRED) {
+        rts.count = 6;
+        rts.formats[0] = rhi::Format::R32G32B32A32_Float;       // map your DXGI formats
+        rts.formats[1] = rhi::Format::R16G16_Float;
+        rts.formats[2] = rhi::Format::R32_Float;
+        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;
+        rts.formats[4] = rhi::Format::R8G8_UNorm;
+        rts.formats[5] = rhi::Format::R16G16B16A16_Float;
     }
-    rasterizerState.FrontCounterClockwise = true;
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
-        rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    else {
+        rts.count = 3;
+        rts.formats[0] = rhi::Format::R32G32B32A32_Float;
+        rts.formats[1] = rhi::Format::R16G16_Float;
+        rts.formats[2] = rhi::Format::R32_Float;
     }
+    rhi::SubobjRTVs      soRTV{ rts };
 
-    // Set up the blend state
-    CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(GetBlendDesc(blendState));
+    rhi::SubobjDSV       soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample    soSmp{ rhi::SampleDesc{1,0} };
 
-    // Set up the depth stencil state
-    CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-	depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-
-    // Set the render target format
-    DXGI_FORMAT dsvFormat = (psoFlags & PSOFlags::PSO_SHADOW) ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D32_FLOAT;
-
-    // Define the pipeline state stream subobjects
-    struct PipelineStateStream {
-        CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-		CD3DX12_PIPELINE_STATE_STREAM_AS AS;
-        CD3DX12_PIPELINE_STATE_STREAM_MS MS;
-        CD3DX12_PIPELINE_STATE_STREAM_PS PS;
-        CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
-        CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
-        CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
+    rhi::PipelineStreamItem items[] = {
+      rhi::Make(soLayout),
+      rhi::Make(soAS), rhi::Make(soMS), rhi::Make(soPS),
+      rhi::Make(soRaster), rhi::Make(soBlend), rhi::Make(soDepth),
+      rhi::Make(soRTV), rhi::Make(soDSV), rhi::Make(soSmp),
     };
+	auto& device = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle psoPrepass = device.CreatePipeline(items, (uint32_t)std::size(items));
 
-    PipelineStateStream pipelineStateStream = {};
-    pipelineStateStream.RootSignature = rootSignature.Get();
-	pipelineStateStream.AS = CD3DX12_SHADER_BYTECODE(amplificationShader.Get());
-    pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-    pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-
-    pipelineStateStream.RasterizerState = rasterizerState;
-    pipelineStateStream.BlendState = blendDesc;
-    pipelineStateStream.DepthStencilState = depthStencilState;
-
-    pipelineStateStream.DSVFormat = dsvFormat;
-
-    // Create the pipeline state stream descriptor
-    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-    streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-    streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-    // Create the pipeline state
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    ID3D12Device2* device2 = nullptr;
-    ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-    ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pso)));
-
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { psoPrepass, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
-PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags) {
+PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
+{
     auto defines = GetShaderDefines(psoFlags);
 
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
-    Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",      L"PSMainDeferred",   L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
 
-	ShaderInfoBundle shaderInfoBundle;
-	shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
-	shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMainDeferred", L"ps_6_6" };
-	shaderInfoBundle.defines = defines;
-	auto compiledBundle = CompileShaders(shaderInfoBundle);
-	vertexShader = compiledBundle.vertexShader;
-	pixelShader = compiledBundle.pixelShader;
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    vsBlob = compiledBundle.vertexShader;
+    psBlob = compiledBundle.pixelShader;
 
-    D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-    inputLayoutDesc.pInputElementDescs = nullptr;
-    inputLayoutDesc.NumElements = 0;
+    auto& layout = GetRootSignature(); // PipelineLayoutHandle
+    rhi::SubobjLayout soLayout{ layout };
 
-    D3D12_RASTERIZER_DESC rasterizerDesc = {};
-    rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-    rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
-    rasterizerDesc.FrontCounterClockwise = FALSE;
-    rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-    rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-    rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-    rasterizerDesc.DepthClipEnable = TRUE;
-    rasterizerDesc.MultisampleEnable = FALSE;
-    rasterizerDesc.AntialiasedLineEnable = FALSE;
-    rasterizerDesc.ForcedSampleCount = 0;
-    rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
 
-    D3D12_BLEND_DESC blendDesc = {};
-    blendDesc.AlphaToCoverageEnable = FALSE;
-    blendDesc.IndependentBlendEnable = FALSE;
-    blendDesc.RenderTarget[0].BlendEnable = TRUE;
-    blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-    blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-    blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-    blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-    blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    rhi::RasterState rs{};
+    rs.fill = rhi::FillMode::Solid;
+    rs.cull = rhi::CullMode::None;
+    rs.frontCCW = false;
+    rhi::SubobjRaster soRaster{ rs };
 
-    D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-    depthStencilDesc.DepthEnable = true;
-    depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
-    depthStencilDesc.StencilEnable = FALSE;
-    depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-    depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-    depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-    depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-    depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
-
-    DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = inputLayoutDesc;
-    psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-    psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
-    psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
-    psoDesc.RasterizerState = rasterizerDesc;
-    psoDesc.BlendState = blendDesc;
-    psoDesc.DepthStencilState = depthStencilDesc;
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = renderTargetFormat;
-    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.SampleDesc.Quality = 0;
-    psoDesc.InputLayout = inputLayoutDesc;
-
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-    auto& device = DeviceManager::GetInstance().GetDevice();
-    auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso));
-    if (FAILED(hr)) {
-        throw std::runtime_error("Failed to create debug PSO");
+    rhi::BlendState bs{};
+    bs.alphaToCoverage = false;
+    bs.independentBlend = false;
+    bs.numAttachments = 1;
+    {
+        auto& a = bs.attachments[0];
+        a.enable = true;
+        a.srcColor = rhi::BlendFactor::SrcAlpha;
+        a.dstColor = rhi::BlendFactor::InvSrcAlpha;
+        a.colorOp = rhi::BlendOp::Add;
+        a.srcAlpha = rhi::BlendFactor::One;
+        a.dstAlpha = rhi::BlendFactor::InvSrcAlpha;
+        a.alphaOp = rhi::BlendOp::Add;
+        a.writeMask = rhi::ColorWriteEnable::All;
     }
+    rhi::SubobjBlend soBlend{ bs };
+
+    // Depth: GREATER, writes disabled
+    rhi::DepthStencilState ds{};
+    ds.depthEnable = true;
+    ds.depthWrite = false;                    // D3D12_DEPTH_WRITE_MASK_ZERO
+    ds.depthFunc = rhi::CompareOp::Greater;  // D3D12_COMPARISON_FUNC_GREATER
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    rts.count = 1;
+    rts.formats[0] = rhi::Format::R16G16B16A16_Float; // DXGI_FORMAT_R16G16B16A16_FLOAT
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float }; // DXGI_FORMAT_D32_FLOAT
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soVS),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto& dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.valid()) {
+        throw std::runtime_error("Failed to create Deferred PSO (RHI)");
+    }
+
     return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
@@ -1740,132 +1751,49 @@ void PSOManager::WriteDebugArtifacts(
 }
 
 void PSOManager::createRootSignature() {
-    // Root parameters
-    D3D12_ROOT_PARAMETER1 parameters[10] = {};
 
-    // PerObject buffer index
-    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[0].Constants.ShaderRegister = 1;
-    parameters[0].Constants.RegisterSpace = 0;
-    parameters[0].Constants.Num32BitValues = NumPerObjectRootConstants;
-    parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // PerMesh buffer index
-    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[1].Constants.ShaderRegister = 2;
-    parameters[1].Constants.RegisterSpace = 0;
-    parameters[1].Constants.Num32BitValues = NumPerMeshRootConstants;
-    parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // view info
-    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[2].Constants.ShaderRegister = 3; // b3 for first integer root constant
-    parameters[2].Constants.RegisterSpace = 0;
-    parameters[2].Constants.Num32BitValues = NumViewRootConstants;
-    parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // Third integer root constant, used for settings
-    parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[3].Constants.ShaderRegister = 4;
-    parameters[3].Constants.RegisterSpace = 0;
-    parameters[3].Constants.Num32BitValues = NumSettingsRootConstants;
-    parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // Draw info
-    parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[4].Constants.ShaderRegister = 5;
-    parameters[4].Constants.RegisterSpace = 0;
-    parameters[4].Constants.Num32BitValues = NumDrawInfoRootConstants;
-    parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // transparency info
-    parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[5].Constants.ShaderRegister = 6;
-    parameters[5].Constants.RegisterSpace = 0;
-    parameters[5].Constants.Num32BitValues = NumTransparencyInfoRootConstants;
-    parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // Light clustering info
-	parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	parameters[6].Constants.ShaderRegister = 7;
-	parameters[6].Constants.RegisterSpace = 0;
-	parameters[6].Constants.Num32BitValues = NumLightClusterRootConstants;
-	parameters[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-	parameters[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	parameters[7].Constants.ShaderRegister = 8;
-	parameters[7].Constants.RegisterSpace = 0;
-	parameters[7].Constants.Num32BitValues = NumMiscUintRootConstants;
-	parameters[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-	parameters[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	parameters[8].Constants.ShaderRegister = 9;
-	parameters[8].Constants.RegisterSpace = 0;
-	parameters[8].Constants.Num32BitValues = NumMiscFloatRootConstants;
-	parameters[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-	parameters[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	parameters[9].Constants.ShaderRegister = 10;
-	parameters[9].Constants.RegisterSpace = 0;
-	parameters[9].Constants.Num32BitValues = NumResourceDescriptorIndicesRootConstants;
-	parameters[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
-
-    // point-clamp at s0
-    auto& pointClamp = staticSamplers[0];
-    pointClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    pointClamp.AddressU       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    pointClamp.AddressV       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    pointClamp.AddressW       = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    pointClamp.MipLODBias     = 0;
-    pointClamp.MaxAnisotropy  = 0;
-    pointClamp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-    pointClamp.MinLOD         = 0;
-    pointClamp.MaxLOD         = D3D12_FLOAT32_MAX;
-    pointClamp.ShaderRegister = 0;
-    pointClamp.RegisterSpace  = 0;
-    pointClamp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-    // linear-clamp at s1
-    auto& linearClamp = staticSamplers[1];
-    linearClamp = pointClamp;
-    linearClamp.Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    linearClamp.ShaderRegister = 1;
-
-    // Root Signature Description
-    D3D12_ROOT_SIGNATURE_DESC1 rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = _countof(parameters);
-    rootSignatureDesc.pParameters = parameters;
-    rootSignatureDesc.NumStaticSamplers = _countof(staticSamplers);
-    rootSignatureDesc.pStaticSamplers   = staticSamplers;
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
-
-    // Serialize and create the root signature
-    ComPtr<ID3DBlob> signature;
-    ComPtr<ID3DBlob> error;
-    D3D12_VERSIONED_ROOT_SIGNATURE_DESC versionedDesc;
-    versionedDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-    versionedDesc.Desc_1_1 = rootSignatureDesc;
-    ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &signature, &error));
     auto& device = DeviceManager::GetInstance().GetDevice();
-    ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
 
-	// Compute root signature
-    ComPtr<ID3DBlob> computeSignature;
-    ComPtr<ID3DBlob> computeError;
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
-    versionedDesc.Desc_1_1 = rootSignatureDesc;
-	ThrowIfFailed(D3D12SerializeVersionedRootSignature(&versionedDesc, &computeSignature, &computeError));
-	ThrowIfFailed(device->CreateRootSignature(0, computeSignature->GetBufferPointer(), computeSignature->GetBufferSize(), IID_PPV_ARGS(&computeRootSignature)));
+    rhi::PushConstantRangeDesc pcs[] = {
+    { rhi::ShaderStage::All, NumPerObjectRootConstants, /*set*/0, /*binding*/1 },
+    { rhi::ShaderStage::All, NumPerMeshRootConstants,   0, 2 },
+    { rhi::ShaderStage::All, NumViewRootConstants,      0, 3 },
+    { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 4 },
+    { rhi::ShaderStage::All, NumDrawInfoRootConstants,  0, 5 },
+    { rhi::ShaderStage::All, NumTransparencyInfoRootConstants, 0, 6 },
+    { rhi::ShaderStage::All, NumLightClusterRootConstants,      0, 7 },
+    { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 8 },
+    { rhi::ShaderStage::All, NumMiscFloatRootConstants,         0, 9 },
+    { rhi::ShaderStage::All, NumResourceDescriptorIndicesRootConstants, 0, 10 },
+    };
+    rhi::StaticSamplerDesc staticSamplers[] = {
+    { .sampler = rhi::SamplerDesc{/*maxAniso=*/1}, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 0, .arrayCount = 1 },
+    {.sampler = rhi::SamplerDesc{/*maxAniso=*/1}, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 1, .arrayCount = 1 }, // fill filter to linear in DX12 map
+    };
+
+    m_rootSignature = device.CreatePipelineLayout(
+        rhi::PipelineLayoutDesc{
+            .ranges = {},
+            .pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
+            .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
+            .flags = rhi::PipelineLayoutFlags::AllowInputAssembler
+        });
+
+    m_computeRootSignature = device.CreatePipelineLayout(
+        rhi::PipelineLayoutDesc{
+            .ranges = {},
+            .pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
+            .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
+            .flags = rhi::PipelineLayoutFlags::None
+        });
 }
 
-ComPtr<ID3D12RootSignature> PSOManager::GetRootSignature() {
-    return rootSignature;
+rhi::PipelineLayoutHandle& PSOManager::GetRootSignature() {
+    return m_rootSignature;
 }
 
-ComPtr<ID3D12RootSignature> PSOManager::GetComputeRootSignature() {
-	return computeRootSignature;
+rhi::PipelineLayoutHandle& PSOManager::GetComputeRootSignature() {
+	return m_computeRootSignature;
 }
 
 void PSOManager::ReloadShaders() {
@@ -1880,56 +1808,56 @@ void PSOManager::ReloadShaders() {
     m_prePassPSOCache.clear();
 }
 
-D3D12_BLEND_DESC PSOManager::GetBlendDesc(BlendState blendState) {
+rhi::BlendState PSOManager::GetBlendDesc(BlendState blendState) {
     switch (blendState) {
     case BlendState::BLEND_STATE_OPAQUE: {
-        D3D12_BLEND_DESC opaqueBlendDesc = {};
-        opaqueBlendDesc.AlphaToCoverageEnable = FALSE;
-        opaqueBlendDesc.IndependentBlendEnable = FALSE;
+        rhi::BlendState opaqueBlendDesc = {};
+        opaqueBlendDesc.alphaToCoverage = FALSE;
+        opaqueBlendDesc.independentBlend = FALSE;
 
         for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
-            opaqueBlendDesc.RenderTarget[i].BlendEnable = FALSE;
-            opaqueBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+            opaqueBlendDesc.attachments[i].enable = FALSE;
+            opaqueBlendDesc.attachments[i].writeMask = rhi::ColorWriteEnable::All;
         }
         return opaqueBlendDesc;
     }
     case BlendState::BLEND_STATE_MASK: {
-        D3D12_BLEND_DESC maskBlendDesc = {};
-        maskBlendDesc.AlphaToCoverageEnable = FALSE;
-        maskBlendDesc.IndependentBlendEnable = FALSE;
+        rhi::BlendState maskBlendDesc = {};
+        maskBlendDesc.alphaToCoverage = FALSE;
+        maskBlendDesc.independentBlend = FALSE;
 
         for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
-            maskBlendDesc.RenderTarget[i].BlendEnable = FALSE; // No standard blending needed.
-            maskBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+            maskBlendDesc.attachments[i].enable = FALSE; // No standard blending needed.
+            maskBlendDesc.attachments[i].writeMask = rhi::ColorWriteEnable::All;
         }
         return maskBlendDesc;
     }
     case BlendState::BLEND_STATE_BLEND: {
-        D3D12_BLEND_DESC blendBlendDesc = {};
-        blendBlendDesc.AlphaToCoverageEnable = FALSE;
-        blendBlendDesc.IndependentBlendEnable = FALSE;
+        rhi::BlendState blendBlendDesc = {};
+        blendBlendDesc.alphaToCoverage = FALSE;
+        blendBlendDesc.independentBlend = FALSE;
 
         for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
-            blendBlendDesc.RenderTarget[i].BlendEnable = TRUE;
-            blendBlendDesc.RenderTarget[i].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-            blendBlendDesc.RenderTarget[i].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-            blendBlendDesc.RenderTarget[i].BlendOp = D3D12_BLEND_OP_ADD;
-            blendBlendDesc.RenderTarget[i].SrcBlendAlpha = D3D12_BLEND_ONE;
-            blendBlendDesc.RenderTarget[i].DestBlendAlpha = D3D12_BLEND_ZERO;
-            blendBlendDesc.RenderTarget[i].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-            blendBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+            blendBlendDesc.attachments[i].enable = TRUE;
+            blendBlendDesc.attachments[i].srcColor = rhi::BlendFactor::SrcAlpha;
+            blendBlendDesc.attachments[i].dstColor = rhi::BlendFactor::InvSrcAlpha;
+            blendBlendDesc.attachments[i].colorOp = rhi::BlendOp::Add;
+            blendBlendDesc.attachments[i].srcAlpha = rhi::BlendFactor::One;
+            blendBlendDesc.attachments[i].dstAlpha = rhi::BlendFactor::Zero;
+            blendBlendDesc.attachments[i].alphaOp = rhi::BlendOp::Add;
+            blendBlendDesc.attachments[i].writeMask = rhi::ColorWriteEnable::All;
         }
         return blendBlendDesc;
     }
     }
     spdlog::warn("Blend state not set, defaulting to opaque");
-    D3D12_BLEND_DESC opaqueBlendDesc = {};
-    opaqueBlendDesc.AlphaToCoverageEnable = FALSE;
-    opaqueBlendDesc.IndependentBlendEnable = FALSE;
+    rhi::BlendState opaqueBlendDesc = {};
+    opaqueBlendDesc.alphaToCoverage = FALSE;
+    opaqueBlendDesc.independentBlend = FALSE;
 
     for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
-        opaqueBlendDesc.RenderTarget[i].BlendEnable = FALSE;
-        opaqueBlendDesc.RenderTarget[i].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        opaqueBlendDesc.attachments[i].enable = FALSE;
+        opaqueBlendDesc.attachments[i].writeMask = rhi::ColorWriteEnable::All;
     }
     return opaqueBlendDesc;
 }

@@ -16,7 +16,7 @@
 #include <ThirdParty/pix/pix3.h>
 
 #include "Mesh/Mesh.h"
-#include "DX12Renderer.h"
+#include "Renderer.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Materials/Material.h"
@@ -41,7 +41,7 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D\\";
 #define USE_PIX
 #pragma comment(lib, "WinPixEventRuntime.lib")
 
-DX12Renderer renderer;
+Renderer renderer;
 UINT default_x_res = 1920;
 UINT default_y_res = 1080;
 

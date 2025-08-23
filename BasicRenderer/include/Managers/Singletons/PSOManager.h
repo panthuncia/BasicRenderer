@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <optional>
 
+#include <rhi.h>
+
 #pragma warning(push, 0)   // Disable all warnings for dxc header
 #include "ThirdParty/DirectX/dxcapi.h"
 #pragma warning(pop)
@@ -100,8 +102,8 @@ public:
 
     PipelineState GetDeferredPSO(UINT psoFlags);
 
-    ComPtr<ID3D12RootSignature> GetRootSignature();
-	ComPtr<ID3D12RootSignature> GetComputeRootSignature();
+    rhi::PipelineLayoutHandle& GetRootSignature();
+    rhi::PipelineLayoutHandle& GetComputeRootSignature();
     void ReloadShaders();
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
 	ShaderBundle CompileShaders(const ShaderInfoBundle& shaderInfoBundle);
@@ -128,10 +130,10 @@ private:
     };
 
     PSOManager() = default;
-    ComPtr<ID3D12RootSignature> rootSignature;
-	ComPtr<ID3D12RootSignature> computeRootSignature;
-    ComPtr<ID3D12RootSignature> debugRootSignature;
-    ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
+    rhi::PipelineLayoutHandle m_rootSignature;
+    rhi::PipelineLayoutHandle m_computeRootSignature;
+    rhi::PipelineLayoutHandle m_debugRootSignature;
+    rhi::PipelineLayoutHandle m_environmentConversionRootSignature;
 
     std::unordered_map<PSOKey, PipelineState> m_psoCache;
     std::unordered_map<PSOKey, PipelineState> m_PPLLPSOCache;
@@ -177,7 +179,7 @@ private:
         Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
 
     void createRootSignature();
-    D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
+    rhi::BlendState GetBlendDesc(BlendState blendState);
 
     void LoadSource(const std::filesystem::path& path, PSOManager::SourceData& sd);
 

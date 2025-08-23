@@ -1,6 +1,6 @@
 #pragma once
 
-#include <d3d12.h>
+#include <rhi.h>
 #include <wrl/client.h>
 #include <stdint.h>
 #include <unordered_map>
@@ -15,15 +15,15 @@ struct PipelineResources {
 
 class PipelineState {
 public:
-	PipelineState(Microsoft::WRL::ComPtr<ID3D12PipelineState> pso,
+	PipelineState(rhi::PipelineHandle pso,
 		uint64_t resourceIDsHash, 
 		PipelineResources resources) :
 		m_resourceIDsHash(resourceIDsHash), 
 		m_pso(pso),
 		m_pipelineResources(resources){}
 	PipelineState() = default;
-	ID3D12PipelineState* GetAPIPipelineState() const {
-		return m_pso.Get();
+	const rhi::PipelineHandle& GetAPIPipelineState() const {
+		return m_pso;
 	}
 	uint64_t GetResourceIDsHash() const {
 		return m_resourceIDsHash;
@@ -33,7 +33,7 @@ public:
 	}
 private:
 	uint64_t m_resourceIDsHash = 0;
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
+	rhi::PipelineHandle m_pso;
 	std::unordered_map<std::string, unsigned int> m_resourceSlots;
 	PipelineResources m_pipelineResources; // Descriptor slots are always 0->n, mandatory first, then optional
 };
