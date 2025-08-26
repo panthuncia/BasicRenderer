@@ -109,7 +109,6 @@ PipelineState PSOManager::GetDeferredPSO(UINT psoFlags) {
 PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags);
-
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 

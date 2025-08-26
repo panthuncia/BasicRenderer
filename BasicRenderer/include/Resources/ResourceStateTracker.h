@@ -4,15 +4,16 @@
 #include <vector>
 #include <optional>
 #include <algorithm>
+#include "resource_states.h"
 
 #include "Resources/ResourceStates.h"
 
 class Resource;
 
 struct ResourceState {
-    ResourceAccessType access;
-    ResourceLayout     layout;
-    ResourceSyncState  sync;
+    rhi::ResourceAccessType access;
+    rhi::ResourceLayout     layout;
+    rhi::ResourceSyncState  sync;
     bool operator==(ResourceState const& o) const {
         return access == o.access
             && layout == o.layout;
@@ -64,17 +65,17 @@ SubresourceRange ResolveRangeSpec(RangeSpec spec,
 
 struct ResourceTransition {
     ResourceTransition() = default;
-    ResourceTransition(Resource* pResource, RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState)
+    ResourceTransition(Resource* pResource, RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState)
         : range(range), pResource(pResource), prevAccessType(prevAccessType), newAccessType(newAccessType), prevLayout(prevLayout), newLayout(newLayout), prevSyncState(prevSyncState), newSyncState(newSyncState) {
     }
     Resource* pResource;
     RangeSpec range;
-    ResourceAccessType prevAccessType = ResourceAccessType::NONE;
-    ResourceAccessType newAccessType = ResourceAccessType::NONE;
-    ResourceLayout prevLayout = ResourceLayout::LAYOUT_COMMON;
-    ResourceLayout newLayout = ResourceLayout::LAYOUT_COMMON;
-    ResourceSyncState prevSyncState = ResourceSyncState::NONE;
-    ResourceSyncState newSyncState = ResourceSyncState::NONE;
+    rhi::ResourceAccessType prevAccessType = rhi::ResourceAccessType::None;
+    rhi::ResourceAccessType newAccessType = rhi::ResourceAccessType::None;
+    rhi::ResourceLayout prevLayout = rhi::ResourceLayout::Common;
+    rhi::ResourceLayout newLayout = rhi::ResourceLayout::Common;
+    rhi::ResourceSyncState prevSyncState = rhi::ResourceSyncState::None;
+    rhi::ResourceSyncState newSyncState = rhi::ResourceSyncState::None;
 };
 
 struct Segment {
@@ -92,7 +93,7 @@ public:
 		whole.mipUpper = { BoundType::All, 0 };
 		whole.sliceLower = { BoundType::All, 0 };
 		whole.sliceUpper = { BoundType::All, 0 };
-		_segs.push_back({ whole, ResourceState{ ResourceAccessType::COMMON, ResourceLayout::LAYOUT_COMMON, ResourceSyncState::ALL } });
+		_segs.push_back({ whole, ResourceState{ rhi::ResourceAccessType::Common, rhi::ResourceLayout::Common, rhi::ResourceSyncState::All } });
     }
     SymbolicTracker(RangeSpec whole, ResourceState init) {
         _segs.push_back({ whole, init });

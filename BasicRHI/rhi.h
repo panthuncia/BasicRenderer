@@ -2,6 +2,9 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <directx/d3dcommon.h>
+
+#include "resource_states.h"
 
 namespace rhi {
 
@@ -9,15 +12,17 @@ namespace rhi {
     inline constexpr uint32_t RHI_QUEUE_ABI_MIN = 1;
     inline constexpr uint32_t RHI_CL_ABI_MIN = 1;
     inline constexpr uint32_t RHI_SC_ABI_MIN = 1;
+    inline constexpr uint32_t RHI_CA_ABI_MIN = 1;
 
     struct Handle32 { uint32_t index{ 0xFFFFFFFFu }; uint32_t generation{ 0 }; constexpr bool valid() const noexcept { return index != 0xFFFFFFFFu; } };
-    using BufferHandle = Handle32;
-    using TextureHandle = Handle32;
+    using ResourceHandle = Handle32;
     using ViewHandle = Handle32;
     using SamplerHandle = Handle32;
     using PipelineHandle = Handle32;
     using CommandSignatureHandle = Handle32;
     using PipelineLayoutHandle = Handle32;
+    using DescriptorHeapHandle = Handle32;
+	using CommandAllocatorHandle = Handle32;
 
     enum class Backend : uint32_t { Null, D3D12, Vulkan };
     enum class QueueKind : uint32_t { Graphics, Compute, Copy };
@@ -61,15 +66,9 @@ namespace rhi {
 
     enum class Memory : uint32_t { DeviceLocal, Upload, Readback };
 
-    struct BufferDesc { uint64_t size = 0; uint32_t usage = 0; Memory memory = Memory::DeviceLocal; uint32_t stride = 0; const char* debugName = nullptr; };
-
-    enum TextureUsage : uint32_t { Tex_Sampled = 1 << 0, Tex_Storage = 1 << 1, Tex_ColorAtt = 1 << 2, Tex_DepthAtt = 1 << 3, Tex_Transfer = 1 << 5 };
-
-    struct TextureDesc { uint32_t width = 0, height = 0, depth = 1; uint32_t mipLevels = 1, arrayLayers = 1; Format format = Format::Unknown; uint32_t usage = 0; const char* debugName = nullptr; };
-
     enum class ViewKind : uint32_t { SRV, UAV, RTV, DSV };
     struct TextureSubresourceRange { uint32_t baseMip = 0, mipCount = 1; uint32_t baseLayer = 0, layerCount = 1; };
-    struct ViewDesc { ViewKind kind = ViewKind::SRV; TextureHandle texture{}; TextureSubresourceRange range{}; Format formatOverride = Format::Unknown; };
+    struct ViewDesc { ViewKind kind = ViewKind::SRV; ResourceHandle texture{}; TextureSubresourceRange range{}; Format formatOverride = Format::Unknown; };
 
     struct SamplerDesc { uint32_t maxAniso = 1; };
 
@@ -116,7 +115,7 @@ namespace rhi {
         uint32_t arrayCount = 1;
     };
 
-    enum class PipelineLayoutFlags : uint32_t { None = 0, AllowInputAssembler = 1 << 1 }; // only for graphics pipelines
+    enum PipelineLayoutFlags : uint32_t { None = 0, AllowInputAssembler = 1 << 0 }; // only for graphics pipelines
 
     struct PipelineLayoutDesc {
         Span<LayoutBindingRange> ranges{};
@@ -130,12 +129,85 @@ namespace rhi {
         uint32_t byteStride = 0; // sizeof(struct in argument buffer)
     };
 
+	enum class DescriptorHeapType : uint32_t { CbvSrvUav, Sampler, RTV, DSV };
+
+    struct DescriptorHeapDesc {
+        DescriptorHeapType type;      // CbvSrvUav, Sampler, RTV, DSV
+        uint32_t           capacity;  // NumDescriptors
+        bool               shaderVisible;
+        const char* debugName{ nullptr };
+    };
+
+    struct DescriptorSlot { DescriptorHeapHandle heap{}; uint32_t index{}; };
+
+    enum class TextureViewDim : uint32_t { Tex2D, Tex2DArray, Tex3D, Cube, CubeArray };
+
+    enum class BufferViewKind : uint32_t { Raw, Structured, Typed };
+
+	enum class ViewType : uint32_t { Undefined, Texture, Buffer };
+
+    struct SrvDesc {
+        // Choose buffer OR texture
+        ViewType             type{ ViewType::Undefined };
+        ResourceHandle  resource{};
+        // Texture path
+        TextureViewDim        texDim{ TextureViewDim::Tex2D };
+        TextureSubresourceRange texRange{};
+        Format                texFormatOverride{ Format::Unknown }; // Unknown => use texture format
+        // Buffer path
+        BufferViewKind bufKind{ BufferViewKind::Raw };
+        Format         bufFormat{ Format::Unknown };    // Typed only
+        uint64_t       firstElement{ 0 };               // 32-bit units for RAW; elements for others
+        uint32_t       numElements{ 0 };
+        uint32_t       structureByteStride{ 0 };        // Structured only
+    };
+
+    struct UavDesc {
+		ViewType type{ ViewType::Undefined };
+        ResourceHandle  resource{};
+        // Texture path
+        TextureViewDim        texDim{ TextureViewDim::Tex2D };
+        TextureSubresourceRange texRange{};
+        Format                texFormatOverride{ Format::Unknown };
+        // Buffer path
+        BufferViewKind bufKind{ BufferViewKind::Raw };
+        Format         bufFormat{ Format::Unknown };
+        uint64_t       firstElement{ 0 };
+        uint32_t       numElements{ 0 };
+        uint32_t       structureByteStride{ 0 };
+        uint32_t       counterOffsetBytes{ 0 };
+    };
+
+    struct CbvDesc { uint64_t byteOffset = 0; uint32_t byteSize = 0; /* 256B aligned */ };
+
+    // RTV/DSV descriptions (texture-only)
+    struct RtvDesc {
+        ResourceHandle       texture{};
+        TextureViewDim       dim{ TextureViewDim::Tex2D };
+        TextureSubresourceRange range{};
+        Format              formatOverride{ Format::Unknown };
+    };
+    struct DsvDesc {
+        ResourceHandle       texture{};
+        TextureViewDim       dim{ TextureViewDim::Tex2D };
+        TextureSubresourceRange range{};
+        Format              formatOverride{ Format::Unknown };
+        bool readOnlyDepth{ false };
+        bool readOnlyStencil{ true };
+    };
+
+    // Command list binding for shader-visible heaps
+    struct BoundDescriptorHeaps {
+        DescriptorHeapHandle cbvSrvUav{};
+        DescriptorHeapHandle sampler{};
+    };
+
     enum class FillMode : uint32_t { Solid, Wireframe };
     enum class CullMode : uint32_t { None, Front, Back };
     enum class CompareOp : uint32_t { Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always };
     enum class BlendFactor : uint32_t { One, Zero, SrcColor, InvSrcColor, SrcAlpha, InvSrcAlpha, DstColor, InvDstColor, DstAlpha, InvDstAlpha };
     enum class BlendOp : uint32_t { Add, Sub, RevSub, Min, Max };
-	enum class ColorWriteEnable : uint16_t { R = 1, G = 2, B = 4, A = 8, All = 0x0F };
+	enum ColorWriteEnable : uint8_t { R = 1, G = 2, B = 4, A = 8, All = 0x0F };
 
     struct ShaderBinary { const void* data{}; uint32_t size{}; };
     struct RasterState {
@@ -221,15 +293,77 @@ namespace rhi {
 
     enum class LoadOp : uint32_t { Load, Clear, DontCare }; enum class StoreOp : uint32_t { Store, DontCare };
     struct ClearValue { float rgba[4]{ 0,0,0,1 }; float depth = 1.0f; uint8_t stencil = 0; };
-    struct ColorAttachment { ViewHandle view{}; LoadOp loadOp = LoadOp::Load; StoreOp storeOp = StoreOp::Store; ClearValue clear{}; };
-    struct DepthAttachment { ViewHandle view{}; LoadOp depthLoad = LoadOp::Load; StoreOp depthStore = StoreOp::Store; LoadOp stencilLoad = LoadOp::DontCare; StoreOp stencilStore = StoreOp::DontCare; ClearValue clear{}; bool readOnly = false; };
-    struct PassBeginInfo { Span<ColorAttachment> colors{}; const DepthAttachment* depth{}; uint32_t width = 0, height = 0; const char* debugName = nullptr; };
+    struct ColorAttachment {
+        DescriptorSlot rtv{};
+        LoadOp loadOp = LoadOp::Load;
+        StoreOp storeOp = StoreOp::Store;
+        ClearValue clear{};
+    };
+
+    struct DepthAttachment {
+        DescriptorSlot dsv{};
+        LoadOp  depthLoad = LoadOp::Load;
+        StoreOp depthStore = StoreOp::Store;
+        LoadOp  stencilLoad = LoadOp::DontCare;
+        StoreOp stencilStore = StoreOp::DontCare;
+        ClearValue clear{};
+        bool readOnly = false;
+    };
+
+    struct PassBeginInfo {
+        Span<ColorAttachment> colors{};
+        const DepthAttachment* depth{};
+        uint32_t width = 0, height = 0;
+        const char* debugName = nullptr;
+    };
+    enum ResourceFlags : uint32_t {
+        None = 0,
+        AllowRenderTarget = 1 << 0,
+        AllowDepthStencil = 1 << 1,
+        AllowUnorderedAccess = 1 << 2,
+        DenyShaderResource = 1 << 3,
+        AllowCrossAdapter = 1 << 4,
+        AllowSimultaneousAccess = 1 << 5,
+        VideoDecodeReferenceOnly = 1 << 6,
+        VideoEncodeReferenceOnly = 1 << 7,
+        RaytracingAccelerationStructure = 1 << 8,
+    };
+    struct BufferDesc {
+        uint64_t     sizeBytes = 0;
+        BufferUsage  usage = (BufferUsage)0;
+        Memory       memory = Memory::DeviceLocal;
+		ResourceFlags flags;
+        const char* debugName = nullptr;
+    };
+    struct TextureDesc {
+        Format       format = Format::Unknown;
+        uint32_t     width = 1;
+        uint32_t     height = 1;
+        uint16_t     depthOrLayers = 1;     // depth for 3D, arraySize otherwise
+        uint16_t     mipLevels = 1;
+        TextureViewDim dim = TextureViewDim::Tex2D;
+        ResourceFlags flags;
+        ResourceLayout initialLayout = ResourceLayout::Undefined;
+        const ClearValue* optimizedClear = nullptr;    // optional, if RTV/DSV
+        const char* debugName = nullptr;
+    };
+
+    struct VertexBufferView { ResourceHandle buffer{}; uint64_t offset = 0; uint32_t sizeBytes = 0; uint32_t stride = 0; };
 
     enum class Stage : uint32_t { Top, Draw, Pixel, Compute, Copy, Bottom }; 
-    enum class Access : uint32_t { None, ShaderRead, ShaderWrite, ColorAttRead, ColorAttWrite, DepthRead, DepthWrite, TransferRead, TransferWrite, Present }; 
-    enum class Layout : uint32_t { Undefined, General, ShaderReadOnly, ColorAttachment, DepthAttachment, TransferSrc, TransferDst, Present };
-    struct ImageBarrier { TextureHandle tex{}; TextureSubresourceRange range{}; Stage srcStage = Stage::Top, dstStage = Stage::Bottom; Access srcAccess = Access::None, dstAccess = Access::None; Layout oldLayout = Layout::Undefined, newLayout = Layout::Undefined; };
-    struct BufferBarrier { BufferHandle buf{}; uint64_t offset = 0, size = ~0ull; Stage srcStage = Stage::Top, dstStage = Stage::Bottom; Access srcAccess = Access::None, dstAccess = Access::None; };
+    struct ImageBarrier { 
+        ResourceHandle tex{}; 
+        TextureSubresourceRange range{}; 
+        Stage srcStage = Stage::Top, dstStage = Stage::Bottom; 
+        ResourceAccessType srcAccess = ResourceAccessType::None, dstAccess = ResourceAccessType::None; 
+        ResourceLayout oldLayout = ResourceLayout::Undefined, newLayout = ResourceLayout::Undefined; 
+    };
+    struct BufferBarrier { 
+        ResourceHandle buf{}; 
+        uint64_t offset = 0, size = ~0ull; 
+        Stage srcStage = Stage::Top, dstStage = Stage::Bottom; 
+        ResourceAccessType srcAccess = ResourceAccessType::None, dstAccess = ResourceAccessType::None; 
+    };
     struct BarrierBatch { Span<ImageBarrier> images{}; Span<BufferBarrier> buffers{}; };
 
     // ---------------- Submission & timelines (thin) ----------------
@@ -237,8 +371,8 @@ namespace rhi {
     struct SubmitDesc { Span<TimelinePoint> waits{}; Span<TimelinePoint> signals{}; };
 
     // ---------------- POD wrappers + VTables ----------------
-    struct Device; struct Queue; struct CommandList; struct Swapchain;
-    struct DeviceVTable; struct QueueVTable; struct CommandListVTable; struct SwapchainVTable;
+    struct Device;       struct Queue;       struct CommandList;       struct Swapchain;       struct CommandAllocator;
+    struct DeviceVTable; struct QueueVTable; struct CommandListVTable; struct SwapchainVTable; struct CommandAllocatorVTable;
 
     struct Queue { 
         void* impl{}; 
@@ -246,7 +380,7 @@ namespace rhi {
         explicit constexpr operator bool() const noexcept {
             return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_QUEUE_ABI_MIN;
         }
-        constexpr bool iIValid() const noexcept { return static_cast<bool>(*this); }
+        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
         inline Result Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept;
         inline Result Signal(const TimelinePoint& p) noexcept;
@@ -263,22 +397,23 @@ namespace rhi {
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
         void Begin(const char* name = nullptr) noexcept;
         void End() noexcept;
+		void Recycle(CommandAllocator& ca) noexcept;
         void BeginPass(const PassBeginInfo& p) noexcept;
         void EndPass() noexcept;
         void Barriers(const BarrierBatch& b) noexcept;
         void BindLayout(PipelineLayoutHandle l) noexcept;
         void BindPipeline(PipelineHandle p) noexcept;
-        void SetVB(uint32_t s, BufferHandle b, uint64_t off, uint32_t stride) noexcept;
-        void SetIB(BufferHandle b, uint64_t off, bool idx32) noexcept;
+        void SetVertexBuffers(uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews);
+        void SetIndexBuffer(ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32);
         void Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept;
         void DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept;
         void Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept;
         void ClearView(ViewHandle v, const ClearValue& c) noexcept;
-        inline void ExecuteIndirect(CommandSignatureHandle sig,
-            BufferHandle argBuf, uint64_t argOff,
-            BufferHandle cntBuf, uint64_t cntOff,
-            uint32_t maxCount) noexcept
-        { vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
+        void ExecuteIndirect(CommandSignatureHandle sig,
+            ResourceHandle argBuf, uint64_t argOff,
+            ResourceHandle cntBuf, uint64_t cntOff,
+            uint32_t maxCount) noexcept;
+		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle samp) noexcept;
     };
 
     struct Swapchain { 
@@ -292,37 +427,43 @@ namespace rhi {
         inline uint32_t ImageCount() noexcept;
         inline uint32_t CurrentImageIndex() noexcept;
         inline ViewHandle RTV(uint32_t i) noexcept;
-        inline TextureHandle Image(uint32_t i) noexcept;
+        inline ResourceHandle Image(uint32_t i) noexcept;
         inline Result Resize(uint32_t w, uint32_t h) noexcept;
         inline Result Present(bool vsync) noexcept;
     };
 
     struct DeviceVTable {
-        BufferHandle(*createBuffer)(Device*, const BufferDesc&) noexcept;
-        TextureHandle(*createTexture)(Device*, const TextureDesc&) noexcept;
-        ViewHandle(*createView)(Device*, const ViewDesc&) noexcept;
-        SamplerHandle(*createSampler)(Device*, const SamplerDesc&) noexcept;
         PipelineHandle(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count) noexcept;
         PipelineLayoutHandle(*createPipelineLayout)(Device*, const PipelineLayoutDesc&) noexcept;
-        CommandSignatureHandle(*createCommandSignature)(Device*, const CommandSignatureDesc&,
-            PipelineLayoutHandle /*layoutOrNull*/) noexcept;
-        CommandList(*createCommandList)(Device*, QueueKind) noexcept;
+        CommandSignatureHandle(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/) noexcept;
+        CommandAllocator(*createCommandAllocator)(Device*, QueueKind) noexcept;
+        CommandList(*createCommandList)(Device*, QueueKind, CommandAllocator) noexcept;
         Swapchain(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept;
+        DescriptorHeapHandle(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
 
-        void (*destroyBuffer)(Device*, BufferHandle) noexcept;
-        void (*destroyTexture)(Device*, TextureHandle) noexcept;
-        void (*destroyView)(Device*, ViewHandle) noexcept;
+        Result(*createConstantBufferView)(Device*, DescriptorSlot dst, ResourceHandle, const CbvDesc&) noexcept;
+        Result(*createShaderResourceView)(Device*, DescriptorSlot dst, const SrvDesc&) noexcept;
+        Result(*createUnorderedAccessView)(Device*, DescriptorSlot dst, const UavDesc&) noexcept;
+        Result(*createRenderTargetView)(Device*, DescriptorSlot dst, const RtvDesc&) noexcept;
+        Result(*createDepthStencilView)(Device*, DescriptorSlot dst, const DsvDesc&) noexcept;
+        Result(*createSampler)(Device*, DescriptorSlot dst, const SamplerDesc&) noexcept;
+        ResourceHandle(*createBuffer)(Device*, const BufferDesc&) noexcept;
+        ResourceHandle(*createTexture)(Device*, const TextureDesc&) noexcept;
+
         void (*destroySampler)(Device*, SamplerHandle) noexcept;
         void (*destroyPipelineLayout)(Device*, PipelineLayoutHandle) noexcept;
         void (*destroyPipeline)(Device*, PipelineHandle) noexcept;
-        void        (*resetCommandList)(Device*, CommandList*) noexcept;
         void (*destroyCommandSignature)(Device*, CommandSignatureHandle) noexcept;
-        void        (*destroyCommandList)(Device*, CommandList*) noexcept;
-        void        (*destroySwapchain)(Device*, Swapchain*) noexcept;
+        void (*destroyCommandAllocator)(Device*, CommandAllocator*) noexcept;
+        void (*destroyCommandList)(Device*, CommandList*) noexcept;
+        void (*destroySwapchain)(Device*, Swapchain*) noexcept;
+        void (*destroyDescriptorHeap)(Device*, DescriptorHeapHandle) noexcept;
+        void (*destroyBuffer)(Device*, ResourceHandle) noexcept;
+        void (*destroyTexture)(Device*, ResourceHandle) noexcept;
 
         Queue(*getQueue)(Device*, QueueKind) noexcept;
         Result(*deviceWaitIdle)(Device*) noexcept;
-        void        (*flushDeletionQueue)(Device*) noexcept;
+        void (*flushDeletionQueue)(Device*) noexcept;
 
         void (*destroyDevice)(Device*) noexcept;
         uint32_t abi_version = 1;
@@ -330,25 +471,43 @@ namespace rhi {
 
     struct QueueVTable { Result(*submit)(Queue*, Span<CommandList>, const SubmitDesc&) noexcept; Result(*signal)(Queue*, const TimelinePoint&) noexcept; Result(*wait)(Queue*, const TimelinePoint&) noexcept; uint32_t abi_version = 1; };
 
+    struct CommandAllocator {
+        void* impl{}; // backend wrap (owns Handle32)
+        const CommandAllocatorVTable* vt{}; // vtable
+        explicit constexpr operator bool() const noexcept {
+            return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_CA_ABI_MIN;
+        }
+        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; } // Naming conflict with vt->reset
+        inline void Recycle() noexcept { vt->reset(this); } // GPU-side reset (allocator->Reset)
+    };
+
+    struct CommandAllocatorVTable {
+        void (*reset)(CommandAllocator*) noexcept;  // allocator Reset()
+        uint32_t abi_version = 1;
+    };
+
     struct CommandListVTable {
         void (*begin)(CommandList*, const char* debugName) noexcept;
         void (*end)(CommandList*) noexcept;
+		void (*recycle)(CommandList*, CommandAllocator& alloc) noexcept;
         void (*beginPass)(CommandList*, const PassBeginInfo&) noexcept;
         void (*endPass)(CommandList*) noexcept;
         void (*barriers)(CommandList*, const BarrierBatch&) noexcept;
         void (*bindLayout)(CommandList*, PipelineLayoutHandle) noexcept;
         void (*bindPipeline)(CommandList*, PipelineHandle) noexcept;
-        void (*setVB)(CommandList*, uint32_t slot, BufferHandle, uint64_t offset, uint32_t stride) noexcept;
-        void (*setIB)(CommandList*, BufferHandle, uint64_t offset, bool index32) noexcept;
+        void (*setVertexBuffers)(CommandList*, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept;
+        void (*setIndexBuffer)(CommandList*, ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32) noexcept;
         void (*draw)(CommandList*, uint32_t vtxCount, uint32_t instCount, uint32_t firstVtx, uint32_t firstInst) noexcept;
         void (*drawIndexed)(CommandList*, uint32_t idxCount, uint32_t instCount, uint32_t firstIdx, int32_t vtxOffset, uint32_t firstInst) noexcept;
         void (*dispatch)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept;
         void (*clearView)(CommandList*, ViewHandle, const ClearValue&) noexcept;
         void (*executeIndirect)(CommandList*,
             CommandSignatureHandle sig,
-            BufferHandle argumentBuffer, uint64_t argumentOffset,
-            BufferHandle countBuffer, uint64_t countOffset,
+            ResourceHandle argumentBuffer, uint64_t argumentOffset,
+            ResourceHandle countBuffer, uint64_t countOffset,
             uint32_t   maxCommandCount) noexcept;
+        void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle sampler) noexcept;
         uint32_t abi_version = 1;
     };
 
@@ -356,7 +515,7 @@ namespace rhi {
         uint32_t(*imageCount)(Swapchain*) noexcept;
         uint32_t(*currentImageIndex)(Swapchain*) noexcept;
         ViewHandle(*rtv)(Swapchain*, uint32_t img) noexcept; // RTV per image
-        TextureHandle(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
+        ResourceHandle(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
         Result(*resize)(Swapchain*, uint32_t w, uint32_t h) noexcept;
         Result(*present)(Swapchain*, bool vsync) noexcept; // Present
         uint32_t abi_version = 1;
@@ -370,13 +529,8 @@ namespace rhi {
         }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-        inline BufferHandle  CreateBuffer(const BufferDesc& d) noexcept { return vt->createBuffer(this, d); }
-        inline TextureHandle CreateTexture(const TextureDesc& d) noexcept { return vt->createTexture(this, d); }
-        inline ViewHandle    CreateView(const ViewDesc& d) noexcept { return vt->createView(this, d); }
-        inline SamplerHandle CreateSampler(const SamplerDesc& d) noexcept { return vt->createSampler(this, d); }
         inline PipelineHandle CreatePipeline(const PipelineStreamItem* items, uint32_t count) noexcept { return vt->createPipelineFromStream(this, items, count); }
-        inline CommandList CreateCommandList(QueueKind q) noexcept { return vt->createCommandList(this, q); }
-        inline void ResetCommandList(CommandList* cl) noexcept { vt->resetCommandList(this, cl); }
+        inline CommandList CreateCommandList(QueueKind q, CommandAllocator alloc) noexcept { return vt->createCommandList(this, q, alloc); }
         inline void DestroyCommandList(CommandList* cl) noexcept { vt->destroyCommandList(this, cl); }
         inline Queue GetQueue(QueueKind q) noexcept { return vt->getQueue(this, q); }
         inline Result WaitIdle() noexcept { return vt->deviceWaitIdle(this); }
@@ -387,7 +541,24 @@ namespace rhi {
         inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { vt->destroyPipelineLayout(this, h); }
         inline CommandSignatureHandle CreateCommandSignature(const CommandSignatureDesc& d, PipelineLayoutHandle layout) noexcept { return vt->createCommandSignature(this, d, layout); }
         inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { vt->destroyCommandSignature(this, h); }
+		inline DescriptorHeapHandle CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
+		inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { vt->destroyDescriptorHeap(this, h); }
+        inline Result CreateConstantBufferView(DescriptorSlot s, ResourceHandle b, const CbvDesc& d) noexcept { return vt->createConstantBufferView(this, s, b, d); }
+        inline Result CreateShaderResourceView(DescriptorSlot s, const SrvDesc& d) noexcept { return vt->createShaderResourceView(this, s, d); }
+        inline Result CreateUnorderedAccessView(DescriptorSlot s, const UavDesc& d) noexcept { return vt->createUnorderedAccessView(this, s, d); }
+        inline Result CreateSampler(DescriptorSlot s, const SamplerDesc& d) noexcept { return vt->createSampler(this, s, d); }
+        inline Result CreateRenderTargetView(DescriptorSlot s, const RtvDesc& d) noexcept { return vt->createRenderTargetView(this, s, d); }
+        inline Result CreateDepthStencilView(DescriptorSlot s, const DsvDesc& d) noexcept { return vt->createDepthStencilView(this, s, d); }
+        inline CommandAllocator CreateCommandAllocator(QueueKind q) noexcept { return vt->createCommandAllocator(this, q); }
+        inline CommandList CreateCommandList(QueueKind q, CommandAllocator a) noexcept { return vt->createCommandList(this, q, a); }
+		inline ResourceHandle CreateBuffer(const BufferDesc& d) noexcept { return vt->createBuffer(this, d); }
+        inline ResourceHandle CreateTexture(const TextureDesc& d) noexcept { return vt->createTexture(this, d); }
+        inline void DestroySampler(SamplerHandle h) noexcept { vt->destroySampler(this, h); }
+		inline void DestroyPipeline(PipelineHandle h) noexcept { vt->destroyPipeline(this, h); }
+		inline void DestroyBuffer(ResourceHandle h) noexcept { vt->destroyBuffer(this, h); }
+		inline void DestroyTexture(ResourceHandle h) noexcept { vt->destroyTexture(this, h); }
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
+
     };
 
     inline Result Queue::Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept { return vt->submit(this, lists, s); }
@@ -396,22 +567,29 @@ namespace rhi {
 
     inline void CommandList::Begin(const char* name) noexcept { vt->begin(this, name); }
     inline void CommandList::End() noexcept { vt->end(this); }
+	inline void CommandList::Recycle(CommandAllocator& alloc) noexcept { vt->recycle(this, alloc); }
     inline void CommandList::BeginPass(const PassBeginInfo& p) noexcept { vt->beginPass(this, p); }
     inline void CommandList::EndPass() noexcept { vt->endPass(this); }
     inline void CommandList::Barriers(const BarrierBatch& b) noexcept { vt->barriers(this, b); }
     inline void CommandList::BindLayout(PipelineLayoutHandle l) noexcept { vt->bindLayout(this, l); }
     inline void CommandList::BindPipeline(PipelineHandle p) noexcept { vt->bindPipeline(this, p); }
-    inline void CommandList::SetVB(uint32_t s, BufferHandle b, uint64_t off, uint32_t stride) noexcept { vt->setVB(this, s, b, off, stride); }
-    inline void CommandList::SetIB(BufferHandle b, uint64_t off, bool idx32) noexcept { vt->setIB(this, b, off, idx32); }
+    inline void CommandList::SetVertexBuffers(uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept { vt->setVertexBuffers(this, startSlot, numViews, pBufferViews); }
+    inline void CommandList::SetIndexBuffer(ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32) noexcept { vt->setIndexBuffer(this, b, offset, sizeBytes, idx32); }
     inline void CommandList::Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept { vt->draw(this, v, i, fv, fi); }
     inline void CommandList::DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept { vt->drawIndexed(this, i, inst, firstIdx, vOff, firstI); }
     inline void CommandList::Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept { vt->dispatch(this, x, y, z); }
     inline void CommandList::ClearView(ViewHandle v, const ClearValue& c) noexcept { vt->clearView(this, v, c); }
+    inline void CommandList::ExecuteIndirect(CommandSignatureHandle sig,
+        ResourceHandle argBuf, uint64_t argOff,
+        ResourceHandle cntBuf, uint64_t cntOff,
+        uint32_t maxCount) noexcept
+    { vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
+    inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
 
     inline uint32_t Swapchain::ImageCount() noexcept { return vt->imageCount(this); }
     inline uint32_t Swapchain::CurrentImageIndex() noexcept { return vt->currentImageIndex(this); }
     inline ViewHandle Swapchain::RTV(uint32_t i) noexcept { return vt->rtv(this, i); }
-    inline TextureHandle Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
+    inline ResourceHandle Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
     inline Result Swapchain::Resize(uint32_t w, uint32_t h) noexcept { return vt->resize(this, w, h); }
     inline Result Swapchain::Present(bool vsync) noexcept { return vt->present(this, vsync); }
 

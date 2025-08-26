@@ -1,13 +1,13 @@
 #pragma once
 
-#include "DirectX/d3dx12.h"
 #include <wrl/client.h>
+#include <rhi.h>
 #include <queue>
 #include <vector>
 
 class DescriptorHeap {
 public:
-    DescriptorHeap(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible = false);
+    DescriptorHeap(rhi::Device device, rhi::DescriptorHeapType type, uint32_t numDescriptors, bool shaderVisible = false);
     ~DescriptorHeap();
 
     // Non-copyable and non-movable
@@ -26,6 +26,6 @@ private:
     UINT m_descriptorSize;
     UINT m_numDescriptorsAllocated;
     std::queue<UINT> m_freeIndices;
-    D3D12_DESCRIPTOR_HEAP_TYPE m_type;
+    rhi::DescriptorHeapType m_type;
     bool m_shaderVisible;
 };
