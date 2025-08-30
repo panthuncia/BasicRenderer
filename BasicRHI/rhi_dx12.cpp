@@ -15,8 +15,7 @@ namespace rhi {
 		&d_createRenderTargetView,
 		&d_createDepthStencilView,
 		&d_createSampler,
-		&d_createBuffer,
-		&d_createTexture,
+		&d_createResource,
 		&d_destroySampler,
 		&d_destroyPipelineLayout,
 		&d_destroyPipeline,
@@ -31,6 +30,7 @@ namespace rhi {
 		&d_getQueue,
 		&d_waitIdle,
 		&d_flushDeletionQueue,
+		&d_getDescriptorHandleIncrementSize,
 		&d_destroyDevice,
         2u
     };
@@ -46,8 +46,8 @@ namespace rhi {
 		1u
 	};
 
-    const CommandListVTable g_clvt = {
-        &cl_begin,
+	const CommandListVTable g_clvt = {
+		&cl_begin,
 		&cl_end,
 		&cl_reset,
 		&cl_beginPass,
@@ -63,6 +63,7 @@ namespace rhi {
 		&cl_clearView,
 		&cl_executeIndirect,
 		&cl_setDescriptorHeaps,
+		&cl_barrier,
 		1u
     };
     const SwapchainVTable g_scvt = { 

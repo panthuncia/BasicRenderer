@@ -4,14 +4,13 @@
 
 #include "Utilities/Utilities.h"
 
-DescriptorHeap::DescriptorHeap(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible)
+DescriptorHeap::DescriptorHeap(rhi::Device& device, rhi::DescriptorHeapType type, uint32_t numDescriptors, bool shaderVisible, std::string name)
     : m_type(type), m_shaderVisible(shaderVisible), m_numDescriptorsAllocated(0) {
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = numDescriptors;
-    heapDesc.Type = type;
-    heapDesc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    ThrowIfFailed(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_heap)));
-    m_descriptorSize = device->GetDescriptorHandleIncrementSize(type);
+
+	rhi::DescriptorHeapDesc heapDesc = {.type = type, .capacity = numDescriptors, .shaderVisible = shaderVisible, .debugName = name.c_str()};
+    m_heap = device.CreateDescriptorHeap(heapDesc);
+
+    m_descriptorSize = device.GetDescriptorHandleIncrementSize(type);
 }
 
 DescriptorHeap::~DescriptorHeap() {
@@ -26,8 +25,8 @@ CD3DX12_GPU_DESCRIPTOR_HANDLE DescriptorHeap::GetGPUHandle(UINT index) {
     return CD3DX12_GPU_DESCRIPTOR_HANDLE(m_heap->GetGPUDescriptorHandleForHeapStart(), index, m_descriptorSize);
 }
 
-ID3D12DescriptorHeap* DescriptorHeap::GetHeap() const {
-    return m_heap.Get();
+rhi::DescriptorHeapHandle DescriptorHeap::GetHeap() const {
+    return m_heap;
 }
 
 UINT DescriptorHeap::AllocateDescriptor() {

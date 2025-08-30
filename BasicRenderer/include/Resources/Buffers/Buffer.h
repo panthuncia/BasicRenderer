@@ -1,10 +1,12 @@
 #pragma once
 
-#include <directx/d3d12.h>
 #include <wrl/client.h>
 #include <stdint.h>
 #include <string>
 #include <memory>
+
+#include <resource_states.h>
+
 #include "Render/DescriptorHeap.h"
 #include "Resources/HeapIndexInfo.h"
 #include "Resources/GloballyIndexedResource.h"
@@ -42,8 +44,8 @@ public:
 		m_buffer.Reset();
 	}
 	ResourceCPUAccessType m_accessType;
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer;
-	BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+	rhi::ResourceHandle m_buffer;
+	BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	size_t GetSize() const { return m_size; }
 
 	ID3D12Resource* GetAPIResource() const override { return m_buffer.Get(); }

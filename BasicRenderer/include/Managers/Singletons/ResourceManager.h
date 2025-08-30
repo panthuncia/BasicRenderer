@@ -5,6 +5,9 @@
 #include <vector>
 #include <stdexcept>
 #include <queue>
+
+#include <rhi.h>
+
 #include "DirectX/d3dx12.h"
 #include "ShaderBuffers.h"
 #include "spdlog/spdlog.h"
@@ -69,7 +72,7 @@ public:
 
         // Create the buffer
         //bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
+        auto dataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, bufferSize, false, false);
 		dataBuffer->SetName(name);
 //        ResourceTransition transition;
 //		transition.resource = dataBuffer.get();
@@ -92,7 +95,7 @@ public:
         cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
         dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
-        device->CreateConstantBufferView(&cbvDesc, handle);
+        device.CreateConstantBufferView()
 
         return dataBuffer;
     }
@@ -124,7 +127,7 @@ public:
             assert(counterOffset % 4096 == 0);
 		}
 
-        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+        auto dataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, bufferSize, false, UAV);
         
         //ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
 //#if defined(_DEBUG)

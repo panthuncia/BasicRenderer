@@ -2,7 +2,9 @@
 
 #include <string>
 #include <vector>
-#include <directx/d3d12.h>
+
+#include <resource_states.h>
+
 #include "Resources/ResourceStates.h"
 #include "Resources/ResourceStateTracker.h"
 
@@ -36,10 +38,10 @@ public:
     virtual void SetName(const std::wstring& newName) { this->name = newName; OnSetName(); }
 	virtual ID3D12Resource* GetAPIResource() const = 0;
     virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
-	virtual ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_subresourceAccessTypes[subresourceIndex] ; }
-	virtual ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const { return m_subresourceLayouts[subresourceIndex]; }
-	virtual ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_subresourceSyncStates[subresourceIndex]; }
-    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) = 0;
+	virtual rhi::ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_subresourceAccessTypes[subresourceIndex] ; }
+	virtual rhi::ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const { return m_subresourceLayouts[subresourceIndex]; }
+	virtual rhi::ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_subresourceSyncStates[subresourceIndex]; }
+    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) = 0;
 	bool HasLayout() const { return m_hasLayout; }
 	void AddAliasedResource(Resource* resource) {
 		m_aliasedResources.push_back(resource);
@@ -68,9 +70,9 @@ protected:
     //ResourceAccessType m_currentAccessType = ResourceAccessType::COMMON;
     //ResourceLayout m_currentLayout = ResourceLayout::LAYOUT_COMMON;
     //ResourceSyncState m_prevSyncState = ResourceSyncState::ALL;
-	std::vector<ResourceAccessType> m_subresourceAccessTypes;
-	std::vector<ResourceLayout> m_subresourceLayouts;
-	std::vector<ResourceSyncState> m_subresourceSyncStates;
+	std::vector<rhi::ResourceAccessType> m_subresourceAccessTypes;
+	std::vector<rhi::ResourceLayout> m_subresourceLayouts;
+	std::vector<rhi::ResourceSyncState> m_subresourceSyncStates;
     std::wstring name;
 	bool m_hasLayout = false; // Only textures have a layout
 	std::vector<Resource*> m_aliasedResources; // Resources that are aliased with this resource

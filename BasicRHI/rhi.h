@@ -24,6 +24,53 @@ namespace rhi {
     using DescriptorHeapHandle = Handle32;
 	using CommandAllocatorHandle = Handle32;
 
+    //RAII unique smart pointer
+    template<typename Tag>
+    class HandlePtr {
+    public:
+        HandlePtr() = default;
+        HandlePtr(Device* d, Handle32 h) : dev_(d), h_(h) {}
+        ~HandlePtr() { reset(); }
+
+        HandlePtr(const HandlePtr&) = delete;
+        HandlePtr& operator=(const HandlePtr&) = delete;
+
+        HandlePtr(HandlePtr&& o) noexcept { swap(o); }
+        HandlePtr& operator=(HandlePtr&& o) noexcept { if (this != &o) { reset(); swap(o); } return *this; }
+
+        Handle32 Get() const noexcept { return h_; }
+        explicit operator bool() const noexcept { return h_.valid(); }
+
+        Handle32 Release() noexcept { auto t = h_; h_ = {}; dev_ = nullptr; return t; }
+        void     Reset()   noexcept { if (dev_ && h_.valid()) Tag::Destroy(dev_, h_); h_ = {}; dev_ = nullptr; }
+
+		// cheap runtime liveness check (needs device) TODO: actually check with device
+        bool Valid() const noexcept { return dev_ }
+
+        Device* Device()  const noexcept { return dev_; }
+
+    private:
+        void swap(HandlePtr& o) noexcept { std::swap(dev_, o.dev_); std::swap(h_, o.h_); }
+
+        Device* dev_{};
+        Handle32 h_{};
+    };
+
+    struct ResourceTag {
+        static void Destroy(Device* d, Handle32 h) noexcept { d->DestroyBuffer(ResourceHandle{ h.index,h.generation }); }
+    };
+
+	// Anything that is not trivially destructible needs its own tag with Destroy()
+	using ResourcePtr = HandlePtr<ResourceTag>;
+	using SamplerPtr = HandlePtr<struct SamplerTag>;
+	using PipelinePtr = HandlePtr<struct PipelineTag>;
+	using CommandSignaturePtr = HandlePtr<struct CommandSignatureTag>;
+	using PipelineLayoutPtr = HandlePtr<struct PipelineLayoutTag>;
+	using DescriptorHeapPtr = HandlePtr<struct DescriptorHeapTag>;
+	using CommandAllocatorPtr = HandlePtr<struct CommandAllocatorTag>;
+
+	// ---------------- Enums & structs ----------------
+
     enum class Backend : uint32_t { Null, D3D12, Vulkan };
     enum class QueueKind : uint32_t { Graphics, Compute, Copy };
 
@@ -61,8 +108,6 @@ namespace rhi {
 		BC6H_Typeless, BC6H_UF16, BC6H_SF16,
 		BC7_Typeless, BC7_UNorm, BC7_UNorm_sRGB,
     };
-
-    enum BufferUsage : uint32_t { Buf_TransferSrc = 1 << 0, Buf_TransferDst = 1 << 1, Buf_Vertex = 1 << 2, Buf_Index = 1 << 3, Buf_Uniform = 1 << 4, Buf_Storage = 1 << 5, Buf_Indirect = 1 << 6 };
 
     enum class Memory : uint32_t { DeviceLocal, Upload, Readback };
 
@@ -330,10 +375,7 @@ namespace rhi {
     };
     struct BufferDesc {
         uint64_t     sizeBytes = 0;
-        BufferUsage  usage = (BufferUsage)0;
         Memory       memory = Memory::DeviceLocal;
-		ResourceFlags flags;
-        const char* debugName = nullptr;
     };
     struct TextureDesc {
         Format       format = Format::Unknown;
@@ -342,33 +384,65 @@ namespace rhi {
         uint16_t     depthOrLayers = 1;     // depth for 3D, arraySize otherwise
         uint16_t     mipLevels = 1;
         TextureViewDim dim = TextureViewDim::Tex2D;
-        ResourceFlags flags;
         ResourceLayout initialLayout = ResourceLayout::Undefined;
         const ClearValue* optimizedClear = nullptr;    // optional, if RTV/DSV
+    };
+	enum class ResourceType : uint32_t { Unknown, Texture, Buffer };
+    struct ResourceDesc { 
+        ResourceType type = ResourceType::Unknown; 
+        ResourceFlags flags;
         const char* debugName = nullptr;
+        union { 
+            TextureDesc texture; 
+            BufferDesc buffer; 
+        }; 
     };
 
     struct VertexBufferView { ResourceHandle buffer{}; uint64_t offset = 0; uint32_t sizeBytes = 0; uint32_t stride = 0; };
 
     enum class Stage : uint32_t { Top, Draw, Pixel, Compute, Copy, Bottom }; 
-    struct ImageBarrier { 
-        ResourceHandle tex{}; 
-        TextureSubresourceRange range{}; 
-        Stage srcStage = Stage::Top, dstStage = Stage::Bottom; 
-        ResourceAccessType srcAccess = ResourceAccessType::None, dstAccess = ResourceAccessType::None; 
-        ResourceLayout oldLayout = ResourceLayout::Undefined, newLayout = ResourceLayout::Undefined; 
-    };
-    struct BufferBarrier { 
-        ResourceHandle buf{}; 
-        uint64_t offset = 0, size = ~0ull; 
-        Stage srcStage = Stage::Top, dstStage = Stage::Bottom; 
-        ResourceAccessType srcAccess = ResourceAccessType::None, dstAccess = ResourceAccessType::None; 
-    };
-    struct BarrierBatch { Span<ImageBarrier> images{}; Span<BufferBarrier> buffers{}; };
 
     // ---------------- Submission & timelines (thin) ----------------
     struct Timeline { Handle32 id{}; }; struct TimelinePoint { Timeline t; uint64_t value = 0; };
     struct SubmitDesc { Span<TimelinePoint> waits{}; Span<TimelinePoint> signals{}; };
+
+    // --- Texture / Buffer / Global barrier descriptions ---
+    struct TextureBarrier {
+        ResourceHandle        texture{};
+        TextureSubresourceRange range{}; // baseMip/mipCount, baseLayer/layerCount
+        ResourceSyncState    beforeSync{ ResourceSyncState::None };
+        ResourceSyncState    afterSync{ ResourceSyncState::None };
+        ResourceAccessType   beforeAccess{ ResourceAccessType::None };
+        ResourceAccessType   afterAccess{ ResourceAccessType::None };
+        ResourceLayout       beforeLayout{ ResourceLayout::Undefined };
+        ResourceLayout       afterLayout{ ResourceLayout::Undefined };
+        bool                 discard{ false }; // optional hint; can be ignored if backend doesn’t use it
+    };
+
+    struct BufferBarrier {
+        ResourceHandle       buffer{};
+        uint64_t             offset{ 0 };
+        uint64_t             size{ ~0ull }; // ~0 -> whole resource from offset
+        ResourceSyncState    beforeSync{ ResourceSyncState::None };
+        ResourceSyncState    afterSync{ ResourceSyncState::None };
+        ResourceAccessType   beforeAccess{ ResourceAccessType::None };
+        ResourceAccessType   afterAccess{ ResourceAccessType::None };
+    };
+
+    struct GlobalBarrier {
+        ResourceSyncState    beforeSync{ ResourceSyncState::None };
+        ResourceSyncState    afterSync{ ResourceSyncState::None };
+        ResourceAccessType   beforeAccess{ ResourceAccessType::None };
+        ResourceAccessType   afterAccess{ ResourceAccessType::None };
+    };
+
+    // Batch to submit in one call
+    struct BarrierBatch {
+        Span<TextureBarrier> textures{};
+        Span<BufferBarrier>  buffers{};
+        Span<GlobalBarrier>  globals{};
+    };
+
 
     // ---------------- POD wrappers + VTables ----------------
     struct Device;       struct Queue;       struct CommandList;       struct Swapchain;       struct CommandAllocator;
@@ -414,6 +488,7 @@ namespace rhi {
             ResourceHandle cntBuf, uint64_t cntOff,
             uint32_t maxCount) noexcept;
 		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle samp) noexcept;
+        void Barrier(const BarrierBatch& b) noexcept;
     };
 
     struct Swapchain { 
@@ -427,19 +502,19 @@ namespace rhi {
         inline uint32_t ImageCount() noexcept;
         inline uint32_t CurrentImageIndex() noexcept;
         inline ViewHandle RTV(uint32_t i) noexcept;
-        inline ResourceHandle Image(uint32_t i) noexcept;
+        inline ResourcePtr Image(uint32_t i) noexcept;
         inline Result Resize(uint32_t w, uint32_t h) noexcept;
         inline Result Present(bool vsync) noexcept;
     };
 
     struct DeviceVTable {
-        PipelineHandle(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count) noexcept;
-        PipelineLayoutHandle(*createPipelineLayout)(Device*, const PipelineLayoutDesc&) noexcept;
-        CommandSignatureHandle(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/) noexcept;
+        PipelinePtr(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count) noexcept;
+        PipelineLayoutPtr(*createPipelineLayout)(Device*, const PipelineLayoutDesc&) noexcept;
+        CommandSignaturePtr(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/) noexcept;
         CommandAllocator(*createCommandAllocator)(Device*, QueueKind) noexcept;
         CommandList(*createCommandList)(Device*, QueueKind, CommandAllocator) noexcept;
         Swapchain(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept;
-        DescriptorHeapHandle(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
+        DescriptorHeap(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
 
         Result(*createConstantBufferView)(Device*, DescriptorSlot dst, ResourceHandle, const CbvDesc&) noexcept;
         Result(*createShaderResourceView)(Device*, DescriptorSlot dst, const SrvDesc&) noexcept;
@@ -447,8 +522,7 @@ namespace rhi {
         Result(*createRenderTargetView)(Device*, DescriptorSlot dst, const RtvDesc&) noexcept;
         Result(*createDepthStencilView)(Device*, DescriptorSlot dst, const DsvDesc&) noexcept;
         Result(*createSampler)(Device*, DescriptorSlot dst, const SamplerDesc&) noexcept;
-        ResourceHandle(*createBuffer)(Device*, const BufferDesc&) noexcept;
-        ResourceHandle(*createTexture)(Device*, const TextureDesc&) noexcept;
+        ResourcePtr(*createCommittedResource)(Device*, const ResourceDesc&) noexcept;
 
         void (*destroySampler)(Device*, SamplerHandle) noexcept;
         void (*destroyPipelineLayout)(Device*, PipelineLayoutHandle) noexcept;
@@ -464,6 +538,7 @@ namespace rhi {
         Queue(*getQueue)(Device*, QueueKind) noexcept;
         Result(*deviceWaitIdle)(Device*) noexcept;
         void (*flushDeletionQueue)(Device*) noexcept;
+        uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
 
         void (*destroyDevice)(Device*) noexcept;
         uint32_t abi_version = 1;
@@ -508,6 +583,7 @@ namespace rhi {
             ResourceHandle countBuffer, uint64_t countOffset,
             uint32_t   maxCommandCount) noexcept;
         void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle sampler) noexcept;
+        void (*barriers)(CommandList*, const BarrierBatch&) noexcept;
         uint32_t abi_version = 1;
     };
 
@@ -515,7 +591,7 @@ namespace rhi {
         uint32_t(*imageCount)(Swapchain*) noexcept;
         uint32_t(*currentImageIndex)(Swapchain*) noexcept;
         ViewHandle(*rtv)(Swapchain*, uint32_t img) noexcept; // RTV per image
-        ResourceHandle(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
+        ResourcePtr(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
         Result(*resize)(Swapchain*, uint32_t w, uint32_t h) noexcept;
         Result(*present)(Swapchain*, bool vsync) noexcept; // Present
         uint32_t abi_version = 1;
@@ -537,11 +613,11 @@ namespace rhi {
         inline void FlushDeletionQueue() noexcept { vt->flushDeletionQueue(this); }
         inline Swapchain CreateSwapchain(void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t buffers, bool allowTearing) noexcept { return vt->createSwapchain(this, hwnd, w, h, fmt, buffers, allowTearing); }
         inline void DestroySwapchain(Swapchain* sc) noexcept { vt->destroySwapchain(this, sc); }
-        inline PipelineLayoutHandle CreatePipelineLayout(const PipelineLayoutDesc& d) noexcept { return vt->createPipelineLayout(this, d); }
+        inline PipelineLayoutPtr CreatePipelineLayout(const PipelineLayoutDesc& d) noexcept { return vt->createPipelineLayout(this, d); }
         inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { vt->destroyPipelineLayout(this, h); }
-        inline CommandSignatureHandle CreateCommandSignature(const CommandSignatureDesc& d, PipelineLayoutHandle layout) noexcept { return vt->createCommandSignature(this, d, layout); }
+        inline CommandSignaturePtr CreateCommandSignature(const CommandSignatureDesc& d, PipelineLayoutHandle layout) noexcept { return vt->createCommandSignature(this, d, layout); }
         inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { vt->destroyCommandSignature(this, h); }
-		inline DescriptorHeapHandle CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
+		inline DescriptorHeap CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
 		inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { vt->destroyDescriptorHeap(this, h); }
         inline Result CreateConstantBufferView(DescriptorSlot s, ResourceHandle b, const CbvDesc& d) noexcept { return vt->createConstantBufferView(this, s, b, d); }
         inline Result CreateShaderResourceView(DescriptorSlot s, const SrvDesc& d) noexcept { return vt->createShaderResourceView(this, s, d); }
@@ -551,12 +627,12 @@ namespace rhi {
         inline Result CreateDepthStencilView(DescriptorSlot s, const DsvDesc& d) noexcept { return vt->createDepthStencilView(this, s, d); }
         inline CommandAllocator CreateCommandAllocator(QueueKind q) noexcept { return vt->createCommandAllocator(this, q); }
         inline CommandList CreateCommandList(QueueKind q, CommandAllocator a) noexcept { return vt->createCommandList(this, q, a); }
-		inline ResourceHandle CreateBuffer(const BufferDesc& d) noexcept { return vt->createBuffer(this, d); }
-        inline ResourceHandle CreateTexture(const TextureDesc& d) noexcept { return vt->createTexture(this, d); }
+		inline ResourcePtr CreateCommittedResource(const ResourceDesc& d) noexcept { return vt->createCommittedResource(this, d); }
         inline void DestroySampler(SamplerHandle h) noexcept { vt->destroySampler(this, h); }
 		inline void DestroyPipeline(PipelineHandle h) noexcept { vt->destroyPipeline(this, h); }
 		inline void DestroyBuffer(ResourceHandle h) noexcept { vt->destroyBuffer(this, h); }
 		inline void DestroyTexture(ResourceHandle h) noexcept { vt->destroyTexture(this, h); }
+		inline uint32_t GetDescriptorHandleIncrementSize(DescriptorHeapType t) noexcept { return vt->getDescriptorHandleIncrementSize(this, t); }
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
 
     };
@@ -585,11 +661,12 @@ namespace rhi {
         uint32_t maxCount) noexcept
     { vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
     inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
+	inline void CommandList::Barrier(const BarrierBatch& b) noexcept { vt->barriers(this, b); }
 
     inline uint32_t Swapchain::ImageCount() noexcept { return vt->imageCount(this); }
     inline uint32_t Swapchain::CurrentImageIndex() noexcept { return vt->currentImageIndex(this); }
     inline ViewHandle Swapchain::RTV(uint32_t i) noexcept { return vt->rtv(this, i); }
-    inline ResourceHandle Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
+    inline ResourcePtr Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
     inline Result Swapchain::Resize(uint32_t w, uint32_t h) noexcept { return vt->resize(this, w, h); }
     inline Result Swapchain::Present(bool vsync) noexcept { return vt->present(this, vsync); }
 

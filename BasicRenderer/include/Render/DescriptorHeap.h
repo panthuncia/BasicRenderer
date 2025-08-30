@@ -7,7 +7,7 @@
 
 class DescriptorHeap {
 public:
-    DescriptorHeap(rhi::Device device, rhi::DescriptorHeapType type, uint32_t numDescriptors, bool shaderVisible = false);
+    DescriptorHeap(rhi::Device& device, rhi::DescriptorHeapType type, uint32_t numDescriptors, bool shaderVisible = false, std::string name = "Descriptor Heap");
     ~DescriptorHeap();
 
     // Non-copyable and non-movable
@@ -16,13 +16,13 @@ public:
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index);
     CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index);
-    ID3D12DescriptorHeap* GetHeap() const;
+    rhi::DescriptorHeapHandle GetHeap() const;
 
     UINT AllocateDescriptor();
     void ReleaseDescriptor(UINT index);
 
 private:
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_heap;
+    rhi::DescriptorHeapHandle m_heap;
     UINT m_descriptorSize;
     UINT m_numDescriptorsAllocated;
     std::queue<UINT> m_freeIndices;

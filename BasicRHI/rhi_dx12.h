@@ -322,6 +322,29 @@ namespace rhi {
 		return f;
 	}
 
+	static D3D12_DESCRIPTOR_HEAP_TYPE ToDX(const DescriptorHeapType t) {
+		switch (t) {
+		case DescriptorHeapType::Sampler: return D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+		case DescriptorHeapType::CbvSrvUav: return D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		case DescriptorHeapType::RTV: return D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+		case DescriptorHeapType::DSV: return D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+		default:
+			assert(false && "Invalid DescriptorType");
+			return D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
+		}
+	}
+
+	static D3D12_BARRIER_SUBRESOURCE_RANGE ToDX(const rhi::TextureSubresourceRange& r) {
+		D3D12_BARRIER_SUBRESOURCE_RANGE o{};
+		o.IndexOrFirstMipLevel = r.baseMip;
+		o.NumMipLevels = r.mipCount;
+		o.FirstArraySlice = r.baseLayer;
+		o.NumArraySlices = r.layerCount;
+		o.FirstPlane = 0;
+		o.NumPlanes = 1;
+		return o;
+	}
+
 	// Build D3D12_RESOURCE_DESC1 for buffers
 	static D3D12_RESOURCE_DESC1 MakeBufferDesc1(uint64_t bytes, D3D12_RESOURCE_FLAGS flags) {
 		D3D12_RESOURCE_DESC1 d{};
@@ -340,28 +363,28 @@ namespace rhi {
 	}
 
 	// Build D3D12_RESOURCE_DESC1 for textures
-	static D3D12_RESOURCE_DESC1 MakeTexDesc1(const TextureDesc& td) {
+	static D3D12_RESOURCE_DESC1 MakeTexDesc1(const ResourceDesc& td) {
 		D3D12_RESOURCE_DESC1 d{};
 		d.Alignment = 0;
-		d.MipLevels = td.mipLevels;
-		d.Format = ToDxgi(td.format);
+		d.MipLevels = td.texture.mipLevels;
+		d.Format = ToDxgi(td.texture.format);
 		d.SampleDesc = { 1, 0 };
 		d.Flags = ToDX(td.flags);
 		d.SamplerFeedbackMipRegion = {};
 
-		switch (td.dim) {
+		switch (td.texture.dim) {
 		case TextureViewDim::Tex3D:
 			d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
-			d.Width = td.width;
-			d.Height = td.height;
-			d.DepthOrArraySize = td.depthOrLayers;
+			d.Width = td.texture.width;
+			d.Height = td.texture.height;
+			d.DepthOrArraySize = td.texture.depthOrLayers;
 			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			break;
 		default: // Tex2D / Tex2DArray / Cube / CubeArray treated as 2D arrays
 			d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-			d.Width = td.width;
-			d.Height = td.height;
-			d.DepthOrArraySize = td.depthOrLayers; // for Cube/CubeArray pass N*6 here
+			d.Width = td.texture.width;
+			d.Height = td.texture.height;
+			d.DepthOrArraySize = td.texture.depthOrLayers; // for Cube/CubeArray pass N*6 here
 			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			break;
 		}
@@ -905,12 +928,7 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 
 		D3D12_DESCRIPTOR_HEAP_DESC desc{};
-		switch (hd.type) {
-		case DescriptorHeapType::CbvSrvUav: desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; break;
-		case DescriptorHeapType::Sampler:   desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;     break;
-		case DescriptorHeapType::RTV:       desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;         break;
-		case DescriptorHeapType::DSV:       desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;         break;
-		}
+		desc.Type = ToDX(hd.type);
 		desc.NumDescriptors = hd.capacity;
 		desc.Flags = hd.shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
@@ -1210,17 +1228,17 @@ namespace rhi {
 		return out;
 	}
 
-	static ResourceHandle d_createBuffer(Device* d, const BufferDesc& bd) noexcept {
+	static ResourceHandle d_createBuffer(Device* d, const ResourceDesc& bd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || bd.sizeBytes == 0) return {};
+		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) return {};
 
 		D3D12_HEAP_PROPERTIES hp{};
-		hp.Type = ToDx(bd.memory);
+		hp.Type = ToDx(bd.buffer.memory);
 		hp.CreationNodeMask = 1;
 		hp.VisibleNodeMask = 1;
 
 		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.flags);
-		const D3D12_RESOURCE_DESC1  desc = MakeBufferDesc1(bd.sizeBytes, flags);
+		const D3D12_RESOURCE_DESC1  desc = MakeBufferDesc1(bd.buffer.sizeBytes, flags);
 
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		// Buffers must use UNDEFINED layout per spec
@@ -1245,9 +1263,9 @@ namespace rhi {
 		return impl->buffers.alloc(std::move(B));
 	}
 
-	static ResourceHandle d_createTexture(Device* d, const TextureDesc& td) noexcept {
+	static ResourceHandle d_createTexture(Device* d, const ResourceDesc& td) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || td.width == 0 || td.height == 0 || td.format == Format::Unknown)
+		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown)
 			return {};
 
 		D3D12_HEAP_PROPERTIES hp{};
@@ -1261,18 +1279,20 @@ namespace rhi {
 		const bool isRT = (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0;
 		const bool isDS = (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0;
 		const D3D12_CLEAR_VALUE* pClear = nullptr;
-		if (td.optimizedClear && (isRT || isDS)) {
+		if (td.texture.optimizedClear && (isRT || isDS)) {
 			clear.Format = desc.Format;
-			if (isDS) { clear.DepthStencil.Depth = td.optimizedClear->depth; clear.DepthStencil.Stencil = td.optimizedClear->stencil; }
+			if (isDS) { clear.DepthStencil.Depth = td.texture.optimizedClear->depth; clear.DepthStencil.Stencil = td.texture.optimizedClear->stencil; }
 			else {
-				clear.Color[0] = td.optimizedClear->rgba[0]; clear.Color[1] = td.optimizedClear->rgba[1];
-				clear.Color[2] = td.optimizedClear->rgba[2]; clear.Color[3] = td.optimizedClear->rgba[3];
+				clear.Color[0] = td.texture.optimizedClear->rgba[0]; clear.Color[1] = td.texture.optimizedClear->rgba[1];
+				clear.Color[2] = td.texture.optimizedClear->rgba[2]; clear.Color[3] = td.texture.optimizedClear->rgba[3];
 			}
 			pClear = &clear;
 		}
 
+		
+
 		// Textures can specify InitialLayout (enhanced barriers)
-		const D3D12_BARRIER_LAYOUT initialLayout = ToDX(td.initialLayout);
+		const D3D12_BARRIER_LAYOUT initialLayout = ToDX(td.texture.initialLayout);
 
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		HRESULT hr = impl->dev->CreateCommittedResource3(
@@ -1292,8 +1312,24 @@ namespace rhi {
 		Dx12Texture T{};
 		T.res = std::move(res);
 		T.fmt = desc.Format;
-		T.w = td.width; T.h = td.height;
+		T.w = td.texture.width; T.h = td.texture.height;
 		return impl->textures.alloc(std::move(T));
+	}
+
+	static ResourceHandle d_createResource(Device* d, const ResourceDesc& td) noexcept {
+		switch (td.type) {
+		case ResourceType::Buffer:  return d_createBuffer(d, td);
+		case ResourceType::Texture: return d_createTexture(d, td);
+		case ResourceType::Unknown: return {};
+		}
+		return {};
+	}
+
+	static uint32_t d_getDescriptorHandleIncrementSize(Device* d, DescriptorHeapType type) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || !impl->dev) return 0;
+		const D3D12_DESCRIPTOR_HEAP_TYPE t = ToDX(type);
+		return (uint32_t)impl->dev->GetDescriptorHandleIncrementSize(t);
 	}
 
 	// ---------------- Queue vtable funcs ----------------
@@ -1482,6 +1518,97 @@ namespace rhi {
 		if (auto* H = dev->descHeaps.get(samp)) heaps[n++] = H->heap.Get();
 		if (n) w->rec->cl->SetDescriptorHeaps(n, heaps);
 	}
+
+	static void cl_barrier(rhi::CommandList* cl, const rhi::BarrierBatch& b) noexcept {
+		if (!cl || !cl->impl) return;
+		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
+		auto* dev = w->dev;
+		if (!dev) return;
+
+		std::vector<D3D12_TEXTURE_BARRIER> tex;
+		std::vector<D3D12_BUFFER_BARRIER>  buf;
+		std::vector<D3D12_GLOBAL_BARRIER>  glob;
+
+		tex.reserve(b.textures.size);
+		buf.reserve(b.buffers.size);
+		glob.reserve(b.globals.size);
+
+		// Textures
+		for (uint32_t i = 0; i < b.textures.size; ++i) {
+			const auto& t = b.textures.data[i];
+			auto* T = dev->textures.get(t.texture);
+			if (!T || !T->res) continue;
+
+			D3D12_TEXTURE_BARRIER tb{};
+			tb.SyncBefore = ToDX(t.beforeSync);
+			tb.SyncAfter = ToDX(t.afterSync);
+			tb.AccessBefore = ToDX(t.beforeAccess);
+			tb.AccessAfter = ToDX(t.afterAccess);
+			tb.LayoutBefore = ToDX(t.beforeLayout);
+			tb.LayoutAfter = ToDX(t.afterLayout);
+			tb.pResource = T->res.Get();
+			tb.Subresources = ToDX(t.range);
+			tex.push_back(tb);
+		}
+
+		// Buffers
+		for (uint32_t i = 0; i < b.buffers.size; ++i) {
+			const auto& br = b.buffers.data[i];
+			auto* B = dev->buffers.get(br.buffer);
+			if (!B || !B->res) continue;
+
+			D3D12_BUFFER_BARRIER bb{};
+			bb.SyncBefore = ToDX(br.beforeSync);
+			bb.SyncAfter = ToDX(br.afterSync);
+			bb.AccessBefore = ToDX(br.beforeAccess);
+			bb.AccessAfter = ToDX(br.afterAccess);
+			bb.pResource = B->res.Get();
+			bb.Offset = br.offset;
+			bb.Size = br.size;
+			buf.push_back(bb);
+		}
+
+		// Globals
+		for (uint32_t i = 0; i < b.globals.size; ++i) {
+			const auto& g = b.globals.data[i];
+			D3D12_GLOBAL_BARRIER gb{};
+			gb.SyncBefore = ToDX(g.beforeSync);
+			gb.SyncAfter = ToDX(g.afterSync);
+			gb.AccessBefore = ToDX(g.beforeAccess);
+			gb.AccessAfter = ToDX(g.afterAccess);
+			glob.push_back(gb);
+		}
+
+		// Build groups (one per kind if non-empty)
+		std::vector<D3D12_BARRIER_GROUP> groups;
+		groups.reserve(3);
+		if (!buf.empty()) {
+			D3D12_BARRIER_GROUP g{};
+			g.Type = D3D12_BARRIER_TYPE_BUFFER;
+			g.NumBarriers = (UINT)buf.size();
+			g.pBufferBarriers = buf.data();
+			groups.push_back(g);
+		}
+		if (!tex.empty()) {
+			D3D12_BARRIER_GROUP g{};
+			g.Type = D3D12_BARRIER_TYPE_TEXTURE;
+			g.NumBarriers = (UINT)tex.size();
+			g.pTextureBarriers = tex.data();
+			groups.push_back(g);
+		}
+		if (!glob.empty()) {
+			D3D12_BARRIER_GROUP g{};
+			g.Type = D3D12_BARRIER_TYPE_GLOBAL;
+			g.NumBarriers = (UINT)glob.size();
+			g.pGlobalBarriers = glob.data();
+			groups.push_back(g);
+		}
+
+		if (!groups.empty()) {
+			w->rec->cl->Barrier((UINT)groups.size(), groups.data());
+		}
+	}
+
 
 	// ---------------- Swapchain vtable funcs ----------------
 	static uint32_t sc_count(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->count; }

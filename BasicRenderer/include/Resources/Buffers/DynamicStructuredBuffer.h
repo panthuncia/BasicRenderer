@@ -127,7 +127,7 @@ private:
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
         auto& device = DeviceManager::GetInstance().GetDevice();
 
-        auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, sizeof(T) * capacity, false, m_UAV);
+        auto newDataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, sizeof(T) * capacity, false, m_UAV);
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);

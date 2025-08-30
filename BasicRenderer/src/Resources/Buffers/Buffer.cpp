@@ -66,12 +66,12 @@ Buffer::Buffer(
 
 	m_size = bufferSize;
 
-	m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
-	m_subresourceLayouts.push_back(ResourceLayout::LAYOUT_COMMON);
-	m_subresourceSyncStates.push_back(ResourceSyncState::ALL);
+	m_subresourceAccessTypes.push_back(rhi::ResourceAccessType::Common);
+	m_subresourceLayouts.push_back(rhi::ResourceLayout::Common);
+	m_subresourceSyncStates.push_back(rhi::ResourceSyncState::All);
 }
 
-BarrierGroups Buffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+BarrierGroups Buffer::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
 #if defined(_DEBUG)
 	//if (prevState != currentState) {
 	//	throw(std::runtime_error("Buffer state mismatch"));
@@ -84,28 +84,39 @@ BarrierGroups Buffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessTyp
 	//}
 #endif
 
-	BarrierGroups barrierGroups = {};
-	
-	barrierGroups.bufferBarrierDescs.push_back({});
+	//BarrierGroups barrierGroups = {};
+	//
+	//barrierGroups.bufferBarrierDescs.push_back({});
 
-	auto& bufferBarrierDesc = barrierGroups.bufferBarrierDescs[0];
-	bufferBarrierDesc.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
-	bufferBarrierDesc.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
-	bufferBarrierDesc.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
-	bufferBarrierDesc.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
-	bufferBarrierDesc.Offset = 0;
-	bufferBarrierDesc.Size = UINT64_MAX;
-	bufferBarrierDesc.pResource = m_buffer.Get();
+	//auto& bufferBarrierDesc = barrierGroups.bufferBarrierDescs[0];
+	//bufferBarrierDesc.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
+	//bufferBarrierDesc.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
+	//bufferBarrierDesc.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
+	//bufferBarrierDesc.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
+	//bufferBarrierDesc.Offset = 0;
+	//bufferBarrierDesc.Size = UINT64_MAX;
+	//bufferBarrierDesc.pResource = m_buffer.Get();
 
-	D3D12_BARRIER_GROUP group;
-	group.NumBarriers = 1;
-	group.Type = D3D12_BARRIER_TYPE_BUFFER;
-	group.pBufferBarriers = barrierGroups.bufferBarrierDescs.data();
-	barrierGroups.bufferBarriers.push_back(group);
+	//D3D12_BARRIER_GROUP group;
+	//group.NumBarriers = 1;
+	//group.Type = D3D12_BARRIER_TYPE_BUFFER;
+	//group.pBufferBarriers = barrierGroups.bufferBarrierDescs.data();
+	//barrierGroups.bufferBarriers.push_back(group);
 
-	m_subresourceAccessTypes[0] = newAccessType;
-	m_subresourceLayouts[0] = newLayout;
-	m_subresourceSyncStates[0] = newSyncState;
+	//m_subresourceAccessTypes[0] = newAccessType;
+	//m_subresourceLayouts[0] = newLayout;
+	//m_subresourceSyncStates[0] = newSyncState;
+
+	rhi::BarrierBatch batch = {};
+	batch.buffers = { rhi::BufferBarrier{
+		.buffer       = GetAPIResource(),
+		.offset       = 0,
+		.size         = UINT64_MAX,
+		.beforeSync   = prevSyncState,
+		.afterSync    = newSyncState,
+		.beforeAccess = prevAccessType,
+		.afterAccess  = newAccessType
+	}, 1 };
 
 	return barrierGroups;
 }
