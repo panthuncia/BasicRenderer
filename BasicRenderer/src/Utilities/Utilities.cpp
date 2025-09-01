@@ -14,7 +14,6 @@
 #include <gsl/gsl>
 
 #include "Render/PSOFlags.h"
-#include "DirectX/d3dx12.h"
 #include "DefaultDirection.h"
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
@@ -813,55 +812,6 @@ DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV) {
     }
 }
 
-CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
-    DXGI_FORMAT format,
-    int width,
-    int height,
-    int arraySize,
-    uint16_t mipLevels,
-    bool isCubemap,
-    bool allowRTV,
-    bool allowDSV,
-    bool allowUAV) {
-
-    CD3DX12_RESOURCE_DESC1 desc = CD3DX12_RESOURCE_DESC1::Tex2D(
-        format,
-        width,
-        height,
-        isCubemap ? 6 * arraySize : arraySize,
-        mipLevels);
-
-    if (allowRTV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-    if (allowDSV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-	if (allowUAV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-    return desc;
-}
-
-Microsoft::WRL::ComPtr<ID3D12Resource> CreateCommittedTextureResource(
-    ID3D12Device10* device,
-    const CD3DX12_RESOURCE_DESC1& desc,
-    D3D12_CLEAR_VALUE* clearValue,
-    D3D12_HEAP_TYPE heapType,
-    D3D12_BARRIER_LAYOUT initialLayout) {
-
-    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(heapType);
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-
-    ThrowIfFailed(device->CreateCommittedResource3(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &desc,
-        initialLayout,
-        clearValue,
-        nullptr,
-        0,
-        nullptr,
-        IID_PPV_ARGS(&resource)));
-
-    return resource;
-}
-
 Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
     ID3D12Device10* device,
     const CD3DX12_RESOURCE_DESC1& desc,
@@ -897,49 +847,56 @@ Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
 
 
 ShaderVisibleIndexInfo CreateShaderResourceView(
-    ID3D12Device* device,
-    ID3D12Resource* resource,
-    DXGI_FORMAT format,
+    rhi::Device& device,
+    rhi::ResourceHandle resource,
+    rhi::Format format,
     DescriptorHeap* srvHeap,
     int mipLevels,
     bool isCubemap,
     bool isArray,
     int arraySize) {
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format = format;
+    //D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    //srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    //srvDesc.Format = format;
+
+    //if (isCubemap) {
+    //    srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY : D3D12_SRV_DIMENSION_TEXTURECUBE;
+    //    if (isArray) {
+    //        srvDesc.TextureCubeArray.MipLevels = mipLevels;
+    //        srvDesc.TextureCubeArray.NumCubes = arraySize;
+    //    }
+    //    else {
+    //        srvDesc.TextureCube.MipLevels = mipLevels;
+    //    }
+    //}
+    //else {
+    //    srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
+    //    if (isArray) {
+    //        srvDesc.Texture2DArray.MipLevels = mipLevels;
+    //        srvDesc.Texture2DArray.ArraySize = arraySize;
+    //    }
+    //    else {
+    //        srvDesc.Texture2D.MipLevels = mipLevels;
+    //    }
+    //}
+
+	rhi::SrvDesc desc = {};
+	desc.texFormatOverride = format;
 
     if (isCubemap) {
-        srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY : D3D12_SRV_DIMENSION_TEXTURECUBE;
-        if (isArray) {
-            srvDesc.TextureCubeArray.MipLevels = mipLevels;
-            srvDesc.TextureCubeArray.NumCubes = arraySize;
-        }
-        else {
-            srvDesc.TextureCube.MipLevels = mipLevels;
-        }
-    }
-    else {
-        srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
-        if (isArray) {
-            srvDesc.Texture2DArray.MipLevels = mipLevels;
-            srvDesc.Texture2DArray.ArraySize = arraySize;
-        }
-        else {
-            srvDesc.Texture2D.MipLevels = mipLevels;
-        }
+		desc.texDim = isArray ? rhi::TextureViewDim::CubeArray : rhi::TextureViewDim::Cube;
+		if (isArray) {
+			desc.texRange.mipCount = mipLevels;
+            desc.
     }
 
     UINT descriptorIndex = srvHeap->AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = srvHeap->GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = srvHeap->GetGPUHandle(descriptorIndex);
 
     device->CreateShaderResourceView(resource, &srvDesc, cpuHandle);
 
     ShaderVisibleIndexInfo srvInfo;
     srvInfo.index = descriptorIndex;
-    srvInfo.gpuHandle = gpuHandle;
 
     return srvInfo;
 }

@@ -12,18 +12,18 @@ struct ImageDimensions {
 struct TextureDescription {
 	std::vector<ImageDimensions> imageDimensions;
     unsigned short channels = 0; // Number of channels in the data (e.g., 3 for RGB, 4 for RGBA)
-    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+    rhi::Format format = rhi::Format::Unknown;
     bool isCubemap = false;
     bool isArray = false;
     uint32_t arraySize = 1;
     bool hasRTV = false;
-	DXGI_FORMAT rtvFormat = DXGI_FORMAT_UNKNOWN;
+    rhi::Format rtvFormat = rhi::Format::Unknown;
     bool hasDSV = false;
-	DXGI_FORMAT dsvFormat = DXGI_FORMAT_UNKNOWN;
+    rhi::Format dsvFormat = rhi::Format::Unknown;
     bool hasUAV = false;
-	DXGI_FORMAT uavFormat = DXGI_FORMAT_UNKNOWN;
+    rhi::Format uavFormat = rhi::Format::Unknown;
 	bool hasSRV = false;
-	DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
+    rhi::Format srvFormat = rhi::Format::Unknown;
 	bool hasNonShaderVisibleUAV = false;
     bool generateMipMaps = false;
 	bool allowAlias = false;

@@ -437,9 +437,9 @@ public:
 
     std::shared_ptr<Buffer> CreateBuffer(size_t size, void* pInitialData, bool UAV = false);
 
-    std::pair<ComPtr<ID3D12Resource>,ComPtr<ID3D12Heap>> CreateTextureResource(
+    std::pair<rhi::ResourcePtr, rhi::HeapHandle> CreateTextureResource(
         const TextureDescription& desc,
-        ComPtr<ID3D12Heap> placedResourceHeap = nullptr);
+        rhi::HeapHandle placedResourceHeap = {});
 
     void UploadTextureData(ID3D12Resource* pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
 

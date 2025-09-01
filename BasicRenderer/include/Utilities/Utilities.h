@@ -103,31 +103,13 @@ std::vector<stbi_uc> ExpandImageData(const stbi_uc* image, int width, int height
 
 // Helper functions for creating resources
 
-CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
-	DXGI_FORMAT format,
-	int width,
-	int height,
-	int arraySize = 1,
-	uint16_t mipLevels = 1,
-	bool isCubemap = false,
-	bool allowRTV = false,
-	bool allowDSV = false,
-	bool allowUAV = false);
-
-Microsoft::WRL::ComPtr<ID3D12Resource> CreateCommittedTextureResource(
-	ID3D12Device10* device,
-	const CD3DX12_RESOURCE_DESC1& desc,
-	D3D12_CLEAR_VALUE* clearValue = nullptr,
-	D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_DEFAULT,
-	D3D12_BARRIER_LAYOUT initialState = D3D12_BARRIER_LAYOUT_COMMON);
-
-Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
-	ID3D12Device10* device,
-	const CD3DX12_RESOURCE_DESC1& desc,
-	D3D12_CLEAR_VALUE* clearValue,
-	D3D12_HEAP_TYPE heapType,
-	Microsoft::WRL::ComPtr<ID3D12Heap>& heap,
-	D3D12_BARRIER_LAYOUT initialLayout);
+//Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
+//	ID3D12Device10* device,
+//	const CD3DX12_RESOURCE_DESC1& desc,
+//	D3D12_CLEAR_VALUE* clearValue,
+//	D3D12_HEAP_TYPE heapType,
+//	Microsoft::WRL::ComPtr<ID3D12Heap>& heap,
+//	D3D12_BARRIER_LAYOUT initialLayout);
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip(
 	ID3D12Device* device,

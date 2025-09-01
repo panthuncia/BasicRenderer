@@ -347,6 +347,36 @@ namespace rhi {
 		o.NumPlanes = 1;
 		return o;
 	}
+	
+	D3D12_CLEAR_VALUE ToDX(const ClearValue& cv) {
+		D3D12_CLEAR_VALUE v{};
+		v.Format = ToDxgi(cv.format);
+		if (cv.type == ClearValueType::Color) {
+			for (int i = 0; i < 4; ++i) v.Color[i] = cv.rgba[i];
+		}
+		else {
+			v.DepthStencil.Depth = cv.depthStencil.depth;
+			v.DepthStencil.Stencil = cv.depthStencil.stencil;
+		}
+		return v;
+	}
+
+	static D3D12_HEAP_FLAGS ToDX(HeapFlags f) {
+		D3D12_HEAP_FLAGS out = D3D12_HEAP_FLAG_NONE;
+		auto test = [&](HeapFlags b) { return (static_cast<uint32_t>(f) & static_cast<uint32_t>(b)) != 0; };
+		if (test(HeapFlags::AllowOnlyBuffers))            out |= D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+		if (test(HeapFlags::AllowOnlyNonRtDsTextures))    out |= D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
+		if (test(HeapFlags::AllowOnlyRtDsTextures))       out |= D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
+		if (test(HeapFlags::DenyBuffers))                 out |= D3D12_HEAP_FLAG_DENY_BUFFERS;
+		if (test(HeapFlags::DenyRtDsTextures))            out |= D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES;
+		if (test(HeapFlags::DenyNonRtDsTextures))         out |= D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES;
+		if (test(HeapFlags::Shared))                      out |= D3D12_HEAP_FLAG_SHARED;
+		if (test(HeapFlags::SharedCrossAdapter))          out |= D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
+		if (test(HeapFlags::CreateNotResident))           out |= D3D12_HEAP_FLAG_CREATE_NOT_RESIDENT;
+		if (test(HeapFlags::CreateNotZeroed))             out |= D3D12_HEAP_FLAG_CREATE_NOT_ZEROED;
+		if (test(HeapFlags::AllowAllBuffersAndTextures))  out |= D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+		return out;
+	}
 
 	// Build D3D12_RESOURCE_DESC1 for buffers
 	static D3D12_RESOURCE_DESC1 MakeBufferDesc1(uint64_t bytes, D3D12_RESOURCE_FLAGS flags) {
@@ -371,23 +401,30 @@ namespace rhi {
 		d.Alignment = 0;
 		d.MipLevels = td.texture.mipLevels;
 		d.Format = ToDxgi(td.texture.format);
-		d.SampleDesc = { 1, 0 };
+		d.SampleDesc = { td.texture.sampleCount, 0 };
 		d.Flags = ToDX(td.flags);
 		d.SamplerFeedbackMipRegion = {};
 
-		switch (td.texture.dim) {
-		case TextureViewDim::Tex3D:
+		switch (td.type) {
+		case ResourceType::Texture3D:
 			d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
 			d.Width = td.texture.width;
 			d.Height = td.texture.height;
 			d.DepthOrArraySize = td.texture.depthOrLayers;
 			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			break;
-		default: // Tex2D / Tex2DArray / Cube / CubeArray treated as 2D arrays
+		case ResourceType::Texture2D:
 			d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 			d.Width = td.texture.width;
 			d.Height = td.texture.height;
 			d.DepthOrArraySize = td.texture.depthOrLayers; // for Cube/CubeArray pass N*6 here
+			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+			break;
+		case ResourceType::Texture1D:
+			d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE1D;
+			d.Width = td.texture.width;
+			d.Height = 1;
+			d.DepthOrArraySize = td.texture.depthOrLayers;
 			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			break;
 		}
@@ -464,6 +501,8 @@ namespace rhi {
 		std::vector<ResourceHandle> imageHandles; std::vector<ViewHandle> rtvHandles;
 	};
 
+	struct Dx12Heap { Microsoft::WRL::ComPtr<ID3D12Heap> heap; uint64_t size{}; };
+
 	struct Dx12Device {
 		Device self{};
 		ComPtr<IDXGIFactory7> factory; ComPtr<ID3D12Device10> dev;
@@ -478,6 +517,7 @@ namespace rhi {
 		Registry<Dx12Allocator> allocators;
 		Registry<Dx12CommandList> commandLists;
 		Registry<Dx12Timeline> timelines;
+		Registry<Dx12Heap> heaps;
 
 		Dx12QueueState gfx{}, comp{}, copy{};
 	};
@@ -964,76 +1004,167 @@ namespace rhi {
 		out.ptr += SIZE_T(s.index) * H->inc;
 		return true;
 	}
+
 	static Result d_createShaderResourceView(Device* d, DescriptorSlot s, const SrvDesc& dv) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
+
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return Result::InvalidArg;
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV))
+			return Result::InvalidArg;
 
 		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
-		desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		desc.Shader4ComponentMapping = (dv.componentMapping == 0)
+			? D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING
+			: dv.componentMapping;
 
-		switch (dv.type) {
-		case ViewType::Texture: {
-			auto* T = impl->textures.get(dv.resource); if (!T) return Result::InvalidArg;
-			desc.Format = (dv.texFormatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.texFormatOverride);
-			switch (dv.texDim) {
-			case TextureViewDim::Tex2D:
-				desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-				desc.Texture2D.MostDetailedMip = dv.texRange.baseMip;
-				desc.Texture2D.MipLevels = dv.texRange.mipCount; break;
-			case TextureViewDim::Tex2DArray:
-				desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-				desc.Texture2DArray.MostDetailedMip = dv.texRange.baseMip;
-				desc.Texture2DArray.MipLevels = dv.texRange.mipCount;
-				desc.Texture2DArray.FirstArraySlice = dv.texRange.baseLayer;
-				desc.Texture2DArray.ArraySize = dv.texRange.layerCount; break;
-			case TextureViewDim::Tex3D:
-				desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
-				desc.Texture3D.MostDetailedMip = dv.texRange.baseMip;
-				desc.Texture3D.MipLevels = dv.texRange.mipCount; break;
-			case TextureViewDim::Cube:
-				desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-				desc.TextureCube.MostDetailedMip = dv.texRange.baseMip;
-				desc.TextureCube.MipLevels = dv.texRange.mipCount; break;
-			case TextureViewDim::CubeArray:
-				desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
-				desc.TextureCubeArray.MostDetailedMip = dv.texRange.baseMip;
-				desc.TextureCubeArray.MipLevels = dv.texRange.mipCount;
-				desc.TextureCubeArray.First2DArrayFace = dv.texRange.baseLayer;
-				desc.TextureCubeArray.NumCubes = dv.texRange.layerCount / 6; break;
-			}
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
-			return Result::Ok;
-		}
+		switch (dv.dim) {
+		case SrvDim::Buffer: {
+			auto* B = impl->buffers.get(dv.resource);
+			if (!B || !B->res) return Result::InvalidArg;
 
-		case ViewType::Buffer: {
-			auto* B = impl->buffers.get(dv.resource); if (!B) return Result::InvalidArg;
 			desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-			switch (dv.bufKind) {
+			switch (dv.buffer.kind) {
 			case BufferViewKind::Raw:
 				desc.Format = DXGI_FORMAT_R32_TYPELESS;
-				desc.Buffer.FirstElement = (UINT)dv.firstElement;   // 32-bit units
-				desc.Buffer.NumElements = dv.numElements;
+				desc.Buffer.FirstElement = (UINT)dv.buffer.firstElement; // in 32-bit units
+				desc.Buffer.NumElements = dv.buffer.numElements;
 				desc.Buffer.StructureByteStride = 0;
-				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW; break;
+				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+				break;
 			case BufferViewKind::Structured:
 				desc.Format = DXGI_FORMAT_UNKNOWN;
-				desc.Buffer.FirstElement = (UINT)dv.firstElement;
-				desc.Buffer.NumElements = dv.numElements;
-				desc.Buffer.StructureByteStride = dv.structureByteStride;
-				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE; break;
+				desc.Buffer.FirstElement = (UINT)dv.buffer.firstElement;
+				desc.Buffer.NumElements = dv.buffer.numElements;
+				desc.Buffer.StructureByteStride = dv.buffer.structureByteStride;
+				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+				break;
 			case BufferViewKind::Typed:
-				desc.Format = ToDxgi(dv.bufFormat);
-				desc.Buffer.FirstElement = (UINT)dv.firstElement;
-				desc.Buffer.NumElements = dv.numElements;
+				desc.Format = ToDxgi(dv.formatOverride);
+				desc.Buffer.FirstElement = (UINT)dv.buffer.firstElement;
+				desc.Buffer.NumElements = dv.buffer.numElements;
 				desc.Buffer.StructureByteStride = 0;
-				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE; break;
+				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+				break;
 			}
 			impl->dev->CreateShaderResourceView(B->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
-		case ViewType::Undefined: break;
+		case SrvDim::Tex1D: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D;
+			desc.Texture1D.MostDetailedMip = dv.tex1D.mostDetailedMip;
+			desc.Texture1D.MipLevels = dv.tex1D.mipLevels;
+			desc.Texture1D.ResourceMinLODClamp = dv.tex1D.minLodClamp;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::Tex1DArray: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1DARRAY;
+			desc.Texture1DArray.MostDetailedMip = dv.tex1DArray.mostDetailedMip;
+			desc.Texture1DArray.MipLevels = dv.tex1DArray.mipLevels;
+			desc.Texture1DArray.FirstArraySlice = dv.tex1DArray.firstArraySlice;
+			desc.Texture1DArray.ArraySize = dv.tex1DArray.arraySize;
+			desc.Texture1DArray.ResourceMinLODClamp = dv.tex1DArray.minLodClamp;
+			auto* R = T->res.Get();
+			impl->dev->CreateShaderResourceView(R, &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::Tex2D: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			desc.Texture2D.MostDetailedMip = dv.tex2D.mostDetailedMip;
+			desc.Texture2D.MipLevels = dv.tex2D.mipLevels;
+			desc.Texture2D.PlaneSlice = dv.tex2D.planeSlice;
+			desc.Texture2D.ResourceMinLODClamp = dv.tex2D.minLodClamp;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::Tex2DArray: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+			desc.Texture2DArray.MostDetailedMip = dv.tex2DArray.mostDetailedMip;
+			desc.Texture2DArray.MipLevels = dv.tex2DArray.mipLevels;
+			desc.Texture2DArray.FirstArraySlice = dv.tex2DArray.firstArraySlice;
+			desc.Texture2DArray.ArraySize = dv.tex2DArray.arraySize;
+			desc.Texture2DArray.PlaneSlice = dv.tex2DArray.planeSlice;
+			desc.Texture2DArray.ResourceMinLODClamp = dv.tex2DArray.minLodClamp;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::Tex2DMS: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::Tex2DMSArray: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
+			desc.Texture2DMSArray.FirstArraySlice = dv.tex2DMSArray.firstArraySlice;
+			desc.Texture2DMSArray.ArraySize = dv.tex2DMSArray.arraySize;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::Tex3D: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+			desc.Texture3D.MostDetailedMip = dv.tex3D.mostDetailedMip;
+			desc.Texture3D.MipLevels = dv.tex3D.mipLevels;
+			desc.Texture3D.ResourceMinLODClamp = dv.tex3D.minLodClamp;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::Cube: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+			desc.TextureCube.MostDetailedMip = dv.cube.mostDetailedMip;
+			desc.TextureCube.MipLevels = dv.cube.mipLevels;
+			desc.TextureCube.ResourceMinLODClamp = dv.cube.minLodClamp;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::CubeArray: {
+			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
+			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+			desc.TextureCubeArray.MostDetailedMip = dv.cubeArray.mostDetailedMip;
+			desc.TextureCubeArray.MipLevels = dv.cubeArray.mipLevels;
+			desc.TextureCubeArray.First2DArrayFace = dv.cubeArray.first2DArrayFace;
+			desc.TextureCubeArray.NumCubes = dv.cubeArray.numCubes;
+			desc.TextureCubeArray.ResourceMinLODClamp = dv.cubeArray.minLodClamp;
+			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		case SrvDim::AccelStruct: {
+			// AS is stored in a buffer with ResourceFlags::RaytracingAccelerationStructure
+			auto* B = impl->buffers.get(dv.resource); if (!B || !B->res) return Result::InvalidArg;
+			desc.Format = DXGI_FORMAT_UNKNOWN;
+			desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+			desc.RaytracingAccelerationStructure.Location = B->res->GetGPUVirtualAddress();
+			impl->dev->CreateShaderResourceView(B->res.Get(), &desc, dst);
+			return Result::Ok;
+		}
+
+		default: break;
 		}
 
 		return Result::InvalidArg;
@@ -1047,7 +1178,7 @@ namespace rhi {
 		D3D12_UNORDERED_ACCESS_VIEW_DESC desc{};
 
 		switch (dv.type) {
-		case ViewType::Texture: {
+		case UAVType::Texture: {
 			auto* T = impl->textures.get(dv.resource); if (!T) return Result::InvalidArg;
 			desc.Format = (dv.texFormatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.texFormatOverride);
 			switch (dv.texDim) {
@@ -1070,7 +1201,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case ViewType::Buffer: {
+		case UAVType::Buffer: {
 			auto* B = impl->buffers.get(dv.resource); if (!B) return Result::InvalidArg;
 			desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
 			switch (dv.bufKind) {
@@ -1096,7 +1227,7 @@ namespace rhi {
 			impl->dev->CreateUnorderedAccessView(B->res.Get(), nullptr, &desc, dst);
 			return Result::Ok;
 		}
-		case ViewType::Undefined: break;
+		case UAVType::Undefined: break;
 		}
 
 		return Result::InvalidArg;
@@ -1228,7 +1359,7 @@ namespace rhi {
 		return MakeCommandListPtr(d, out);
 	}
 
-	static ResourcePtr d_createBuffer(Device* d, const ResourceDesc& bd) noexcept {
+	static ResourcePtr d_createCommittedBuffer(Device* d, const ResourceDesc& bd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) return {};
 
@@ -1264,7 +1395,7 @@ namespace rhi {
 		return MakeBufferPtr(d, handle);
 	}
 
-	static ResourcePtr d_createTexture(Device* d, const ResourceDesc& td) noexcept {
+	static ResourcePtr d_createCommittedTexture(Device* d, const ResourceDesc& td) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown)
 			return {};
@@ -1276,22 +1407,12 @@ namespace rhi {
 
 		const D3D12_RESOURCE_DESC1 desc = MakeTexDesc1(td);
 
-		D3D12_CLEAR_VALUE clear{};
-		const bool isRT = (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0;
-		const bool isDS = (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0;
-		const D3D12_CLEAR_VALUE* pClear = nullptr;
-		if (td.texture.optimizedClear && (isRT || isDS)) {
-			clear.Format = desc.Format;
-			if (isDS) { clear.DepthStencil.Depth = td.texture.optimizedClear->depth; clear.DepthStencil.Stencil = td.texture.optimizedClear->stencil; }
-			else {
-				clear.Color[0] = td.texture.optimizedClear->rgba[0]; clear.Color[1] = td.texture.optimizedClear->rgba[1];
-				clear.Color[2] = td.texture.optimizedClear->rgba[2]; clear.Color[3] = td.texture.optimizedClear->rgba[3];
-			}
+		D3D12_CLEAR_VALUE* pClear = nullptr;
+		D3D12_CLEAR_VALUE clear;
+		if (td.texture.optimizedClear) {
+			clear = ToDX(*td.texture.optimizedClear);
 			pClear = &clear;
 		}
-
-		
-
 		// Textures can specify InitialLayout (enhanced barriers)
 		const D3D12_BARRIER_LAYOUT initialLayout = ToDX(td.texture.initialLayout);
 
@@ -1318,10 +1439,13 @@ namespace rhi {
 		return MakeTexturePtr(d, handle);
 	}
 
-	static ResourcePtr d_createResource(Device* d, const ResourceDesc& td) noexcept {
+	static ResourcePtr d_createCommittedResource(Device* d, const ResourceDesc& td) noexcept {
 		switch (td.type) {
-		case ResourceType::Buffer:  return d_createBuffer(d, td);
-		case ResourceType::Texture: return d_createTexture(d, td);
+		case ResourceType::Buffer:  return d_createCommittedBuffer(d, td);
+		case ResourceType::Texture3D:
+		case ResourceType::Texture2D:
+		case ResourceType::Texture1D:
+			return d_createCommittedTexture(d, td);
 		case ResourceType::Unknown: return {};
 		}
 		return {};
@@ -1366,6 +1490,127 @@ namespace rhi {
 		WaitForSingleObject(e, INFINITE);
 		CloseHandle(e);
 		return Result::Ok;
+	}
+
+	static HeapPtr d_createHeap(Device* d, const HeapDesc& hd) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || !impl->dev || hd.sizeBytes == 0) return {};
+
+		D3D12_HEAP_PROPERTIES props{};
+		props.Type = ToDx(hd.memory);         // same helper you already have (Upload/Readback/Default)
+		props.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		props.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		props.CreationNodeMask = 1;
+		props.VisibleNodeMask = 1;
+
+		D3D12_HEAP_DESC desc{};
+		desc.SizeInBytes = hd.sizeBytes;
+		desc.Alignment = (hd.alignment ? hd.alignment : D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+		desc.Properties = props;
+		desc.Flags = ToDX(hd.flags);
+
+		Microsoft::WRL::ComPtr<ID3D12Heap> heap;
+		if (FAILED(impl->dev->CreateHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
+
+#ifdef _WIN32
+		if (hd.debugName) { std::wstring w(hd.debugName, hd.debugName + ::strlen(hd.debugName)); heap->SetName(w.c_str()); }
+#endif
+
+		Dx12Heap H{ heap, hd.sizeBytes };
+		auto h = impl->heaps.alloc(std::move(H));
+		return MakeHeapPtr(d, HeapHandle{ h.index, h.generation });
+	}
+
+	static void d_destroyHeap(Device* d, HeapHandle h) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl) return;
+		impl->heaps.free(h);
+	}
+
+	static void d_setNameHeap(Device* d, HeapHandle h, const char* n) noexcept {
+		if (!n) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* H = impl->heaps.get(h)) {
+			std::wstring w(n, n + ::strlen(n));
+			H->heap->SetName(w.c_str());
+		}
+	}
+
+	static ResourcePtr d_createPlacedTexture(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& td) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl) return {};
+		auto* H = impl->heaps.get(hh); if (!H || !H->heap) return {};
+		if (td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown)
+			return {};
+		const D3D12_RESOURCE_DESC1 desc = MakeTexDesc1(td);
+		D3D12_CLEAR_VALUE* pClear = nullptr;
+		D3D12_CLEAR_VALUE clear;
+		if (td.texture.optimizedClear) {
+			clear = ToDX(*td.texture.optimizedClear);
+			pClear = &clear;
+		}
+		// Textures can specify InitialLayout (enhanced barriers)
+		const D3D12_BARRIER_LAYOUT initialLayout = ToDX(td.texture.initialLayout);
+		Microsoft::WRL::ComPtr<ID3D12Resource> res;
+		HRESULT hr = impl->dev->CreatePlacedResource2(
+			H->heap.Get(),
+			offset,
+			&desc,
+			initialLayout,
+			pClear,
+			/*numCastableFormats*/ 0,
+			/*pProtectedSession*/ nullptr,
+			IID_PPV_ARGS(&res));
+		if (FAILED(hr)) return {};
+		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
+		Dx12Texture T{};
+		T.res = std::move(res);
+		T.fmt = desc.Format;
+		T.w = td.texture.width; T.h = td.texture.height;
+		auto handle = impl->textures.alloc(std::move(T));
+		return MakeTexturePtr(d, handle);
+	}
+
+	static ResourcePtr d_createPlacedBuffer(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& bd) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl) return {};
+		auto* H = impl->heaps.get(hh); if (!H || !H->heap) return {};
+		if (bd.buffer.sizeBytes == 0) return {};
+		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.flags);
+		const D3D12_RESOURCE_DESC1  desc = MakeBufferDesc1(bd.buffer.sizeBytes, flags);
+		// Buffers must use UNDEFINED layout per spec
+		const D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_UNDEFINED;
+		Microsoft::WRL::ComPtr<ID3D12Resource> res;
+		HRESULT hr = impl->dev->CreatePlacedResource2(
+			H->heap.Get(),
+			offset,
+			&desc,
+			initialLayout,
+			/*pOptimizedClearValue*/ nullptr,        // buffers: must be null
+			/*numCastableFormats*/   0,
+			/*pProtectedSession*/   nullptr,
+			IID_PPV_ARGS(&res));
+		if (FAILED(hr)) return {};
+		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
+		Dx12Buffer B{};
+		B.res = std::move(res);
+		auto handle = impl->buffers.alloc(std::move(B));
+		return MakeBufferPtr(d, handle);
+	}
+
+	static ResourcePtr d_createPlacedResource(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& rd) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl) return {};
+		auto* H = impl->heaps.get(hh); if (!H || !H->heap) return {};
+		switch (rd.type) {
+		case ResourceType::Buffer:  return d_createPlacedBuffer(d, hh, offset, rd);
+		case ResourceType::Texture3D:
+		case ResourceType::Texture2D:
+		case ResourceType::Texture1D:
+			return d_createPlacedTexture(d, hh, offset, rd);
+		case ResourceType::Unknown: return {};
+		}
+
 	}
 
 	// ---------------- Queue vtable funcs ----------------
@@ -1449,7 +1694,7 @@ namespace rhi {
 						dsv,
 						(p.depth->depthLoad == LoadOp::Clear ? D3D12_CLEAR_FLAG_DEPTH : (D3D12_CLEAR_FLAGS)0) |
 						(p.depth->stencilLoad == LoadOp::Clear ? D3D12_CLEAR_FLAG_STENCIL : (D3D12_CLEAR_FLAGS)0),
-						c.depth, c.stencil, 0, nullptr);
+						c.depthStencil.depth, c.depthStencil.stencil, 0, nullptr);
 				}
 			}
 		}

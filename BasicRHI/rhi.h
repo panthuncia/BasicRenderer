@@ -29,6 +29,7 @@ namespace rhi {
         struct HTimeline {};
         struct HCommandAllocator {};
 		struct HCommandList {};
+		struct HHeap {};
 
         // forward-declared trait; default is no-op (safe in release)
         template<class Tag> struct NameOps {
@@ -58,6 +59,7 @@ namespace rhi {
 	using TimelineHandle = Handle<detail::HTimeline>;
 	using CommandAllocatorHandle = Handle<detail::HCommandAllocator>;
 	using CommandListHandle = Handle<detail::HCommandList>;
+	using HeapHandle = Handle<detail::HHeap>;
 
     //RAII unique smart pointer
 
@@ -131,6 +133,7 @@ namespace rhi {
     using DescriptorHeapPtr = UniqueHandle<DescriptorHeapHandle>;
     using SamplerPtr = UniqueHandle<SamplerHandle>;
 	using TimelinePtr = UniqueHandle<TimelineHandle>;
+	using HeapPtr = UniqueHandle<HeapHandle>;
 
     inline void name_buffer(Device* d, ResourceHandle h, const char* n) noexcept {
         if (d && d->vt && d->vt->setNameBuffer) d->vt->setNameBuffer(d, h, n);
@@ -155,6 +158,9 @@ namespace rhi {
     }
     inline void name_timeline(Device* d, TimelineHandle h, const char* n) noexcept {
         if (d && d->vt && d->vt->setNameTimeline) d->vt->setNameTimeline(d, h, n);
+	}
+    inline void name_heap(Device* d, HeapHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNameHeap) d->vt->setNameHeap(d, h, n);
 	}
 
     inline ResourcePtr MakeBufferPtr(Device* d, ResourceHandle h) noexcept {
@@ -206,6 +212,12 @@ namespace rhi {
 		return TimelinePtr(d, h,
 			[](Device* d, TimelineHandle hh) noexcept { d->DestroyTimeline(hh); }
 			, & name_timeline
+		);
+	}
+	inline HeapPtr MakeHeapPtr(Device* d, HeapHandle h) noexcept {
+		return HeapPtr(d, h,
+			[](Device* d, HeapHandle hh) noexcept { d->DestroyHeap(hh); }
+			, & name_heap
 		);
 	}
 
@@ -402,26 +414,104 @@ namespace rhi {
 
     enum class BufferViewKind : uint32_t { Raw, Structured, Typed };
 
-	enum class ViewType : uint32_t { Undefined, Texture, Buffer };
-
-    struct SrvDesc {
-        // Choose buffer OR texture
-        ViewType             type{ ViewType::Undefined };
-        ResourceHandle  resource{};
-        // Texture path
-        TextureViewDim        texDim{ TextureViewDim::Tex2D };
-        TextureSubresourceRange texRange{};
-        Format                texFormatOverride{ Format::Unknown }; // Unknown => use texture format
-        // Buffer path
-        BufferViewKind bufKind{ BufferViewKind::Raw };
-        Format         bufFormat{ Format::Unknown };    // Typed only
-        uint64_t       firstElement{ 0 };               // 32-bit units for RAW; elements for others
-        uint32_t       numElements{ 0 };
-        uint32_t       structureByteStride{ 0 };        // Structured only
+    enum class SrvDim : uint32_t {
+        Undefined,
+        Buffer,
+        Tex1D, Tex1DArray,
+        Tex2D, Tex2DArray,
+        Tex2DMS, Tex2DMSArray,
+        Tex3D,
+        Cube, CubeArray,
+        AccelStruct, // DXR TLAS/BLAS SRV (VK_KHR_acceleration_structure)
     };
 
+    // 0 => use API default (DX12_DEFAULT_SHADER_4_COMPONENT_MAPPING / RGBA identity in VK)
+    using ComponentMapping = uint32_t;
+
+    struct SrvDesc {
+        SrvDim        dim{ SrvDim::Undefined };
+        ResourceHandle resource{};
+        Format        formatOverride{ Format::Unknown }; // textures + typed buffers
+        ComponentMapping componentMapping{ 0 };          // optional, 0 = default
+
+        union {
+            struct { // ===== Buffer SRV =====
+                BufferViewKind kind{ BufferViewKind::Raw }; // Raw/Structured/Typed
+                // RAW: firstElement in 32-bit units; TYPED/STRUCTURED: in elements
+                uint64_t firstElement{ 0 };
+                uint32_t numElements{ 0 };
+                uint32_t structureByteStride{ 0 }; // Structured only
+                // typed format comes from formatOverride
+            } buffer;
+
+            struct { // ===== TEX1D =====
+                uint32_t mostDetailedMip{ 0 };
+                uint32_t mipLevels{ 0 };
+                float    minLodClamp{ 0.0f };
+            } tex1D;
+
+            struct { // ===== TEX1D ARRAY =====
+                uint32_t mostDetailedMip{ 0 };
+                uint32_t mipLevels{ 0 };
+                uint32_t firstArraySlice{ 0 };
+                uint32_t arraySize{ 0 };
+                float    minLodClamp{ 0.0f };
+            } tex1DArray;
+
+            struct { // ===== TEX2D =====
+                uint32_t mostDetailedMip{ 0 };
+                uint32_t mipLevels{ 0 };
+                uint32_t planeSlice{ 0 };     // for planar formats
+                float    minLodClamp{ 0.0f };
+            } tex2D;
+
+            struct { // ===== TEX2D ARRAY =====
+                uint32_t mostDetailedMip{ 0 };
+                uint32_t mipLevels{ 0 };
+                uint32_t firstArraySlice{ 0 };
+                uint32_t arraySize{ 0 };
+                uint32_t planeSlice{ 0 };
+                float    minLodClamp{ 0.0f };
+            } tex2DArray;
+
+            struct { // ===== TEX2DMS =====
+                // no fields
+            } tex2DMS;
+
+            struct { // ===== TEX2DMS ARRAY =====
+                uint32_t firstArraySlice{ 0 };
+                uint32_t arraySize{ 0 };
+            } tex2DMSArray;
+
+            struct { // ===== TEX3D =====
+                uint32_t mostDetailedMip{ 0 };
+                uint32_t mipLevels{ 0 };
+                float    minLodClamp{ 0.0f };
+            } tex3D;
+
+            struct { // ===== CUBE =====
+                uint32_t mostDetailedMip{ 0 };
+                uint32_t mipLevels{ 0 };
+                float    minLodClamp{ 0.0f };
+            } cube;
+
+            struct { // ===== CUBE ARRAY =====
+                uint32_t mostDetailedMip{ 0 };
+                uint32_t mipLevels{ 0 };
+                uint32_t first2DArrayFace{ 0 };
+                uint32_t numCubes{ 0 }; // arraySize / 6
+                float    minLodClamp{ 0.0f };
+            } cubeArray;
+
+            struct { // ===== ACCEL STRUCT =====
+                // no fields; resource is the AS buffer
+            } accel;
+        };
+    };
+
+    enum class UAVType : uint32_t { Undefined, Texture, Buffer };
     struct UavDesc {
-		ViewType type{ ViewType::Undefined };
+        UAVType type{ UAVType::Undefined };
         ResourceHandle  resource{};
         // Texture path
         TextureViewDim        texDim{ TextureViewDim::Tex2D };
@@ -550,7 +640,17 @@ namespace rhi {
     // ---------------- Pass & barriers (minimal) ----------------
 
     enum class LoadOp : uint32_t { Load, Clear, DontCare }; enum class StoreOp : uint32_t { Store, DontCare };
-    struct ClearValue { float rgba[4]{ 0,0,0,1 }; float depth = 1.0f; uint8_t stencil = 0; };
+	enum class ClearValueType : uint32_t { Color, DepthStencil };
+	struct DepthStencilClearValue { float depth = 1.0f; uint8_t stencil = 0; };
+    struct ClearValue {
+		ClearValueType type = ClearValueType::Color;
+		Format format = Format::Unknown;
+		// union
+        union {
+            float rgba[4]{ 0,0,0,1 };
+            DepthStencilClearValue depthStencil;
+        };
+    };
     struct ColorAttachment {
         DescriptorSlot rtv{};
         LoadOp loadOp = LoadOp::Load;
@@ -586,6 +686,14 @@ namespace rhi {
         VideoEncodeReferenceOnly = 1 << 7,
         RaytracingAccelerationStructure = 1 << 8,
     };
+	// Define |= for ResourceFlags
+	inline ResourceFlags operator|(ResourceFlags a, ResourceFlags b) {
+		return static_cast<ResourceFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+	}
+	inline ResourceFlags& operator|=(ResourceFlags& a, ResourceFlags b) {
+		a = a | b;
+		return a;
+	}
     struct BufferDesc {
         uint64_t     sizeBytes = 0;
     };
@@ -595,11 +703,11 @@ namespace rhi {
         uint32_t     height = 1;
         uint16_t     depthOrLayers = 1;     // depth for 3D, arraySize otherwise
         uint16_t     mipLevels = 1;
-        TextureViewDim dim = TextureViewDim::Tex2D;
+        uint32_t     sampleCount = 1;
         ResourceLayout initialLayout = ResourceLayout::Undefined;
         const ClearValue* optimizedClear = nullptr;    // optional, if RTV/DSV
     };
-	enum class ResourceType : uint32_t { Unknown, Texture, Buffer };
+	enum class ResourceType : uint32_t { Unknown, Buffer, Texture1D, Texture2D, Texture3D};
     struct ResourceDesc { 
         ResourceType type = ResourceType::Unknown; 
         Memory memory = Memory::DeviceLocal;
@@ -610,6 +718,37 @@ namespace rhi {
             BufferDesc buffer; 
         }; 
     };
+
+    enum class HeapFlags : uint32_t {
+        None = 0,
+        // Mirror the most useful D3D12 flags
+        AllowOnlyBuffers = 1u << 0,  // D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS
+        AllowOnlyNonRtDsTextures = 1u << 1,  // D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES
+        AllowOnlyRtDsTextures = 1u << 2,  // D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES
+        DenyBuffers = 1u << 3,  // D3D12_HEAP_FLAG_DENY_BUFFERS
+        DenyRtDsTextures = 1u << 4,  // D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES
+        DenyNonRtDsTextures = 1u << 5,  // D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES
+        Shared = 1u << 6,  // D3D12_HEAP_FLAG_SHARED
+        SharedCrossAdapter = 1u << 7,  // D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER
+        CreateNotResident = 1u << 8,  // D3D12_HEAP_FLAG_CREATE_NOT_RESIDENT
+        CreateNotZeroed = 1u << 9,  // D3D12_HEAP_FLAG_CREATE_NOT_ZEROED
+        AllowAllBuffersAndTextures = 1u << 10  // D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES
+    };
+
+    inline HeapFlags operator|(HeapFlags a, HeapFlags b) {
+        return static_cast<HeapFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+    inline HeapFlags& operator|=(HeapFlags& a, HeapFlags b) { a = a | b; return a; }
+
+    struct HeapDesc {
+        uint64_t   sizeBytes = 0;      // total heap size
+        uint64_t   alignment = 0;      // 0 -> choose default; otherwise 64KB or 4MB (MSAA) on DX12
+        Memory     memory = Memory::DeviceLocal; // maps to HEAP_PROPERTIES.Type
+        HeapFlags  flags = HeapFlags::None;
+        const char* debugName{ nullptr };
+    };
+
+    struct ResourceAllocInfo { uint64_t size; uint64_t alignment; };
 
     struct VertexBufferView { ResourceHandle buffer{}; uint64_t offset = 0; uint32_t sizeBytes = 0; uint32_t stride = 0; };
 
@@ -753,6 +892,8 @@ namespace rhi {
         Result(*createSampler)(Device*, DescriptorSlot dst, const SamplerDesc&) noexcept;
         ResourcePtr(*createCommittedResource)(Device*, const ResourceDesc&) noexcept;
         TimelinePtr(*createTimeline)(Device*, uint64_t initialValue, const char* debugName) noexcept;
+        HeapPtr(*createHeap)(Device*, const HeapDesc&) noexcept;
+        ResourcePtr(*createPlacedResource)(Device*, HeapHandle, uint64_t offset, const ResourceDesc&) noexcept;
 
         void (*destroySampler)(Device*, SamplerHandle) noexcept;
         void (*destroyPipelineLayout)(Device*, PipelineLayoutHandle) noexcept;
@@ -765,6 +906,7 @@ namespace rhi {
         void (*destroyBuffer)(Device*, ResourceHandle) noexcept;
         void (*destroyTexture)(Device*, ResourceHandle) noexcept;
         void (*destroyTimeline)(Device*, TimelineHandle) noexcept;
+        void (*destroyHeap)(Device*, HeapHandle) noexcept;
 
         Queue(*getQueue)(Device*, QueueKind) noexcept;
         Result(*deviceWaitIdle)(Device*) noexcept;
@@ -772,6 +914,7 @@ namespace rhi {
         uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
         uint64_t(*timelineCompletedValue)(Device*, TimelineHandle) noexcept;
         Result(*timelineHostWait)(Device*, const TimelinePoint& p) noexcept; // blocks until reached
+        ResourceAllocInfo(*getResourceAllocInfo)(Device*, const ResourceDesc&) noexcept;
 
 		// Optional debug name setters (can be nullopt)
         void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
@@ -782,6 +925,7 @@ namespace rhi {
         void (*setNameCommandSignature)(Device*, CommandSignatureHandle, const char*) noexcept;
         void (*setNameDescriptorHeap)(Device*, DescriptorHeapHandle, const char*) noexcept;
         void (*setNameTimeline)(Device*, TimelineHandle, const char*) noexcept;
+		void (*setNameHeap)(Device*, HeapHandle, const char*) noexcept;
 
         void (*destroyDevice)(Device*) noexcept;
         uint32_t abi_version = 1;
@@ -894,6 +1038,10 @@ namespace rhi {
         inline void DestroyTimeline(TimelineHandle t) noexcept { vt->destroyTimeline(this, t); }
         inline uint64_t TimelineCompletedValue(TimelineHandle t) noexcept { return vt->timelineCompletedValue(this, t); }
         inline Result TimelineHostWait(const TimelinePoint& p) noexcept { return vt->timelineHostWait(this, p); }
+        inline HeapPtr CreateHeap(const HeapDesc& h) noexcept { return vt->createHeap(this, h); }
+        inline void DestroyHeap(HeapHandle h) noexcept { vt->destroyHeap(this, h); }
+        inline ResourcePtr CreatePlacedResource(HeapHandle heap, uint64_t offset, const ResourceDesc& rd) noexcept { return vt->createPlacedResource(this, heap, offset, rd); }
+        inline ResourceAllocInfo GetResourceAllocInfo(const ResourceDesc& rd) noexcept { return vt->getResourceAllocInfo(this, rd); }
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };
 
@@ -902,7 +1050,6 @@ namespace rhi {
     inline Result Queue::Signal(const TimelinePoint& p) noexcept { return vt->signal(this, p); }
     inline Result Queue::Wait(const TimelinePoint& p) noexcept { return vt->wait(this, p); }
 
-    inline void CommandList::Begin(const char* name) noexcept { vt->begin(this, name); }
     inline void CommandList::End() noexcept { vt->end(this); }
 	inline void CommandList::Recycle(const CommandAllocator& alloc) noexcept { vt->recycle(this, alloc); }
     inline void CommandList::BeginPass(const PassBeginInfo& p) noexcept { vt->beginPass(this, p); }
@@ -964,6 +1111,9 @@ namespace rhi {
     }
     inline void SetName(TimelineHandle h, const char* n, Device& d) noexcept {
         if (d.vt->setNameTimeline) d.vt->setNameTimeline(&d, h, n);
+	}
+    inline void SetName(HeapHandle h, const char* n, Device& d) noexcept {
+        if (d.vt->setNameHeap) d.vt->setNameHeap(&d, h, n);
 	}
 
     using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
