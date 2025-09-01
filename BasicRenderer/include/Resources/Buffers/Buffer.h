@@ -24,7 +24,7 @@ class RenderContext;
 class Buffer : public GloballyIndexedResource{
 public:
 	static std::shared_ptr<Buffer> CreateShared(
-		ID3D12Device* device,
+		rhi::Device& device,
 		ResourceCPUAccessType accessType, 
 		uint64_t bufferSize, 
 		bool upload,
@@ -32,7 +32,7 @@ public:
 		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, upload, unorderedAccess));
 	}
 	static std::unique_ptr<Buffer> CreateUnique(
-		ID3D12Device* device, 
+		rhi::Device& device, 
 		ResourceCPUAccessType accessType, 
 		uint64_t bufferSize,
 		bool upload,
@@ -44,11 +44,11 @@ public:
 		m_buffer.Reset();
 	}
 	ResourceCPUAccessType m_accessType;
-	rhi::ResourceHandle m_buffer;
-	BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
+	rhi::ResourcePtr m_buffer;
+	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	size_t GetSize() const { return m_size; }
 
-	ID3D12Resource* GetAPIResource() const override { return m_buffer.Get(); }
+	rhi::ResourceHandle GetAPIResource() const override { return m_buffer.Get(); }
 protected:
 	void OnSetName() override { m_buffer->SetName(name.c_str()); }
 private:

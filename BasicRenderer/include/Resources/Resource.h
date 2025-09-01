@@ -4,27 +4,12 @@
 #include <vector>
 
 #include <resource_states.h>
+#include <rhi.h>
 
 #include "Resources/ResourceStates.h"
 #include "Resources/ResourceStateTracker.h"
 
 class RenderContext;
-
-struct BarrierGroups {
-	std::vector<D3D12_TEXTURE_BARRIER>   textureBarrierDescs;
-	std::vector<D3D12_BUFFER_BARRIER>    bufferBarrierDescs;
-	std::vector<D3D12_GLOBAL_BARRIER>    globalBarrierDescs;
-
-    std::vector<D3D12_BARRIER_GROUP> bufferBarriers;
-    std::vector<D3D12_BARRIER_GROUP> textureBarriers;
-    std::vector<D3D12_BARRIER_GROUP> globalBarriers;
-
-	BarrierGroups() = default; // Default constructor
-	BarrierGroups(const BarrierGroups&) = delete;            // no copy, since the ptrs in D3D12_BARRIER_GROUP will be invalid
-	BarrierGroups& operator=(const BarrierGroups&) = delete;
-	BarrierGroups(BarrierGroups&&) = default;                // allow move
-	BarrierGroups& operator=(BarrierGroups&&) = default;
-};
 
 class Resource {
 public:
@@ -36,12 +21,12 @@ public:
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& newName) { this->name = newName; OnSetName(); }
-	virtual ID3D12Resource* GetAPIResource() const = 0;
+	virtual rhi::ResourceHandle GetAPIResource() const = 0;
     virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
 	virtual rhi::ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_subresourceAccessTypes[subresourceIndex] ; }
 	virtual rhi::ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const { return m_subresourceLayouts[subresourceIndex]; }
 	virtual rhi::ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_subresourceSyncStates[subresourceIndex]; }
-    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) = 0;
+    virtual rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) = 0;
 	bool HasLayout() const { return m_hasLayout; }
 	void AddAliasedResource(Resource* resource) {
 		m_aliasedResources.push_back(resource);

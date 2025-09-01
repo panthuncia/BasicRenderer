@@ -68,10 +68,6 @@ public:
         return m_index;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE getHandle() const {
-        return ResourceManager::GetInstance().getSamplerCPUHandle(m_index);
-    }
-
     static std::shared_ptr<Sampler> GetDefaultSampler();
 	static std::shared_ptr<Sampler> GetDefaultShadowSampler();
 

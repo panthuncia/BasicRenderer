@@ -16,6 +16,7 @@ namespace rhi {
 		&d_createDepthStencilView,
 		&d_createSampler,
 		&d_createResource,
+		&d_createTimeline,
 		&d_destroySampler,
 		&d_destroyPipelineLayout,
 		&d_destroyPipeline,
@@ -26,11 +27,14 @@ namespace rhi {
 		&d_destroyDescriptorHeap,
 		&d_destroyBuffer,
 		&d_destroyTexture,
+		&d_destroyTimeline,
 		
 		&d_getQueue,
 		&d_waitIdle,
 		&d_flushDeletionQueue,
 		&d_getDescriptorHandleIncrementSize,
+		&d_timelineCompletedValue,
+		&d_timelineHostWait,
 		&d_destroyDevice,
         2u
     };

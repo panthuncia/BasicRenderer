@@ -1,4 +1,7 @@
 #include "Managers/Singletons/ResourceManager.h"
+
+#include <rhi_helpers.h>
+
 #include "Utilities/Utilities.h"
 #include "DirectX/d3dx12.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -7,13 +10,13 @@
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Managers/Singletons/UploadManager.h"
-void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
+void ResourceManager::Initialize(rhi::Queue commandQueue) {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
 	//    frameResourceCopies[i]->Initialize();
 	//}
 
-	auto& device = DeviceManager::GetInstance().GetDevice();
+	auto device = DeviceManager::GetInstance().GetDevice();
 	m_cbvSrvUavHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::CbvSrvUav, 1000000 /*D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1*/, true);
 	m_samplerHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::Sampler, 2048, true);
 	m_rtvHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::RTV, 10000, false);
@@ -44,15 +47,19 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	InitializeTransitionCommandList();
 	SetTransitionCommandQueue(commandQueue);
 
-	auto clearDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT));
-	auto clearHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-	ThrowIfFailed(device->CreateCommittedResource(
-		&clearHeapProps,
-		D3D12_HEAP_FLAG_NONE,
-		&clearDesc,
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(&m_uavCounterReset)));
+
+
+	//auto clearDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT));
+	//auto clearHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	//ThrowIfFailed(device->CreateCommittedResource(
+	//	&clearHeapProps,
+	//	D3D12_HEAP_FLAG_NONE,
+	//	&clearDesc,
+	//	D3D12_RESOURCE_STATE_GENERIC_READ,
+	//	nullptr,
+	//	IID_PPV_ARGS(&m_uavCounterReset)));
+
+	device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::Memory::Upload));
 
 	UINT8* pMappedCounterReset = nullptr;
 	CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
@@ -61,19 +68,11 @@ void ResourceManager::Initialize(ID3D12CommandQueue* commandQueue) {
 	m_uavCounterReset->Unmap(0, nullptr);
 }
 
-CD3DX12_CPU_DESCRIPTOR_HANDLE ResourceManager::GetSRVCPUHandle(UINT index) {
-	return m_cbvSrvUavHeap->GetCPUHandle(index);
-}
-
-CD3DX12_GPU_DESCRIPTOR_HANDLE ResourceManager::GetSRVGPUHandle(UINT index) {
-	return m_cbvSrvUavHeap->GetGPUHandle(index);
-}
-
-ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSRVDescriptorHeap() {
+rhi::DescriptorHeapHandle ResourceManager::GetSRVDescriptorHeap() {
 	return m_cbvSrvUavHeap->GetHeap();
 }
 
-ComPtr<ID3D12DescriptorHeap> ResourceManager::GetSamplerDescriptorHeap() {
+rhi::DescriptorHeapHandle ResourceManager::GetSamplerDescriptorHeap() {
 	return m_samplerHeap->GetHeap();
 }
 
@@ -94,141 +93,109 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 }
 
 void ResourceManager::WaitForCopyQueue() {
-	ThrowIfFailed(copyCommandQueue->Signal(copyFence.Get(), ++copyFenceValue));
-	if (copyFence->GetCompletedValue() < copyFenceValue) {
-		ThrowIfFailed(copyFence->SetEventOnCompletion(copyFenceValue, copyFenceEvent));
-		WaitForSingleObject(copyFenceEvent, INFINITE);
+	auto device = DeviceManager::GetInstance().GetDevice();
+	copyCommandQueue.Signal({ copyFence.Get(), ++copyFenceValue});
+	if (device.TimelineCompletedValue(copyFence.Get()) < copyFenceValue) {
+		device.TimelineHostWait({ copyFence.Get(), copyFenceValue});
 	}
 }
 
 void ResourceManager::WaitForTransitionQueue() {
-	ThrowIfFailed(transitionCommandQueue->Signal(transitionFence.Get(), ++transitionFenceValue));
-	if (transitionFence->GetCompletedValue() < transitionFenceValue) {
-		ThrowIfFailed(transitionFence->SetEventOnCompletion(transitionFenceValue, transitionFenceEvent));
-		WaitForSingleObject(transitionFenceEvent, INFINITE);
+	auto device = DeviceManager::GetInstance().GetDevice();
+	transitionCommandQueue.Signal({ transitionFence.Get(), ++transitionFenceValue});
+	if (device.TimelineCompletedValue(transitionFence.Get()) < transitionFenceValue) {
+		device.TimelineHostWait({ transitionFence.Get(), transitionFenceValue});
 	}
 }
 
 void ResourceManager::InitializeCopyCommandQueue() {
-	auto& device = DeviceManager::GetInstance().GetDevice();
+	auto device = DeviceManager::GetInstance().GetDevice();
 
-	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&copyCommandQueue)));
+	copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics); // TODO: async copy queue
+	copyCommandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
+	copyCommandList = device.CreateCommandList(rhi::QueueKind::Graphics, copyCommandAllocator.Get());
+	copyCommandList->End();
 
-	ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&copyCommandAllocator)));
-	ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, copyCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&copyCommandList)));
-	copyCommandList->Close();
-
-	ThrowIfFailed(device->CreateFence(copyFenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copyFence)));
-	copyFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-	if (copyFenceEvent == nullptr) {
-		ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-	}
+	copyFence = device.CreateTimeline(copyFenceValue, "CopyFence");
 }
 
 void ResourceManager::InitializeTransitionCommandList() {
-	auto& device = DeviceManager::GetInstance().GetDevice();
+	auto device = DeviceManager::GetInstance().GetDevice();
 
-	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	transitionCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
+	transitionCommandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
+	transitionCommandList = device.CreateCommandList(rhi::QueueKind::Graphics, transitionCommandAllocator.Get());
 
-	ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&transitionCommandAllocator)));
-	ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, transitionCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&transitionCommandList)));
-	transitionCommandList->Close();
-
-	ThrowIfFailed(device->CreateFence(transitionFenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&transitionFence)));
-	transitionFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-	if (transitionFenceEvent == nullptr) {
-		ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-	}
+	transitionFence = device.CreateTimeline(transitionFenceValue, "TransitionFence");
 }
 
-void ResourceManager::SetTransitionCommandQueue(ID3D12CommandQueue* queue) {
+void ResourceManager::SetTransitionCommandQueue(rhi::Queue queue) {
 	transitionCommandQueue = queue;
 }
 
-UINT ResourceManager::CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc) {
-	auto& device = DeviceManager::GetInstance().GetDevice();
+UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) {
+	auto device = DeviceManager::GetInstance().GetDevice();
 
 	UINT index = m_samplerHeap->AllocateDescriptor();
-	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_samplerHeap->GetCPUHandle(index);
+	//D3D12_CPU_DESCRIPTOR_HANDLE handle = m_samplerHeap->GetCPUHandle(index);
 
-	device->CreateSampler(&samplerDesc, handle);
-
+	//device->CreateSampler(&samplerDesc, handle);
+	device.CreateSampler({ m_samplerHeap->GetHeap(), index}, samplerDesc);
 	return index;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE ResourceManager::getSamplerCPUHandle(UINT index) const {
-	return m_samplerHeap->GetCPUHandle(index);
-}
-
-void ResourceManager::GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator) {
-	auto& device = DeviceManager::GetInstance().GetDevice();
+void ResourceManager::GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
+	auto device = DeviceManager::GetInstance().GetDevice();
 
 	// Create a new command allocator if none is available or reuse an existing one
-	if (!commandAllocator || FAILED(commandAllocator->Reset())) {
-		ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+	if (!commandAllocator ) {
+		commandAllocator->Recycle();
+		commandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
 	}
 
-	if (!commandList || FAILED(commandList->Reset(commandAllocator.Get(), nullptr))) {
-		ThrowIfFailed(device->CreateCommandList(
-			0,
-			D3D12_COMMAND_LIST_TYPE_DIRECT,
-			commandAllocator.Get(),
-			nullptr,
-			IID_PPV_ARGS(&commandList)
-		));
+	if (!commandList) {
+		commandList->Recycle(commandAllocator.Get());
+		commandList = device.CreateCommandList(rhi::QueueKind::Graphics, commandAllocator.Get());
 	}
 }
 
-void ResourceManager::ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator) {
-	auto& device = DeviceManager::GetInstance().GetDevice();
-	static ComPtr<ID3D12CommandQueue> copyCommandQueue;
-	static ComPtr<ID3D12Fence> copyFence;
-	static HANDLE copyFenceEvent = nullptr;
+void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
+	auto device = DeviceManager::GetInstance().GetDevice();
+	static rhi::Queue copyCommandQueue;
+	static rhi::TimelinePtr copyFence;
 	static UINT64 copyFenceValue = 0;
+	bool copyFenceEventCreated = false;
 
 	// Create the command queue if it hasn't been created yet
 	if (!copyCommandQueue) {
-		D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-		queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-		queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-		ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&copyCommandQueue)));
+		copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
 	}
 
 	// Create a fence for synchronization if it hasn't been created yet
-	if (!copyFence) {
-		ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copyFence)));
-		copyFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-		if (!copyFenceEvent) {
-			ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-		}
+	if (!copyFenceEventCreated) {
+		copyFence = device.CreateTimeline(copyFenceValue, "TempCopyFence");
+		copyFenceEventCreated = true;
 	}
 
 	// Close the command list and execute it
-	ThrowIfFailed(commandList->Close());
-	ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
-	copyCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+	commandList->End();
+	copyCommandQueue.Submit({ &commandList.Get(), 1}, {});
 
 	// Increment the fence value and signal the fence
 	++copyFenceValue;
-	ThrowIfFailed(copyCommandQueue->Signal(copyFence.Get(), copyFenceValue));
+	copyCommandQueue.Signal({ copyFence.Get(), copyFenceValue});
 
 	// Wait until the fence is completed
-	if (copyFence->GetCompletedValue() < copyFenceValue) {
-		ThrowIfFailed(copyFence->SetEventOnCompletion(copyFenceValue, copyFenceEvent));
-		WaitForSingleObject(copyFenceEvent, INFINITE);
+	if (device.TimelineCompletedValue(copyFence.Get()) < copyFenceValue) {
+		device.TimelineHostWait({ copyFence.Get(), copyFenceValue});
 	}
 
-	ThrowIfFailed(commandAllocator->Reset());
+	commandAllocator->Recycle();
 }
 
 std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
-	auto& device = DeviceManager::GetInstance().GetDevice();
-	auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+	auto device = DeviceManager::GetInstance().GetDevice();
+	auto dataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, bufferSize, false, UAV);
 	if (pInitialData) {
 		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}
@@ -289,7 +256,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
 	assert(byteAddress ? numElements % 4 == 0 : true);
 #endif
-	auto& device = DeviceManager::GetInstance().GetDevice();
+	auto device = DeviceManager::GetInstance().GetDevice();
 
 	size_t bufferSize = elementSize * numElements;
 	bufferSize += bufferSize % 4; // Align to 4 bytes
@@ -309,19 +276,20 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		});
 
 	// Create an SRV for the buffer
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
-	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-	srvDesc.Buffer.FirstElement = 0;
-	srvDesc.Buffer.NumElements = static_cast<uint32_t>(byteAddress? numElements / 4 : numElements);
-	srvDesc.Buffer.StructureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize);
-	srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
 	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-	bufferIDDescriptorIndexMap[bufferID] = index;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-	device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+
+	device.CreateShaderResourceView(
+		{ m_cbvSrvUavHeap->GetHeap(), index }, 
+		{
+			.type = rhi::ViewType::Buffer,
+			.resource = pDynamicBuffer->GetBuffer()->GetAPIResource(),
+			.bufKind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
+			.bufFormat = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown,
+			.firstElement = 0,
+			.numElements = static_cast<uint32_t>(byteAddress ? numElements / 4 : numElements),
+			.structureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize)
+		});
 
 	CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
 	ShaderVisibleIndexInfo srvInfo;

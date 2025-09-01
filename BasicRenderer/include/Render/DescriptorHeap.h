@@ -14,17 +14,16 @@ public:
     DescriptorHeap(const DescriptorHeap&) = delete;
     DescriptorHeap& operator=(const DescriptorHeap&) = delete;
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index);
     rhi::DescriptorHeapHandle GetHeap() const;
 
     UINT AllocateDescriptor();
     void ReleaseDescriptor(UINT index);
 
 private:
-    rhi::DescriptorHeapHandle m_heap;
+    rhi::DescriptorHeapPtr m_heap;
     UINT m_descriptorSize;
     UINT m_numDescriptorsAllocated;
+    uint32_t m_totalSize;
     std::queue<UINT> m_freeIndices;
     rhi::DescriptorHeapType m_type;
     bool m_shaderVisible;

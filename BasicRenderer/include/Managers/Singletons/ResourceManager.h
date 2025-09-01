@@ -33,12 +33,10 @@ public:
         return instance;
     }
 
-    void Initialize(ID3D12CommandQueue* commandQueue);
+    void Initialize(rhi::Queue commandQueue);
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
-    ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
-    ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
+    rhi::DescriptorHeapHandle GetSRVDescriptorHeap();
+    rhi::DescriptorHeapHandle GetSamplerDescriptorHeap();
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
     
     std::shared_ptr<Buffer>& GetPerFrameBuffer() {
@@ -445,8 +443,7 @@ public:
 
     void UploadTextureData(ID3D12Resource* pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
 
-    UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
-    D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
+    UINT CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc);
 
 	//void QueueResourceTransition(const ResourceTransition& transition);
     //void ExecuteResourceTransitions();
@@ -454,7 +451,7 @@ public:
 	void SetActiveEnvironmentIndex(unsigned int index) { perFrameCBData.activeEnvironmentIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
 
-	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
+	rhi::ResourceHandle& GetUAVCounterReset() { return m_uavCounterReset.Get(); }
 
     const std::shared_ptr<DescriptorHeap>& GetCBVSRVUAVHeap() const { return m_cbvSrvUavHeap; }
     const std::shared_ptr<DescriptorHeap>& GetSamplerHeap() const { return m_samplerHeap; }
@@ -468,10 +465,10 @@ private:
     void WaitForTransitionQueue();
     void InitializeCopyCommandQueue();
     void InitializeTransitionCommandList();
-	void SetTransitionCommandQueue(ID3D12CommandQueue* commandQueue);
-    void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
-    void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
-    void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
+	void SetTransitionCommandQueue(rhi::Queue commandQueue);
+    void GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
+    void GetDirectCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
+    void ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
 
     std::shared_ptr<DescriptorHeap> m_cbvSrvUavHeap;
     std::shared_ptr<DescriptorHeap> m_samplerHeap;
@@ -481,17 +478,17 @@ private:
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> copyCommandQueue;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> copyCommandAllocator;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> copyCommandList;
-    Microsoft::WRL::ComPtr<ID3D12Fence> copyFence;
+    rhi::Queue copyCommandQueue;
+    rhi::CommandAllocatorPtr copyCommandAllocator;
+    rhi::CommandListPtr copyCommandList;
+    rhi::TimelinePtr copyFence;
     HANDLE copyFenceEvent;
     UINT64 copyFenceValue = 0;
 
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> transitionCommandQueue;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> transitionCommandAllocator;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> transitionCommandList;
-    Microsoft::WRL::ComPtr<ID3D12Fence> transitionFence;
+    rhi::Queue transitionCommandQueue;
+    rhi::CommandAllocatorPtr transitionCommandAllocator;
+    rhi::CommandListPtr transitionCommandList;
+    rhi::TimelinePtr transitionFence;
     HANDLE transitionFenceEvent;
     UINT64 transitionFenceValue = 0;
 
@@ -502,8 +499,8 @@ private:
 
     //std::shared_ptr<DynamicStructuredBuffer<LightInfo>> lightBufferPtr;
 
-    ComPtr<ID3D12GraphicsCommandList> commandList;
-    ComPtr<ID3D12CommandAllocator> commandAllocator;
+    rhi::CommandListPtr commandList;
+    rhi::CommandAllocatorPtr commandAllocator;
 
     std::vector<std::shared_ptr<Buffer>> buffersToUpdate;
     std::vector<DynamicBufferBase*> dynamicBuffersToUpdate;
@@ -511,7 +508,7 @@ private:
 
 	//std::vector<ResourceTransition> queuedResourceTransitions;
 
-    ComPtr<ID3D12Resource> m_uavCounterReset;
+    rhi::ResourcePtr m_uavCounterReset;
 
 	int defaultShadowSamplerIndex = -1;
 

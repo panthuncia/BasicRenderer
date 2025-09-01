@@ -32,6 +32,9 @@ namespace rhi {
 		uint32_t stride = 0;
 	};
 
+	struct Dx12Allocator { Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc; D3D12_COMMAND_LIST_TYPE type{}; };
+	struct Dx12CommandList { Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl; D3D12_COMMAND_LIST_TYPE type{}; Dx12Device* dev; };
+
 	static inline D3D12_BARRIER_ACCESS ToDX(const ResourceAccessType state) {
 		if (state == ResourceAccessType::None) {
 			return D3D12_BARRIER_ACCESS_NO_ACCESS;
@@ -392,52 +395,66 @@ namespace rhi {
 	}
 
 	// tiny handle registry
+	
+	template<class Obj> struct HandleFor;  // no default
+
+	template<> struct HandleFor<Dx12Buffer> { using type = rhi::ResourceHandle; };
+	template<> struct HandleFor<Dx12Texture> { using type = rhi::ResourceHandle; };
+	template<> struct HandleFor<Dx12View> { using type = rhi::ViewHandle; };
+	template<> struct HandleFor<Dx12Sampler> { using type = rhi::SamplerHandle; };
+	template<> struct HandleFor<Dx12PipelineLayout> { using type = rhi::PipelineLayoutHandle; };
+	template<> struct HandleFor<Dx12Pipeline> { using type = rhi::PipelineHandle; };
+	template<> struct HandleFor<Dx12CommandSignature> { using type = rhi::CommandSignatureHandle; };
+	template<> struct HandleFor<Dx12DescHeap> { using type = rhi::DescriptorHeapHandle; };
+	template<> struct HandleFor<Dx12Timeline> { using type = rhi::TimelineHandle; };
+	template<> struct HandleFor<Dx12Allocator> { using type = rhi::CommandAllocatorHandle; };
+	template<> struct HandleFor<Dx12CommandList> { using type = rhi::CommandListHandle; };
+
 	template<typename T>
 	struct Slot { T obj{}; uint32_t generation{ 1 }; bool alive{ false }; };
 
+	// Generic registry, automatically picks the correct handle for T via HandleFor<T>.
 	template<typename T>
 	struct Registry {
-		std::vector<Slot<T>> slots; std::vector<uint32_t> freelist;
-		Handle32 alloc(const T& v) {
+		using HandleT = typename HandleFor<T>::type;
+
+		std::vector<Slot<T>> slots;
+		std::vector<uint32_t> freelist;
+
+		HandleT alloc(const T& v) {
 			if (!freelist.empty()) {
-				auto i = freelist.back();
-				freelist.pop_back();
-				auto& s = slots[i];
-				s.obj = v;
-				s.alive = true;
-				++s.generation;
-				return { i,s.generation };
+				const uint32_t i = freelist.back(); freelist.pop_back();
+				auto& s = slots[i]; s.obj = v; s.alive = true; ++s.generation;
+				return HandleT{ i, s.generation };
 			}
-			auto i = (uint32_t)slots.size();
-			slots.push_back({ v,1u,true });
-			return { i,1u };
+			const uint32_t i = (uint32_t)slots.size();
+			slots.push_back({ v, 1u, true });
+			return HandleT{ i, 1u };
 		}
-		void free(Handle32 h) {
-			if (h.index >= slots.size()) {
-				return;
-			}
-			auto& s = slots[h.index];
-			if (!s.alive || s.generation != h.generation) {
-				return;
-			}
-			s.alive = false;
-			freelist.push_back(h.index);
+
+		void free(HandleT h) {
+			uint32_t i = h.index;
+			if (i >= slots.size()) return;
+			auto& s = slots[i];
+			if (!s.alive || s.generation != h.generation) return;
+			s.alive = false; freelist.push_back(i);
 		}
-		T* get(Handle32 h) {
-			if (h.index >= slots.size()) {
-				return nullptr;
-			}
-			auto& s = slots[h.index];
-			if (!s.alive || s.generation != h.generation) {
-				return nullptr;
-			}
+
+		T* get(HandleT h) {
+			uint32_t i = h.index;
+			if (i >= slots.size()) return nullptr;
+			auto& s = slots[i];
+			if (!s.alive || s.generation != h.generation) return nullptr;
 			return &s.obj;
 		}
 	};
 
+	struct Dx12Timeline { Microsoft::WRL::ComPtr<ID3D12Fence> fence; };
+
 	struct Dx12QueueState {
-		ComPtr<ID3D12CommandQueue> q;
-		ComPtr<ID3D12Fence> fence; UINT64 value = 0;
+		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
+		Microsoft::WRL::ComPtr<ID3D12Fence> fence; UINT64 value = 0;
+		Dx12Device* owner{};
 	};
 
 	struct Dx12Swapchain {
@@ -446,8 +463,6 @@ namespace rhi {
 		std::vector<ComPtr<ID3D12Resource>> images;
 		std::vector<ResourceHandle> imageHandles; std::vector<ViewHandle> rtvHandles;
 	};
-
-	struct Dx12Allocator { Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc; D3D12_COMMAND_LIST_TYPE type{}; };
 
 	struct Dx12Device {
 		Device self{};
@@ -461,10 +476,10 @@ namespace rhi {
 		Registry<Dx12CommandSignature> commandSignatures;
 		Registry<Dx12DescHeap> descHeaps;
 		Registry<Dx12Allocator> allocators;
+		Registry<Dx12CommandList> commandLists;
+		Registry<Dx12Timeline> timelines;
 
 		Dx12QueueState gfx{}, comp{}, copy{};
-		struct CL { Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl; };
-		std::vector<CL> liveCLs;
 	};
 
 	struct Dx12DescHeap {
@@ -476,13 +491,6 @@ namespace rhi {
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
 	};
 
-	// ---------------- CommandList wrapper impl ----------------
-	struct Dx12CLWrap {
-		Dx12Device* dev{}; QueueKind kind{};
-		Dx12Device::CL* rec{};
-		bool recording = false;
-		Handle32 allocH{};
-	};
 	// ---------------- VTables forward ----------------
 	extern const DeviceVTable g_devvt; extern const QueueVTable g_qvt; extern const CommandListVTable g_clvt; extern const SwapchainVTable g_scvt; extern const CommandAllocatorVTable g_calvt;
 
@@ -502,7 +510,7 @@ namespace rhi {
 		return static_cast<uint8_t>(e);
 	}
 
-	static PipelineHandle d_createPipelineFromStream(Device* d,
+	static PipelinePtr d_createPipelineFromStream(Device* d,
 		const PipelineStreamItem* items,
 		uint32_t count) noexcept
 	{
@@ -645,7 +653,8 @@ namespace rhi {
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
 		if (FAILED(impl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) return {};
 
-		return impl->pipelines.alloc(Dx12Pipeline{ pso, isCompute });
+		auto handle = impl->pipelines.alloc(Dx12Pipeline{ pso, isCompute });
+		return MakePipelinePtr(d, handle);
 	}
 
 	static void d_destroyPipeline(Device* d, PipelineHandle h) noexcept {
@@ -658,18 +667,16 @@ namespace rhi {
 	static void d_destroySampler(Device* d, SamplerHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->samplers.free(h); }
 	static void d_destroyPipeline(Device* d, PipelineHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->pipelines.free(h); }
 
-	static void d_destroyCommandList(Device*, CommandList* cl) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		delete w;
-		cl->impl = nullptr;
-		cl->vt = nullptr;
+	static void d_destroyCommandList(Device*, CommandList cl) noexcept {
+		static_cast<Dx12Device*>(cl.impl)->commandLists.free(cl.GetHandle());
 	}
 
-	static Queue d_getQueue(Device* d, QueueKind q) noexcept {
+	static Queue d_getQueue(Device* d, QueueKind qk) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		Queue out{};
-		out.vt = &g_qvt;
-		out.impl = (q == QueueKind::Graphics ? &impl->gfx : q == QueueKind::Compute ? &impl->comp : &impl->copy);
+		Queue out{}; out.vt = &g_qvt;
+		Dx12QueueState* s = (qk == QueueKind::Graphics ? &impl->gfx : qk == QueueKind::Compute ? &impl->comp : &impl->copy);
+		s->owner = impl;
+		out.impl = s;
 		return out;
 	}
 
@@ -777,7 +784,7 @@ namespace rhi {
 		}
 	}
 
-	static PipelineLayoutHandle d_createPipelineLayout(Device* d, const PipelineLayoutDesc& ld) noexcept {
+	static PipelineLayoutPtr d_createPipelineLayout(Device* d, const PipelineLayoutDesc& ld) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 
 		// Root parameters: push constants only (bindless tables omitted for brevity)
@@ -849,7 +856,8 @@ namespace rhi {
 		if (ld.staticSamplers.size && ld.staticSamplers.data)
 			L.staticSamplers.assign(ld.staticSamplers.data, ld.staticSamplers.data + ld.staticSamplers.size);
 		L.root = root;
-		return impl->pipelineLayouts.alloc(std::move(L));
+		auto handle = impl->pipelineLayouts.alloc(std::move(L));
+		return MakePipelineLayoutPtr(d, handle);
 	}
 
 
@@ -889,7 +897,7 @@ namespace rhi {
 
 	static bool FillDx12Arg(const IndirectArg& a, D3D12_INDIRECT_ARGUMENT_DESC& out);
 
-	static CommandSignatureHandle d_createCommandSignature(Device* d,
+	static CommandSignaturePtr d_createCommandSignature(Device* d,
 		const CommandSignatureDesc& cd,
 		PipelineLayoutHandle layout) noexcept
 	{
@@ -917,14 +925,15 @@ namespace rhi {
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> cs;
 		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) return {};
 		Dx12CommandSignature S{ cs, cd.byteStride };
-		return impl->commandSignatures.alloc(std::move(S));
+		auto handle = impl->commandSignatures.alloc(std::move(S));
+		return MakeCommandSignaturePtr(d, handle);
 	}
 
 	static void d_destroyCommandSignature(Device* d, CommandSignatureHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->commandSignatures.free(h);
 	}
 
-	static DescriptorHeapHandle d_createDescriptorHeap(Device* d, const DescriptorHeapDesc& hd) noexcept {
+	static DescriptorHeapPtr d_createDescriptorHeap(Device* d, const DescriptorHeapDesc& hd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 
 		D3D12_DESCRIPTOR_HEAP_DESC desc{};
@@ -942,7 +951,8 @@ namespace rhi {
 		H.cpuStart = heap->GetCPUDescriptorHandleForHeapStart();
 		if (H.shaderVisible) H.gpuStart = heap->GetGPUDescriptorHandleForHeapStart();
 
-		return impl->descHeaps.alloc(std::move(H));
+		auto handle = impl->descHeaps.alloc(std::move(H));
+		return MakeDescriptorHeapPtr(d, handle);
 	}
 	static void d_destroyDescriptorHeap(Device* d, DescriptorHeapHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->descHeaps.free(h);
@@ -1180,60 +1190,50 @@ namespace rhi {
 			: D3D12_COMMAND_LIST_TYPE_COPY;
 	}
 
-	struct Dx12CAWrap { Dx12Device* dev{}; Handle32 h{}; };
-
-	static CommandAllocator d_createCommandAllocator(Device* d, QueueKind q) noexcept {
+	static CommandAllocatorPtr d_createCommandAllocator(Device* d, QueueKind q) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a;
 		if (FAILED(impl->dev->CreateCommandAllocator(ToDx(q), IID_PPV_ARGS(&a)))) return {};
 
 		Dx12Allocator A{}; A.alloc = a; A.type = ToDx(q);
-		Handle32 h = impl->allocators.alloc(std::move(A));
-
-		auto* wrap = new Dx12CAWrap{ impl, h };
+		auto h = impl->allocators.alloc(std::move(A));
 
 		extern const CommandAllocatorVTable g_cavt; // vtable defined below
-		CommandAllocator out{};
-		out.impl = wrap;
+		CommandAllocator out{h};
+		out.impl = impl->allocators.get(h);
 		out.vt = &g_cavt;
-		return out;
+		return MakeCommandAllocatorPtr(d, out);
 	}
 
-	static void d_destroyCommandAllocator(Device* d, CommandAllocator* ca) noexcept {
-		if (!ca || !ca->impl) return;
-		auto* w = static_cast<Dx12CAWrap*>(ca->impl);
+	static void d_destroyCommandAllocator(Device* d, CommandAllocator ca) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		impl->allocators.free(w->h);
-		delete w;
-		ca->impl = nullptr;
-		ca->vt = nullptr;
+		impl->allocators.free(ca.GetHandle());
 	}
 
-	static CommandList d_createCommandList(Device* d, QueueKind q, CommandAllocator ca) noexcept {
+	static CommandListPtr d_createCommandList(Device* d, QueueKind q, CommandAllocator ca) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		auto* aw = static_cast<Dx12CAWrap*>(ca.impl);
-		if (!aw) return {};
-		auto* A = impl->allocators.get(aw->h);
+		auto* A = static_cast<Dx12Allocator*>(ca.impl);
 		if (!A) return {};
 
-		Dx12Device::CL rec{};
+		Dx12CommandList rec{};
 		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&rec.cl)))) return {};
 		rec.cl->Close();
+		rec.dev = impl;
 
-		impl->liveCLs.push_back(std::move(rec));
-		auto* stored = &impl->liveCLs.back();
+		auto h = impl->commandLists.alloc(std::move(rec));
 
-		auto* wrap = new Dx12CLWrap{ impl, q, stored, false, aw->h };
-		CommandList out{}; out.impl = wrap; out.vt = &g_clvt;
-		return out;
+		CommandList out{h};
+		out.impl = impl->commandLists.get(h);
+		out.vt = &g_clvt;
+		return MakeCommandListPtr(d, out);
 	}
 
-	static ResourceHandle d_createBuffer(Device* d, const ResourceDesc& bd) noexcept {
+	static ResourcePtr d_createBuffer(Device* d, const ResourceDesc& bd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) return {};
 
 		D3D12_HEAP_PROPERTIES hp{};
-		hp.Type = ToDx(bd.buffer.memory);
+		hp.Type = ToDx(bd.memory);
 		hp.CreationNodeMask = 1;
 		hp.VisibleNodeMask = 1;
 
@@ -1260,16 +1260,17 @@ namespace rhi {
 
 		Dx12Buffer B{};
 		B.res = std::move(res);
-		return impl->buffers.alloc(std::move(B));
+		auto handle = impl->buffers.alloc(std::move(B));
+		return MakeBufferPtr(d, handle);
 	}
 
-	static ResourceHandle d_createTexture(Device* d, const ResourceDesc& td) noexcept {
+	static ResourcePtr d_createTexture(Device* d, const ResourceDesc& td) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown)
 			return {};
 
 		D3D12_HEAP_PROPERTIES hp{};
-		hp.Type = ToDx(Memory::DeviceLocal);
+		hp.Type = ToDx(td.memory);
 		hp.CreationNodeMask = 1;
 		hp.VisibleNodeMask = 1;
 
@@ -1313,10 +1314,11 @@ namespace rhi {
 		T.res = std::move(res);
 		T.fmt = desc.Format;
 		T.w = td.texture.width; T.h = td.texture.height;
-		return impl->textures.alloc(std::move(T));
+		auto handle = impl->textures.alloc(std::move(T));
+		return MakeTexturePtr(d, handle);
 	}
 
-	static ResourceHandle d_createResource(Device* d, const ResourceDesc& td) noexcept {
+	static ResourcePtr d_createResource(Device* d, const ResourceDesc& td) noexcept {
 		switch (td.type) {
 		case ResourceType::Buffer:  return d_createBuffer(d, td);
 		case ResourceType::Texture: return d_createTexture(d, td);
@@ -1332,63 +1334,106 @@ namespace rhi {
 		return (uint32_t)impl->dev->GetDescriptorHandleIncrementSize(t);
 	}
 
-	// ---------------- Queue vtable funcs ----------------
-	static Result q_submit(Queue* q, Span<CommandList> lists, const SubmitDesc&) noexcept {
-		auto* qs = static_cast<Dx12QueueState*>(q->impl);
-		std::vector<ID3D12CommandList*> native; native.reserve(lists.size);
-		for (uint32_t i = 0; i < lists.size; i++) {
-			auto* w = static_cast<Dx12CLWrap*>(lists.data[i].impl);
-			native.push_back(w->rec->cl.Get());
-		}
-		if (!native.empty()) {
-			qs->q->ExecuteCommandLists((UINT)native.size(), native.data());
-		}
-		return Result::Ok;
+	static TimelinePtr d_createTimeline(Device* d, uint64_t initial, const char* dbg) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		Microsoft::WRL::ComPtr<ID3D12Fence> f;
+		if (FAILED(impl->dev->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)))) return {};
+		if (dbg) { std::wstring w(dbg, dbg + ::strlen(dbg)); f->SetName(w.c_str()); }
+		Dx12Timeline T{ f };
+		auto h = impl->timelines.alloc(std::move(T));
+		return MakeTimelinePtr(d, h);
 	}
-	static Result q_signal(Queue* q, const TimelinePoint&) noexcept {
-		(void)q;
-		return Result::Ok;
+
+
+	static void d_destroyTimeline(Device* d, TimelineHandle& t) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		impl->timelines.free(t);
 	}
-	static Result q_wait(Queue* q, const TimelinePoint&) noexcept {
-		(void)q;
+
+	static uint64_t d_timelineCompletedValue(Device* d, TimelineHandle t) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* TL = impl->timelines.get(t)) return TL->fence->GetCompletedValue();
+		return 0;
+	}
+
+	static Result d_timelineHostWait(Device* d, const TimelinePoint& p) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		auto* TL = impl->timelines.get(p.t); if (!TL) return Result::InvalidArg;
+		HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		if (!e) return Result::Failed;
+		HRESULT hr = TL->fence->SetEventOnCompletion(p.value, e);
+		if (FAILED(hr)) { CloseHandle(e); return Result::Failed; }
+		WaitForSingleObject(e, INFINITE);
+		CloseHandle(e);
 		return Result::Ok;
 	}
 
-	// ---------------- CommandList vtable funcs ----------------
-	static void cl_begin(CommandList* cl, const char* /*name*/) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* A = w->dev->allocators.get(w->allocH);
-		if (!A) return;
-		w->rec->cl->Reset(A->alloc.Get(), nullptr);
-		w->recording = true;
+	// ---------------- Queue vtable funcs ----------------
+	static Result q_submit(Queue* q, Span<CommandList> lists, const SubmitDesc& s) noexcept {
+		auto* qs = static_cast<Dx12QueueState*>(q->impl);
+		auto* dev = qs->owner; if (!dev) return Result::Failed;
+
+		// Pre-waits
+		for (auto& w : s.waits) {
+			auto* TL = dev->timelines.get(w.t); if (!TL) return Result::InvalidArg;
+			if (FAILED(qs->q->Wait(TL->fence.Get(), w.value))) return Result::Failed;
+		}
+
+		// Execute command lists
+		std::vector<ID3D12CommandList*> native; native.reserve(lists.size);
+		for (auto& L : lists) {
+			auto* w = static_cast<Dx12CommandList*>(L.impl);
+			native.push_back(w->cl.Get());
+		}
+		if (!native.empty()) qs->q->ExecuteCommandLists((UINT)native.size(), native.data());
+
+		// Post-signals
+		for (auto& sgn : s.signals) {
+			auto* TL = dev->timelines.get(sgn.t); if (!TL) return Result::InvalidArg;
+			if (FAILED(qs->q->Signal(TL->fence.Get(), sgn.value))) return Result::Failed;
+		}
+		return Result::Ok;
 	}
+
+	static Result q_signal(Queue* q, const TimelinePoint& p) noexcept {
+		auto* qs = static_cast<Dx12QueueState*>(q->impl);
+		auto* dev = qs->owner; if (!dev) return Result::Failed;
+		auto* TL = dev->timelines.get(p.t); if (!TL) return Result::InvalidArg;
+		return SUCCEEDED(qs->q->Signal(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
+	}
+
+	static Result q_wait(Queue* q, const TimelinePoint& p) noexcept {
+		auto* qs = static_cast<Dx12QueueState*>(q->impl);
+		auto* dev = qs->owner; if (!dev) return Result::Failed;
+		auto* TL = dev->timelines.get(p.t); if (!TL) return Result::InvalidArg;
+		return SUCCEEDED(qs->q->Wait(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
+	}
+
+	// ---------------- CommandList vtable funcs ----------------
+
 	static void cl_end(CommandList* cl) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		w->rec->cl->Close();
-		w->recording = false;
+		auto* w = static_cast<Dx12CommandList*>(cl->impl);
+		w->cl->Close();
 	}
 	static void cl_reset(CommandList* cl, CommandAllocator& ca) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* aw = static_cast<Dx12CAWrap*>(ca.impl);
-		if (!aw) return;
-		auto* A = w->dev->allocators.get(aw->h);
-		if (!A) return;
-		w->rec->cl->Reset(A->alloc.Get(), nullptr);
-		w->recording = true;
-		w->allocH = aw->h;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto* a = static_cast<Dx12Allocator*>(ca.impl);
+		if (!l) return;
+		if (!a) return;
+		l->cl->Reset(a->alloc.Get(), nullptr);
 	}
 	static void cl_beginPass(CommandList* cl, const PassBeginInfo& p) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dev = w->dev;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		if (!l) return;
 
 		std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvs;
 		rtvs.reserve(p.colors.size);
 		for (uint32_t i = 0; i < p.colors.size; ++i) {
 			D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
-			if (DxGetDstCpu(dev, p.colors.data[i].rtv, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
+			if (DxGetDstCpu(l->dev, p.colors.data[i].rtv, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
 				rtvs.push_back(cpu);
 				if (p.colors.data[i].loadOp == LoadOp::Clear) {
-					w->rec->cl->ClearRenderTargetView(cpu, p.colors.data[i].clear.rgba, 0, nullptr);
+					l->cl->ClearRenderTargetView(cpu, p.colors.data[i].clear.rgba, 0, nullptr);
 				}
 			}
 		}
@@ -1396,11 +1441,11 @@ namespace rhi {
 		D3D12_CPU_DESCRIPTOR_HANDLE dsv{};
 		const D3D12_CPU_DESCRIPTOR_HANDLE* pDsv = nullptr;
 		if (p.depth) {
-			if (DxGetDstCpu(dev, p.depth->dsv, dsv, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
+			if (DxGetDstCpu(l->dev, p.depth->dsv, dsv, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
 				pDsv = &dsv;
 				if (p.depth->depthLoad == LoadOp::Clear || p.depth->stencilLoad == LoadOp::Clear) {
 					const auto& c = p.depth->clear;
-					w->rec->cl->ClearDepthStencilView(
+					l->cl->ClearDepthStencilView(
 						dsv,
 						(p.depth->depthLoad == LoadOp::Clear ? D3D12_CLEAR_FLAG_DEPTH : (D3D12_CLEAR_FLAGS)0) |
 						(p.depth->stencilLoad == LoadOp::Clear ? D3D12_CLEAR_FLAG_STENCIL : (D3D12_CLEAR_FLAGS)0),
@@ -1409,36 +1454,36 @@ namespace rhi {
 			}
 		}
 
-		w->rec->cl->OMSetRenderTargets((UINT)rtvs.size(), rtvs.data(), FALSE, pDsv);
+		l->cl->OMSetRenderTargets((UINT)rtvs.size(), rtvs.data(), FALSE, pDsv);
 		D3D12_VIEWPORT vp{ 0,0,(float)p.width,(float)p.height,0.0f,1.0f };
 		D3D12_RECT sc{ 0,0,(LONG)p.width,(LONG)p.height };
-		w->rec->cl->RSSetViewports(1, &vp);
-		w->rec->cl->RSSetScissorRects(1, &sc);
+		l->cl->RSSetViewports(1, &vp);
+		l->cl->RSSetScissorRects(1, &sc);
 	}
 
 	static void cl_endPass(CommandList* /*cl*/) noexcept {}
 	static void cl_barriers(CommandList*, const BarrierBatch&) noexcept {}
 	static void cl_bindLayout(CommandList* cl, PipelineLayoutHandle layoutH) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dev = w->dev;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto dev = l->dev;
 		if (auto* L = dev->pipelineLayouts.get(layoutH)) {
 			ID3D12RootSignature* rs = L->root.Get();
 			// TODO: Is this allowed?
-			w->rec->cl->SetGraphicsRootSignature(rs);
-			w->rec->cl->SetComputeRootSignature(rs);
+			l->cl->SetGraphicsRootSignature(rs);
+			l->cl->SetComputeRootSignature(rs);
 		}
 	}
 	static void cl_bindPipeline(CommandList* cl, PipelineHandle psoH) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dev = w->dev;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = l->dev;
 		if (auto* P = dev->pipelines.get(psoH)) {
-			w->rec->cl->SetPipelineState(P->pso.Get());
+			l->cl->SetPipelineState(P->pso.Get());
 		}
 	}
 	static void cl_setVB(CommandList* cl, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		std::vector<D3D12_VERTEX_BUFFER_VIEW> views; views.resize(numViews);
-		auto* dev = w->dev;
+		auto* dev = l->dev;
 		for (uint32_t i = 0; i < numViews; ++i) {
 			if (auto* B = dev->buffers.get(pBufferViews[i].buffer)) {
 				views[i].BufferLocation = B->res->GetGPUVirtualAddress() + pBufferViews[i].offset;
@@ -1446,36 +1491,38 @@ namespace rhi {
 				views[i].StrideInBytes = pBufferViews[i].stride;
 			}
 		}
-		w->rec->cl->IASetVertexBuffers(startSlot, (UINT)numViews, views.data());
+		l->cl->IASetVertexBuffers(startSlot, (UINT)numViews, views.data());
 	}
 	static void cl_setIB(CommandList* cl, ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dev = w->dev;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = l->dev;
 		if (auto* B = dev->buffers.get(b)) {
 			D3D12_INDEX_BUFFER_VIEW ibv{};
 			ibv.BufferLocation = B->res->GetGPUVirtualAddress() + offset;
 			ibv.SizeInBytes = sizeBytes;
 			ibv.Format = idx32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
-			w->rec->cl->IASetIndexBuffer(&ibv);
+			l->cl->IASetIndexBuffer(&ibv);
 		}
 	}
 	static void cl_draw(CommandList* cl, uint32_t vc, uint32_t ic, uint32_t fv, uint32_t fi) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		w->rec->cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		w->rec->cl->DrawInstanced(vc, ic, fv, fi);
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		l->cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		l->cl->DrawInstanced(vc, ic, fv, fi);
 	}
 	static void cl_drawIndexed(CommandList* cl, uint32_t ic, uint32_t inst, uint32_t firstIdx, int32_t vtxOff, uint32_t firstInst) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl); w->rec->cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		w->rec->cl->DrawIndexedInstanced(ic, inst, firstIdx, vtxOff, firstInst);
+		auto* l = static_cast<Dx12CommandList*>(cl->impl); 
+		l->cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		l->cl->DrawIndexedInstanced(ic, inst, firstIdx, vtxOff, firstInst);
 	}
 	static void cl_dispatch(CommandList* cl, uint32_t x, uint32_t y, uint32_t z) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		w->rec->cl->Dispatch(x, y, z);
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		l->cl->Dispatch(x, y, z);
 	}
 	static void cl_clearView(CommandList* cl, ViewHandle v, const ClearValue& c) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dv = w->dev; auto* view = dv->views.get(v);
-		w->rec->cl->ClearRenderTargetView(view->cpu, c.rgba, 0, nullptr);
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dv = l->dev; 
+		auto* view = dv->views.get(v);
+		l->cl->ClearRenderTargetView(view->cpu, c.rgba, 0, nullptr);
 	}
 	static void cl_executeIndirect(
 		CommandList* cl,
@@ -1486,8 +1533,8 @@ namespace rhi {
 	{
 		if (!cl || !cl->impl) return;
 
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dev = w->dev;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = l->dev;
 		if (!dev) return;
 
 		auto* S = dev->commandSignatures.get(sigH);
@@ -1502,27 +1549,29 @@ namespace rhi {
 			if (c && c->res) cntRes = c->res.Get();
 		}
 
-		w->rec->cl->ExecuteIndirect(
+		l->cl->ExecuteIndirect(
 			S->sig.Get(),
 			maxCount,
 			argB->res.Get(), argOff,
 			cntRes, cntOff);
 	}
 	static void cl_setDescriptorHeaps(CommandList* cl, DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept {
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dev = w->dev;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = l->dev;
 
 		ID3D12DescriptorHeap* heaps[2]{};
 		UINT n = 0;
 		if (auto* H = dev->descHeaps.get(csu))  heaps[n++] = H->heap.Get();
 		if (auto* H = dev->descHeaps.get(samp)) heaps[n++] = H->heap.Get();
-		if (n) w->rec->cl->SetDescriptorHeaps(n, heaps);
+		if (n) {
+			l->cl->SetDescriptorHeaps(n, heaps);
+		}
 	}
 
 	static void cl_barrier(rhi::CommandList* cl, const rhi::BarrierBatch& b) noexcept {
 		if (!cl || !cl->impl) return;
-		auto* w = static_cast<Dx12CLWrap*>(cl->impl);
-		auto* dev = w->dev;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = l->dev;
 		if (!dev) return;
 
 		std::vector<D3D12_TEXTURE_BARRIER> tex;
@@ -1605,7 +1654,7 @@ namespace rhi {
 		}
 
 		if (!groups.empty()) {
-			w->rec->cl->Barrier((UINT)groups.size(), groups.data());
+			l->cl->Barrier((UINT)groups.size(), groups.data());
 		}
 	}
 
@@ -1622,7 +1671,7 @@ namespace rhi {
 		return s->sc->Present(sync, flags) == S_OK ? Result::Ok : Result::Failed;
 	}
 
-	Device CreateD3D12Device(const DeviceCreateInfo& ci) noexcept {
+	DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept {
 		UINT flags = 0;
 #ifdef _DEBUG
 		if (ci.enableDebug) { ComPtr<ID3D12Debug> dbg; if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer(), flags |= DXGI_CREATE_FACTORY_DEBUG; }
@@ -1649,15 +1698,13 @@ namespace rhi {
 		Device d{};
 		d.impl = impl;
 		d.vt = &g_devvt;
-		return d;
+		return MakeDevicePtr(d);
 	}
 
 	// ------------------ Allocator vtable funcs ----------------
 	static void ca_reset(CommandAllocator* ca) noexcept {
 		if (!ca || !ca->impl) return;
-		auto* w = static_cast<Dx12CAWrap*>(ca->impl);
-		auto* A = w->dev->allocators.get(w->h);
-		if (!A) return;
+		auto* A = static_cast<Dx12Allocator*>(ca->impl);
 		A->alloc->Reset(); // ID3D12CommandAllocator::Reset()
 	}
 

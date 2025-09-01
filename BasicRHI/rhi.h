@@ -14,60 +14,273 @@ namespace rhi {
     inline constexpr uint32_t RHI_SC_ABI_MIN = 1;
     inline constexpr uint32_t RHI_CA_ABI_MIN = 1;
 
-    struct Handle32 { uint32_t index{ 0xFFFFFFFFu }; uint32_t generation{ 0 }; constexpr bool valid() const noexcept { return index != 0xFFFFFFFFu; } };
-    using ResourceHandle = Handle32;
-    using ViewHandle = Handle32;
-    using SamplerHandle = Handle32;
-    using PipelineHandle = Handle32;
-    using CommandSignatureHandle = Handle32;
-    using PipelineLayoutHandle = Handle32;
-    using DescriptorHeapHandle = Handle32;
-	using CommandAllocatorHandle = Handle32;
+    class Device;
+
+    namespace detail {
+        // tag types for each handle family
+        struct HResource {}; // "either buffer or texture" handle
+        struct HView {};
+        struct HSampler {};
+        struct HPipeline {};
+        struct HCmdSig {};
+        struct HPipelineLayout {};
+        struct HDescHeap {};
+        struct HCmdAlloc {};
+        struct HTimeline {};
+        struct HCommandAllocator {};
+		struct HCommandList {};
+
+        // forward-declared trait; default is no-op (safe in release)
+        template<class Tag> struct NameOps {
+            static inline void Set(class Device*, uint32_t /*index*/, uint32_t /*gen*/, const char*) noexcept {}
+        };
+    } // namespace detail
+
+    template<class Tag>
+    struct Handle {
+        uint32_t index{ 0xFFFFFFFFu };
+        uint32_t generation{ 0 };
+        constexpr bool valid() const noexcept { return index != 0xFFFFFFFFu; }
+
+        inline void SetName(Device* d, const char* name) const noexcept {
+            if (!valid()) return;
+            detail::NameOps<Tag>::Set(d, index, generation, name);
+        }
+    };
+
+    using ResourceHandle = Handle<detail::HResource>;
+    using ViewHandle = Handle<detail::HView>;
+    using SamplerHandle = Handle<detail::HSampler>;
+    using PipelineHandle = Handle<detail::HPipeline>;
+    using CommandSignatureHandle = Handle<detail::HCmdSig>;
+    using PipelineLayoutHandle = Handle<detail::HPipelineLayout>;
+    using DescriptorHeapHandle = Handle<detail::HDescHeap>;
+	using TimelineHandle = Handle<detail::HTimeline>;
+	using CommandAllocatorHandle = Handle<detail::HCommandAllocator>;
+	using CommandListHandle = Handle<detail::HCommandList>;
 
     //RAII unique smart pointer
-    template<typename Tag>
-    class HandlePtr {
+
+    // THandle handle type, e.g. PipelineHandle, ResourceHandle
+    template<class THandle>
+    class UniqueHandle {
     public:
-        HandlePtr() = default;
-        HandlePtr(Device* d, Handle32 h) : dev_(d), h_(h) {}
-        ~HandlePtr() { reset(); }
+        using DestroyFn = void(*)(Device*, THandle) noexcept;
+        using NameFn = void(*)(Device*, THandle, const char*) noexcept;
 
-        HandlePtr(const HandlePtr&) = delete;
-        HandlePtr& operator=(const HandlePtr&) = delete;
+        UniqueHandle() = default;
+        UniqueHandle(Device* d, THandle h, DestroyFn dfn
+            , NameFn nfn = nullptr
+        ) : dev_(d), h_(h), destroy_(dfn)
+            , setname_(nfn)
+        {
+        }
 
-        HandlePtr(HandlePtr&& o) noexcept { swap(o); }
-        HandlePtr& operator=(HandlePtr&& o) noexcept { if (this != &o) { reset(); swap(o); } return *this; }
+        ~UniqueHandle() { Reset(); }
 
-        Handle32 Get() const noexcept { return h_; }
+        UniqueHandle(const UniqueHandle&) = delete;
+        UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+        UniqueHandle(UniqueHandle&& o) noexcept { Swap(o); }
+        UniqueHandle& operator=(UniqueHandle&& o) noexcept {
+            if (this != &o) { Reset(); Swap(o); }
+            return *this;
+        }
+
+        THandle Get() const noexcept { return h_; }
         explicit operator bool() const noexcept { return h_.valid(); }
+        bool Valid() const noexcept { return dev_ && h_.valid(); }
+        Device* DevicePtr() const noexcept { return dev_; }
 
-        Handle32 Release() noexcept { auto t = h_; h_ = {}; dev_ = nullptr; return t; }
-        void     Reset()   noexcept { if (dev_ && h_.valid()) Tag::Destroy(dev_, h_); h_ = {}; dev_ = nullptr; }
+        THandle Release() noexcept {
+            auto t = h_;
+            h_ = {}; dev_ = nullptr; destroy_ = nullptr;
+            setname_ = nullptr;
+            return t;
+        }
 
-		// cheap runtime liveness check (needs device) TODO: actually check with device
-        bool Valid() const noexcept { return dev_ }
+        void Reset() noexcept {
+            if (dev_ && h_.valid() && destroy_) destroy_(dev_, h_);
+            h_ = {}; dev_ = nullptr; destroy_ = nullptr;
+            setname_ = nullptr;
+        }
 
-        Device* Device()  const noexcept { return dev_; }
+        void SetName(const char* n) const noexcept {
+            if (dev_ && h_.valid() && setname_) setname_(dev_, h_, n);
+        }
 
     private:
-        void swap(HandlePtr& o) noexcept { std::swap(dev_, o.dev_); std::swap(h_, o.h_); }
+        void Swap(UniqueHandle& o) noexcept {
+            std::swap(dev_, o.dev_);
+            std::swap(h_, o.h_);
+            std::swap(destroy_, o.destroy_);
+            std::swap(setname_, o.setname_);
+        }
 
         Device* dev_{};
-        Handle32 h_{};
+        THandle  h_{};
+        DestroyFn destroy_{};
+        NameFn    setname_{};
     };
 
-    struct ResourceTag {
-        static void Destroy(Device* d, Handle32 h) noexcept { d->DestroyBuffer(ResourceHandle{ h.index,h.generation }); }
-    };
+	// Anything that is not trivially destructible needs its own tag with a destructor
+    using ResourcePtr = UniqueHandle<ResourceHandle>;
+    using PipelinePtr = UniqueHandle<PipelineHandle>;
+    using PipelineLayoutPtr = UniqueHandle<PipelineLayoutHandle>;
+    using CommandSignaturePtr = UniqueHandle<CommandSignatureHandle>;
+    using DescriptorHeapPtr = UniqueHandle<DescriptorHeapHandle>;
+    using SamplerPtr = UniqueHandle<SamplerHandle>;
+	using TimelinePtr = UniqueHandle<TimelineHandle>;
 
-	// Anything that is not trivially destructible needs its own tag with Destroy()
-	using ResourcePtr = HandlePtr<ResourceTag>;
-	using SamplerPtr = HandlePtr<struct SamplerTag>;
-	using PipelinePtr = HandlePtr<struct PipelineTag>;
-	using CommandSignaturePtr = HandlePtr<struct CommandSignatureTag>;
-	using PipelineLayoutPtr = HandlePtr<struct PipelineLayoutTag>;
-	using DescriptorHeapPtr = HandlePtr<struct DescriptorHeapTag>;
-	using CommandAllocatorPtr = HandlePtr<struct CommandAllocatorTag>;
+    inline void name_buffer(Device* d, ResourceHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNameBuffer) d->vt->setNameBuffer(d, h, n);
+    }
+    inline void name_texture(Device* d, ResourceHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNameTexture) d->vt->setNameTexture(d, h, n);
+	}
+    inline void name_pipeline(Device* d, PipelineHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNamePipeline) d->vt->setNamePipeline(d, h, n);
+    }
+    inline void name_layout(Device* d, PipelineLayoutHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNamePipelineLayout) d->vt->setNamePipelineLayout(d, h, n);
+    }
+    inline void name_cmdsig(Device* d, CommandSignatureHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNameCommandSignature) d->vt->setNameCommandSignature(d, h, n);
+    }
+    inline void name_heap(Device* d, DescriptorHeapHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNameDescriptorHeap) d->vt->setNameDescriptorHeap(d, h, n);
+    }
+    inline void name_sampler(Device* d, SamplerHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNameSampler) d->vt->setNameSampler(d, h, n);
+    }
+    inline void name_timeline(Device* d, TimelineHandle h, const char* n) noexcept {
+        if (d && d->vt && d->vt->setNameTimeline) d->vt->setNameTimeline(d, h, n);
+	}
+
+    inline ResourcePtr MakeBufferPtr(Device* d, ResourceHandle h) noexcept {
+        return ResourcePtr(
+            d, h,
+            [](Device* d, ResourceHandle hh) noexcept { d->DestroyBuffer(hh); }
+            , &name_buffer
+        );
+    }
+    inline ResourcePtr MakeTexturePtr(Device* d, ResourceHandle h) noexcept {
+        return ResourcePtr(
+            d, h,
+            [](Device* d, ResourceHandle hh) noexcept { d->DestroyTexture(hh); }
+            , &name_texture
+        );
+    }
+
+    inline PipelinePtr MakePipelinePtr(Device* d, PipelineHandle h) noexcept {
+        return PipelinePtr(d, h,
+            [](Device* d, PipelineHandle hh) noexcept { d->DestroyPipeline(hh); }
+            , &name_pipeline
+        );
+    }
+    inline PipelineLayoutPtr MakePipelineLayoutPtr(Device* d, PipelineLayoutHandle h) noexcept {
+        return PipelineLayoutPtr(d, h,
+            [](Device* d, PipelineLayoutHandle hh) noexcept { d->DestroyPipelineLayout(hh); }
+            , &name_layout
+        );
+    }
+    inline CommandSignaturePtr MakeCommandSignaturePtr(Device* d, CommandSignatureHandle h) noexcept {
+        return CommandSignaturePtr(d, h,
+            [](Device* d, CommandSignatureHandle hh) noexcept { d->DestroyCommandSignature(hh); }
+            , &name_cmdsig
+        );
+    }
+    inline DescriptorHeapPtr MakeDescriptorHeapPtr(Device* d, DescriptorHeapHandle h) noexcept {
+        return DescriptorHeapPtr(d, h,
+            [](Device* d, DescriptorHeapHandle hh) noexcept { d->DestroyDescriptorHeap(hh); }
+            , &name_heap
+        );
+    }
+    inline SamplerPtr MakeSamplerPtr(Device* d, SamplerHandle h) noexcept {
+        return SamplerPtr(d, h,
+            [](Device* d, SamplerHandle hh) noexcept { d->DestroySampler(hh); }
+            , &name_sampler
+        );
+    }
+	inline TimelinePtr MakeTimelinePtr(Device* d, TimelineHandle h) noexcept {
+		return TimelinePtr(d, h,
+			[](Device* d, TimelineHandle hh) noexcept { d->DestroyTimeline(hh); }
+			, & name_timeline
+		);
+	}
+
+    template<class TObject>
+    class ObjectPtr {
+    public:
+        // Destroy: Device*, TObject* -> void
+        using DestroyFn = void(*)(Device*, TObject*) noexcept;
+        // Optional naming hook: TObject*, const char* -> void  (usually calls o->vt->setName)
+        using NameFn = void(*)(TObject*, const char*) noexcept;
+
+        ObjectPtr() = default;
+
+        ObjectPtr(Device* d, TObject obj, DestroyFn dfn, NameFn nfn = nullptr) noexcept
+            : dev_(d), obj_(obj), destroy_(dfn), name_(nfn) {
+        }
+
+        ~ObjectPtr() { Reset(); }
+
+        ObjectPtr(const ObjectPtr&) = delete;
+        ObjectPtr& operator=(const ObjectPtr&) = delete;
+
+        ObjectPtr(ObjectPtr&& o) noexcept { Swap(o); }
+        ObjectPtr& operator=(ObjectPtr&& o) noexcept {
+            if (this != &o) { Reset(); Swap(o); }
+            return *this;
+        }
+
+        // Access
+        TObject* operator->()       noexcept { return &obj_; }
+        const TObject* operator->() const noexcept { return &obj_; }
+        TObject& operator*()        noexcept { return obj_; }
+        const TObject& operator*()  const noexcept { return obj_; }
+
+        // State
+        explicit operator bool() const noexcept { return dev_ && static_cast<bool>(obj_); }
+        bool Valid() const noexcept { return !!*this; }
+        Device* DevicePtr() const noexcept { return dev_; }
+        const TObject& Get() const noexcept { return obj_; } // by-ref view
+
+        // Release ownership to caller (returns the raw object)
+        TObject Release() noexcept {
+            TObject t = obj_;
+            dev_ = nullptr; destroy_ = nullptr; name_ = nullptr;
+            obj_ = {}; // invalidate our copy
+            return t;
+        }
+
+        // Destroy if owned
+        void Reset() noexcept {
+            if (dev_ && static_cast<bool>(obj_) && destroy_) {
+                destroy_(dev_, &obj_);
+            }
+            dev_ = nullptr; destroy_ = nullptr; name_ = nullptr;
+            obj_ = {};
+        }
+
+        // Set a debug name if vtable supports it
+        void SetName(const char* n) const noexcept {
+            if (name_ && dev_ && static_cast<bool>(obj_)) name_(&obj_, n);
+        }
+
+    private:
+        void Swap(ObjectPtr& o) noexcept {
+            std::swap(dev_, o.dev_);
+            std::swap(obj_, o.obj_);
+            std::swap(destroy_, o.destroy_);
+            std::swap(name_, o.name_);
+        }
+
+        Device* dev_{};        // non-owning
+        TObject  obj_{};       // owning copy of the small POD wrapper
+        DestroyFn destroy_{};  // how to destroy it
+        NameFn    name_{};     // how to name it
+    };
 
 	// ---------------- Enums & structs ----------------
 
@@ -375,7 +588,6 @@ namespace rhi {
     };
     struct BufferDesc {
         uint64_t     sizeBytes = 0;
-        Memory       memory = Memory::DeviceLocal;
     };
     struct TextureDesc {
         Format       format = Format::Unknown;
@@ -390,6 +602,7 @@ namespace rhi {
 	enum class ResourceType : uint32_t { Unknown, Texture, Buffer };
     struct ResourceDesc { 
         ResourceType type = ResourceType::Unknown; 
+        Memory memory = Memory::DeviceLocal;
         ResourceFlags flags;
         const char* debugName = nullptr;
         union { 
@@ -403,7 +616,7 @@ namespace rhi {
     enum class Stage : uint32_t { Top, Draw, Pixel, Compute, Copy, Bottom }; 
 
     // ---------------- Submission & timelines (thin) ----------------
-    struct Timeline { Handle32 id{}; }; struct TimelinePoint { Timeline t; uint64_t value = 0; };
+    struct TimelinePoint { TimelineHandle t; uint64_t value = 0; };
     struct SubmitDesc { Span<TimelinePoint> waits{}; Span<TimelinePoint> signals{}; };
 
     // --- Texture / Buffer / Global barrier descriptions ---
@@ -443,6 +656,14 @@ namespace rhi {
         Span<GlobalBarrier>  globals{};
     };
 
+    struct UavClearUint { uint32_t v[4]; };
+    struct UavClearFloat { float v[4]; };
+
+    struct UavClearInfo {
+        DescriptorSlot shaderVisible;   // SRV/UAV heap, shader-visible; REQUIRED on DX12
+        DescriptorSlot cpuVisible;      // SRV/UAV heap, non shader-visible; REQUIRED on DX12
+        ResourceHandle resource;        // the resource whose UAV is being cleared
+    };
 
     // ---------------- POD wrappers + VTables ----------------
     struct Device;       struct Queue;       struct CommandList;       struct Swapchain;       struct CommandAllocator;
@@ -461,17 +682,19 @@ namespace rhi {
         inline Result Wait(const TimelinePoint& p) noexcept;
     };
 
-    struct CommandList { 
+    class CommandList { 
+	public:
+		CommandList(CommandListHandle h = {}) : handle(h) {}
         void* impl{}; 
         const CommandListVTable* vt{}; 
         explicit constexpr operator bool() const noexcept {
             return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_CL_ABI_MIN;
         }
+		CommandListHandle GetHandle() const noexcept { return handle; }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-        void Begin(const char* name = nullptr) noexcept;
         void End() noexcept;
-		void Recycle(CommandAllocator& ca) noexcept;
+		void Recycle(const CommandAllocator& ca) noexcept;
         void BeginPass(const PassBeginInfo& p) noexcept;
         void EndPass() noexcept;
         void Barriers(const BarrierBatch& b) noexcept;
@@ -489,6 +712,12 @@ namespace rhi {
             uint32_t maxCount) noexcept;
 		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle samp) noexcept;
         void Barrier(const BarrierBatch& b) noexcept;
+		void ClearUavUint(const UavClearInfo& u, const UavClearUint& v) noexcept;
+        void ClearUavFloat(const UavClearInfo& u, const UavClearFloat& v) noexcept;
+		void SetName(const char* n) noexcept;
+
+    private:
+        CommandListHandle handle;
     };
 
     struct Swapchain { 
@@ -502,7 +731,7 @@ namespace rhi {
         inline uint32_t ImageCount() noexcept;
         inline uint32_t CurrentImageIndex() noexcept;
         inline ViewHandle RTV(uint32_t i) noexcept;
-        inline ResourcePtr Image(uint32_t i) noexcept;
+        inline ResourceHandle Image(uint32_t i) noexcept;
         inline Result Resize(uint32_t w, uint32_t h) noexcept;
         inline Result Present(bool vsync) noexcept;
     };
@@ -511,10 +740,10 @@ namespace rhi {
         PipelinePtr(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count) noexcept;
         PipelineLayoutPtr(*createPipelineLayout)(Device*, const PipelineLayoutDesc&) noexcept;
         CommandSignaturePtr(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/) noexcept;
-        CommandAllocator(*createCommandAllocator)(Device*, QueueKind) noexcept;
-        CommandList(*createCommandList)(Device*, QueueKind, CommandAllocator) noexcept;
+        CommandAllocatorPtr(*createCommandAllocator)(Device*, QueueKind) noexcept;
+        CommandListPtr(*createCommandList)(Device*, QueueKind, CommandAllocator) noexcept;
         Swapchain(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept;
-        DescriptorHeap(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
+        DescriptorHeapPtr(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
 
         Result(*createConstantBufferView)(Device*, DescriptorSlot dst, ResourceHandle, const CbvDesc&) noexcept;
         Result(*createShaderResourceView)(Device*, DescriptorSlot dst, const SrvDesc&) noexcept;
@@ -523,6 +752,7 @@ namespace rhi {
         Result(*createDepthStencilView)(Device*, DescriptorSlot dst, const DsvDesc&) noexcept;
         Result(*createSampler)(Device*, DescriptorSlot dst, const SamplerDesc&) noexcept;
         ResourcePtr(*createCommittedResource)(Device*, const ResourceDesc&) noexcept;
+        TimelinePtr(*createTimeline)(Device*, uint64_t initialValue, const char* debugName) noexcept;
 
         void (*destroySampler)(Device*, SamplerHandle) noexcept;
         void (*destroyPipelineLayout)(Device*, PipelineLayoutHandle) noexcept;
@@ -534,19 +764,39 @@ namespace rhi {
         void (*destroyDescriptorHeap)(Device*, DescriptorHeapHandle) noexcept;
         void (*destroyBuffer)(Device*, ResourceHandle) noexcept;
         void (*destroyTexture)(Device*, ResourceHandle) noexcept;
+        void (*destroyTimeline)(Device*, TimelineHandle) noexcept;
 
         Queue(*getQueue)(Device*, QueueKind) noexcept;
         Result(*deviceWaitIdle)(Device*) noexcept;
         void (*flushDeletionQueue)(Device*) noexcept;
         uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
+        uint64_t(*timelineCompletedValue)(Device*, TimelineHandle) noexcept;
+        Result(*timelineHostWait)(Device*, const TimelinePoint& p) noexcept; // blocks until reached
+
+		// Optional debug name setters (can be nullopt)
+        void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
+        void (*setNameTexture)(Device*, ResourceHandle, const char*) noexcept;
+        void (*setNameSampler)(Device*, SamplerHandle, const char*) noexcept;
+        void (*setNamePipelineLayout)(Device*, PipelineLayoutHandle, const char*) noexcept;
+        void (*setNamePipeline)(Device*, PipelineHandle, const char*) noexcept;
+        void (*setNameCommandSignature)(Device*, CommandSignatureHandle, const char*) noexcept;
+        void (*setNameDescriptorHeap)(Device*, DescriptorHeapHandle, const char*) noexcept;
+        void (*setNameTimeline)(Device*, TimelineHandle, const char*) noexcept;
 
         void (*destroyDevice)(Device*) noexcept;
         uint32_t abi_version = 1;
     };
 
-    struct QueueVTable { Result(*submit)(Queue*, Span<CommandList>, const SubmitDesc&) noexcept; Result(*signal)(Queue*, const TimelinePoint&) noexcept; Result(*wait)(Queue*, const TimelinePoint&) noexcept; uint32_t abi_version = 1; };
+    struct QueueVTable { 
+        Result(*submit)(Queue*, Span<CommandList>, const SubmitDesc&) noexcept; 
+        Result(*signal)(Queue*, const TimelinePoint&) noexcept; 
+        Result(*wait)(Queue*, const TimelinePoint&) noexcept; uint32_t abi_version = 1; 
+        void (*setName)(Queue*, const char*) noexcept;
+    };
 
-    struct CommandAllocator {
+    class CommandAllocator {
+    public:
+        CommandAllocator(CommandAllocatorHandle handle = {}) : handle(handle) {}
         void* impl{}; // backend wrap (owns Handle32)
         const CommandAllocatorVTable* vt{}; // vtable
         explicit constexpr operator bool() const noexcept {
@@ -555,6 +805,10 @@ namespace rhi {
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; } // Naming conflict with vt->reset
         inline void Recycle() noexcept { vt->reset(this); } // GPU-side reset (allocator->Reset)
+		CommandAllocatorHandle GetHandle() const noexcept { return handle; }
+
+    private:
+        CommandAllocatorHandle handle;
     };
 
     struct CommandAllocatorVTable {
@@ -563,9 +817,8 @@ namespace rhi {
     };
 
     struct CommandListVTable {
-        void (*begin)(CommandList*, const char* debugName) noexcept;
         void (*end)(CommandList*) noexcept;
-		void (*recycle)(CommandList*, CommandAllocator& alloc) noexcept;
+		void (*recycle)(CommandList*, const CommandAllocator& alloc) noexcept;
         void (*beginPass)(CommandList*, const PassBeginInfo&) noexcept;
         void (*endPass)(CommandList*) noexcept;
         void (*barriers)(CommandList*, const BarrierBatch&) noexcept;
@@ -584,6 +837,9 @@ namespace rhi {
             uint32_t   maxCommandCount) noexcept;
         void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle sampler) noexcept;
         void (*barriers)(CommandList*, const BarrierBatch&) noexcept;
+        void (*clearUavUint)(CommandList*, const UavClearInfo&, const UavClearUint&) noexcept;
+        void (*clearUavFloat)(CommandList*, const UavClearInfo&, const UavClearFloat&) noexcept;
+        void (*setName)(CommandList*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
 
@@ -591,9 +847,10 @@ namespace rhi {
         uint32_t(*imageCount)(Swapchain*) noexcept;
         uint32_t(*currentImageIndex)(Swapchain*) noexcept;
         ViewHandle(*rtv)(Swapchain*, uint32_t img) noexcept; // RTV per image
-        ResourcePtr(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
+        ResourceHandle(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
         Result(*resize)(Swapchain*, uint32_t w, uint32_t h) noexcept;
         Result(*present)(Swapchain*, bool vsync) noexcept; // Present
+        void (*setName)(Swapchain*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
 
@@ -605,8 +862,8 @@ namespace rhi {
         }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-        inline PipelineHandle CreatePipeline(const PipelineStreamItem* items, uint32_t count) noexcept { return vt->createPipelineFromStream(this, items, count); }
-        inline CommandList CreateCommandList(QueueKind q, CommandAllocator alloc) noexcept { return vt->createCommandList(this, q, alloc); }
+        inline PipelinePtr CreatePipeline(const PipelineStreamItem* items, uint32_t count) noexcept { return vt->createPipelineFromStream(this, items, count); }
+        inline CommandListPtr CreateCommandList(QueueKind q, CommandAllocator alloc) noexcept { return vt->createCommandList(this, q, alloc); }
         inline void DestroyCommandList(CommandList* cl) noexcept { vt->destroyCommandList(this, cl); }
         inline Queue GetQueue(QueueKind q) noexcept { return vt->getQueue(this, q); }
         inline Result WaitIdle() noexcept { return vt->deviceWaitIdle(this); }
@@ -617,7 +874,7 @@ namespace rhi {
         inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { vt->destroyPipelineLayout(this, h); }
         inline CommandSignaturePtr CreateCommandSignature(const CommandSignatureDesc& d, PipelineLayoutHandle layout) noexcept { return vt->createCommandSignature(this, d, layout); }
         inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { vt->destroyCommandSignature(this, h); }
-		inline DescriptorHeap CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
+		inline DescriptorHeapPtr CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
 		inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { vt->destroyDescriptorHeap(this, h); }
         inline Result CreateConstantBufferView(DescriptorSlot s, ResourceHandle b, const CbvDesc& d) noexcept { return vt->createConstantBufferView(this, s, b, d); }
         inline Result CreateShaderResourceView(DescriptorSlot s, const SrvDesc& d) noexcept { return vt->createShaderResourceView(this, s, d); }
@@ -625,17 +882,21 @@ namespace rhi {
         inline Result CreateSampler(DescriptorSlot s, const SamplerDesc& d) noexcept { return vt->createSampler(this, s, d); }
         inline Result CreateRenderTargetView(DescriptorSlot s, const RtvDesc& d) noexcept { return vt->createRenderTargetView(this, s, d); }
         inline Result CreateDepthStencilView(DescriptorSlot s, const DsvDesc& d) noexcept { return vt->createDepthStencilView(this, s, d); }
-        inline CommandAllocator CreateCommandAllocator(QueueKind q) noexcept { return vt->createCommandAllocator(this, q); }
-        inline CommandList CreateCommandList(QueueKind q, CommandAllocator a) noexcept { return vt->createCommandList(this, q, a); }
+        inline CommandAllocatorPtr CreateCommandAllocator(QueueKind q) noexcept { return vt->createCommandAllocator(this, q); }
+		inline void DestroyCommandAllocator(CommandAllocator* a) noexcept { vt->destroyCommandAllocator(this, a); }
 		inline ResourcePtr CreateCommittedResource(const ResourceDesc& d) noexcept { return vt->createCommittedResource(this, d); }
         inline void DestroySampler(SamplerHandle h) noexcept { vt->destroySampler(this, h); }
 		inline void DestroyPipeline(PipelineHandle h) noexcept { vt->destroyPipeline(this, h); }
 		inline void DestroyBuffer(ResourceHandle h) noexcept { vt->destroyBuffer(this, h); }
 		inline void DestroyTexture(ResourceHandle h) noexcept { vt->destroyTexture(this, h); }
 		inline uint32_t GetDescriptorHandleIncrementSize(DescriptorHeapType t) noexcept { return vt->getDescriptorHandleIncrementSize(this, t); }
+        inline TimelinePtr CreateTimeline(uint64_t initial = 0, const char* name = nullptr) noexcept { return vt->createTimeline(this, initial, name); }
+        inline void DestroyTimeline(TimelineHandle t) noexcept { vt->destroyTimeline(this, t); }
+        inline uint64_t TimelineCompletedValue(TimelineHandle t) noexcept { return vt->timelineCompletedValue(this, t); }
+        inline Result TimelineHostWait(const TimelinePoint& p) noexcept { return vt->timelineHostWait(this, p); }
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
-
     };
+
 
     inline Result Queue::Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept { return vt->submit(this, lists, s); }
     inline Result Queue::Signal(const TimelinePoint& p) noexcept { return vt->signal(this, p); }
@@ -643,7 +904,7 @@ namespace rhi {
 
     inline void CommandList::Begin(const char* name) noexcept { vt->begin(this, name); }
     inline void CommandList::End() noexcept { vt->end(this); }
-	inline void CommandList::Recycle(CommandAllocator& alloc) noexcept { vt->recycle(this, alloc); }
+	inline void CommandList::Recycle(const CommandAllocator& alloc) noexcept { vt->recycle(this, alloc); }
     inline void CommandList::BeginPass(const PassBeginInfo& p) noexcept { vt->beginPass(this, p); }
     inline void CommandList::EndPass() noexcept { vt->endPass(this); }
     inline void CommandList::Barriers(const BarrierBatch& b) noexcept { vt->barriers(this, b); }
@@ -662,21 +923,102 @@ namespace rhi {
     { vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
     inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
 	inline void CommandList::Barrier(const BarrierBatch& b) noexcept { vt->barriers(this, b); }
+    inline void CommandList::ClearUavUint(const UavClearInfo& i, const UavClearUint& v) noexcept { vt->clearUavUint(this, i, v); }
+    inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
+	inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
 
     inline uint32_t Swapchain::ImageCount() noexcept { return vt->imageCount(this); }
     inline uint32_t Swapchain::CurrentImageIndex() noexcept { return vt->currentImageIndex(this); }
     inline ViewHandle Swapchain::RTV(uint32_t i) noexcept { return vt->rtv(this, i); }
-    inline ResourcePtr Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
+    inline ResourceHandle Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
     inline Result Swapchain::Resize(uint32_t w, uint32_t h) noexcept { return vt->resize(this, w, h); }
     inline Result Swapchain::Present(bool vsync) noexcept { return vt->present(this, vsync); }
 
     struct DeviceCreateInfo { Backend backend = Backend::D3D12; uint32_t framesInFlight = 3; bool enableDebug = true; };
 
-    Device CreateD3D12Device(const DeviceCreateInfo& ci) noexcept; // implemented in rhi_dx12.cpp
-
     static inline ShaderBinary DXIL(ID3DBlob* blob) {
         return { blob ? blob->GetBufferPointer() : nullptr,
                  blob ? static_cast<uint32_t>(blob->GetBufferSize()) : 0u };
     }
+
+    inline void SetBufferName(Device& d, ResourceHandle h, const char* n) noexcept {
+        if (d.vt->setNameBuffer) d.vt->setNameBuffer(&d, h, n);
+    }
+    inline void SetTextureName(Device& d, ResourceHandle h, const char* n) noexcept {
+        if (d.vt->setNameTexture) d.vt->setNameTexture(&d, h, n);
+	}
+    inline void SetName(SamplerHandle h, const char* n, Device& d) noexcept {
+        if (d.vt->setNameSampler) d.vt->setNameSampler(&d, h, n);
+    }
+    inline void SetName(PipelineLayoutHandle h, const char* n, Device& d) noexcept {
+        if (d.vt->setNamePipelineLayout) d.vt->setNamePipelineLayout(&d, h, n);
+	}
+    inline void SetName(PipelineHandle h, const char* n, Device& d) noexcept {
+        if (d.vt->setNamePipeline) d.vt->setNamePipeline(&d, h, n);
+    }
+    inline void SetName(CommandSignatureHandle h, const char* n, Device& d) noexcept {
+        if (d.vt->setNameCommandSignature) d.vt->setNameCommandSignature(&d, h, n);
+    }
+    inline void SetName(DescriptorHeapHandle h, const char* n, Device& d) noexcept {
+        if (d.vt->setNameDescriptorHeap) d.vt->setNameDescriptorHeap(&d, h, n);
+    }
+    inline void SetName(TimelineHandle h, const char* n, Device& d) noexcept {
+        if (d.vt->setNameTimeline) d.vt->setNameTimeline(&d, h, n);
+	}
+
+    using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
+    using CommandListPtr = ObjectPtr<CommandList>;
+    using SwapchainPtr = ObjectPtr<Swapchain>;
+    using DevicePtr = ObjectPtr<Device>;
+
+    // Small helpers to use vtable naming if available
+    inline void _name_queue(Queue* q, const char* n) noexcept {
+        if (q && q->vt && q->vt->setName) q->vt->setName(q, n);
+    }
+    inline void _name_cmdlist(CommandList* cl, const char* n) noexcept {
+        if (cl && cl->vt && cl->vt->setName) cl->vt->setName(cl, n);
+    }
+    inline void _name_swapchain(Swapchain* sc, const char* n) noexcept {
+        if (sc && sc->vt && sc->vt->setName) sc->vt->setName(sc, n);
+    }
+
+    inline CommandAllocatorPtr MakeCommandAllocatorPtr(Device* d, CommandAllocator ca) noexcept {
+        return CommandAllocatorPtr(
+            d, ca,
+            // Destroy
+            [](Device* dev, CommandAllocator* p) noexcept { if (dev && p) dev->DestroyCommandAllocator(p); }
+            // TODO: Name hook for allocator
+        );
+    }
+
+    inline CommandListPtr MakeCommandListPtr(Device* d, CommandList cl) noexcept {
+        return CommandListPtr(
+            d, cl,
+            [](Device* dev, CommandList* p) noexcept { if (dev && p) dev->DestroyCommandList(p); },
+            // name hook via the CL vtable
+            [](CommandList* p, const char* n) noexcept { _name_cmdlist(p, n); }
+        );
+    }
+
+    inline SwapchainPtr MakeSwapchainPtr(Device* d, Swapchain sc) noexcept {
+        return SwapchainPtr(
+            d, sc,
+            [](Device* dev, Swapchain* p) noexcept { if (dev && p) dev->DestroySwapchain(p); },
+            [](Swapchain* p, const char* n) noexcept { _name_swapchain(p, n); }
+        );
+    }
+
+    inline DevicePtr MakeDevicePtr(Device d) noexcept {
+        return DevicePtr(
+            &d, d,
+            // DestroyFn for Device ignores the TObject* and calls destroy on the object itself
+            [](Device* /*ignored*/, Device* self) noexcept {
+                if (self && self->IsValid()) self->Destroy();
+            }
+			// TODO: Name hook for Device
+        );
+    }
+
+    DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept; // implemented in rhi_dx12.cpp
 
 }

@@ -15,22 +15,22 @@ class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
-    void Initialize(rhi::Device device, rhi::Queue graphicsQueue, rhi::Queue computeQueue, rhi::Queue copyQueue);
+    void Initialize();
 	void DiagnoseDeviceRemoval();
-	rhi::Device& GetDevice() {
-        return device;
+	rhi::Device GetDevice() {
+        return device.Get();
     }
 
-	rhi::Queue& GetGraphicsQueue() {
-		return graphicsQueue;
+	rhi::Queue GetGraphicsQueue() {
+		return device->GetQueue(rhi::QueueKind::Graphics);
 	}
 
-	rhi::Queue& GetComputeQueue() {
-		return computeQueue;
+	rhi::Queue GetComputeQueue() {
+		return device->GetQueue(rhi::QueueKind::Compute);
 	}
 
-	rhi::Queue& GetCopyQueue() {
-		return copyQueue;
+	rhi::Queue GetCopyQueue() {
+		return device->GetQueue(rhi::QueueKind::Copy);
 	}
 
 	bool GetMeshShadersSupported() {
@@ -41,10 +41,10 @@ private:
 	ComPtr<ID3D12DeviceRemovedExtendedData> dred;
 
     DeviceManager() = default;
-	rhi::Device device;
-	rhi::Queue graphicsQueue;
-	rhi::Queue computeQueue;
-	rhi::Queue copyQueue;
+	rhi::DevicePtr device;
+	//rhi::Queue graphicsQueue;
+	//rhi::Queue computeQueue;
+	//rhi::Queue copyQueue;
 	bool m_meshShadersSupported = false;
 
     void CheckGPUFeatures();
@@ -56,11 +56,9 @@ inline DeviceManager& DeviceManager::GetInstance() {
     return instance;
 }
 
-inline void DeviceManager::Initialize(rhi::Device device, rhi::Queue graphicsQueue, rhi::Queue computeQueue, rhi::Queue copyQueue) {
-    this->device = device;
-	this->graphicsQueue = graphicsQueue;
-	this->computeQueue = computeQueue;
-	this->copyQueue = copyQueue;
+inline void DeviceManager::Initialize() {
+	auto framesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("framesInFlight")();
+	this->device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = framesInFlight, .enableDebug = true });
 
 	CheckGPUFeatures();
 }
