@@ -13,6 +13,7 @@ namespace rhi {
     inline constexpr uint32_t RHI_CL_ABI_MIN = 1;
     inline constexpr uint32_t RHI_SC_ABI_MIN = 1;
     inline constexpr uint32_t RHI_CA_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_RESOURCE_ABI_MIN = 1;
 
     class Device;
 
@@ -126,7 +127,6 @@ namespace rhi {
     };
 
 	// Anything that is not trivially destructible needs its own tag with a destructor
-    using ResourcePtr = UniqueHandle<ResourceHandle>;
     using PipelinePtr = UniqueHandle<PipelineHandle>;
     using PipelineLayoutPtr = UniqueHandle<PipelineLayoutHandle>;
     using CommandSignaturePtr = UniqueHandle<CommandSignatureHandle>;
@@ -162,21 +162,6 @@ namespace rhi {
     inline void name_heap(Device* d, HeapHandle h, const char* n) noexcept {
         if (d && d->vt && d->vt->setNameHeap) d->vt->setNameHeap(d, h, n);
 	}
-
-    inline ResourcePtr MakeBufferPtr(Device* d, ResourceHandle h) noexcept {
-        return ResourcePtr(
-            d, h,
-            [](Device* d, ResourceHandle hh) noexcept { d->DestroyBuffer(hh); }
-            , &name_buffer
-        );
-    }
-    inline ResourcePtr MakeTexturePtr(Device* d, ResourceHandle h) noexcept {
-        return ResourcePtr(
-            d, h,
-            [](Device* d, ResourceHandle hh) noexcept { d->DestroyTexture(hh); }
-            , &name_texture
-        );
-    }
 
     inline PipelinePtr MakePipelinePtr(Device* d, PipelineHandle h) noexcept {
         return PipelinePtr(d, h,
@@ -317,7 +302,7 @@ namespace rhi {
 		R32G32B32_Typeless, R32G32B32_Float, R32G32B32_UInt, R32G32B32_SInt,
 		R16G16B16A16_Typeless, R16G16B16A16_Float, R16G16B16A16_UNorm, R16G16B16A16_UInt, R16G16B16A16_SNorm, R16G16B16A16_SInt,
 		R32G32_Typeless, R32G32_Float, R32G32_UInt, R32G32_SInt,
-		R10G10B10A2_Typeless, R10G10B10,
+        R10G10B10A2_Typeless, R10G10B10A2_UNorm, R10G10B10A2_UInt,
 		R11G11B10_Float,
 		R8G8B8A8_Typeless, R8G8B8A8_UNorm, R8G8B8A8_UNorm_sRGB, R8G8B8A8_UInt, R8G8B8A8_SNorm, R8G8B8A8_SInt,
 		R16G16_Typeless, R16G16_Float, R16G16_UNorm, R16G16_UInt, R16G16_SNorm, R16G16_SInt,
@@ -807,6 +792,7 @@ namespace rhi {
     // ---------------- POD wrappers + VTables ----------------
     struct Device;       struct Queue;       struct CommandList;       struct Swapchain;       struct CommandAllocator;
     struct DeviceVTable; struct QueueVTable; struct CommandListVTable; struct SwapchainVTable; struct CommandAllocatorVTable;
+	struct Resource;     struct ResourceVTable;
 
     struct Queue { 
         void* impl{}; 
@@ -816,9 +802,9 @@ namespace rhi {
         }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-        inline Result Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept;
-        inline Result Signal(const TimelinePoint& p) noexcept;
-        inline Result Wait(const TimelinePoint& p) noexcept;
+        Result Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept;
+        Result Signal(const TimelinePoint& p) noexcept;
+        Result Wait(const TimelinePoint& p) noexcept;
     };
 
     class CommandList { 
@@ -850,7 +836,6 @@ namespace rhi {
             ResourceHandle cntBuf, uint64_t cntOff,
             uint32_t maxCount) noexcept;
 		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle samp) noexcept;
-        void Barrier(const BarrierBatch& b) noexcept;
 		void ClearUavUint(const UavClearInfo& u, const UavClearUint& v) noexcept;
         void ClearUavFloat(const UavClearInfo& u, const UavClearFloat& v) noexcept;
 		void SetName(const char* n) noexcept;
@@ -980,7 +965,6 @@ namespace rhi {
             ResourceHandle countBuffer, uint64_t countOffset,
             uint32_t   maxCommandCount) noexcept;
         void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle sampler) noexcept;
-        void (*barriers)(CommandList*, const BarrierBatch&) noexcept;
         void (*clearUavUint)(CommandList*, const UavClearInfo&, const UavClearUint&) noexcept;
         void (*clearUavFloat)(CommandList*, const UavClearInfo&, const UavClearFloat&) noexcept;
         void (*setName)(CommandList*, const char*) noexcept;
@@ -1069,7 +1053,6 @@ namespace rhi {
         uint32_t maxCount) noexcept
     { vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
     inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
-	inline void CommandList::Barrier(const BarrierBatch& b) noexcept { vt->barriers(this, b); }
     inline void CommandList::ClearUavUint(const UavClearInfo& i, const UavClearUint& v) noexcept { vt->clearUavUint(this, i, v); }
     inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
 	inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
@@ -1080,6 +1063,33 @@ namespace rhi {
     inline ResourceHandle Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
     inline Result Swapchain::Resize(uint32_t w, uint32_t h) noexcept { return vt->resize(this, w, h); }
     inline Result Swapchain::Present(bool vsync) noexcept { return vt->present(this, vsync); }
+
+    struct ResourceVTable {
+        void (*map)(Resource*, void** data, uint64_t offset, uint64_t size) noexcept;
+        void (*unmap)(Resource*, uint64_t writeOffset, uint64_t writeSize) noexcept;
+        void (*setName)(Resource*, const char*) noexcept;
+        uint32_t abi_version = 1;
+	};
+
+	class Resource {
+	public:
+		Resource(ResourceHandle h = {}) : handle(h) {}
+		void* impl{}; // backend wrap (owns Handle32)
+		const ResourceVTable* vt{}; // vtable
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_RESOURCE_ABI_MIN;
+		}
+		ResourceHandle GetHandle() const noexcept { return handle; }
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; } // Naming
+		inline void Map(void** data, uint64_t offset = 0, uint64_t size = ~0ull) noexcept { vt->map(this, data, offset, size); }
+		inline void Unmap(uint64_t writeOffset, uint64_t writeSize) noexcept { vt->unmap(this, writeOffset, writeSize); }
+		inline void SetName(const char* n) noexcept {
+			vt->setName(this, n);
+		}
+	private:
+		ResourceHandle handle;
+	};
 
     struct DeviceCreateInfo { Backend backend = Backend::D3D12; uint32_t framesInFlight = 3; bool enableDebug = true; };
 
@@ -1120,6 +1130,7 @@ namespace rhi {
     using CommandListPtr = ObjectPtr<CommandList>;
     using SwapchainPtr = ObjectPtr<Swapchain>;
     using DevicePtr = ObjectPtr<Device>;
+	using ResourcePtr = ObjectPtr<Resource>;
 
     // Small helpers to use vtable naming if available
     inline void _name_queue(Queue* q, const char* n) noexcept {
@@ -1168,6 +1179,20 @@ namespace rhi {
 			// TODO: Name hook for Device
         );
     }
+    inline ResourcePtr MakeTexturePtr(Device* d, Resource r) noexcept {
+        return ResourcePtr(
+            d, r,
+            [](Device* dev, Resource* p) noexcept { if (dev && p) dev->DestroyTexture(p->GetHandle()); },
+            [](Resource* p, const char* n) noexcept { if (p) p->SetName(n); }
+        );
+	}
+    inline ResourcePtr MakeBufferPtr(Device* d, Resource r) noexcept {
+        return ResourcePtr(
+            d, r,
+            [](Device* dev, Resource* p) noexcept { if (dev && p) dev->DestroyBuffer(p->GetHandle()); },
+            [](Resource* p, const char* n) noexcept { if (p) p->SetName(n); }
+        );
+	}
 
     DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept; // implemented in rhi_dx12.cpp
 

@@ -1,8 +1,8 @@
 # Set the path to the directory you want to search
-$directory = "BasicRenderer"
+$directory = "."
 
 # Set a list of directory names to exclude
-$excludedDirectories = @("nlohmann", "stb", "DirectX", "pix", "Intel", "FidelityFX", "ThirdParty")
+$excludedDirectories = @("nlohmann", "stb", "DirectX", "pix", "Intel", "FidelityFX", "ThirdParty", ".*", "models", "textures", "out")
 
 # File extensions to include in the search (e.g., .txt, .cpp, .h)
 $includeExtensions = @("*.txt", "*.cpp", "*.h")

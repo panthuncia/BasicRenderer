@@ -78,4 +78,16 @@ namespace rhi {
 		&sc_resize,
 		&sc_present, 
 		1u };
+	const ResourceVTable g_buf_rvt = {
+		&buf_map,
+		&buf_unmap,
+		&buf_setName,
+		1
+	};
+	const ResourceVTable g_tex_rvt = {
+		&tex_map,
+		&tex_unmap,
+		&tex_setName,
+		1
+	};
 }

@@ -2,6 +2,8 @@
 
 #ifdef _WIN32
 #include <directx/d3dx12.h>
+#include <Windows.h>
+#include <string>
 #include <dxgi1_6.h>
 #include <wrl.h>
 #include <vector>
@@ -12,6 +14,13 @@
 #ifndef SAFE_RELEASE
 #define SAFE_RELEASE(p) if(p){ (p)->Release(); (p)=nullptr; }
 #endif
+
+std::wstring s2ws(const std::string & s) {
+	int buffSize = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
+	std::wstring ws(buffSize, 0);
+	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), ws.data(), buffSize);
+	return ws;
+}
 
 namespace rhi {
 	using Microsoft::WRL::ComPtr;
@@ -212,6 +221,8 @@ namespace rhi {
 		case Format::R32G32_UInt: return DXGI_FORMAT_R32G32_UINT;
 		case Format::R32G32_SInt: return DXGI_FORMAT_R32G32_SINT;
 		case Format::R10G10B10A2_Typeless: return DXGI_FORMAT_R10G10B10A2_TYPELESS;
+		case Format::R10G10B10A2_UNorm: return DXGI_FORMAT_R10G10B10A2_UNORM;
+		case Format::R10G10B10A2_UInt: return DXGI_FORMAT_R10G10B10A2_UINT;
 		case Format::R11G11B10_Float: return DXGI_FORMAT_R11G11B10_FLOAT;
 		case Format::R8G8B8A8_Typeless: return DXGI_FORMAT_R8G8B8A8_TYPELESS;
 		case Format::R8G8B8A8_UNorm: return DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -532,7 +543,13 @@ namespace rhi {
 	};
 
 	// ---------------- VTables forward ----------------
-	extern const DeviceVTable g_devvt; extern const QueueVTable g_qvt; extern const CommandListVTable g_clvt; extern const SwapchainVTable g_scvt; extern const CommandAllocatorVTable g_calvt;
+	extern const DeviceVTable g_devvt; 
+	extern const QueueVTable g_qvt; 
+	extern const CommandListVTable g_clvt; 
+	extern const SwapchainVTable g_scvt; 
+	extern const CommandAllocatorVTable g_calvt;
+	extern const ResourceVTable g_buf_rvt;
+	extern const ResourceVTable g_tex_rvt;
 
 	// ---------------- Helpers ----------------
 	static void EnableDebug(ID3D12Device* device) {
@@ -697,18 +714,17 @@ namespace rhi {
 		return MakePipelinePtr(d, handle);
 	}
 
-	static void d_destroyPipeline(Device* d, PipelineHandle h) noexcept {
-		static_cast<Dx12Device*>(d->impl)->pipelines.free(h);
-	}
-
 	static void d_destroyBuffer(Device* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->buffers.free(h); }
 	static void d_destroyTexture(Device* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->textures.free(h); }
 	static void d_destroyView(Device* d, ViewHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->views.free(h); }
 	static void d_destroySampler(Device* d, SamplerHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->samplers.free(h); }
 	static void d_destroyPipeline(Device* d, PipelineHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->pipelines.free(h); }
 
-	static void d_destroyCommandList(Device*, CommandList cl) noexcept {
-		static_cast<Dx12Device*>(cl.impl)->commandLists.free(cl.GetHandle());
+	static void d_destroyCommandList(Device* d, CommandList* p) noexcept {
+		if (!d || !p || !p->IsValid()) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		impl->commandLists.free(p->GetHandle());
+		p->Reset();
 	}
 
 	static Queue d_getQueue(Device* d, QueueKind qk) noexcept {
@@ -1392,7 +1408,11 @@ namespace rhi {
 		Dx12Buffer B{};
 		B.res = std::move(res);
 		auto handle = impl->buffers.alloc(std::move(B));
-		return MakeBufferPtr(d, handle);
+
+		Resource out{ handle };
+		out.impl = impl->buffers.get(handle);
+		out.vt = &g_buf_rvt;
+		return MakeBufferPtr(d, out);
 	}
 
 	static ResourcePtr d_createCommittedTexture(Device* d, const ResourceDesc& td) noexcept {
@@ -1436,7 +1456,12 @@ namespace rhi {
 		T.fmt = desc.Format;
 		T.w = td.texture.width; T.h = td.texture.height;
 		auto handle = impl->textures.alloc(std::move(T));
-		return MakeTexturePtr(d, handle);
+
+		Resource out{ handle };
+		out.impl = impl->textures.get(handle);
+		out.vt = &g_tex_rvt;
+
+		return MakeTexturePtr(d, out);
 	}
 
 	static ResourcePtr d_createCommittedResource(Device* d, const ResourceDesc& td) noexcept {
@@ -1916,6 +1941,68 @@ namespace rhi {
 		return s->sc->Present(sync, flags) == S_OK ? Result::Ok : Result::Failed;
 	}
 
+	// ---------------- Resource vtable funcs ----------------
+
+	static void buf_map(Resource* r, void** data, uint64_t offset, uint64_t size) noexcept {
+		if (!r || !data) return;
+		auto* B = static_cast<Dx12Buffer*>(r->impl);
+		if (!B || !B->res) { *data = nullptr; return; }
+
+		D3D12_RANGE readRange{};
+		D3D12_RANGE* pRange = nullptr;
+		if (size != ~0ull) {
+			readRange.Begin = SIZE_T(offset);
+			readRange.End = SIZE_T(offset + size);
+			pRange = &readRange;
+		}
+
+		void* ptr = nullptr;
+		HRESULT hr = B->res->Map(0, pRange, &ptr);
+		*data = SUCCEEDED(hr) ? ptr : nullptr;
+	}
+
+	static void buf_unmap(Resource* r, uint64_t writeOffset, uint64_t writeSize) noexcept {
+		auto* B = static_cast<Dx12Buffer*>(r->impl);
+		if (!B || !B->res) return;
+		D3D12_RANGE range{};
+		if (writeSize != ~0ull) {
+			range.Begin = SIZE_T(writeOffset);
+			range.End = SIZE_T(writeOffset + writeSize);
+		}
+		B->res->Unmap(0, (writeSize != ~0ull) ? &range : nullptr);
+	}
+
+	static void buf_setName(Resource* r, const char* n) noexcept {
+		if (!n) return;
+		auto* B = static_cast<Dx12Buffer*>(r->impl);
+		if (!B || !B->res) return;
+		B->res->SetName(s2ws(n).c_str());
+	}
+
+	static void tex_map(Resource* r, void** data, uint64_t /*offset*/, uint64_t /*size*/) noexcept {
+		if (!r || !data) return;
+		auto* T = static_cast<Dx12Texture*>(r->impl);
+		if (!T || !T->res) { *data = nullptr; return; }
+
+		// NOTE: Texture mapping is only valid on UPLOAD/READBACK heaps.
+		// This returns a pointer to subresource 0 memory. Caller must compute
+		// row/slice offsets via GetCopyableFootprints.
+		void* ptr = nullptr;
+		HRESULT hr = T->res->Map(0, nullptr, &ptr);
+		*data = SUCCEEDED(hr) ? ptr : nullptr;
+	}
+	static void tex_unmap(Resource* r) noexcept {
+		auto* T = static_cast<Dx12Texture*>(r->impl);
+		if (T && T->res) T->res->Unmap(0, nullptr);
+	}
+
+	static void tex_setName(Resource* r, const char* n) noexcept {
+		if (!n) return;
+		auto* T = static_cast<Dx12Texture*>(r->impl);
+		if (!T || !T->res) return;
+		T->res->SetName(s2ws(n).c_str());
+	}
+
 	DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept {
 		UINT flags = 0;
 #ifdef _DEBUG
@@ -1924,7 +2011,7 @@ namespace rhi {
 		auto* impl = new Dx12Device();
 		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->factory));
 
-		// Select default adapter (for brevity). You can port your GetMostPowerfulAdapter here.
+		// Select default adapter. TODO: expose adapter selection
 		ComPtr<IDXGIAdapter1> adapter; impl->factory->EnumAdapters1(0, &adapter);
 		D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->dev));
 		EnableDebug(impl->dev.Get());
