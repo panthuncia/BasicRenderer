@@ -8,6 +8,9 @@
 #include <wrl.h>
 #include <vector>
 #include <cassert>
+
+#include "rhi_interop_dx12.h"
+
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 
@@ -25,8 +28,16 @@ std::wstring s2ws(const std::string & s) {
 namespace rhi {
 	using Microsoft::WRL::ComPtr;
 
-	struct Dx12Buffer { ComPtr<ID3D12Resource> res; }; // trimmed for demo
-	struct Dx12Texture { ComPtr<ID3D12Resource> res; DXGI_FORMAT fmt{ DXGI_FORMAT_UNKNOWN }; uint32_t w = 0, h = 0; };
+	struct Dx12Buffer { ComPtr<ID3D12Resource> res;};
+	struct Dx12Texture { 
+		ComPtr<ID3D12Resource> res; 
+		DXGI_FORMAT fmt{ DXGI_FORMAT_UNKNOWN }; 
+		uint32_t w = 0, h = 0; 
+		uint16_t mips = 1;
+		uint16_t arraySize = 1; // for 1D/2D/cube (cube arrays should already multiply by 6)
+		D3D12_RESOURCE_DIMENSION dim = D3D12_RESOURCE_DIMENSION_UNKNOWN;
+		uint16_t depth = 1;
+	};
 	struct Dx12View { ViewDesc desc; D3D12_CPU_DESCRIPTOR_HANDLE cpu{}; };
 	struct Dx12Sampler { SamplerDesc desc; };
 	struct Dx12Pipeline { Microsoft::WRL::ComPtr<ID3D12PipelineState> pso; bool isCompute; };
@@ -41,8 +52,17 @@ namespace rhi {
 		uint32_t stride = 0;
 	};
 
-	struct Dx12Allocator { Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc; D3D12_COMMAND_LIST_TYPE type{}; };
-	struct Dx12CommandList { Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl; D3D12_COMMAND_LIST_TYPE type{}; Dx12Device* dev; };
+	struct Dx12Allocator {
+		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc; 
+		D3D12_COMMAND_LIST_TYPE type{}; 
+	};
+	struct Dx12Device;
+	struct Dx12CommandList { 
+		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl; 
+		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
+		D3D12_COMMAND_LIST_TYPE type{}; 
+		Dx12Device* dev; 
+	};
 
 	static inline D3D12_BARRIER_ACCESS ToDX(const ResourceAccessType state) {
 		if (state == ResourceAccessType::None) {
@@ -516,7 +536,14 @@ namespace rhi {
 
 	struct Dx12Device {
 		Device self{};
-		ComPtr<IDXGIFactory7> factory; ComPtr<ID3D12Device10> dev;
+		ComPtr<IDXGIFactory7> factory; 
+		ComPtr<ID3D12Device10> dev;
+		ComPtr<IDXGIAdapter4>  adapter;
+
+		rhi::dx12::PFN_UpgradeInterface upgradeFn = nullptr;
+		Microsoft::WRL::ComPtr<IDXGIFactory7>  slFactory;   // upgraded proxy
+		Microsoft::WRL::ComPtr<ID3D12Device>   slDeviceBase;// upgraded base iface
+
 		Registry<Dx12Buffer> buffers;
 		Registry<Dx12Texture> textures;
 		Registry<Dx12View> views;
@@ -762,8 +789,12 @@ namespace rhi {
 		desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
 		desc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-		ComPtr<IDXGISwapChain1> sc1; impl->factory->CreateSwapChainForHwnd(impl->gfx.q.Get(), (HWND)hwnd, &desc, nullptr, nullptr, &sc1);
-		ComPtr<IDXGISwapChain3> sc; sc1.As(&sc);
+		ComPtr<IDXGISwapChain1> sc1;
+		IDXGIFactory7* facForCreate = impl->upgradeFn && impl->slFactory ? impl->slFactory.Get()
+			: impl->factory.Get();
+		facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), (HWND)hwnd, &desc, nullptr, nullptr, &sc1);
+		ComPtr<IDXGISwapChain3> sc; 
+		sc1.As(&sc);
 
 		// RTV heap for backbuffers
 		ComPtr<ID3D12DescriptorHeap> rtvHeap;
@@ -786,6 +817,10 @@ namespace rhi {
 			t.fmt = desc.Format;
 			t.w = w;
 			t.h = h;
+			t.mips = 1;
+			t.arraySize = 1;
+			t.dim = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			t.depth = 1;
 			imgHandles[i] = impl->textures.alloc(t);
 			// Create RTV in the heap
 			auto cpu = cpuStart;
@@ -1018,6 +1053,16 @@ namespace rhi {
 		if (!H || H->type != expect) return false;
 		out = H->cpuStart;
 		out.ptr += SIZE_T(s.index) * H->inc;
+		return true;
+	}
+
+	static bool DxGetDstGpu(Dx12Device* impl, DescriptorSlot s,
+		D3D12_GPU_DESCRIPTOR_HANDLE& out,
+		D3D12_DESCRIPTOR_HEAP_TYPE expect) {
+		auto* H = impl->descHeaps.get(s.heap);
+		if (!H || H->type != expect || !H->shaderVisible) return false;
+		out = H->gpuStart;
+		out.ptr += UINT64(s.index) * H->inc;
 		return true;
 	}
 
@@ -1352,9 +1397,9 @@ namespace rhi {
 		return MakeCommandAllocatorPtr(d, out);
 	}
 
-	static void d_destroyCommandAllocator(Device* d, CommandAllocator ca) noexcept {
+	static void d_destroyCommandAllocator(Device* d, CommandAllocator* ca) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		impl->allocators.free(ca.GetHandle());
+		impl->allocators.free(ca->GetHandle());
 	}
 
 	static CommandListPtr d_createCommandList(Device* d, QueueKind q, CommandAllocator ca) noexcept {
@@ -1366,6 +1411,8 @@ namespace rhi {
 		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&rec.cl)))) return {};
 		rec.cl->Close();
 		rec.dev = impl;
+		rec.alloc = A->alloc;
+		rec.type = A->type;
 
 		auto h = impl->commandLists.alloc(std::move(rec));
 
@@ -1409,7 +1456,7 @@ namespace rhi {
 		B.res = std::move(res);
 		auto handle = impl->buffers.alloc(std::move(B));
 
-		Resource out{ handle };
+		Resource out{ handle, false };
 		out.impl = impl->buffers.get(handle);
 		out.vt = &g_buf_rvt;
 		return MakeBufferPtr(d, out);
@@ -1455,9 +1502,22 @@ namespace rhi {
 		T.res = std::move(res);
 		T.fmt = desc.Format;
 		T.w = td.texture.width; T.h = td.texture.height;
+		T.mips = td.texture.mipLevels;
+		T.dim = (td.type == ResourceType::Texture3D)
+			? D3D12_RESOURCE_DIMENSION_TEXTURE3D
+			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
+				: D3D12_RESOURCE_DIMENSION_TEXTURE1D);
+		if (td.type == ResourceType::Texture3D) {
+			T.depth = td.texture.depthOrLayers;
+			T.arraySize = 1;
+		}
+		else {
+			T.depth = 1;
+			T.arraySize = td.texture.depthOrLayers; // NOTE: for cube/cube array, pass 6*N here at creation time
+		}
 		auto handle = impl->textures.alloc(std::move(T));
 
-		Resource out{ handle };
+		Resource out{ handle, true };
 		out.impl = impl->textures.get(handle);
 		out.vt = &g_tex_rvt;
 
@@ -1494,7 +1554,7 @@ namespace rhi {
 	}
 
 
-	static void d_destroyTimeline(Device* d, TimelineHandle& t) noexcept {
+	static void d_destroyTimeline(Device* d, TimelineHandle t) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		impl->timelines.free(t);
 	}
@@ -1550,6 +1610,68 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) return;
 		impl->heaps.free(h);
+	}
+
+	static void d_setNameBuffer(Device* d, ResourceHandle b, const char* n) noexcept {
+		if (!n) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* B = impl->buffers.get(b)) {
+			std::wstring w(n, n + ::strlen(n));
+			B->res->SetName(w.c_str());
+		}
+	}
+	
+	static void d_setNameTexture(Device* d, ResourceHandle t, const char* n) noexcept {
+		if (!n) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* T = impl->textures.get(t)) {
+			std::wstring w(n, n + ::strlen(n));
+			T->res->SetName(w.c_str());
+		}
+	}
+
+	static void d_setNameSampler(Device* d, SamplerHandle s, const char* n) noexcept {
+		return; // TODO?
+	}
+
+	static void d_setNamePipelineLayout(Device* d, PipelineLayoutHandle p, const char* n) noexcept {
+		return; // TODO?
+	}
+
+	static void d_setNamePipeline(Device* d, PipelineHandle p, const char* n) noexcept {
+		if (!n) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* P = impl->pipelines.get(p)) {
+			std::wstring w(n, n + ::strlen(n));
+			P->pso->SetName(w.c_str());
+		}
+	}
+
+	static void d_setNameCommandSignature(Device* d, CommandSignatureHandle cs, const char* n) noexcept {
+		if (!n) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* CS = impl->commandSignatures.get(cs)) {
+			std::wstring w(n, n + ::strlen(n));
+			CS->sig->SetName(w.c_str());
+		}
+	}
+
+	static void d_setNameDescriptorHeap(Device* d, DescriptorHeapHandle dh, const char* n) noexcept {
+		if (!n) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* DH = impl->descHeaps.get(dh)) {
+			std::wstring w(n, n + ::strlen(n));
+			DH->heap->SetName(w.c_str());
+		}
+	}
+
+	static void d_setNameTimeline(Device* d, TimelineHandle t, const char* n) noexcept {
+		if (!n) return;
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (auto* TL = impl->timelines.get(t)) {
+			std::wstring w(n, n + ::strlen(n));
+			TL->fence->SetName(w.c_str());
+		}
 	}
 
 	static void d_setNameHeap(Device* d, HeapHandle h, const char* n) noexcept {
@@ -1681,6 +1803,15 @@ namespace rhi {
 
 	// ---------------- CommandList vtable funcs ----------------
 
+	static inline UINT MipDim(UINT base, UINT mip) {
+		return (std::max)(1u, base >> mip);
+	}
+
+	static inline UINT CalcSubresourceFor(const rhi::Dx12Texture& T, UINT mip, UINT arraySlice) {
+		// PlaneSlice = 0 (non-planar). TODO: support planar formats
+		return D3D12CalcSubresource(mip, arraySlice, 0, T.mips, T.arraySize);
+	}
+
 	static void cl_end(CommandList* cl) noexcept {
 		auto* w = static_cast<Dx12CommandList*>(cl->impl);
 		w->cl->Close();
@@ -1731,8 +1862,7 @@ namespace rhi {
 		l->cl->RSSetScissorRects(1, &sc);
 	}
 
-	static void cl_endPass(CommandList* /*cl*/) noexcept {}
-	static void cl_barriers(CommandList*, const BarrierBatch&) noexcept {}
+	static void cl_endPass(CommandList* /*cl*/) noexcept {} // nothing to do in DX12
 	static void cl_bindLayout(CommandList* cl, PipelineLayoutHandle layoutH) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto dev = l->dev;
@@ -1928,6 +2058,160 @@ namespace rhi {
 		}
 	}
 
+	static void cl_clearUavUint(rhi::CommandList* cl,
+		const rhi::UavClearInfo& u,
+		const rhi::UavClearUint& v) noexcept
+	{
+		auto* rec = static_cast<rhi::Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!rec || !impl) return;
+
+		// Resolve the two matching descriptors
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu{};
+		if (!DxGetDstCpu(impl, u.cpuVisible, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
+		if (!DxGetDstGpu(impl, u.shaderVisible, gpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
+
+		// Resource to clear
+		
+		ID3D12Resource* res = nullptr;
+		if (u.resource.IsTexture()) {
+			res = impl->textures.get(u.resource.GetHandle())->res.Get();
+		} else {
+			res = impl->buffers.get(u.resource.GetHandle())->res.Get();
+		}
+		if (!res) return;
+
+		// NOTE: caller must have bound the shader-visible heap via SetDescriptorHeaps()
+		// and transitioned 'res' to UAV/UNORDERED_ACCESS with your enhanced barriers.
+		rec->cl->ClearUnorderedAccessViewUint(gpu, cpu, res, v.v, 0, nullptr);
+	}
+
+	static void cl_clearUavFloat(rhi::CommandList* cl,
+		const rhi::UavClearInfo& u,
+		const rhi::UavClearFloat& v) noexcept
+	{
+		auto* rec = static_cast<rhi::Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!rec || !impl) return;
+
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu{};
+		if (!DxGetDstCpu(impl, u.cpuVisible, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
+		if (!DxGetDstGpu(impl, u.shaderVisible, gpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
+
+		ID3D12Resource* res = nullptr;
+		if (u.resource.IsTexture()) {
+			res = impl->textures.get(u.resource.GetHandle())->res.Get();
+		}
+		else {
+			res = impl->buffers.get(u.resource.GetHandle())->res.Get();
+		}
+		if (!res) return;
+
+		rec->cl->ClearUnorderedAccessViewFloat(gpu, cpu, res, v.v, 0, nullptr);
+	}
+
+	static void cl_copyBufferToTexture(CommandList* cl, const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept {
+		if (!cl || !cl->impl) return;
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = rec->dev;
+		if (!dev) return;
+
+		// Resolve destination texture & source buffer
+		auto* T = dev->textures.get(dst.texture);
+		auto* B = dev->buffers.get(src.buffer);
+		if (!T || !T->res || !B || !B->res) return;
+
+		// Compute subresource index (plane slice = 0 for non-planar formats)
+		const UINT plane = 0;
+		UINT subresource = 0;
+		if (T->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) {
+			subresource = D3D12CalcSubresource(dst.mip, /*arraySlice*/0, plane, T->mips, /*ArraySize*/1);
+		}
+		else {
+			// 1D/2D/2DArray/Cube/CubeArray: array slice is meaningful
+			subresource = D3D12CalcSubresource(dst.mip, dst.arraySlice, plane, T->mips, T->arraySize);
+		}
+
+		// Destination: texture subresource
+		D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+		dstLoc.pResource = T->res.Get();
+		dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dstLoc.SubresourceIndex = subresource;
+
+		// Source: buffer with placed footprint
+		D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+		srcLoc.pResource = B->res.Get();
+		srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		srcLoc.PlacedFootprint.Offset = src.offset;
+		srcLoc.PlacedFootprint.Footprint.Format = T->fmt;
+		srcLoc.PlacedFootprint.Footprint.Width = dst.width;
+		srcLoc.PlacedFootprint.Footprint.Height = dst.height;
+		srcLoc.PlacedFootprint.Footprint.Depth = dst.depth;   // usually 1 for 2D uploads; >1 for 3D slices
+		srcLoc.PlacedFootprint.Footprint.RowPitch = src.rowPitch; // must satisfy D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256)
+
+		// pSrcBox must be nullptr when source is a buffer (footprint defines size)
+		rec->cl->CopyTextureRegion(&dstLoc, dst.x, dst.y, dst.z, &srcLoc, nullptr);
+	}
+
+	static void cl_copyTextureRegion(
+		rhi::CommandList* cl,
+		const rhi::TextureCopyRegion& dst,
+		const rhi::TextureCopyRegion& src) noexcept
+	{
+		auto* rec = static_cast<rhi::Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!rec || !impl) return;
+
+		auto* DstT = impl->textures.get(dst.texture);
+		auto* SrcT = impl->textures.get(src.texture);
+		if (!DstT || !SrcT || !DstT->res || !SrcT->res) return;
+
+		// Build D3D12 copy locations
+		D3D12_TEXTURE_COPY_LOCATION dxDst{};
+		dxDst.pResource = DstT->res.Get();
+		dxDst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dxDst.SubresourceIndex = CalcSubresourceFor(*DstT, dst.mip,
+			(DstT->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? 0u : dst.arraySlice);
+
+		D3D12_TEXTURE_COPY_LOCATION dxSrc{};
+		dxSrc.pResource = SrcT->res.Get();
+		dxSrc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dxSrc.SubresourceIndex = CalcSubresourceFor(*SrcT, src.mip,
+			(SrcT->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? 0u : src.arraySlice);
+
+		// If width/height/depth are zero, treat them as "copy full mip slice from src starting at (src.x,src.y,src.z)"
+		UINT srcW = src.width ? src.width : MipDim(SrcT->w, src.mip);
+		UINT srcH = src.height ? src.height : MipDim(SrcT->h, src.mip);
+		UINT srcD = src.depth ? src.depth : ((SrcT->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+			? MipDim(SrcT->depth, src.mip) : 1u);
+
+		// Clamp box to the src subresource bounds just in case (optional; D3D will also validate)
+		if (SrcT->dim != D3D12_RESOURCE_DIMENSION_TEXTURE3D) { srcD = 1; }
+
+		D3D12_BOX srcBox{};
+		srcBox.left = src.x;
+		srcBox.top = src.y;
+		srcBox.front = src.z;
+		srcBox.right = src.x + srcW;
+		srcBox.bottom = src.y + srcH;
+		srcBox.back = src.z + srcD;
+
+		// Perform the copy
+		// NOTE: Resources must already be in COPY_SOURCE / COPY_DEST layouts respectively.
+		rec->cl->CopyTextureRegion(
+			&dxDst,
+			dst.x, dst.y, dst.z,   // destination offsets
+			&dxSrc,
+			&srcBox);
+	}
+	static void cl_setName(CommandList* cl, const char* n) noexcept {
+		if (!n) return;
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		if (!l || !l->cl) return;
+		l->cl->SetName(std::wstring(n, n + ::strlen(n)).c_str());
+	}
 
 	// ---------------- Swapchain vtable funcs ----------------
 	static uint32_t sc_count(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->count; }
@@ -1940,7 +2224,7 @@ namespace rhi {
 		UINT sync = vsync ? 1 : 0; UINT flags = 0;
 		return s->sc->Present(sync, flags) == S_OK ? Result::Ok : Result::Failed;
 	}
-
+	static void sc_setName(Swapchain* sc, const char* n) noexcept {} // Cannot name IDXGISwapChain
 	// ---------------- Resource vtable funcs ----------------
 
 	static void buf_map(Resource* r, void** data, uint64_t offset, uint64_t size) noexcept {
@@ -1991,7 +2275,7 @@ namespace rhi {
 		HRESULT hr = T->res->Map(0, nullptr, &ptr);
 		*data = SUCCEEDED(hr) ? ptr : nullptr;
 	}
-	static void tex_unmap(Resource* r) noexcept {
+	static void tex_unmap(Resource* r, uint64_t writeOffset, uint64_t writeSize) noexcept {
 		auto* T = static_cast<Dx12Texture*>(r->impl);
 		if (T && T->res) T->res->Unmap(0, nullptr);
 	}
@@ -2012,8 +2296,12 @@ namespace rhi {
 		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->factory));
 
 		// Select default adapter. TODO: expose adapter selection
-		ComPtr<IDXGIAdapter1> adapter; impl->factory->EnumAdapters1(0, &adapter);
-		D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->dev));
+		ComPtr<IDXGIAdapter1> adapter; 
+		impl->factory->EnumAdapters1(0, &adapter);
+
+		adapter.As(&impl->adapter);
+
+		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->dev));
 		EnableDebug(impl->dev.Get());
 
 		auto makeQ = [&](D3D12_COMMAND_LIST_TYPE t, Dx12QueueState& out) {

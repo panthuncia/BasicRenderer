@@ -12,7 +12,7 @@ find_package(DirectX-Headers CONFIG REQUIRED)
 # Build a static library for now.
 add_library(BasicRHI STATIC 
     rhi_dx12.cpp
- "rhi_interop.h" "rhi_dx12.h" "rhi_interop.cpp" "rhi_interop_dx12.h" "resource_states.h" "rhi_helpers.h")
+ "rhi_interop.h" "rhi_dx12.h"  "rhi_interop_dx12.h" "resource_states.h" "rhi_helpers.h" "rhi_interop_dx12.cpp")
 
 # Public header(s)
 set_target_properties(BasicRHI PROPERTIES
@@ -22,7 +22,7 @@ set_target_properties(BasicRHI PROPERTIES
 # Set sources
 target_sources(BasicRHI PRIVATE
     rhi_dx12.cpp
-    rhi_interop.cpp
+    rhi_interop_dx12.cpp
 )
 
 # Public include paths:

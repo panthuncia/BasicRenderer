@@ -71,7 +71,6 @@ public:
     void Update(float elapsedSeconds);
     void Render();
     void Cleanup();
-    ComPtr<ID3D12Device10>& GetDevice();
     std::shared_ptr<Scene>& GetCurrentScene();
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
@@ -89,17 +88,15 @@ private:
     ComPtr<ID3D12Device10> nativeDevice;
     ComPtr<ID3D12Device10> slProxyDevice;
 
-    ComPtr<IDXGISwapChain4> swapChain;
-    ComPtr<ID3D12CommandQueue> graphicsQueue;
-	ComPtr<ID3D12CommandQueue> computeQueue;
-	ComPtr<ID3D12CommandQueue> copyQueue;
-    ComPtr<ID3D12DescriptorHeap> rtvHeap;
+    rhi::SwapchainPtr swapChain;
+
+    rhi::DescriptorHeapPtr rtvHeap;
 	std::vector<ComPtr<ID3D12Resource>> renderTargets;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;
-    std::vector<ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
-    std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
+    std::vector<rhi::CommandAllocatorPtr> m_commandAllocators;
+    std::vector<rhi::CommandListPtr> m_commandLists;
     UINT rtvDescriptorSize;
     UINT dsvDescriptorSize;
     uint8_t m_frameIndex = 0;

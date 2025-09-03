@@ -65,12 +65,6 @@ inline void DeviceManager::Initialize() {
 
 inline void DeviceManager::CheckGPUFeatures() {
 	D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {}; // TODO: Query interface support in RHI
-	rhi::dx12::get_device(device)->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
+	rhi::dx12::get_device(device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
 	m_meshShadersSupported = features.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
-
-	if (SUCCEEDED(rhi::dx12::get_device(device)->QueryInterface(IID_PPV_ARGS(&dred)))) {
-	}
-	else {
-		spdlog::warn("Failed to get DRED interface");
-	}
 }

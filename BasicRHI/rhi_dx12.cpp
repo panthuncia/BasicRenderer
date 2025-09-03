@@ -15,8 +15,11 @@ namespace rhi {
 		&d_createRenderTargetView,
 		&d_createDepthStencilView,
 		&d_createSampler,
-		&d_createResource,
+		&d_createCommittedResource,
 		&d_createTimeline,
+		&d_createHeap,
+		&d_createPlacedResource,
+
 		&d_destroySampler,
 		&d_destroyPipelineLayout,
 		&d_destroyPipeline,
@@ -28,6 +31,7 @@ namespace rhi {
 		&d_destroyBuffer,
 		&d_destroyTexture,
 		&d_destroyTimeline,
+		&d_destroyHeap,
 		
 		&d_getQueue,
 		&d_waitIdle,
@@ -35,6 +39,15 @@ namespace rhi {
 		&d_getDescriptorHandleIncrementSize,
 		&d_timelineCompletedValue,
 		&d_timelineHostWait,
+		&d_setNameBuffer,
+		&d_setNameTexture,
+		&d_setNameSampler,
+		&d_setNamePipelineLayout,
+		&d_setNamePipeline,
+		&d_setNameCommandSignature,
+		&d_setNameDescriptorHeap,
+		&d_setNameTimeline,
+		&d_setNameHeap,
 		&d_destroyDevice,
         2u
     };
@@ -51,12 +64,11 @@ namespace rhi {
 	};
 
 	const CommandListVTable g_clvt = {
-		&cl_begin,
 		&cl_end,
 		&cl_reset,
 		&cl_beginPass,
 		&cl_endPass,
-		&cl_barriers,
+		&cl_barrier,
 		&cl_bindLayout,
 		&cl_bindPipeline,
 		&cl_setVB,
@@ -67,7 +79,11 @@ namespace rhi {
 		&cl_clearView,
 		&cl_executeIndirect,
 		&cl_setDescriptorHeaps,
-		&cl_barrier,
+		&cl_clearUavUint,
+		&cl_clearUavFloat,
+		&cl_copyBufferToTexture,
+		&cl_copyTextureRegion,
+		&cl_setName,
 		1u
     };
     const SwapchainVTable g_scvt = { 
@@ -76,7 +92,8 @@ namespace rhi {
 		&sc_rtv,
 		&sc_img,
 		&sc_resize,
-		&sc_present, 
+		&sc_present,
+		&sc_setName,
 		1u };
 	const ResourceVTable g_buf_rvt = {
 		&buf_map,

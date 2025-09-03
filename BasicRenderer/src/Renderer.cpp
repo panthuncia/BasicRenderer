@@ -156,12 +156,13 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().InitFFX(); // Needs device
     FFXManager::GetInstance().InitFFX();
     SetSettings();
-    ResourceManager::GetInstance().Initialize(graphicsQueue.Get());
+    auto graphicsQueue = DeviceManager::GetInstance().GetGraphicsQueue();
+    ResourceManager::GetInstance().Initialize(graphicsQueue);
     PSOManager::GetInstance().initialize();
     UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
-    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_device(m_device), graphicsQueue, swapChain);
+    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_device(m_device), rhi::dx12::get_queue(graphicsQueue), rhi::dx12::get_swapchain(swapChain.Get())); // TODO: VK imgui
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
 	StatisticsManager::GetInstance().Initialize();
@@ -905,13 +906,15 @@ void Renderer::Render() {
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
 
+	auto& deviceManager = DeviceManager::GetInstance();
+
     m_context.currentScene = currentScene.get();
-	m_context.device = DeviceManager::GetInstance().GetDevice().Get();
+	m_context.device = deviceManager.GetDevice();
     //m_context.commandList = commandList.Get();
-	m_context.commandQueue = graphicsQueue.Get();
-    m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap().Get();
-    m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get();
-    m_context.rtvHeap = rtvHeap.Get();
+	m_context.commandQueue = deviceManager.GetGraphicsQueue();
+    m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap();
+    m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap();
+    m_context.rtvHeap = rtvHeap;
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
@@ -950,7 +953,7 @@ void Renderer::Render() {
 
     // Execute the command list
     ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
-    graphicsQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    deviceManager.GetGraphicsQueue().Submit(_countof(ppCommandLists), ppCommandLists);
 
 	currentRenderGraph->Execute(m_context); // Main render graph execution
 
@@ -969,7 +972,7 @@ void Renderer::Render() {
     graphicsQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Present the frame
-    ThrowIfFailed(swapChain->Present(0, m_allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
+    swapChain->Present(!m_allowTearing);
 
     AdvanceFrameIndex();
 
@@ -996,29 +999,19 @@ void Renderer::AdvanceFrameIndex() {
 
 void Renderer::FlushCommandQueue() {
     // Create a fence and an event to wait on
-    Microsoft::WRL::ComPtr<ID3D12Fence> flushFence;
-    ThrowIfFailed(DeviceManager::GetInstance().GetDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&flushFence)));
 
-    HANDLE flushEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    if (!flushEvent) {
-        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-    }
+	auto device = DeviceManager::GetInstance().GetDevice();
+    rhi::TimelinePtr flushFence = device.CreateTimeline();
+
+	auto graphicsQueue = DeviceManager::GetInstance().GetGraphicsQueue();
+    auto computeQueue = DeviceManager::GetInstance().GetComputeQueue();
 
     // Signal the fence and wait
-    const UINT64 flushValue = 1;
-    ThrowIfFailed(graphicsQueue->Signal(flushFence.Get(), flushValue));
-    if (flushFence->GetCompletedValue() < flushValue) {
-        ThrowIfFailed(flushFence->SetEventOnCompletion(flushValue, flushEvent));
-        WaitForSingleObject(flushEvent, INFINITE);
-    }
-
-	ThrowIfFailed(computeQueue->Signal(flushFence.Get(), flushValue+1));
-	if (flushFence->GetCompletedValue() < flushValue+1) {
-		ThrowIfFailed(flushFence->SetEventOnCompletion(flushValue+1, flushEvent));
-		WaitForSingleObject(flushEvent, INFINITE);
-	}
-
-    CloseHandle(flushEvent);
+    graphicsQueue.Signal({ flushFence.Get(), 1 });
+	computeQueue.Signal({ flushFence.Get(), 2 });
+    
+	device.TimelineHostWait({ flushFence.Get(), 1 });
+    device.TimelineHostWait({ flushFence.Get(), 2 });
 }
 
 void Renderer::StallPipeline() {
@@ -1047,27 +1040,23 @@ void Renderer::Cleanup() {
 }
 
 void Renderer::CheckDebugMessages() {
-    ComPtr<ID3D12InfoQueue> infoQueue;
-    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
-        UINT64 messageCount = infoQueue->GetNumStoredMessages();
-        for (UINT64 i = 0; i < messageCount; ++i) {
-            SIZE_T messageLength = 0;
-            infoQueue->GetMessage(i, nullptr, &messageLength);
-            D3D12_MESSAGE* pMessage = (D3D12_MESSAGE*)malloc(messageLength);
-            infoQueue->GetMessage(i, pMessage, &messageLength);
-            std::cerr << "D3D12 Debug Message: " << pMessage->pDescription << std::endl;
-            free(pMessage);
-        }
-        infoQueue->ClearStoredMessages();
-    }
+    //ComPtr<ID3D12InfoQueue> infoQueue;
+    //if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+    //    UINT64 messageCount = infoQueue->GetNumStoredMessages();
+    //    for (UINT64 i = 0; i < messageCount; ++i) {
+    //        SIZE_T messageLength = 0;
+    //        infoQueue->GetMessage(i, nullptr, &messageLength);
+    //        D3D12_MESSAGE* pMessage = (D3D12_MESSAGE*)malloc(messageLength);
+    //        infoQueue->GetMessage(i, pMessage, &messageLength);
+    //        std::cerr << "D3D12 Debug Message: " << pMessage->pDescription << std::endl;
+    //        free(pMessage);
+    //    }
+    //    infoQueue->ClearStoredMessages();
+    //}
 }
 
 void Renderer::SetEnvironment(std::string environmentName) {
 	setEnvironment(environmentName);
-}
-
-ComPtr<ID3D12Device10>& Renderer::GetDevice() {
-    return device;
 }
 
 std::shared_ptr<Scene>& Renderer::GetCurrentScene() {

@@ -31,41 +31,40 @@ void SlLogMessageCallback(sl::LogType level, const char* message) {
     //spdlog::info("Streamline Log: {}", message);
 }
 
+static ID3D12Device* dx12_device() { return rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice()); }
+static IDXGIFactory7* dx12_factory() { return rhi::dx12::get_factory(DeviceManager::GetInstance().GetDevice()); }
+static IDXGIAdapter4* dx12_adapter() { return rhi::dx12::get_adapter(DeviceManager::GetInstance().GetDevice()); }
+
 ffxFunctions ffxModule;
 
 FfxApiResource getFFXResource(Resource* resource, const wchar_t* name, FfxApiResourceState state) {
 	//auto desc = ffx::ApiGetResourceDescriptionDX12(resource->GetAPIResource(), FFX_API_RESOURCE_USAGE_READ_ONLY);
-	auto ffxResource = ffxApiGetResourceDX12(resource->GetAPIResource(), state);
+	auto ffxResource = ffxApiGetResourceDX12(rhi::dx12::get_resource(resource->GetAPIResource()), state);
     if (ffxResource.resource == nullptr) {
         spdlog::error("Failed to get FFX resource for resource");
 	}
     return ffxResource;
 }
 
-bool CheckDLSSSupport(IDXGIAdapter1* adapter) {
-    DXGI_ADAPTER_DESC desc{};
-    if (SUCCEEDED(adapter->GetDesc(&desc)))
-    {
-        sl::AdapterInfo adapterInfo{};
-        adapterInfo.deviceLUID = (uint8_t*)&desc.AdapterLuid;
-        adapterInfo.deviceLUIDSizeInBytes = sizeof(LUID);
-        if (SL_FAILED(result, slIsFeatureSupported(sl::kFeatureDLSS, adapterInfo)))
-        {
-            // Requested feature is not supported on the system, fallback to the default method
-            switch (result)
-            {
-            case sl::Result::eErrorOSOutOfDate:         // inform user to update OS
-            case sl::Result::eErrorDriverOutOfDate:     // inform user to update driver
-            case sl::Result::eErrorAdapterNotSupported:  // cannot use this adapter (older or non-NVDA GPU etc)
-                return false;
-            };
-        }
-        else
-        {
-            return true;
-        }
+bool CheckDLSSSupport(rhi::Device dev) {
+    IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
+    if (!ad) {
+        return false;
     }
-	return false;
+    DXGI_ADAPTER_DESC desc{};
+    if (FAILED(ad->GetDesc(&desc))) {
+        return false;
+    }
+
+    sl::AdapterInfo ai{};
+    ai.deviceLUID = reinterpret_cast<uint8_t*>(&desc.AdapterLuid);
+    ai.deviceLUIDSizeInBytes = sizeof(LUID);
+
+    sl::Result res = sl::Result::eOk;
+    if (SL_FAILED(res, slIsFeatureSupported(sl::kFeatureDLSS, ai))) {
+        return false;
+    }
+    return true;
 }
 
 inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool transpose = false)
@@ -89,18 +88,30 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
     );
 }
 
-void UpscalingManager::InitializeAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1>& adapter)
+void UpscalingManager::InitializeAdapter(rhi::Device& dev)
 {
-	m_currentAdapter = adapter;
+    auto dev = DeviceManager::GetInstance().GetDevice();
 
-    if (CheckDLSSSupport(adapter.Get()))
-    {
-		m_upscalingMode = UpscalingMode::DLSS;
+    if (CheckDLSSSupport(dev)) {
+        m_upscalingMode = UpscalingMode::DLSS;
+        if (!InitSL()) {
+            m_upscalingMode = UpscalingMode::FSR3; // fallback
+        }
     }
-    else
-    {
+    else {
         m_upscalingMode = UpscalingMode::FSR3;
-	}
+    }
+
+    if (m_upscalingMode == UpscalingMode::DLSS) {
+        // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
+        rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface);
+        // Let SL know about the device we're using
+        slSetD3DDevice(dx12_device());
+    }
+
+    if (m_upscalingMode == UpscalingMode::FSR3) {
+        InitFFX();
+    }
 }
 
 ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device) {
@@ -145,7 +156,7 @@ bool UpscalingManager::InitFFX() {
         ffxLoadFunctions(&ffxModule, module);
 
         ffx::CreateBackendDX12Desc backendDesc{};
-        backendDesc.device = DeviceManager::GetInstance().GetDevice().Get();
+        backendDesc.device = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
 
         ffx::CreateContextDescUpscale createUpscaling;
         createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
@@ -411,7 +422,7 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
 
     const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
 
-    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context.commandList)))
+    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), rhi::dx12::get_cmd_list(context.commandList))))
     {
         spdlog::error("DLSS evaluation failed!");
     }
@@ -427,7 +438,7 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
 
     auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
 
-    dispatchUpscale.commandList = context.commandList;
+    dispatchUpscale.commandList = rhi::dx12::get_cmd_list(context.commandList);
 
     dispatchUpscale.color = getFFXResource(pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
 	dispatchUpscale.depth = getFFXResource(pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);

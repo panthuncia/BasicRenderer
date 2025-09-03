@@ -13,6 +13,8 @@
 #include <ThirdParty/Streamline/sl_dlss.h>
 #include <ThirdParty/Streamline/sl_matrix_helpers.h>
 
+#include <rhi.h>
+
 #include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
 #include "ThirdParty/FFX/ffx_api_loader.h"
 #include "ThirdParty/FFX/ffx_api.hpp"
@@ -94,7 +96,7 @@ class RenderContext;
 class UpscalingManager {
 public:
     static UpscalingManager& GetInstance();
-    void InitializeAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1>& adapter);
+    void InitializeAdapter(rhi::Device& dev);
 	ID3D12Device10* ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device);
 	IDXGIFactory7* ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory);
     void Setup();
@@ -115,7 +117,6 @@ private:
     void EvaluateDLSS(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
     void EvaluateFSR3(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-    Microsoft::WRL::ComPtr<IDXGIAdapter1> m_currentAdapter;
 	UpscalingMode m_upscalingMode = UpscalingMode::None;
     UpscaleQualityMode m_upscaleQualityMode = UpscaleQualityMode::DLAA;
     std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight

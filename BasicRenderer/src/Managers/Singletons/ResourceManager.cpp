@@ -61,11 +61,11 @@ void ResourceManager::Initialize(rhi::Queue commandQueue) {
 
 	device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::Memory::Upload));
 
-	UINT8* pMappedCounterReset = nullptr;
-	CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-	ThrowIfFailed(m_uavCounterReset->Map(0, &readRange, reinterpret_cast<void**>(&pMappedCounterReset)));
+	void* pMappedCounterReset = nullptr;
+	
+    m_uavCounterReset->Map(&pMappedCounterReset, 0, 0);
 	ZeroMemory(pMappedCounterReset, sizeof(UINT));
-	m_uavCounterReset->Unmap(0, nullptr);
+	m_uavCounterReset->Unmap(0, 0);
 }
 
 rhi::DescriptorHeapHandle ResourceManager::GetSRVDescriptorHeap() {
@@ -444,114 +444,108 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 	return std::make_pair(textureResource, placedResourceHeap);
 }
 
-void ResourceManager::UploadTextureData(ID3D12Resource* pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels) {
-	// Handle initial data upload if provided
-	if (!initialData.empty()) {
-		auto device = DeviceManager::GetInstance().GetDevice();
-		// Ensure initialData has the correct size
-		uint32_t numTextures = arraySize * desc.isCubemap ? 6 : 1;
-		uint32_t numSubresources = numTextures * mipLevels;
+void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels) {
 
-		// Create an upload heap
-		UINT64 uploadBufferSize = GetRequiredIntermediateSize(pResource, 0, numSubresources);
-		//CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
-		//D3D12_HEAP_PROPERTIES uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-		//ComPtr<ID3D12Resource> textureUploadHeap;
-		//ThrowIfFailed(device->CreateCommittedResource(
-		//	&uploadHeapProps,
-		//	D3D12_HEAP_FLAG_NONE,
-		//	&uploadBufferDesc,
-		//	D3D12_RESOURCE_STATE_GENERIC_READ,
-		//	nullptr,
-		//	IID_PPV_ARGS(&textureUploadHeap)));
+	// Encure the copy command list and allocator are ready
+	GetCopyCommandList(commandList, commandAllocator);
 
-		auto uploadBufferDesc = rhi::helpers::ResourceDesc::Buffer(uploadBufferSize, rhi::Memory::Upload);
-		auto uploadResource = device.CreateCommittedResource(uploadBufferDesc);
+	if (initialData.empty()) return;
 
-		// Prepare the subresource data
-		std::vector<D3D12_SUBRESOURCE_DATA> subresourceData(numSubresources);
-		std::vector<std::vector<stbi_uc>> expandedImages;
+	// NOTE: the original expression had a precedence bug.
+	// Correct: effective array slices = arraySize * (isCubemap ? 6 : 1)
+	const uint32_t faces = desc.isCubemap ? 6u : 1u;
+	const uint32_t arraySlices = faces * static_cast<uint32_t>(arraySize);
+	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
 
-		std::vector<const stbi_uc*> fullInitialData(numSubresources, nullptr);
-		std::copy(initialData.begin(), initialData.end(), fullInitialData.begin());
+	// Build a dense SubresourceData table (nullptr entries are allowed; they’ll be skipped)
+	std::vector<rhi::helpers::SubresourceData> srd(numSubres);
+	std::vector<std::vector<stbi_uc>> expandedImages;   // keep storage alive during copy
+	expandedImages.reserve(numSubres);
 
-		int i = -1;
-		for (uint32_t arraySlice = 0; arraySlice < numTextures; ++arraySlice) {
-			for (uint32_t mip = 0; mip < mipLevels; ++mip) {
-				i++;
-				UINT subresourceIndex = mip + arraySlice * mipLevels;
-				D3D12_SUBRESOURCE_DATA& subData = subresourceData[subresourceIndex];
+	// If caller passed fewer than numSubres pointers, pad with nullptrs.
+	std::vector<const stbi_uc*> fullInitial(numSubres, nullptr);
+	std::copy(initialData.begin(), initialData.end(), fullInitial.begin());
 
-				const stbi_uc* imageData = fullInitialData[subresourceIndex];
+	int i = -1; // matches your original indexing over desc.imageDimensions[]
+	for (uint32_t a = 0; a < arraySlices; ++a) {
+		for (uint32_t m = 0; m < mipLevels; ++m) {
+			++i;
+			const uint32_t subIdx = m + a * mipLevels;
 
-				UINT width = static_cast<uint32_t>(desc.imageDimensions[i].width >> mip);
-				UINT height = static_cast<uint32_t>(desc.imageDimensions[i].height >> mip);
-				UINT channels = desc.channels;
-				if ((width * channels != desc.imageDimensions[i].rowPitch) || (width * channels * height != desc.imageDimensions[i].slicePitch)) // Probably compressed texture
-				{
-					subData.pData = imageData;
-					subData.RowPitch = desc.imageDimensions[i].rowPitch;
-					subData.SlicePitch = desc.imageDimensions[i].slicePitch;
+			const stbi_uc* imageData = fullInitial[subIdx];
+
+			uint32_t width = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].width >> m));
+			uint32_t height = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].height >> m));
+			uint32_t channels = desc.channels;
+
+			auto& out = srd[subIdx];
+
+			// If provided pitches don't match raw (width*channels), treat as “pre-padded or compressed”
+			if ((width * channels != desc.imageDimensions[i].rowPitch) ||
+				(width * channels * height != desc.imageDimensions[i].slicePitch))
+			{
+				out.pData = imageData;
+				out.rowPitch = desc.imageDimensions[i].rowPitch;
+				out.slicePitch = desc.imageDimensions[i].slicePitch;
+			}
+			else {
+				if (imageData) {
+					const stbi_uc* ptr = imageData;
+					if (channels == 3) {
+						// Expand to RGBA8
+						expandedImages.emplace_back(ExpandImageData(imageData, width, height));
+						ptr = expandedImages.back().data();
+						channels = 4;
+					}
+					out.pData = ptr;
+					out.rowPitch = width * channels;     // tightly packed
+					out.slicePitch = out.rowPitch * height;
 				}
 				else {
-					if (imageData != nullptr) {
-						// Expand image data if channels == 3
-						const stbi_uc* imagePtr = imageData;
-						if (channels == 3) {
-							// Expand image data and store it in the container
-							expandedImages.emplace_back(ExpandImageData(imageData, width, height));
-							imagePtr = expandedImages.back().data();
-							channels = 4; // Update channels after expansion
-						}
-
-						subData.pData = imagePtr;
-						subData.RowPitch = width * channels;
-						subData.SlicePitch = subData.RowPitch * height;
-					}
-					else {
-						// For missing data, set pData to nullptr
-						subData.pData = nullptr;
-						subData.RowPitch = 0;
-						subData.SlicePitch = 0;
-					}
+					out.pData = nullptr;
+					out.rowPitch = out.slicePitch = 0;
 				}
 			}
 		}
-
-		// Record commands to upload data
-		GetCopyCommandList(commandList, commandAllocator);
-
-		// Update only subresources with valid data
-		std::vector<D3D12_SUBRESOURCE_DATA> validSubresourceData;
-		UINT firstValidSubresource = UINT_MAX;
-		for (UINT j = 0; j < subresourceData.size(); ++j) {
-			if (subresourceData[j].pData != nullptr) {
-				if (firstValidSubresource == UINT_MAX) {
-					firstValidSubresource = j;
-				}
-				validSubresourceData.push_back(subresourceData[j]);
-			}
-		}
-
-		if (!validSubresourceData.empty()) {
-			UpdateSubresources(
-				commandList.Get(),
-				pResource,
-				textureUploadHeap.Get(),
-				0,
-				firstValidSubresource,
-				static_cast<UINT>(validSubresourceData.size()),
-				validSubresourceData.data()
-			);
-		}
-
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			pResource,
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			D3D12_RESOURCE_STATE_COMMON
-		);
-		commandList->ResourceBarrier(1, &barrier);
-
-		ExecuteAndWaitForCommandList(commandList, commandAllocator); // TODO - Replace this by using UploadManager
 	}
+
+	// Record the uploads (helper creates an upload buffer, maps & packs rows, then emits the copies).
+	// depthOrLayers = 1 for 2D/cube textures. (Use actual depth for 3D volumes.)
+	const uint32_t baseW = desc.imageDimensions[0].width;
+	const uint32_t baseH = desc.imageDimensions[0].height;
+
+	auto device = DeviceManager::GetInstance().GetDevice();
+
+	rhi::ResourcePtr upload = rhi::helpers::UpdateTextureSubresources(
+		device,
+		copyCommandList.Get(),
+		dstTexture,
+		desc.format,                               // rhi::Format
+		baseW,
+		baseH,
+		/*depthOrLayers*/ 1,
+		static_cast<uint32_t>(mipLevels),
+		arraySlices,
+		{ srd.data(), static_cast<uint32_t>(srd.size()) }
+	);
+
+	// Transition out of CopyDest (your original moved to COMMON)
+	rhi::TextureBarrier tb{};
+	tb.texture = dstTexture.GetHandle();
+	tb.range = { /*baseMip*/0, static_cast<uint32_t>(mipLevels),
+		/*baseLayer*/0, arraySlices };
+	tb.beforeSync = rhi::ResourceSyncState::Copy;
+	tb.afterSync = rhi::ResourceSyncState::All;         // generic
+	tb.beforeAccess = rhi::ResourceAccessType::CopyDest;
+	tb.afterAccess = rhi::ResourceAccessType::None;
+	tb.beforeLayout = rhi::ResourceLayout::CopyDest;
+	tb.afterLayout = rhi::ResourceLayout::Common;         // mirrors your D3D12 barrier
+
+	rhi::BarrierBatch bb{};
+	bb.textures = { &tb, 1 };
+	copyCommandList->Barriers(bb);
+
+
+	ExecuteAndWaitForCommandList(commandList, commandAllocator); // TODO - Replace this by using UploadManager
+
 }

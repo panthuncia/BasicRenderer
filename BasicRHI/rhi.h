@@ -241,7 +241,7 @@ namespace rhi {
         explicit operator bool() const noexcept { return dev_ && static_cast<bool>(obj_); }
         bool Valid() const noexcept { return !!*this; }
         Device* DevicePtr() const noexcept { return dev_; }
-        const TObject& Get() const noexcept { return obj_; } // by-ref view
+        TObject& Get() const noexcept { return obj_; } // by-ref view
 
         // Release ownership to caller (returns the raw object)
         TObject Release() noexcept {
@@ -733,8 +733,6 @@ namespace rhi {
         const char* debugName{ nullptr };
     };
 
-    struct ResourceAllocInfo { uint64_t size; uint64_t alignment; };
-
     struct VertexBufferView { ResourceHandle buffer{}; uint64_t offset = 0; uint32_t sizeBytes = 0; uint32_t stride = 0; };
 
     enum class Stage : uint32_t { Top, Draw, Pixel, Compute, Copy, Bottom }; 
@@ -786,7 +784,22 @@ namespace rhi {
     struct UavClearInfo {
         DescriptorSlot shaderVisible;   // SRV/UAV heap, shader-visible; REQUIRED on DX12
         DescriptorSlot cpuVisible;      // SRV/UAV heap, non shader-visible; REQUIRED on DX12
-        ResourceHandle resource;        // the resource whose UAV is being cleared
+        Resource resource;        // the resource whose UAV is being cleared
+    };
+
+    struct TextureCopyRegion {
+        ResourceHandle texture{};
+        uint32_t mip = 0;
+        uint32_t arraySlice = 0;     // face for cubemaps (0..5) or array element
+        uint32_t x = 0, y = 0, z = 0;
+        uint32_t width = 0, height = 0, depth = 1; // depth slices for 3D
+    };
+
+    struct BufferTextureCopy {
+        ResourceHandle buffer{};
+        uint64_t offset = 0;         // byte offset in buffer
+        uint32_t rowPitch = 0;       // bytes (must satisfy backend's row alignment)
+        uint32_t slicePitch = 0;     // bytes
     };
 
     // ---------------- POD wrappers + VTables ----------------
@@ -830,7 +843,7 @@ namespace rhi {
         void Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept;
         void DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept;
         void Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept;
-        void ClearView(ViewHandle v, const ClearValue& c) noexcept;
+        void ClearRenderTargetView(ViewHandle v, const ClearValue& c) noexcept;
         void ExecuteIndirect(CommandSignatureHandle sig,
             ResourceHandle argBuf, uint64_t argOff,
             ResourceHandle cntBuf, uint64_t cntOff,
@@ -838,6 +851,8 @@ namespace rhi {
 		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle samp) noexcept;
 		void ClearUavUint(const UavClearInfo& u, const UavClearUint& v) noexcept;
         void ClearUavFloat(const UavClearInfo& u, const UavClearFloat& v) noexcept;
+        void CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept;
+        void CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept;
 		void SetName(const char* n) noexcept;
 
     private:
@@ -850,7 +865,7 @@ namespace rhi {
         explicit constexpr operator bool() const noexcept {
             return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_SC_ABI_MIN;
         }
-        constexpr bool isValid() const noexcept { return static_cast<bool>(*this); }
+        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void reset() noexcept { impl = nullptr; vt = nullptr; }
         inline uint32_t ImageCount() noexcept;
         inline uint32_t CurrentImageIndex() noexcept;
@@ -899,7 +914,6 @@ namespace rhi {
         uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
         uint64_t(*timelineCompletedValue)(Device*, TimelineHandle) noexcept;
         Result(*timelineHostWait)(Device*, const TimelinePoint& p) noexcept; // blocks until reached
-        ResourceAllocInfo(*getResourceAllocInfo)(Device*, const ResourceDesc&) noexcept;
 
 		// Optional debug name setters (can be nullopt)
         void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
@@ -958,7 +972,7 @@ namespace rhi {
         void (*draw)(CommandList*, uint32_t vtxCount, uint32_t instCount, uint32_t firstVtx, uint32_t firstInst) noexcept;
         void (*drawIndexed)(CommandList*, uint32_t idxCount, uint32_t instCount, uint32_t firstIdx, int32_t vtxOffset, uint32_t firstInst) noexcept;
         void (*dispatch)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept;
-        void (*clearView)(CommandList*, ViewHandle, const ClearValue&) noexcept;
+        void (*clearRenderTargetView)(CommandList*, ViewHandle, const ClearValue&) noexcept;
         void (*executeIndirect)(CommandList*,
             CommandSignatureHandle sig,
             ResourceHandle argumentBuffer, uint64_t argumentOffset,
@@ -967,6 +981,8 @@ namespace rhi {
         void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle sampler) noexcept;
         void (*clearUavUint)(CommandList*, const UavClearInfo&, const UavClearUint&) noexcept;
         void (*clearUavFloat)(CommandList*, const UavClearInfo&, const UavClearFloat&) noexcept;
+        void (*copyBufferToTexture)(CommandList*, const TextureCopyRegion&, const BufferTextureCopy&) noexcept;
+        void (*copyTextureRegion)(CommandList*, const TextureCopyRegion&, const TextureCopyRegion&) noexcept;
         void (*setName)(CommandList*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
@@ -1025,7 +1041,6 @@ namespace rhi {
         inline HeapPtr CreateHeap(const HeapDesc& h) noexcept { return vt->createHeap(this, h); }
         inline void DestroyHeap(HeapHandle h) noexcept { vt->destroyHeap(this, h); }
         inline ResourcePtr CreatePlacedResource(HeapHandle heap, uint64_t offset, const ResourceDesc& rd) noexcept { return vt->createPlacedResource(this, heap, offset, rd); }
-        inline ResourceAllocInfo GetResourceAllocInfo(const ResourceDesc& rd) noexcept { return vt->getResourceAllocInfo(this, rd); }
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };
 
@@ -1046,7 +1061,7 @@ namespace rhi {
     inline void CommandList::Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept { vt->draw(this, v, i, fv, fi); }
     inline void CommandList::DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept { vt->drawIndexed(this, i, inst, firstIdx, vOff, firstI); }
     inline void CommandList::Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept { vt->dispatch(this, x, y, z); }
-    inline void CommandList::ClearView(ViewHandle v, const ClearValue& c) noexcept { vt->clearView(this, v, c); }
+    inline void CommandList::ClearRenderTargetView(ViewHandle v, const ClearValue& c) noexcept { vt->clearRenderTargetView(this, v, c); }
     inline void CommandList::ExecuteIndirect(CommandSignatureHandle sig,
         ResourceHandle argBuf, uint64_t argOff,
         ResourceHandle cntBuf, uint64_t cntOff,
@@ -1054,7 +1069,9 @@ namespace rhi {
     { vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
     inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
     inline void CommandList::ClearUavUint(const UavClearInfo& i, const UavClearUint& v) noexcept { vt->clearUavUint(this, i, v); }
+    inline void CommandList::CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept { vt->copyBufferToTexture(this, dst, src); }
     inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
+    inline void CommandList::CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept { vt->copyTextureRegion(this, dst, src); }
 	inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
 
     inline uint32_t Swapchain::ImageCount() noexcept { return vt->imageCount(this); }
@@ -1073,12 +1090,13 @@ namespace rhi {
 
 	class Resource {
 	public:
-		Resource(ResourceHandle h = {}) : handle(h) {}
+		Resource(ResourceHandle h = {}, bool isTexture = false) : handle(h) {}
 		void* impl{}; // backend wrap (owns Handle32)
 		const ResourceVTable* vt{}; // vtable
 		explicit constexpr operator bool() const noexcept {
 			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_RESOURCE_ABI_MIN;
 		}
+		bool IsTexture() const noexcept { return isTexture; }
 		ResourceHandle GetHandle() const noexcept { return handle; }
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; } // Naming
@@ -1089,6 +1107,7 @@ namespace rhi {
 		}
 	private:
 		ResourceHandle handle;
+		bool isTexture = false;
 	};
 
     struct DeviceCreateInfo { Backend backend = Backend::D3D12; uint32_t framesInFlight = 3; bool enableDebug = true; };
