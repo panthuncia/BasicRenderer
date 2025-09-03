@@ -8,6 +8,7 @@
 #include <wrl.h>
 #include <vector>
 #include <cassert>
+#include <spdlog/spdlog.h>
 
 #include "rhi_interop_dx12.h"
 
@@ -777,7 +778,7 @@ namespace rhi {
 	static void   d_flushDeletionQueue(Device*) noexcept {}
 
 	// Swapchain create/destroy
-	static Swapchain d_createSwapchain(Device* d, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept {
+	static SwapchainPtr d_createSwapchain(Device* d, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		DXGI_SWAP_CHAIN_DESC1 desc{};
 		desc.BufferCount = bufferCount;
@@ -849,7 +850,7 @@ namespace rhi {
 		Swapchain out{};
 		out.impl = scWrap;
 		out.vt = &g_scvt;
-		return out;
+		return MakeSwapchainPtr(d, out);
 	}
 
 	static void d_destroySwapchain(Device*, Swapchain* sc) noexcept {
@@ -1111,7 +1112,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Tex1D: {
+		case SrvDim::Texture1D: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D;
@@ -1122,7 +1123,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Tex1DArray: {
+		case SrvDim::Texture1DArray: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1DARRAY;
@@ -1136,7 +1137,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Tex2D: {
+		case SrvDim::Texture2D: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -1148,7 +1149,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Tex2DArray: {
+		case SrvDim::Texture2DArray: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
@@ -1162,7 +1163,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Tex2DMS: {
+		case SrvDim::Texture2DMS: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
@@ -1170,7 +1171,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Tex2DMSArray: {
+		case SrvDim::Texture2DMSArray: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
@@ -1180,7 +1181,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Tex3D: {
+		case SrvDim::Texture3D: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
@@ -1191,7 +1192,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::Cube: {
+		case SrvDim::TextureCube: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
@@ -1202,7 +1203,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::CubeArray: {
+		case SrvDim::TextureCubeArray: {
 			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
@@ -1215,7 +1216,7 @@ namespace rhi {
 			return Result::Ok;
 		}
 
-		case SrvDim::AccelStruct: {
+		case SrvDim::AccelerationStruct: {
 			// AS is stored in a buffer with ResourceFlags::RaytracingAccelerationStructure
 			auto* B = impl->buffers.get(dv.resource); if (!B || !B->res) return Result::InvalidArg;
 			desc.Format = DXGI_FORMAT_UNKNOWN;
@@ -1231,64 +1232,141 @@ namespace rhi {
 		return Result::InvalidArg;
 	}
 
-	static Result d_createUnorderedAccessView(Device* d, DescriptorSlot s, const UavDesc& dv) noexcept {
+	static Result d_createUnorderedAccessView(Device* d, DescriptorSlot s, const UavDesc& dv) noexcept
+	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl) return Result::Failed;
+
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return Result::InvalidArg;
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV))
+			return Result::InvalidArg;
 
 		D3D12_UNORDERED_ACCESS_VIEW_DESC desc{};
+		ID3D12Resource* pResource = nullptr;
+		ID3D12Resource* pCounterResource = nullptr; // optional, for structured append/consume
 
-		switch (dv.type) {
-		case UAVType::Texture: {
-			auto* T = impl->textures.get(dv.resource); if (!T) return Result::InvalidArg;
-			desc.Format = (dv.texFormatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.texFormatOverride);
-			switch (dv.texDim) {
-			case TextureViewDim::Tex2D:
-				desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-				desc.Texture2D.MipSlice = dv.texRange.baseMip; break;
-			case TextureViewDim::Tex2DArray:
-				desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-				desc.Texture2DArray.MipSlice = dv.texRange.baseMip;
-				desc.Texture2DArray.FirstArraySlice = dv.texRange.baseLayer;
-				desc.Texture2DArray.ArraySize = dv.texRange.layerCount; break;
-			case TextureViewDim::Tex3D:
-				desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-				desc.Texture3D.MipSlice = dv.texRange.baseMip;
-				desc.Texture3D.FirstWSlice = 0;
-				desc.Texture3D.WSize = UINT(-1); break;
-			default: return Result::Unsupported; // no cube UAV on DX12
-			}
-			impl->dev->CreateUnorderedAccessView(T->res.Get(), nullptr, &desc, dst);
-			return Result::Ok;
-		}
+		switch (dv.texDim)
+		{
+			// ========================= Buffer UAV =========================
+		case UavDim::Buffer:
+		{
+			auto* B = impl->buffers.get(dv.resource);
+			if (!B || !B->res) return Result::InvalidArg;
 
-		case UAVType::Buffer: {
-			auto* B = impl->buffers.get(dv.resource); if (!B) return Result::InvalidArg;
+			pResource = B->res.Get();
 			desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-			switch (dv.bufKind) {
+			desc.Buffer.FirstElement = (UINT)dv.buffer.firstElement;
+			desc.Buffer.NumElements = dv.buffer.numElements;
+			desc.Buffer.CounterOffsetInBytes = (UINT)dv.buffer.counterOffsetInBytes;
+
+			switch (dv.buffer.kind)
+			{
 			case BufferViewKind::Raw:
 				desc.Format = DXGI_FORMAT_R32_TYPELESS;
-				desc.Buffer.FirstElement = (UINT)dv.firstElement;
-				desc.Buffer.NumElements = dv.numElements;
 				desc.Buffer.StructureByteStride = 0;
-				desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW; break;
+				desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+				break;
+
 			case BufferViewKind::Structured:
 				desc.Format = DXGI_FORMAT_UNKNOWN;
-				desc.Buffer.FirstElement = (UINT)dv.firstElement;
-				desc.Buffer.NumElements = dv.numElements;
-				desc.Buffer.StructureByteStride = dv.structureByteStride;
-				desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE; break;
+				desc.Buffer.StructureByteStride = dv.buffer.structureByteStride;
+				desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+				// If caller provided a counter offset, assume the counter is in the same buffer.
+				if (dv.buffer.counterOffsetInBytes != 0)
+					pCounterResource = pResource;
+				break;
+
 			case BufferViewKind::Typed:
-				desc.Format = ToDxgi(dv.bufFormat);
-				desc.Buffer.FirstElement = (UINT)dv.firstElement;
-				desc.Buffer.NumElements = dv.numElements;
-				desc.Buffer.StructureByteStride = 0;
-				desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE; break;
+				return Result::Unsupported; // TODO
 			}
-			impl->dev->CreateUnorderedAccessView(B->res.Get(), nullptr, &desc, dst);
+
+			impl->dev->CreateUnorderedAccessView(pResource, pCounterResource, &desc, dst);
 			return Result::Ok;
 		}
-		case UAVType::Undefined: break;
+
+		// ========================= Texture UAVs =========================
+		case UavDim::Texture1D:
+		{
+			auto* T = impl->textures.get(dv.resource);
+			if (!T || !T->res) return Result::InvalidArg;
+			pResource = T->res.Get();
+
+			desc.Format = T->fmt;
+			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1D;
+			desc.Texture1D.MipSlice = dv.tex1D.mipSlice;
+
+			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			return Result::Ok;
+		}
+
+		case UavDim::Texture1DArray:
+		{
+			auto* T = impl->textures.get(dv.resource);
+			if (!T || !T->res) return Result::InvalidArg;
+			pResource = T->res.Get();
+
+			desc.Format = T->fmt;
+			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1DARRAY;
+			desc.Texture1DArray.MipSlice = dv.tex1DArray.mipSlice;
+			desc.Texture1DArray.FirstArraySlice = dv.tex1DArray.firstArraySlice;
+			desc.Texture1DArray.ArraySize = dv.tex1DArray.arraySize;
+
+			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			return Result::Ok;
+		}
+
+		case UavDim::Texture2D:
+		{
+			auto* T = impl->textures.get(dv.resource);
+			if (!T || !T->res) return Result::InvalidArg;
+			pResource = T->res.Get();
+
+			desc.Format = T->fmt;
+			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+			desc.Texture2D.MipSlice = dv.tex2D.mipSlice;
+			desc.Texture2D.PlaneSlice = dv.tex2D.planeSlice;
+
+			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			return Result::Ok;
+		}
+
+		case UavDim::Texture2DArray:
+		{
+			auto* T = impl->textures.get(dv.resource);
+			if (!T || !T->res) return Result::InvalidArg;
+			pResource = T->res.Get();
+
+			desc.Format = T->fmt;
+			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+			desc.Texture2DArray.MipSlice = dv.tex2DArray.mipSlice;
+			desc.Texture2DArray.FirstArraySlice = dv.tex2DArray.firstArraySlice;
+			desc.Texture2DArray.ArraySize = dv.tex2DArray.arraySize;
+			desc.Texture2DArray.PlaneSlice = dv.tex2DArray.planeSlice;
+
+			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			return Result::Ok;
+		}
+
+		case UavDim::Texture3D:
+		{
+			auto* T = impl->textures.get(dv.resource);
+			if (!T || !T->res) return Result::InvalidArg;
+			pResource = T->res.Get();
+
+			desc.Format = T->fmt;
+			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+			desc.Texture3D.MipSlice = dv.tex3D.mipSlice;
+			desc.Texture3D.FirstWSlice = dv.tex3D.firstWSlice;
+			desc.Texture3D.WSize = (dv.tex3D.wSize == 0) ? UINT(-1) : dv.tex3D.wSize;
+
+			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			return Result::Ok;
+		}
+
+		case UavDim::Texture2DMS:
+		case UavDim::Texture2DMSArray:
+			// UAVs for MSAA textures are not supported by D3D12
+			return Result::Unsupported;
 		}
 
 		return Result::InvalidArg;
@@ -1323,58 +1401,171 @@ namespace rhi {
 		return Result::Ok;
 	}
 
-	static Result d_createRenderTargetView(Device* d, DescriptorSlot s, const RtvDesc& rd) noexcept {
+	static Result d_createRenderTargetView(Device* d, DescriptorSlot s, const RtvDesc& rd) noexcept
+	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) return Result::InvalidArg;
+		if (!impl) return Result::Failed;
 
-		auto* T = impl->textures.get(rd.texture); if (!T) return Result::InvalidArg;
+		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_RTV))
+			return Result::InvalidArg;
+
+		// For texture RTVs we expect a texture resource
+		auto* T = impl->textures.get(rd.texture);
+		if (!T && rd.dim != RtvDim::Buffer) return Result::InvalidArg;
 
 		D3D12_RENDER_TARGET_VIEW_DESC r{};
-		r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
-		switch (rd.dim) {
-		case TextureViewDim::Tex2D:
-			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D; break;
-		case TextureViewDim::Tex2DArray:
+		ID3D12Resource* pRes = nullptr;
+
+		switch (rd.dim)
+		{
+		case RtvDim::Texture1D:
+		{
+			pRes = T->res.Get();
+			r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
+			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE1D;
+			r.Texture1D.MipSlice = rd.range.baseMip;
+			break;
+		}
+
+		case RtvDim::Texture1DArray:
+		{
+			pRes = T->res.Get();
+			r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
+			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE1DARRAY;
+			r.Texture1DArray.MipSlice = rd.range.baseMip;
+			r.Texture1DArray.FirstArraySlice = rd.range.baseLayer;
+			r.Texture1DArray.ArraySize = rd.range.layerCount;
+			break;
+		}
+
+		case RtvDim::Texture2D:
+		{
+			pRes = T->res.Get();
+			r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
+			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+			r.Texture2D.MipSlice = rd.range.baseMip;
+			r.Texture2D.PlaneSlice = 0; // no plane in desc -> default to 0
+			break;
+		}
+
+		case RtvDim::Texture2DArray:
+		{
+			pRes = T->res.Get();
+			r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
 			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
 			r.Texture2DArray.MipSlice = rd.range.baseMip;
 			r.Texture2DArray.FirstArraySlice = rd.range.baseLayer;
-			r.Texture2DArray.ArraySize = rd.range.layerCount; break;
-		case TextureViewDim::Tex3D:
+			r.Texture2DArray.ArraySize = rd.range.layerCount;
+			r.Texture2DArray.PlaneSlice = 0;
+			break;
+		}
+
+		case RtvDim::Texture2DMS:
+		{
+			pRes = T->res.Get();
+			r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
+			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+			break;
+		}
+
+		case RtvDim::Texture2DMSArray:
+		{
+			pRes = T->res.Get();
+			r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
+			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMSARRAY;
+			r.Texture2DMSArray.FirstArraySlice = rd.range.baseLayer;
+			r.Texture2DMSArray.ArraySize = rd.range.layerCount;
+			break;
+		}
+
+		case RtvDim::Texture3D:
+		{
+			pRes = T->res.Get();
+			r.Format = (rd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(rd.formatOverride);
 			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE3D;
 			r.Texture3D.MipSlice = rd.range.baseMip;
-			r.Texture3D.FirstWSlice = 0;
-			r.Texture3D.WSize = UINT(-1); break;
-		default: return Result::Unsupported; // no cube RTV
+			// Reuse range.baseLayer/layerCount to address Z-slices of the 3D subresource.
+			r.Texture3D.FirstWSlice = rd.range.baseLayer;
+			r.Texture3D.WSize = (rd.range.layerCount == 0) ? UINT(-1) : rd.range.layerCount;
+			break;
 		}
-		impl->dev->CreateRenderTargetView(T->res.Get(), (r.ViewDimension == D3D12_RTV_DIMENSION_TEXTURE2D ? nullptr : &r), dst);
+
+		case RtvDim::Buffer:
+		{
+			// TODO: What is this?
+			return Result::Unsupported;
+		}
+
+		default:
+			return Result::Unsupported;
+		}
+
+		impl->dev->CreateRenderTargetView(pRes, &r, dst);
 		return Result::Ok;
 	}
 
-	static Result d_createDepthStencilView(Device* d, DescriptorSlot s, const DsvDesc& dd) noexcept {
+	static Result d_createDepthStencilView(Device* d, DescriptorSlot s, const DsvDesc& dd) noexcept
+	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) return Result::InvalidArg;
+		if (!impl) return Result::Failed;
 
-		auto* T = impl->textures.get(dd.texture); if (!T) return Result::InvalidArg;
+		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_DSV))
+			return Result::InvalidArg;
+
+		auto* T = impl->textures.get(dd.texture);
+		if (!T) return Result::InvalidArg;
 
 		D3D12_DEPTH_STENCIL_VIEW_DESC z{};
 		z.Format = (dd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dd.formatOverride);
-		z.Flags = (dd.readOnlyDepth ? D3D12_DSV_FLAG_READ_ONLY_DEPTH : (D3D12_DSV_FLAGS)0)
-			| (dd.readOnlyStencil ? D3D12_DSV_FLAG_READ_ONLY_STENCIL : (D3D12_DSV_FLAGS)0);
-		switch (dd.dim) {
-		case TextureViewDim::Tex2D:
-			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D; break;
-		case TextureViewDim::Tex2DArray:
+		z.Flags = (dd.readOnlyDepth ? D3D12_DSV_FLAG_READ_ONLY_DEPTH : (D3D12_DSV_FLAGS)0) |
+			(dd.readOnlyStencil ? D3D12_DSV_FLAG_READ_ONLY_STENCIL : (D3D12_DSV_FLAGS)0);
+
+		switch (dd.dim)
+		{
+		case DsvDim::Texture1D:
+			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE1D;
+			z.Texture1D.MipSlice = dd.range.baseMip;
+			break;
+
+		case DsvDim::Texture1DArray:
+			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE1DARRAY;
+			z.Texture1DArray.MipSlice = dd.range.baseMip;
+			z.Texture1DArray.FirstArraySlice = dd.range.baseLayer;
+			z.Texture1DArray.ArraySize = dd.range.layerCount;
+			break;
+
+		case DsvDim::Texture2D:
+			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+			z.Texture2D.MipSlice = dd.range.baseMip;
+			break;
+
+		case DsvDim::Texture2DArray:
 			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
 			z.Texture2DArray.MipSlice = dd.range.baseMip;
 			z.Texture2DArray.FirstArraySlice = dd.range.baseLayer;
-			z.Texture2DArray.ArraySize = dd.range.layerCount; break;
-		default: return Result::Unsupported;
+			z.Texture2DArray.ArraySize = dd.range.layerCount;
+			break;
+
+		case DsvDim::Texture2DMS:
+			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMS;
+			break;
+
+		case DsvDim::Texture2DMSArray:
+			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMSARRAY;
+			z.Texture2DMSArray.FirstArraySlice = dd.range.baseLayer;
+			z.Texture2DMSArray.ArraySize = dd.range.layerCount;
+			break;
+
+		default:
+			return Result::Unsupported;
 		}
-		impl->dev->CreateDepthStencilView(T->res.Get(), (z.ViewDimension == D3D12_DSV_DIMENSION_TEXTURE2D ? nullptr : &z), dst);
+
+		impl->dev->CreateDepthStencilView(T->res.Get(), &z, dst);
 		return Result::Ok;
 	}
+
 
 	static D3D12_COMMAND_LIST_TYPE ToDx(QueueKind q) {
 		return q == QueueKind::Graphics ? D3D12_COMMAND_LIST_TYPE_DIRECT
@@ -2218,11 +2409,16 @@ namespace rhi {
 	static uint32_t sc_curr(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->sc->GetCurrentBackBufferIndex(); }
 	static ViewHandle sc_rtv(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->rtvHandles[i]; }
 	static ResourceHandle sc_img(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->imageHandles[i]; }
-	static Result sc_resize(Swapchain* /*sc*/, uint32_t /*w*/, uint32_t /*h*/) noexcept { return Result::Unsupported; } // demo skips resize
 	static Result sc_present(Swapchain* sc, bool vsync) noexcept {
 		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
 		UINT sync = vsync ? 1 : 0; UINT flags = 0;
 		return s->sc->Present(sync, flags) == S_OK ? Result::Ok : Result::Failed;
+	}
+	static Result sc_resizeBuffers(Swapchain* sc, uint32_t numBuffers, uint32_t w, uint32_t h, Format newFormat, uint32_t flags) noexcept {
+		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
+		s->fmt = ToDxgi(newFormat);
+		s->count = numBuffers;
+		s->sc->ResizeBuffers(s->count, w, h, s->fmt, flags); // TODO: Is there anything else to do here?
 	}
 	static void sc_setName(Swapchain* sc, const char* n) noexcept {} // Cannot name IDXGISwapChain
 	// ---------------- Resource vtable funcs ----------------
@@ -2303,6 +2499,36 @@ namespace rhi {
 
 		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->dev));
 		EnableDebug(impl->dev.Get());
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+		ComPtr<ID3D12InfoQueue1> infoQueue;
+		if (SUCCEEDED(impl->dev->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
+			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+
+			DWORD callbackCookie = 0;
+			infoQueue->RegisterMessageCallback([](D3D12_MESSAGE_CATEGORY category, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID id, LPCSTR description, void* context) {
+				// Log or print the debug messages,
+				spdlog::error("D3D12 Debug Message: {}", description);
+				}, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &callbackCookie);
+		}
+#endif
+
+		// Disable unwanted warnings
+		ComPtr<ID3D12InfoQueue> warningInfoQueue;
+		if (SUCCEEDED(impl->dev->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
+		{
+			D3D12_INFO_QUEUE_FILTER filter = {};
+			D3D12_MESSAGE_ID blockedIDs[] = {
+				(D3D12_MESSAGE_ID)1356, // Barrier-only command lists
+				(D3D12_MESSAGE_ID)1328, // ps output type mismatch
+				(D3D12_MESSAGE_ID)1008 }; // RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS
+			filter.DenyList.NumIDs = _countof(blockedIDs);
+			filter.DenyList.pIDList = blockedIDs;
+
+			warningInfoQueue->AddStorageFilterEntries(&filter);
+		}
 
 		auto makeQ = [&](D3D12_COMMAND_LIST_TYPE t, Dx12QueueState& out) {
 			D3D12_COMMAND_QUEUE_DESC qd{};

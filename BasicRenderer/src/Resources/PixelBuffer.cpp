@@ -26,7 +26,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 {
     ResourceManager& rm = ResourceManager::GetInstance();
 
-    // 1) create the raw resource
+    // create the raw resource
     auto [texture, placedHeap] =
         rm.CreateTextureResource(desc, aliasTarget != nullptr ? aliasTarget->GetPlacedResourceHeap() : nullptr);
     m_texture    = texture;
@@ -58,7 +58,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
         desc.clearColor[3] };
 
 	// Create SRV
-	auto& device = DeviceManager::GetInstance().GetDevice();
+	auto device = DeviceManager::GetInstance().GetDevice();
 	const auto& cbvSrvUavHeap = rm.GetCBVSRVUAVHeap();
 	const auto& nonShaderVisibleHeap = rm.GetNonShaderVisibleHeap();
 	const auto& rtvHeap = rm.GetRTVHeap();

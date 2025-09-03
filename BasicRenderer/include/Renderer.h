@@ -88,10 +88,10 @@ private:
     ComPtr<ID3D12Device10> nativeDevice;
     ComPtr<ID3D12Device10> slProxyDevice;
 
-    rhi::SwapchainPtr swapChain;
+    rhi::SwapchainPtr m_swapChain;
 
     rhi::DescriptorHeapPtr rtvHeap;
-	std::vector<ComPtr<ID3D12Resource>> renderTargets;
+	std::vector<rhi::Resource> renderTargets;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;
@@ -102,12 +102,11 @@ private:
     uint8_t m_frameIndex = 0;
     uint64_t m_totalFramesRendered = 0;
 	uint8_t m_numFramesInFlight = 0;
-    ComPtr<ID3D12Fence> m_frameFence;
+    rhi::TimelinePtr m_frameFence;
     std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
-    HANDLE m_frameFenceEvent;
     UINT64 m_currentFrameFenceValue = 0;
 
-	ComPtr<ID3D12Fence> m_readbackFence;
+	rhi::TimelinePtr m_readbackFence;
 
     InputManager inputManager;
     MovementState movementState;

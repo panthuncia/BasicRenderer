@@ -395,19 +395,51 @@ namespace rhi {
 
     struct DescriptorSlot { DescriptorHeapHandle heap{}; uint32_t index{}; };
 
-    enum class TextureViewDim : uint32_t { Tex2D, Tex2DArray, Tex3D, Cube, CubeArray };
+    enum class UavDim : uint32_t {
+        Undefined,
+        Buffer,
+        Texture1D,
+		Texture1DArray,
+		Texture2D,
+		Texture2DArray,
+		Texture2DMS,
+		Texture2DMSArray,
+		Texture3D
+	};
+
+    enum class RtvDim : uint32_t {
+        Undefined,
+        Buffer,
+        Texture1D,
+        Texture1DArray,
+        Texture2D,
+        Texture2DArray,
+        Texture2DMS,
+        Texture2DMSArray,
+        Texture3D
+    };
+
+    enum class DsvDim : uint32_t {
+        Undefined,
+        Texture1D,
+        Texture1DArray,
+        Texture2D,
+        Texture2DArray,
+        Texture2DMS,
+        Texture2DMSArray
+    };
 
     enum class BufferViewKind : uint32_t { Raw, Structured, Typed };
 
     enum class SrvDim : uint32_t {
         Undefined,
         Buffer,
-        Tex1D, Tex1DArray,
-        Tex2D, Tex2DArray,
-        Tex2DMS, Tex2DMSArray,
-        Tex3D,
-        Cube, CubeArray,
-        AccelStruct, // DXR TLAS/BLAS SRV (VK_KHR_acceleration_structure)
+        Texture1D, Texture1DArray,
+        Texture2D, Texture2DArray,
+        Texture2DMS, Texture2DMSArray,
+        Texture3D,
+        TextureCube, TextureCubeArray,
+        AccelerationStruct, // DXR TLAS/BLAS SRV (VK_KHR_acceleration_structure)
     };
 
     // 0 => use API default (DX12_DEFAULT_SHADER_4_COMPONENT_MAPPING / RGBA identity in VK)
@@ -494,37 +526,66 @@ namespace rhi {
         };
     };
 
-    enum class UAVType : uint32_t { Undefined, Texture, Buffer };
     struct UavDesc {
-        UAVType type{ UAVType::Undefined };
         ResourceHandle  resource{};
         // Texture path
-        TextureViewDim        texDim{ TextureViewDim::Tex2D };
-        TextureSubresourceRange texRange{};
-        Format                texFormatOverride{ Format::Unknown };
-        // Buffer path
-        BufferViewKind bufKind{ BufferViewKind::Raw };
-        Format         bufFormat{ Format::Unknown };
-        uint64_t       firstElement{ 0 };
-        uint32_t       numElements{ 0 };
-        uint32_t       structureByteStride{ 0 };
-        uint32_t       counterOffsetBytes{ 0 };
+        UavDim        texDim{ UavDim::Buffer };
+        union {
+            struct { // ===== Buffer UAV =====
+                BufferViewKind kind{ BufferViewKind::Raw }; // Raw/Structured/Typed
+                // RAW: firstElement in 32-bit units; TYPED/STRUCTURED: in elements
+                uint64_t firstElement{ 0 };
+                uint32_t numElements{ 0 };
+                uint32_t structureByteStride{ 0 }; // Structured only
+				uint64_t counterOffsetInBytes{ 0 }; // optional, for append/consume buffers
+			} buffer;
+            struct { // ===== TEX1D =====
+                uint32_t mipSlice{ 0 };
+            } tex1D;
+            struct { // ===== TEX1D ARRAY =====
+                uint32_t mipSlice{ 0 };
+                uint32_t firstArraySlice{ 0 };
+                uint32_t arraySize{ 0 };
+            } tex1DArray;
+            struct { // ===== TEX2D =====
+                uint32_t mipSlice{ 0 };
+                uint32_t planeSlice{ 0 }; // for planar formats
+            } tex2D;
+            struct { // ===== TEX2D ARRAY =====
+                uint32_t mipSlice{ 0 };
+                uint32_t firstArraySlice{ 0 };
+                uint32_t arraySize{ 0 };
+                uint32_t planeSlice{ 0 }; // for planar formats
+            } tex2DArray;
+            struct { // ===== TEX2DMS =====
+                // no fields
+            } tex2DMS;
+            struct { // ===== TEX2DMS ARRAY =====
+                uint32_t firstArraySlice{ 0 };
+                uint32_t arraySize{ 0 };
+            } tex2DMSArray;
+            struct { // ===== TEX3D =====
+                uint32_t mipSlice{ 0 };
+                uint32_t firstWSlice{ 0 };
+                uint32_t wSize{ 0 };
+			} tex3D;
+        };
     };
 
     struct CbvDesc { uint64_t byteOffset = 0; uint32_t byteSize = 0; /* 256B aligned */ };
 
     // RTV/DSV descriptions (texture-only)
     struct RtvDesc {
-        ResourceHandle       texture{};
-        TextureViewDim       dim{ TextureViewDim::Tex2D };
+        ResourceHandle texture{};
+        RtvDim dim{ RtvDim::Texture2D };
         TextureSubresourceRange range{};
-        Format              formatOverride{ Format::Unknown };
+        Format formatOverride{ Format::Unknown };
     };
     struct DsvDesc {
-        ResourceHandle       texture{};
-        TextureViewDim       dim{ TextureViewDim::Tex2D };
+        ResourceHandle texture{};
+        DsvDim dim{ DsvDim::Texture2D };
         TextureSubresourceRange range{};
-        Format              formatOverride{ Format::Unknown };
+        Format formatOverride{ Format::Unknown };
         bool readOnlyDepth{ false };
         bool readOnlyStencil{ true };
     };
@@ -871,8 +932,10 @@ namespace rhi {
         inline uint32_t CurrentImageIndex() noexcept;
         inline ViewHandle RTV(uint32_t i) noexcept;
         inline ResourceHandle Image(uint32_t i) noexcept;
-        inline Result Resize(uint32_t w, uint32_t h) noexcept;
         inline Result Present(bool vsync) noexcept;
+        inline Result ResizeBuffers(uint32_t bufferCount, uint32_t w, uint32_t h, Format newFmt, uint32_t flags) noexcept {
+            return vt->resizeBuffers ? vt->resizeBuffers(this, bufferCount, w, h, newFmt, flags) : Result::Unsupported;
+        }
     };
 
     struct DeviceVTable {
@@ -881,7 +944,7 @@ namespace rhi {
         CommandSignaturePtr(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/) noexcept;
         CommandAllocatorPtr(*createCommandAllocator)(Device*, QueueKind) noexcept;
         CommandListPtr(*createCommandList)(Device*, QueueKind, CommandAllocator) noexcept;
-        Swapchain(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept;
+        SwapchainPtr(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept;
         DescriptorHeapPtr(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
 
         Result(*createConstantBufferView)(Device*, DescriptorSlot dst, ResourceHandle, const CbvDesc&) noexcept;
@@ -992,8 +1055,8 @@ namespace rhi {
         uint32_t(*currentImageIndex)(Swapchain*) noexcept;
         ViewHandle(*rtv)(Swapchain*, uint32_t img) noexcept; // RTV per image
         ResourceHandle(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
-        Result(*resize)(Swapchain*, uint32_t w, uint32_t h) noexcept;
         Result(*present)(Swapchain*, bool vsync) noexcept; // Present
+        Result(*resizeBuffers)(Swapchain*, uint32_t bufferCount, uint32_t w, uint32_t h, Format newFormat, uint32_t flags) noexcept;
         void (*setName)(Swapchain*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
@@ -1012,7 +1075,7 @@ namespace rhi {
         inline Queue GetQueue(QueueKind q) noexcept { return vt->getQueue(this, q); }
         inline Result WaitIdle() noexcept { return vt->deviceWaitIdle(this); }
         inline void FlushDeletionQueue() noexcept { vt->flushDeletionQueue(this); }
-        inline Swapchain CreateSwapchain(void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t buffers, bool allowTearing) noexcept { return vt->createSwapchain(this, hwnd, w, h, fmt, buffers, allowTearing); }
+        inline SwapchainPtr CreateSwapchain(void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t buffers, bool allowTearing) noexcept { return vt->createSwapchain(this, hwnd, w, h, fmt, buffers, allowTearing); }
         inline void DestroySwapchain(Swapchain* sc) noexcept { vt->destroySwapchain(this, sc); }
         inline PipelineLayoutPtr CreatePipelineLayout(const PipelineLayoutDesc& d) noexcept { return vt->createPipelineLayout(this, d); }
         inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { vt->destroyPipelineLayout(this, h); }
@@ -1078,7 +1141,6 @@ namespace rhi {
     inline uint32_t Swapchain::CurrentImageIndex() noexcept { return vt->currentImageIndex(this); }
     inline ViewHandle Swapchain::RTV(uint32_t i) noexcept { return vt->rtv(this, i); }
     inline ResourceHandle Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
-    inline Result Swapchain::Resize(uint32_t w, uint32_t h) noexcept { return vt->resize(this, w, h); }
     inline Result Swapchain::Present(bool vsync) noexcept { return vt->present(this, vsync); }
 
     struct ResourceVTable {

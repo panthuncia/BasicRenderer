@@ -91,8 +91,8 @@ namespace rhi {
 		&sc_curr,
 		&sc_rtv,
 		&sc_img,
-		&sc_resize,
 		&sc_present,
+		&sc_resizeBuffers,
 		&sc_setName,
 		1u };
 	const ResourceVTable g_buf_rvt = {

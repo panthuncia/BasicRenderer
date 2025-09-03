@@ -21,7 +21,7 @@ public:
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& newName) { this->name = newName; OnSetName(); }
-	virtual rhi::ResourceHandle GetAPIResource() const = 0;
+	virtual rhi::Resource GetAPIResource() const = 0;
     virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
 	virtual rhi::ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_subresourceAccessTypes[subresourceIndex] ; }
 	virtual rhi::ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const { return m_subresourceLayouts[subresourceIndex]; }

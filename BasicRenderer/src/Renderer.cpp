@@ -441,16 +441,7 @@ void Renderer::SetSettings() {
             UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().SetUpscalingMode(newValue);
 
-            if (newValue != UpscalingMode::DLSS) {
-                device = nativeDevice;
-                factory = nativeFactory;
-            }
-            else {
-                device = slProxyDevice;
-                factory = slProxyFactory;
-            }
-
-            DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue, copyQueue); // Re-init device manager with correct device 
+            DeviceManager::GetInstance().Initialize(); // Re-init device manager with correct device 
 
             UpscalingManager::GetInstance().Setup();
 
@@ -578,36 +569,14 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     EnableShaderBasedValidation();
 #endif
 
-    // Create DXGI factory
-
-    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-    nativeFactory = factory;
-	slProxyFactory = UpscalingManager::GetInstance().ProxyFactory(factory);
-
-    m_currentAdapter = GetMostPowerfulAdapter(factory.Get());
-    
-    UpscalingManager::GetInstance().InitializeAdapter(m_currentAdapter);
-
-    if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS) {
-        factory = slProxyFactory;
-	}
-
-    // Create device
-
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     m_gpuCrashTracker.Initialize();
 #endif
 
-    ThrowIfFailed(D3D12CreateDevice(
-        m_currentAdapter.Get(),
-        D3D_FEATURE_LEVEL_12_0,
-        IID_PPV_ARGS(&device)));
+    DeviceManager::GetInstance().Initialize();
 
-    nativeDevice = device;
-	slProxyDevice = UpscalingManager::GetInstance().ProxyDevice(device);
-    if (UpscalingManager::GetInstance().GetCurrentUpscalingMode() == UpscalingMode::DLSS) {
-        device = slProxyDevice;
-    }
+	auto device = DeviceManager::GetInstance().GetDevice();
+	m_swapChain = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing);
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
@@ -622,127 +591,40 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         device.Get()));
 #endif
 
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-    ComPtr<ID3D12InfoQueue1> infoQueue;
-    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
-        infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
-        infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
-        infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
-
-        DWORD callbackCookie = 0;
-        infoQueue->RegisterMessageCallback([](D3D12_MESSAGE_CATEGORY category, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID id, LPCSTR description, void* context) {
-            // Log or print the debug messages,
-            spdlog::error("D3D12 Debug Message: {}", description);
-            }, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &callbackCookie);
-    }
-#endif
-
-    // Disable unwanted warnings
-    ComPtr<ID3D12InfoQueue> warningInfoQueue;
-    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
-    {
-        D3D12_INFO_QUEUE_FILTER filter = {};
-        D3D12_MESSAGE_ID blockedIDs[] = { 
-            (D3D12_MESSAGE_ID)1356, // Barrier-only command lists
-			(D3D12_MESSAGE_ID)1328, // ps output type mismatch
-            (D3D12_MESSAGE_ID)1008 }; // RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS
-        filter.DenyList.NumIDs = _countof(blockedIDs);
-        filter.DenyList.pIDList = blockedIDs;
-
-        warningInfoQueue->AddStorageFilterEntries(&filter);
-    }
-
-    // Describe and create the command queue
-    D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-    queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-
-    ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&graphicsQueue)));
-
-	// Compute queue
-	D3D12_COMMAND_QUEUE_DESC computeQueueDesc = {};
-	computeQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
-	ThrowIfFailed(device->CreateCommandQueue(&computeQueueDesc, IID_PPV_ARGS(&computeQueue)));
-
-	D3D12_COMMAND_QUEUE_DESC copyQueueDesc = {};
-	copyQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	copyQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
-	ThrowIfFailed(device->CreateCommandQueue(&copyQueueDesc, IID_PPV_ARGS(&copyQueue)));
-
-    // Initialize device manager and PSO manager
-    DeviceManager::GetInstance().Initialize(device, graphicsQueue, computeQueue, copyQueue);
-
-    // Describe and create the swap chain
-    auto numFramesInFlight = getNumFramesInFlight();
-    DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-    swapChainDesc.BufferCount = numFramesInFlight;
-    swapChainDesc.Width = x_res;
-    swapChainDesc.Height = y_res;
-    swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    swapChainDesc.SampleDesc.Count = 1;
-    swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-
-    ComPtr<IDXGISwapChain1> swapChainTemp;
-    ThrowIfFailed(factory->CreateSwapChainForHwnd(
-        graphicsQueue.Get(),
-        hwnd,
-        &swapChainDesc,
-        nullptr,
-        nullptr,
-        &swapChainTemp));
-
-    ThrowIfFailed(swapChainTemp.As(&swapChain));
-
-    // We do not support fullscreen transitions
-    ThrowIfFailed(factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
-
-    m_frameIndex = static_cast<uint8_t>(swapChain->GetCurrentBackBufferIndex());
-
     // Create RTV descriptor heap
-    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-    rtvHeapDesc.NumDescriptors = numFramesInFlight;
-    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    ThrowIfFailed(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap)));
+	rhi::DescriptorHeapDesc rtvHeapDesc = {};
+    rtvHeapDesc.capacity = m_numFramesInFlight;
+    rtvHeapDesc.type = rhi::DescriptorHeapType::RTV;
+	rtvHeapDesc.shaderVisible = false;
+	rtvHeapDesc.debugName = "RTV Descriptor Heap";
+    rtvHeap = device.CreateDescriptorHeap(rtvHeapDesc);
 
-    rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    rtvDescriptorSize = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::RTV);
 
     // Create frame resources
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
-    renderTargets.resize(numFramesInFlight);
-    for (UINT n = 0; n < numFramesInFlight; n++) {
-        ThrowIfFailed(swapChain->GetBuffer(n, IID_PPV_ARGS(&renderTargets[n])));
-        device->CreateRenderTargetView(renderTargets[n].Get(), nullptr, rtvHandle);
-        rtvHandle.Offset(1, rtvDescriptorSize);
+    renderTargets.resize(m_numFramesInFlight);
+    for (UINT n = 0; n < m_numFramesInFlight; n++) {        
+        renderTargets[n] = m_swapChain->Image(n);
     }
 
     // Create command allocator
 
-    for (int i = 0; i < numFramesInFlight; i++) {
-        ComPtr<ID3D12CommandAllocator> allocator;
-        ComPtr<ID3D12GraphicsCommandList7> commandList;
-        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-        ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
-        commandList->Close();
-        m_commandAllocators.push_back(allocator);
-        m_commandLists.push_back(commandList);
+	m_commandAllocators.resize(m_numFramesInFlight);
+	m_commandLists.resize(m_numFramesInFlight);
+    for (int i = 0; i < m_numFramesInFlight; i++) {
+		m_commandAllocators[i] = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
+		m_commandLists[i] = device.CreateCommandList(rhi::QueueKind::Graphics, m_commandAllocators[i].Get());
+        m_commandLists[i]->End();
     }
 
     // Create per-frame fence information
-	m_frameFenceValues.resize(numFramesInFlight);
-	for (int i = 0; i < numFramesInFlight; i++) {
+	m_frameFenceValues.resize(m_numFramesInFlight);
+	for (int i = 0; i < m_numFramesInFlight; i++) {
 		m_frameFenceValues[i] = 0;
 	}
-    ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameFence)));
-    m_frameFenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    if (m_frameFenceEvent == nullptr) {
-        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-    }
 
-    ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_readbackFence)));
+    m_frameFence = device.CreateTimeline();
+	m_readbackFence = device.CreateTimeline();
 }
 
 void Renderer::CreateTextures() {
@@ -754,7 +636,7 @@ void Renderer::CreateTextures() {
     hdrDesc.isCubemap = false;
     hdrDesc.hasRTV = true;
     hdrDesc.hasUAV = false;
-    hdrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT; // HDR format
+    hdrDesc.format = rhi::Format::R16G16B16A16_Float; // HDR format
     hdrDesc.generateMipMaps = false; // For bloom downsampling
     hdrDesc.hasUAV = true;
     ImageDimensions dims;
@@ -778,10 +660,10 @@ void Renderer::CreateTextures() {
     motionVectors.channels = 2;
     motionVectors.isCubemap = false;
     motionVectors.hasRTV = true;
-    motionVectors.format = DXGI_FORMAT_R16G16_FLOAT;
+    motionVectors.format = rhi::Format::R16G16_Float;
     motionVectors.generateMipMaps = false;
     motionVectors.hasSRV = true;
-    motionVectors.srvFormat = DXGI_FORMAT_R16G16_FLOAT;
+    motionVectors.srvFormat = rhi::Format::R16G16_Float;
     ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
     motionVectors.imageDimensions.push_back(motionVectorsDims);
     auto motionVectorsBuffer = PixelBuffer::Create(motionVectors);
@@ -790,7 +672,6 @@ void Renderer::CreateTextures() {
 }
 
 void Renderer::OnResize(UINT newWidth, UINT newHeight) {
-    if (!device) return;
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
 
@@ -802,20 +683,20 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
     }
 
     // Resize the swap chain
-    ThrowIfFailed(swapChain->ResizeBuffers(
-        2, // Buffer count
-        newWidth, newHeight,
-        DXGI_FORMAT_R8G8B8A8_UNORM,
-        DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
+	m_swapChain->ResizeBuffers(m_numFramesInFlight, newWidth, newHeight, rhi::Format::R8G8B8A8_UNorm, DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH); // TODO: Port flags to RHI
 
-    m_frameIndex = static_cast<uint8_t>(swapChain->GetCurrentBackBufferIndex());
+    m_frameIndex = static_cast<uint8_t>(m_swapChain->CurrentImageIndex());
 
+	auto device = DeviceManager::GetInstance().GetDevice();
     // Recreate the render target views
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
-    for (UINT i = 0; i < numFramesInFlight; i++) {
-        ThrowIfFailed(swapChain->GetBuffer(i, IID_PPV_ARGS(&renderTargets[i])));
-        device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
-        rtvHandle.Offset(1, rtvDescriptorSize);
+    for (UINT n = 0; n < m_numFramesInFlight; n++) {
+        renderTargets[n] = m_swapChain->Image(n);
+		rhi::RtvDesc rtvDesc = {};
+		rtvDesc.dim = rhi::RtvDim::Texture2D;
+		rtvDesc.formatOverride = rhi::Format::R8G8B8A8_UNorm;
+		rtvDesc.range = { 0, 1, 0, 1 };
+		rtvDesc.texture = renderTargets[n].GetHandle();
+		device.CreateRenderTargetView({ rtvHeap.Get(), n }, rtvDesc);
     }
 
 	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("outputResolution")({ newWidth, newHeight });
@@ -833,14 +714,11 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
 
 void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
-    // Check if the fence value for the current frame is complete
-	auto completedValue = m_frameFence->GetCompletedValue();
+	// Wait until the GPU has completed commands up to this fence point.
+	auto device = DeviceManager::GetInstance().GetDevice();
+	auto completedValue = device.TimelineCompletedValue(m_frameFence.Get());
     if (completedValue < m_frameFenceValues[currentFrameIndex]) {
-        // Set the event to be triggered when the GPU reaches the required fence value
-        ThrowIfFailed(m_frameFence->SetEventOnCompletion(m_frameFenceValues[currentFrameIndex], m_frameFenceEvent));
-
-        // Wait for the event
-        WaitForSingleObject(m_frameFenceEvent, INFINITE);
+        device.TimelineHostWait({ m_frameFence.Get(), m_frameFenceValues[currentFrameIndex] });
     }
 }
 

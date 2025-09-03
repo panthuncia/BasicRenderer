@@ -243,3 +243,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 uint32_t NumMips(uint32_t width, uint32_t height);
 
 std::string GetDirectoryFromPath(const std::string& path);
+
+constexpr UINT CalcSubresource(UINT MipSlice, UINT ArraySlice, UINT PlaneSlice, UINT MipLevels, UINT ArraySize) noexcept {
+	return MipSlice + ArraySlice * MipLevels + PlaneSlice * MipLevels * ArraySize;
+}

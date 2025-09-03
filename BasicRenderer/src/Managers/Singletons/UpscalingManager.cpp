@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 #include <flecs.h>
+#include <rhi.h>
 
 #include "ThirdParty/Streamline/sl.h"
 #include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
@@ -348,7 +349,7 @@ void UpscalingManager::Setup() {
     }
 }
 
-void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+void UpscalingManager::EvaluateDLSS(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     auto frameToken = m_frameTokens[context.frameIndex];
     auto myViewport = sl::ViewportHandle(0); // 0 is the default viewport
     auto renderRes = m_getRenderRes();
@@ -406,10 +407,10 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
         spdlog::error("Failed to set DLSS constants");
     }
 
-    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)pHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource colorOut = { sl::ResourceType::eTex2d, pUpscaledHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource depth = { sl::ResourceType::eTex2d, pDepthTexture->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource mvec = { sl::ResourceType::eTex2d, pMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+    sl::Resource colorOut = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pUpscaledHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    sl::Resource depth = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+    sl::Resource mvec = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pMotionVectors->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
     //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
 
     sl::Extent renderExtent = { 0, 0, renderRes.x, renderRes.y };
@@ -433,7 +434,7 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
     }
 }
 
-void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+void UpscalingManager::EvaluateFSR3(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     ffx::DispatchDescUpscale dispatchUpscale{};
 
     auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
@@ -486,36 +487,39 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
     ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
 }
 
-void UpscalingManager::EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
-	
-    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-    srcLoc.pResource = pHDRTarget->GetAPIResource();
-    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    srcLoc.SubresourceIndex = 0;
-
+void UpscalingManager::EvaluateNone(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     UINT mipSlice = 0;
     UINT arraySlice = 0;
-    UINT dstSubresource = D3D12CalcSubresource(
+    UINT dstSubresource = CalcSubresource(
         /*MipSlice=*/mipSlice,
         /*ArraySlice=*/arraySlice,
         /*PlaneSlice=*/0,
         /*TotalMipCount=*/pUpscaledHDRTarget->GetNumSRVMipLevels(),
         /*ArraySize=*/1);
 
-    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-    dstLoc.pResource = pUpscaledHDRTarget->GetAPIResource();
-    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLoc.SubresourceIndex = dstSubresource;
+    rhi::TextureCopyRegion dst = {
+        .texture = pUpscaledHDRTarget->GetAPIResource().GetHandle(),
+        .mip = mipSlice,
+        .arraySlice = arraySlice,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .depth = 1,
+    };
+    rhi::TextureCopyRegion src = {
+        .texture = pHDRTarget->GetAPIResource().GetHandle(),
+        .mip = mipSlice,
+        .arraySlice = arraySlice,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .depth = 1,
+    };
 
-    context.commandList->CopyTextureRegion(
-        &dstLoc,
-        /*dstX=*/0, /*dstY=*/0, /*dstZ=*/0,
-        &srcLoc,
-        /*pSrcBox=*/nullptr
-    );
+    context.commandList.CopyTextureRegion(dst, src);
 }
 
-void UpscalingManager::Evaluate(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+void UpscalingManager::Evaluate(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     switch (m_upscalingMode)
     {
 	    case UpscalingMode::None:

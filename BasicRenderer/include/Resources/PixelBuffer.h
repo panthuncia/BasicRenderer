@@ -1,9 +1,9 @@
 #pragma once
 #include <initguid.h> // Why is this needed? Without it I get a linker error for IID_ID3D12Device.
-#include "wrl.h"
+
+#include <rhi.h>
+
 #include "ThirdParty/stb/stb_image.h"
-#include "DirectX/d3dx12.h"
-#include <d3d12.h>
 #include <array>
 
 #include "Resources/ResourceStates.h"
@@ -21,17 +21,17 @@ public:
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
-    ComPtr<ID3D12Resource> GetTexture() const {
-		return m_texture;
+    rhi::Resource GetTexture() const {
+		return m_texture.Get();
     }
-    BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
-    virtual void SetName(const std::wstring& newName) { name = newName; m_texture->SetName(newName.c_str()); }
+    virtual void SetName(const std::wstring& newName) { name = newName; m_texture->SetName(ws2s(newName).c_str()); }
 
-	ID3D12Resource* GetAPIResource() const override { return m_texture.Get(); }
+	rhi::Resource GetAPIResource() const override { return m_texture.Get(); }
 
-	ID3D12Heap* GetPlacedResourceHeap() const {
-		return m_placedResourceHeap.Get();
+	rhi::HeapHandle GetPlacedResourceHeap() const {
+		return m_placedResourceHeap;
 	}
 
 	const std::array<float, 4>& GetClearColor() const {
@@ -54,20 +54,16 @@ private:
     unsigned int m_width;
     unsigned int m_height;
 	unsigned int m_channels;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_texture;
-    DXGI_FORMAT m_format;
+    rhi::ResourcePtr m_texture;
+    rhi::Format m_format;
 	TextureDescription m_desc;
 	std::array<float, 4> m_clearColor;
 
-    Microsoft::WRL::ComPtr<ID3D12Heap> m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
-
-	// Old barriers
-	std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
-	std::vector<D3D12_RESOURCE_BARRIER> m_emptyTransitions = {};
+    rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
 
     // Enhanced barriers
     //D3D12_TEXTURE_BARRIER m_textureBarrier;
-    D3D12_BARRIER_GROUP m_barrierGroup = {};
+    rhi::TextureBarrier m_barrierGroup = {};
 	//BarrierGroups m_barrierGroups;
 
 	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two

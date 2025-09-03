@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <vector>
+#include <rhi.h>
 #include "Managers/Singletons/SettingsManager.h"
 
 #include "RenderPasses/Base/RenderPass.h"
@@ -23,7 +24,7 @@ class ReadbackManager {
 public:
 	static ReadbackManager& GetInstance();
 
-	void Initialize(ID3D12Fence* readbackFence) {
+	void Initialize(rhi::TimelineHandle readbackFence) {
 		m_readbackPass->Setup();
 		m_readbackFence = readbackFence;
         m_readbackPass->SetReadbackFence(readbackFence);
@@ -81,12 +82,12 @@ private:
             // Cleanup if necessary
         }
 
-		void SetReadbackFence(ID3D12Fence* fence) {
+		void SetReadbackFence(rhi::TimelineHandle fence) {
 			m_readbackFence = fence;
 		}
 
     private:
-        ID3D12Fence* m_readbackFence = nullptr;
+        rhi::TimelineHandle m_readbackFence;
 		UINT64 m_fenceValue = 0;
     };
 
@@ -99,7 +100,7 @@ private:
 
     std::vector<ReadbackInfo> m_queuedReadbacks;
 	std::shared_ptr<ReadbackPass> m_readbackPass;
-    Microsoft::WRL::ComPtr<ID3D12Fence> m_readbackFence;
+    rhi::TimelineHandle m_readbackFence;
     std::mutex readbackRequestsMutex;
     std::vector<ReadbackRequest> m_readbackRequests;
 

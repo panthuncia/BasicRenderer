@@ -100,7 +100,7 @@ public:
 	ID3D12Device10* ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device);
 	IDXGIFactory7* ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory);
     void Setup();
-    void Evaluate(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+    void Evaluate(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void Shutdown();
 
     bool InitSL();
@@ -114,9 +114,9 @@ public:
 
 private:
     UpscalingManager() = default;
-    void EvaluateDLSS(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-    void EvaluateFSR3(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-	void EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+    void EvaluateDLSS(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+    void EvaluateFSR3(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+	void EvaluateNone(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	UpscalingMode m_upscalingMode = UpscalingMode::None;
     UpscaleQualityMode m_upscaleQualityMode = UpscaleQualityMode::DLAA;
     std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight
