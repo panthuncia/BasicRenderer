@@ -1,8 +1,8 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include <DirectX/d3dx12.h>
 #include <algorithm>
+#include <rhi_helpers.h>
 
 StatisticsManager& StatisticsManager::GetInstance() {
     static StatisticsManager inst;
@@ -12,19 +12,10 @@ StatisticsManager& StatisticsManager::GetInstance() {
 void StatisticsManager::Initialize() {
     m_numFramesInFlight = SettingsManager::GetInstance()
         .getSettingGetter<uint8_t>("numFramesInFlight")();
-    auto queue = DeviceManager::GetInstance().GetGraphicsQueue();
-    queue->GetTimestampFrequency(&m_gpuTimestampFreq);
-
+	auto device = DeviceManager::GetInstance().GetDevice();
+	m_gpuTimestampFreq = device.GetTimestampCalibration(rhi::QueueKind::Graphics).ticksPerSecond;
 	m_getCollectPipelineStatistics =
 		SettingsManager::GetInstance().getSettingGetter<bool>("collectPipelineStatistics");
-
-    //auto& device = DeviceManager::GetInstance().GetDevice();
-    //D3D12_FEATURE_DATA_D3D12_OPTIONS9 opts9 = {};
-    //device->CheckFeatureSupport(
-    //    D3D12_FEATURE_D3D12_OPTIONS9,
-    //    &opts9, sizeof(opts9)
-    //);
-    //assert(opts9.MeshShaderPipelineStatsSupported);
 }
 
 void StatisticsManager::RegisterPasses(const std::vector<std::string>& passNames) {
@@ -51,7 +42,7 @@ void StatisticsManager::MarkGeometryPass(const std::string& passName) {
     }
 }
 
-void StatisticsManager::RegisterQueue(ID3D12CommandQueue* queue) {
+void StatisticsManager::RegisterQueue(rhi::Queue queue) {
     m_timestampBuffers[queue];
     m_meshStatsBuffers[queue];
     m_recordedQueries[queue];
@@ -65,117 +56,140 @@ void StatisticsManager::SetupQueryHeap() {
 		return;
     }
     // Timestamp heap: 2 queries/pass/frame
-    D3D12_QUERY_HEAP_DESC th = { D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
-        m_numPasses * 2 * m_numFramesInFlight };
-    device->CreateQueryHeap(&th, IID_PPV_ARGS(&m_timestampHeap));
 
-    // Mesh stats heap: 1 query/pass/frame
-    D3D12_QUERY_HEAP_DESC ph = { D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1,
-        m_numPasses * m_numFramesInFlight };
-    device->CreateQueryHeap(&ph, IID_PPV_ARGS(&m_pipelineStatsHeap));
+	rhi::QueryPoolDesc tq;
+    tq.type = rhi::QueryType::Timestamp;
+    tq.count = m_numPasses * 2 * m_numFramesInFlight;
+    m_timestampPool = device.CreateQueryPool(tq);
+
+	rhi::QueryPoolDesc sq;
+	sq.type = rhi::QueryType::PipelineStatistics;
+	sq.count = m_numPasses * m_numFramesInFlight;
+	sq.statsMask = rhi::PipelineStatBits::PS_MeshInvocations | rhi::PipelineStatBits::PS_MeshPrimitives;
+	m_pipelineStatsPool = device.CreateQueryPool(sq);
+
 
     // Allocate readback buffers for each queue
-    UINT64 tsSize = sizeof(UINT64) * th.Count;
-    auto tsDesc = CD3DX12_RESOURCE_DESC::Buffer(tsSize);
-    UINT64 psSize = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS1) * ph.Count;
-    auto psDesc = CD3DX12_RESOURCE_DESC::Buffer(psSize);
+    auto tsInfo = device.GetQueryResultInfo(m_timestampPool.Get());
+    auto psInfo = device.GetQueryResultInfo(m_pipelineStatsPool.Get());
+
+    rhi::ResourceDesc tsRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(tsInfo.elementSize) * tsInfo.count, rhi::Memory::Readback);
+    rhi::ResourceDesc psRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(psInfo.elementSize) * psInfo.count, rhi::Memory::Readback);
 
     for (auto& kv : m_timestampBuffers) {
-        auto props = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
-        device->CreateCommittedResource(
-            &props,
-            D3D12_HEAP_FLAG_NONE, &tsDesc,
-            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-            IID_PPV_ARGS(&kv.second)
-        );
+        auto& buf = kv.second;
+        buf = device.CreateCommittedResource(tsRb);
         auto& mb = m_meshStatsBuffers[kv.first];
-        device->CreateCommittedResource(
-            &props,
-            D3D12_HEAP_FLAG_NONE, &psDesc,
-            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-            IID_PPV_ARGS(&mb)
-        );
-    }
+        mb = std::move(device.CreateCommittedResource(psRb));
+	}
+
+    m_timestampQueryInfo = device.GetQueryResultInfo(m_timestampPool.Get());
+    m_pipelineStatsQueryInfo = device.GetQueryResultInfo(m_pipelineStatsPool.Get());
+	m_pipelineStatsFields.resize(2);
+    m_pipelineStatsFields[0].field = rhi::PipelineStatTypes::MeshInvocations;
+    m_pipelineStatsFields[1].field = rhi::PipelineStatTypes::MeshPrimitives;
+	m_pipelineStatsLayout = device.GetPipelineStatsLayout(m_pipelineStatsPool.Get(), m_pipelineStatsFields.data(), m_pipelineStatsFields.size());
 }
 
-void StatisticsManager::BeginQuery(unsigned passIndex,
+void StatisticsManager::BeginQuery(
+    unsigned passIndex,
     unsigned frameIndex,
-    ID3D12CommandQueue* queue,
-    ID3D12GraphicsCommandList* cmd) {
+    rhi::Queue& queue,
+    rhi::CommandList& cmd)
+{
     if (passIndex >= m_numPasses) return;
-    UINT tsIdx = (frameIndex*m_numPasses + passIndex)*2;
-    cmd->EndQuery(m_timestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsIdx);
 
+    // Timestamp "begin" marker = write a timestamp at index 2*N
+    const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u;
+    cmd.WriteTimestamp(m_timestampPool.Get(), tsIdx, rhi::Stage::Top); // RHI: EndQuery on a Timestamp pool writes a timestamp
+
+    // Begin pipeline stats for geometry passes
     if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
-        UINT psIdx = frameIndex*m_numPasses + passIndex;
-        cmd->BeginQuery(m_pipelineStatsHeap.Get(),
-            D3D12_QUERY_TYPE_PIPELINE_STATISTICS1,
-            psIdx);
+        const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
+        cmd.BeginQuery(m_pipelineStatsPool.Get(), psIdx);
     }
+
     m_recordedQueries[queue][frameIndex].push_back(tsIdx);
 }
 
-void StatisticsManager::EndQuery(unsigned passIndex,
+void StatisticsManager::EndQuery(
+    unsigned passIndex,
     unsigned frameIndex,
-    ID3D12CommandQueue* queue,
-    ID3D12GraphicsCommandList* cmd) {
+    rhi::Queue& queue,
+    rhi::CommandList& cmd)
+{
     if (passIndex >= m_numPasses) return;
-    UINT tsIdx = (frameIndex*m_numPasses + passIndex)*2 + 1;
-    cmd->EndQuery(m_timestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsIdx);
 
+    // Timestamp "end" marker = write a timestamp at index 2*N + 1
+    const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u + 1u;
+    cmd.EndQuery(m_timestampPool.Get(), tsIdx);
+
+    // End pipeline stats for geometry passes
     if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
-        UINT psIdx = frameIndex*m_numPasses + passIndex;
-        cmd->EndQuery(m_pipelineStatsHeap.Get(),
-            D3D12_QUERY_TYPE_PIPELINE_STATISTICS1,
-            psIdx);
+        const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
+        cmd.EndQuery(m_pipelineStatsPool.Get(), psIdx);
     }
+
     m_recordedQueries[queue][frameIndex].push_back(tsIdx);
 }
 
-void StatisticsManager::ResolveQueries(unsigned frameIndex,
-    ID3D12CommandQueue* queue,
-    ID3D12GraphicsCommandList* cmd) {
+void StatisticsManager::ResolveQueries(
+    unsigned frameIndex,
+    rhi::Queue& queue,
+    rhi::CommandList& cmd)
+{
     auto& rec = m_recordedQueries[queue][frameIndex];
     if (rec.empty()) return;
 
+    // Collapse timestamp indices into contiguous ranges
     std::sort(rec.begin(), rec.end());
-    std::vector<std::pair<unsigned, unsigned>> ranges;
-    unsigned start = rec[0], prev = rec[0];
+    std::vector<std::pair<uint32_t, uint32_t>> ranges;
+    uint32_t start = rec[0], prev = rec[0];
     for (size_t i = 1; i < rec.size(); ++i) {
         if (rec[i] == prev + 1) {
             prev = rec[i];
-        } else {
+        }
+        else {
             ranges.emplace_back(start, prev - start + 1);
-            start = rec[i]; prev = rec[i];
+            start = rec[i];
+            prev = rec[i];
         }
     }
     ranges.emplace_back(start, prev - start + 1);
 
-    auto& tsBuf = m_timestampBuffers[queue];
-    auto& psBuf = m_meshStatsBuffers[queue];
+    const uint64_t tsStride = m_timestampQueryInfo.elementSize; // usually 8
+    const uint64_t psStride = m_pipelineStatsQueryInfo.elementSize; // backend-dependent
 
-    // Resolve timestamp data and record for OnFrameComplete
+    auto& tsBuf = m_timestampBuffers[queue];   // rhi::ResourcePtr
+    auto& psBuf = m_meshStatsBuffers[queue];   // rhi::ResourcePtr
+
+    // Resolve timestamp data and remember what to read on frame complete
     for (auto& r : ranges) {
-        cmd->ResolveQueryData(
-            m_timestampHeap.Get(),
-            D3D12_QUERY_TYPE_TIMESTAMP,
+        // Write timestamp results starting at byte offset = stride * firstIndex
+        cmd.ResolveQueryData(
+            m_timestampPool.Get(),
             r.first, r.second,
-            tsBuf.Get(), sizeof(UINT64) * r.first
+            tsBuf->GetHandle(),
+            tsStride * uint64_t(r.first)
         );
+
         m_pendingResolves[queue][frameIndex].push_back(r);
 
-		if (!m_collectPipelineStatistics) continue;
-        // For each stamped pass in this range, resolve mesh-stats if geometry
-        for (unsigned idx = r.first; idx < r.first + r.second; idx += 2) {
-            unsigned base = idx / 2;
-            unsigned pi   = base % m_numPasses;
+        if (!m_collectPipelineStatistics) continue;
+
+        // For each stamped pass in this range, resolve pipeline stats if it's a geometry pass
+        for (uint32_t idx = r.first; idx < r.first + r.second; idx += 2) {
+            const uint32_t base = idx / 2;                 // pass instance index
+            const uint32_t pi = base % m_numPasses;      // pass id within frame
             if (!m_isGeometryPass[pi]) continue;
-            UINT psIdx = frameIndex * m_numPasses + pi;
-            cmd->ResolveQueryData(
-                m_pipelineStatsHeap.Get(),
-                D3D12_QUERY_TYPE_PIPELINE_STATISTICS1,
+
+            const uint32_t psIdx = frameIndex * m_numPasses + pi;
+
+            cmd.ResolveQueryData(
+                m_pipelineStatsPool.Get(),
                 psIdx, 1,
-                psBuf.Get(), sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS1) * psIdx
+                psBuf->GetHandle(),
+                psStride * uint64_t(psIdx)
             );
         }
     }
@@ -183,66 +197,95 @@ void StatisticsManager::ResolveQueries(unsigned frameIndex,
     rec.clear();
 }
 
-void StatisticsManager::OnFrameComplete(unsigned frameIndex,
-    ID3D12CommandQueue* queue) {
-	m_collectPipelineStatistics = m_getCollectPipelineStatistics();
+void StatisticsManager::OnFrameComplete(
+    unsigned frameIndex,
+    rhi::Queue& queue)
+{
+    m_collectPipelineStatistics = m_getCollectPipelineStatistics();
 
-    auto& buf = m_timestampBuffers[queue];
+    auto& tsBuf = m_timestampBuffers[queue];
     auto& psBuf = m_meshStatsBuffers[queue];
     auto& pending = m_pendingResolves[queue][frameIndex];
     if (pending.empty()) return;
 
-    for (auto& r:pending) {
-        D3D12_RANGE readRange{ r.first*sizeof(UINT64), (r.first+r.second)*sizeof(UINT64) };
-        UINT64* mappedTs=nullptr;
-        buf->Map(0,&readRange,(void**)&mappedTs);
+    const uint64_t tsStride = m_timestampQueryInfo.elementSize; // usually 8
+    const uint64_t psStride = m_pipelineStatsQueryInfo.elementSize; // backend-specific
+    const double   toMs = 1000.0 / double(m_gpuTimestampFreq);
 
-        for (unsigned idx=r.first; idx<r.first+r.second; idx+=2) {
-            unsigned base = idx/2;
-            unsigned fi = base/m_numPasses;
-            unsigned pi = base% m_numPasses;
-            UINT64 t0 = mappedTs[idx];
-            UINT64 t1 = mappedTs[idx+1];
-            double ms = double(t1-t0)*1000.0/double(m_gpuTimestampFreq);
-            m_stats[pi].ema = m_stats[pi].ema*(1.0-PassStats::alpha) + ms*PassStats::alpha;
+    auto readU64At = [](const uint8_t* base, uint64_t byteOffset) -> uint64_t {
+        uint64_t v = 0;
+        std::memcpy(&v, base + byteOffset, sizeof(uint64_t));
+        return v;
+        };
 
-			if (!m_collectPipelineStatistics) continue;
-
-            if (m_isGeometryPass[pi]) {
-                // mesh-stats resolve
-                D3D12_RANGE psRange{
-                    (fi*m_numPasses + pi) * sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS1),
-                    ((fi*m_numPasses + pi) + 1) * sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS1)
-                };
-
-                void* mappedMem = nullptr;
-                psBuf->Map(0, &psRange, &mappedMem);
-
-                BYTE* basePtr = reinterpret_cast<BYTE*>(mappedMem);
-                auto* stats   = reinterpret_cast<D3D12_QUERY_DATA_PIPELINE_STATISTICS1*>(
-                    basePtr + psRange.Begin
-                    );
-                double inv = double(stats->MSInvocations);
-                double prim = double(stats->MSPrimitives);
-
-                psBuf->Unmap(0, nullptr);
-
-                auto& mps = m_meshStatsEma[pi];
-                mps.invocationsEma = mps.invocationsEma * (1.0 - PassStats::alpha)
-                    + inv * PassStats::alpha;
-                mps.primitivesEma  = mps.primitivesEma  * (1.0 - PassStats::alpha)
-                    + prim * PassStats::alpha;
-            }
+	// TODO: Avoid searching the field list every time
+    auto findFieldOffset = [&](rhi::PipelineStatTypes f, uint32_t& off) -> bool {
+        for (const auto& fd : m_pipelineStatsFields) {
+            if (fd.field == f && fd.supported) { off = fd.byteOffset; return true; }
         }
+        return false;
+        };
+
+    for (const auto& r : pending) {
+        // Map just the timestamp byte range we resolved this frame
+        const uint64_t tsMapOffset = tsStride * uint64_t(r.first);
+        const uint64_t tsMapSize = tsStride * uint64_t(r.second);
+
+        void* tsPtrVoid = nullptr;
+        tsBuf->Map(&tsPtrVoid, tsMapOffset, tsMapSize);
+        const uint8_t* tsBase = static_cast<const uint8_t*>(tsPtrVoid);
+
+        for (uint32_t idx = r.first; idx < r.first + r.second; idx += 2) {
+            const uint32_t local0 = (idx - r.first);
+            const uint32_t local1 = local0 + 1;
+
+            // Read the two timestamps (each element starts at localIndex * tsStride)
+            const uint64_t t0 = readU64At(tsBase, uint64_t(local0) * tsStride);
+            const uint64_t t1 = readU64At(tsBase, uint64_t(local1) * tsStride);
+            const double   ms = double(t1 - t0) * toMs;
+
+            const uint32_t base = idx / 2;
+            const uint32_t fi = base / m_numPasses;
+            const uint32_t pi = base % m_numPasses;
+
+            m_stats[pi].ema = m_stats[pi].ema * (1.0 - PassStats::alpha) + ms * PassStats::alpha;
+
+            if (!m_collectPipelineStatistics || !m_isGeometryPass[pi]) continue;
+
+            // Map just this pass's pipeline stat element
+            const uint32_t psIdx = frameIndex * m_numPasses + pi;
+            const uint64_t psOffset = psStride * uint64_t(psIdx);
+            void* psPtrVoid = nullptr;
+            psBuf->Map(&psPtrVoid, psOffset, psStride);
+
+            const uint8_t* psBase = static_cast<const uint8_t*>(psPtrVoid);
+
+            uint64_t inv = 0, prim = 0;
+            uint32_t offInv = 0, offPrim = 0;
+
+            if (findFieldOffset(rhi::PipelineStatTypes::MeshInvocations, offInv))
+                inv = readU64At(psBase, offInv);
+            if (findFieldOffset(rhi::PipelineStatTypes::MeshPrimitives, offPrim))
+                prim = readU64At(psBase, offPrim);
+
+            psBuf->Unmap(0, 0);
+
+            auto& mps = m_meshStatsEma[pi];
+            mps.invocationsEma = mps.invocationsEma * (1.0 - PassStats::alpha) + double(inv) * PassStats::alpha;
+            mps.primitivesEma = mps.primitivesEma * (1.0 - PassStats::alpha) + double(prim) * PassStats::alpha;
+        }
+
+        tsBuf->Unmap(0, 0);
     }
-    buf->Unmap(0, nullptr);
+
     pending.clear();
     m_pendingResolves[queue].erase(frameIndex);
 }
 
+
 void StatisticsManager::ClearAll() {
-    m_timestampHeap.Reset();
-    m_pipelineStatsHeap.Reset();
+    m_timestampPool.Reset();
+    m_pipelineStatsPool.Reset();
     for (auto& kv:m_timestampBuffers) kv.second.Reset();
     for (auto& kv:m_meshStatsBuffers) kv.second.Reset();
     m_timestampBuffers.clear();

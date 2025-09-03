@@ -1,8 +1,8 @@
 #include "rhi_dx12.h"
 
 namespace rhi {
-    const DeviceVTable g_devvt = {
-        &d_createPipelineFromStream,
+	const DeviceVTable g_devvt = {
+		&d_createPipelineFromStream,
 		&d_createPipelineLayout,
 		&d_createCommandSignature,
 		&d_createCommandAllocator,
@@ -19,6 +19,7 @@ namespace rhi {
 		&d_createTimeline,
 		&d_createHeap,
 		&d_createPlacedResource,
+		&d_createQueryPool,
 
 		&d_destroySampler,
 		&d_destroyPipelineLayout,
@@ -32,13 +33,18 @@ namespace rhi {
 		&d_destroyTexture,
 		&d_destroyTimeline,
 		&d_destroyHeap,
-		
+		&d_destroyQueryPool,
+
 		&d_getQueue,
 		&d_waitIdle,
 		&d_flushDeletionQueue,
 		&d_getDescriptorHandleIncrementSize,
 		&d_timelineCompletedValue,
 		&d_timelineHostWait,
+		&d_getTimestampCalibration,
+		&d_getQueryResultInfo,
+		&d_getPipelineStatsLayout,
+
 		&d_setNameBuffer,
 		&d_setNameTexture,
 		&d_setNameSampler,
@@ -83,6 +89,11 @@ namespace rhi {
 		&cl_clearUavFloat,
 		&cl_copyBufferToTexture,
 		&cl_copyTextureRegion,
+		&cl_writeTimestamp,
+		&cl_beginQuery,
+		&cl_endQuery,
+		&cl_resolveQueryData,
+		&cl_resetQueries,
 		&cl_setName,
 		1u
     };

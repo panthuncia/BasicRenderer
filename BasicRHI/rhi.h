@@ -863,6 +863,89 @@ namespace rhi {
         uint32_t slicePitch = 0;     // bytes
     };
 
+    // What kind of queries we support at the RHI level
+    enum class QueryType : uint32_t {
+        Timestamp,            // DX12: TIMESTAMP heap | Vulkan: VK_QUERY_TYPE_TIMESTAMP
+        PipelineStatistics,   // DX12: PIPELINE_STATISTICS / *_STATISTICS1 | Vulkan: VK_QUERY_TYPE_PIPELINE_STATISTICS
+        Occlusion             // DX12: OCCLUSION | Vulkan: VK_QUERY_TYPE_OCCLUSION
+    };
+
+    // Cross-API pipeline stats bitmask (request only what you need).
+    // Backends will mask out unsupported bits; check capabilities at device create.
+    enum PipelineStatBits : uint64_t {
+        PS_IAVertices = 1ull << 0,
+        PS_IAPrimitives = 1ull << 1,
+        PS_VSInvocations = 1ull << 2,
+        PS_GSInvocations = 1ull << 3,
+        PS_GSPrimitives = 1ull << 4,
+        PS_CInvocations = 1ull << 5, // TessControl
+        PS_CPrimitives = 1ull << 6, // TessControl output
+        PS_EInvocations = 1ull << 7, // TessEval
+        PS_PSInvocations = 1ull << 8,
+        PS_CSInvocations = 1ull << 9,
+        // Mesh/Task (DX12 PIPELINE_STATISTICS1; Vulkan requires VK_EXT_mesh_shader)
+        PS_TaskInvocations = 1ull << 16,
+        PS_MeshInvocations = 1ull << 17,
+        PS_MeshPrimitives = 1ull << 18, // DX12 has MSPrimitives; Vulkan may not expose primitive count.
+        PS_All = 0xFFFFFFFFFFFFFFFFull
+    };
+    enum class PipelineStatTypes : uint32_t {
+        IAVertices,
+        IAPrimitives,
+        VSInvocations,
+        GSInvocations,
+        GSPrimitives,
+        TSControlInvocations,   // a.k.a. HS
+        TSEvaluationInvocations,// a.k.a. DS
+        PSInvocations,
+        CSInvocations,
+        // Mesh/Task (DX12 *_STATISTICS1, Vulkan needs mesh shader extension)
+        TaskInvocations,
+        MeshInvocations,
+        MeshPrimitives,
+    };
+
+    using PipelineStatsMask = uint64_t;
+
+    // Query pool creation
+    struct QueryPoolDesc {
+        QueryType          type{};
+        uint32_t           count = 0;         // total slots in the pool
+        PipelineStatsMask  statsMask = 0;     // only for PipelineStatistics
+        bool               requireAllStats = false; // if true and backend can’t support all bits -> Unsupported
+    };
+
+    namespace detail { struct HQueryPool {}; }
+    using QueryPoolHandle = Handle<detail::HQueryPool>;
+    using QueryPoolPtr = UniqueHandle<QueryPoolHandle>;
+
+    struct QueryResultInfo {
+        QueryType type{};
+        uint32_t  count = 0;            // slots in the pool
+        uint32_t  elementSize = 0;      // bytes per query result (native layout in the resolve buffer)
+        uint32_t  elementAlignment = 8; // conservative; useful if you choose to pad
+        // For timestamps/occlusion this is enough.
+    };
+
+    struct PipelineStatsFieldDesc {
+        PipelineStatTypes field;
+        uint32_t          byteOffset;   // offset within one element
+        uint32_t          byteSize;     // usually 8 (u64 counters)
+        bool              supported;    // false if backend can’t provide it
+    };
+
+    struct PipelineStatsLayout {
+        QueryResultInfo   info;
+        // Dense list; only supported fields included (or include all with supported=false)
+        Span<PipelineStatsFieldDesc> fields;
+    };
+
+
+    // Convenience conversion for timestamps (RHI exposes a uniform "ticks per second")
+    struct TimestampCalibration {
+        uint64_t ticksPerSecond = 0; // DX12: queue->GetTimestampFrequency(); Vulkan: round(1e9 / timestampPeriod)
+    };
+
     // ---------------- POD wrappers + VTables ----------------
     struct Device;       struct Queue;       struct CommandList;       struct Swapchain;       struct CommandAllocator;
     struct DeviceVTable; struct QueueVTable; struct CommandListVTable; struct SwapchainVTable; struct CommandAllocatorVTable;
@@ -914,6 +997,11 @@ namespace rhi {
         void ClearUavFloat(const UavClearInfo& u, const UavClearFloat& v) noexcept;
         void CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept;
         void CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept;
+        void WriteTimestamp(QueryPoolHandle p, uint32_t idx, Stage s) noexcept;
+        void BeginQuery(QueryPoolHandle p, uint32_t idx) noexcept;
+        void EndQuery(QueryPoolHandle p, uint32_t idx) noexcept;
+        void ResolveQueryData(QueryPoolHandle p, uint32_t first, uint32_t count, ResourceHandle dst, uint64_t off) noexcept;
+        void ResetQueries(QueryPoolHandle p, uint32_t first, uint32_t count) noexcept;
 		void SetName(const char* n) noexcept;
 
     private:
@@ -957,6 +1045,7 @@ namespace rhi {
         TimelinePtr(*createTimeline)(Device*, uint64_t initialValue, const char* debugName) noexcept;
         HeapPtr(*createHeap)(Device*, const HeapDesc&) noexcept;
         ResourcePtr(*createPlacedResource)(Device*, HeapHandle, uint64_t offset, const ResourceDesc&) noexcept;
+        QueryPoolPtr(*createQueryPool)(Device*, const QueryPoolDesc&) noexcept;
 
         void (*destroySampler)(Device*, SamplerHandle) noexcept;
         void (*destroyPipelineLayout)(Device*, PipelineLayoutHandle) noexcept;
@@ -970,6 +1059,7 @@ namespace rhi {
         void (*destroyTexture)(Device*, ResourceHandle) noexcept;
         void (*destroyTimeline)(Device*, TimelineHandle) noexcept;
         void (*destroyHeap)(Device*, HeapHandle) noexcept;
+        void (*destroyQueryPool)(Device*, QueryPoolHandle) noexcept;
 
         Queue(*getQueue)(Device*, QueueKind) noexcept;
         Result(*deviceWaitIdle)(Device*) noexcept;
@@ -977,6 +1067,9 @@ namespace rhi {
         uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
         uint64_t(*timelineCompletedValue)(Device*, TimelineHandle) noexcept;
         Result(*timelineHostWait)(Device*, const TimelinePoint& p) noexcept; // blocks until reached
+        TimestampCalibration(*getTimestampCalibration)(Device*, QueueKind) noexcept;
+        QueryResultInfo(*getQueryResultInfo)(Device*, QueryPoolHandle) noexcept;
+        PipelineStatsLayout(*getPipelineStatsLayout)(Device*, QueryPoolHandle, PipelineStatsFieldDesc* outBuf, uint32_t outCap) noexcept;
 
 		// Optional debug name setters (can be nullopt)
         void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
@@ -1046,6 +1139,12 @@ namespace rhi {
         void (*clearUavFloat)(CommandList*, const UavClearInfo&, const UavClearFloat&) noexcept;
         void (*copyBufferToTexture)(CommandList*, const TextureCopyRegion&, const BufferTextureCopy&) noexcept;
         void (*copyTextureRegion)(CommandList*, const TextureCopyRegion&, const TextureCopyRegion&) noexcept;
+        void (*writeTimestamp)(CommandList*, QueryPoolHandle, uint32_t index, Stage stageHint) noexcept; // Timestamp: writes at 'index' (stage ignored on DX12, used on Vulkan)
+        void (*beginQuery)(CommandList*, QueryPoolHandle, uint32_t index) noexcept; // Begin/End for occlusion & pipeline stats (no-op for timestamps)
+        void (*endQuery)  (CommandList*, QueryPoolHandle, uint32_t index) noexcept;
+        void (*resolveQueryData)(CommandList*, QueryPoolHandle,uint32_t firstQuery, uint32_t queryCount,
+            ResourceHandle dstBuffer, uint64_t dstOffsetBytes) noexcept; // Resolve to a buffer; always 64-bit results (matches both APIs)
+        void (*resetQueries)(CommandList*, QueryPoolHandle, uint32_t firstQuery, uint32_t queryCount) noexcept; // Vulkan requires resets before reuse; DX12 can no-op this.
         void (*setName)(CommandList*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
@@ -1104,6 +1203,11 @@ namespace rhi {
         inline HeapPtr CreateHeap(const HeapDesc& h) noexcept { return vt->createHeap(this, h); }
         inline void DestroyHeap(HeapHandle h) noexcept { vt->destroyHeap(this, h); }
         inline ResourcePtr CreatePlacedResource(HeapHandle heap, uint64_t offset, const ResourceDesc& rd) noexcept { return vt->createPlacedResource(this, heap, offset, rd); }
+        inline QueryPoolPtr CreateQueryPool(const QueryPoolDesc& d) noexcept { return vt->createQueryPool(this, d); }
+        inline void DestroyQueryPool(QueryPoolHandle h) noexcept { vt->destroyQueryPool(this, h); }
+        inline TimestampCalibration GetTimestampCalibration(QueueKind q) noexcept { return vt->getTimestampCalibration(this, q); }
+		inline QueryResultInfo GetQueryResultInfo(QueryPoolHandle h) noexcept { return vt->getQueryResultInfo(this, h); }
+		inline PipelineStatsLayout GetPipelineStatsLayout(QueryPoolHandle h, PipelineStatsFieldDesc* outBuf, uint32_t outCap) noexcept { return vt->getPipelineStatsLayout(this, h, outBuf, outCap); }
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };
 
@@ -1135,6 +1239,16 @@ namespace rhi {
     inline void CommandList::CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept { vt->copyBufferToTexture(this, dst, src); }
     inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
     inline void CommandList::CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept { vt->copyTextureRegion(this, dst, src); }
+    inline void CommandList::WriteTimestamp(QueryPoolHandle p, uint32_t idx, Stage s) noexcept { vt->writeTimestamp(this, p, idx, s); }
+    inline void CommandList::BeginQuery(QueryPoolHandle p, uint32_t idx) noexcept { vt->beginQuery(this, p, idx); }
+    inline void CommandList::EndQuery(QueryPoolHandle p, uint32_t idx) noexcept { vt->endQuery(this, p, idx); }
+    inline void CommandList::ResolveQueryData(QueryPoolHandle p, uint32_t first, uint32_t count,
+        ResourceHandle dst, uint64_t off) noexcept {
+        vt->resolveQueryData(this, p, first, count, dst, off);
+    }
+    inline void CommandList::ResetQueries(QueryPoolHandle p, uint32_t first, uint32_t count) noexcept {
+        vt->resetQueries(this, p, first, count);
+    }
 	inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
 
     inline uint32_t Swapchain::ImageCount() noexcept { return vt->imageCount(this); }

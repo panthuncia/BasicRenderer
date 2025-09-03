@@ -535,6 +535,16 @@ namespace rhi {
 
 	struct Dx12Heap { Microsoft::WRL::ComPtr<ID3D12Heap> heap; uint64_t size{}; };
 
+	struct Dx12QueryPool {
+		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
+		D3D12_QUERY_HEAP_TYPE type{};
+		uint32_t count = 0;
+
+		// For pipeline stats, remember if we used *_STATISTICS1 (mesh/task) or legacy
+		bool usePSO1 = false;
+	};
+
+
 	struct Dx12Device {
 		Device self{};
 		ComPtr<IDXGIFactory7> factory; 
@@ -557,6 +567,7 @@ namespace rhi {
 		Registry<Dx12CommandList> commandLists;
 		Registry<Dx12Timeline> timelines;
 		Registry<Dx12Heap> heaps;
+		Registry<Dx12QueryPool> queryPools;
 
 		Dx12QueueState gfx{}, comp{}, copy{};
 	};
@@ -1951,6 +1962,161 @@ namespace rhi {
 
 	}
 
+	static QueryPoolPtr d_createQueryPool(Device* d, const QueryPoolDesc& qd) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || qd.count == 0) return {};
+
+		Dx12QueryPool qp{};
+		D3D12_QUERY_HEAP_DESC desc{};
+		desc.Count = qd.count;
+
+		switch (qd.type) {
+		case QueryType::Timestamp:
+			desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+			qp.type = desc.Type; break;
+
+		case QueryType::Occlusion:
+			desc.Type = D3D12_QUERY_HEAP_TYPE_OCCLUSION;
+			qp.type = desc.Type; break;
+
+		case QueryType::PipelineStatistics: {
+			// If mesh/task bits requested and supported -> use *_STATISTICS1
+			bool needMesh = (qd.statsMask & (PS_TaskInvocations | PS_MeshInvocations | PS_MeshPrimitives)) != 0;
+
+			D3D12_FEATURE_DATA_D3D12_OPTIONS9 opts9{};
+			bool haveOpt9 = SUCCEEDED(impl->dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opts9, sizeof(opts9)));
+			bool canMeshStats = haveOpt9 && !!opts9.MeshShaderPipelineStatsSupported;
+
+			if (needMesh && !canMeshStats && qd.requireAllStats)
+				return {}; // Unsupported
+
+			desc.Type = needMesh && canMeshStats
+				? D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1
+				: D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
+			qp.type = desc.Type;
+			qp.usePSO1 = (desc.Type == D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1);
+		} break;
+		}
+
+		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
+		if (FAILED(impl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
+		qp.heap = heap;
+		qp.count = qd.count;
+
+		auto handle = impl->queryPools.alloc(std::move(qp));
+		return QueryPoolPtr(d, handle,
+			[](Device* dev, QueryPoolHandle hh) noexcept {
+				static_cast<Dx12Device*>(dev->impl)->queryPools.free(hh);
+			}
+		);
+	}
+
+	static void d_destroyQueryPool(Device* d, QueryPoolHandle h) noexcept {
+		static_cast<Dx12Device*>(d->impl)->queryPools.free(h);
+	}
+
+	static void d_destroyQueryPool(Device* d, QueryPoolHandle h) noexcept {
+		static_cast<Dx12Device*>(d->impl)->queryPools.free(h);
+	}
+
+	static TimestampCalibration d_getTimestampCalibration(Device* d, QueueKind q) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		auto* s = (q == QueueKind::Graphics) ? &impl->gfx : (q == QueueKind::Compute ? &impl->comp : &impl->copy);
+		UINT64 freq = 0;
+		if (s->q) s->q->GetTimestampFrequency(&freq);
+		return { freq };
+	}
+
+	static QueryResultInfo d_getQueryResultInfo(Device* d, QueryPoolHandle h) noexcept {
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		auto* P = impl->queryPools.get(h);
+		QueryResultInfo out{};
+		if (!P) return out;
+		out.count = P->count;
+
+		switch (P->type) {
+		case D3D12_QUERY_HEAP_TYPE_TIMESTAMP:
+			out.type = QueryType::Timestamp;
+			out.elementSize = sizeof(uint64_t);
+			break;
+		case D3D12_QUERY_HEAP_TYPE_OCCLUSION:
+			out.type = QueryType::Occlusion;
+			out.elementSize = sizeof(uint64_t);
+			break;
+		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS:
+			out.type = QueryType::PipelineStatistics;
+			out.elementSize = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS);
+			break;
+		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1:
+			out.type = QueryType::PipelineStatistics;
+			out.elementSize = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS1);
+			break;
+		}
+		return out;
+	}
+
+	static PipelineStatsLayout d_getPipelineStatsLayout(Device* d, QueryPoolHandle h,
+		PipelineStatsFieldDesc* outBuf,
+		uint32_t cap) noexcept
+	{
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		auto* P = impl->queryPools.get(h);
+		PipelineStatsLayout L{};
+		if (!P) return L;
+
+		L.info = d_getQueryResultInfo(d, h);
+
+		// Build a local vector, then copy to outBuf
+		std::vector<PipelineStatsFieldDesc> tmp;
+		tmp.reserve(16);
+
+		if (!P->usePSO1) {
+			using S = D3D12_QUERY_DATA_PIPELINE_STATISTICS;
+			auto push = [&](PipelineStatTypes f, size_t off) {
+				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
+				};
+			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
+			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
+			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
+			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
+			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
+			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
+			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
+			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
+			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
+			// Mesh/Task not supported here
+			tmp.push_back({ PipelineStatTypes::TaskInvocations, 0, 0, false });
+			tmp.push_back({ PipelineStatTypes::MeshInvocations, 0, 0, false });
+			tmp.push_back({ PipelineStatTypes::MeshPrimitives,  0, 0, false });
+		}
+		else {
+			using S = D3D12_QUERY_DATA_PIPELINE_STATISTICS1;
+			auto push = [&](PipelineStatTypes f, size_t off) {
+				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
+				};
+			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
+			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
+			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
+			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
+			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
+			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
+			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
+			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
+			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
+			// Mesh/Task present:
+			push(PipelineStatTypes::TaskInvocations, offsetof(S, ASInvocations));
+			push(PipelineStatTypes::MeshInvocations, offsetof(S, MSInvocations));
+			push(PipelineStatTypes::MeshPrimitives, offsetof(S, MSPrimitives));
+		}
+
+		// Copy out
+		const uint32_t n = std::min<uint32_t>(cap, (uint32_t)tmp.size());
+		if (outBuf && n) std::memcpy(outBuf, tmp.data(), n * sizeof(tmp[0]));
+		// Return layout header: info + fields span (caller knows cap, we return size via .fields.size)
+		L.fields = { outBuf, n };
+		return L;
+	}
+
 	// ---------------- Queue vtable funcs ----------------
 	static Result q_submit(Queue* q, Span<CommandList> lists, const SubmitDesc& s) noexcept {
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
@@ -2403,6 +2569,91 @@ namespace rhi {
 		if (!l || !l->cl) return;
 		l->cl->SetName(std::wstring(n, n + ::strlen(n)).c_str());
 	}
+
+	static void cl_writeTimestamp(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!impl) return;
+
+		auto* P = impl->queryPools.get(pool);
+		if (!P || P->type != D3D12_QUERY_HEAP_TYPE_TIMESTAMP) return;
+
+		rec->cl->EndQuery(P->heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, index);
+	}
+
+	static void cl_beginQuery(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!impl) return;
+
+		auto* P = impl->queryPools.get(pool);
+		if (!P) return;
+
+		if (P->type == D3D12_QUERY_HEAP_TYPE_OCCLUSION) {
+			rec->cl->BeginQuery(P->heap.Get(), D3D12_QUERY_TYPE_OCCLUSION, index);
+		}
+		else if (P->type == D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS) {
+			rec->cl->BeginQuery(P->heap.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, index);
+		}
+		else if (P->type == D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1) {
+			rec->cl->BeginQuery(P->heap.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS1, index);
+		}
+	}
+
+	static void cl_endQuery(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!impl) return;
+
+		auto* P = impl->queryPools.get(pool);
+		if (!P) return;
+
+		if (P->type == D3D12_QUERY_HEAP_TYPE_OCCLUSION) {
+			rec->cl->EndQuery(P->heap.Get(), D3D12_QUERY_TYPE_OCCLUSION, index);
+		}
+		else if (P->type == D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS) {
+			rec->cl->EndQuery(P->heap.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, index);
+		}
+		else if (P->type == D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1) {
+			rec->cl->EndQuery(P->heap.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS1, index);
+		}
+		else if (P->type == D3D12_QUERY_HEAP_TYPE_TIMESTAMP) {
+			// no-op; timestamps use writeTimestamp (EndQuery(TIMESTAMP))
+		}
+	}
+
+	static void cl_resolveQueryData(CommandList* cl,
+		QueryPoolHandle pool,
+		uint32_t firstQuery, uint32_t queryCount,
+		ResourceHandle dst, uint64_t dstOffset) noexcept
+	{
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!impl) return;
+
+		auto* P = impl->queryPools.get(pool);
+		if (!P) return;
+
+		// Resolve to the given buffer (assumed COPY_DEST)
+		auto* B = impl->buffers.get(dst);
+		if (!B || !B->res) return;
+
+		D3D12_QUERY_TYPE type{};
+		switch (P->type) {
+		case D3D12_QUERY_HEAP_TYPE_TIMESTAMP:               type = D3D12_QUERY_TYPE_TIMESTAMP; break;
+		case D3D12_QUERY_HEAP_TYPE_OCCLUSION:               type = D3D12_QUERY_TYPE_OCCLUSION; break;
+		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS:     type = D3D12_QUERY_TYPE_PIPELINE_STATISTICS; break;
+		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1:    type = D3D12_QUERY_TYPE_PIPELINE_STATISTICS1; break;
+		default: return;
+		}
+
+		rec->cl->ResolveQueryData(P->heap.Get(), type, firstQuery, queryCount, B->res.Get(), dstOffset);
+	}
+
+	static void cl_resetQueries(CommandList* /*cl*/, QueryPoolHandle /*pool*/, uint32_t /*first*/, uint32_t /*count*/) noexcept {
+		// D3D12 does not require resets; Vulkan impl will fill this.
+	}
+
 
 	// ---------------- Swapchain vtable funcs ----------------
 	static uint32_t sc_count(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->count; }
