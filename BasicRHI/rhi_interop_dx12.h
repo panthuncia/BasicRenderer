@@ -48,6 +48,42 @@ namespace rhi::dx12 {
 		if (!QueryNativeResource(h, RHI_IID_D3D12_RESOURCE, &info, sizeof(info))) return nullptr;
 		return static_cast<ID3D12Resource*>(info.resource);
 	}
+    inline ID3D12Heap* get_heap(rhi::Heap h) {
+        D3D12HeapInfo info{};
+		if (!QueryNativeHeap(h, RHI_IID_D3D12_HEAP, &info, sizeof(info))) return nullptr;
+		return static_cast<ID3D12Heap*>(info.heap);
+	}
+    inline ID3D12QueryHeap* get_querypool(rhi::QueryPool qp) {
+		D3D12QueryPoolInfo info{};
+		if (!QueryNativeQueryPool(qp, RHI_IID_D3D12_HEAP, &info, sizeof(info))) return nullptr;
+		return static_cast<ID3D12QueryHeap*>(info.queryPool);
+	}
+    inline ID3D12PipelineState* get_pipeline(rhi::Pipeline p) {
+        D3D12PipelineInfo info{};
+        if (!QueryNativePipeline(p, RHI_IID_D3D12_PIPELINE, &info, sizeof(info))) return nullptr;
+        return static_cast<ID3D12PipelineState*>(info.pipeline);
+	}
+    inline ID3D12RootSignature* get_pipeline_layout(rhi::PipelineLayout pl) {
+        D3D12PipelineLayoutInfo info{};
+        if (!QueryNativePipelineLayout(pl, RHI_IID_D3D12_PIPELINE_LAYOUT, &info, sizeof(info))) return nullptr;
+        return static_cast<ID3D12RootSignature*>(info.layout);
+	}
+    inline ID3D12CommandSignature* get_command_signature(rhi::CommandSignature cs) {
+        D3D12CommandSignatureInfo info{};
+        if (!QueryNativeCommandSignature(cs, RHI_IID_D3D12_COMMAND_SIGNATURE, &info, sizeof(info))) return nullptr;
+        return static_cast<ID3D12CommandSignature*>(info.cmdSig);
+	}
+    inline ID3D12DescriptorHeap* get_descriptor_heap(rhi::DescriptorHeap dh) {
+        D3D12DescriptorHeapInfo info{};
+        if (!QueryNativeDescriptorHeap(dh, RHI_IID_D3D12_DESCRIPTOR_HEAP, &info, sizeof(info))) return nullptr;
+        return static_cast<ID3D12DescriptorHeap*>(info.descHeap);
+	}
+    inline ID3D12Fence* get_timeline(rhi::Timeline t) {
+        D3D12TimelineInfo info{};
+        if (!QueryNativeTimeline(t, RHI_IID_D3D12_TIMELINE, &info, sizeof(info))) return nullptr;
+        return static_cast<ID3D12Fence*>(info.timeline);
+	}
+
     using PFN_UpgradeInterface = sl::Result(*)(void**); // Streamline's slUpgradeInterface-compatible
     bool enable_streamline_interposer(Device, PFN_UpgradeInterface upgrade);
     void disable_streamline_interposer(Device);

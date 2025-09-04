@@ -111,8 +111,87 @@ namespace rhi {
 	}
 
     bool QueryNativeHeap(Heap h, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
-        // Not implemented in BasicRHI yet
-        return false;
+        if (!h.IsValid() || !outStruct) return false;
+        if (iid != RHI_IID_D3D12_HEAP) return false;
+        if (outSize < sizeof(D3D12HeapInfo)) return false;
+        auto* rec = static_cast<Dx12Heap*>(h.impl);
+        if (!rec || !rec->heap) return false;
+        auto* out = reinterpret_cast<D3D12HeapInfo*>(outStruct);
+        out->heap = rec->heap.Get(); // ID3D12Heap*
+        out->version = 1;
+		return true;
+	}
+
+    bool QueryNativeQueryPool(QueryPool qp, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
+		if (!qp.IsValid() || !outStruct) return false;
+		if (iid != RHI_IID_D3D12_QUERY_POOL) return false;
+		if (outSize < sizeof(D3D12QueryPoolInfo)) return false;
+		auto* rec = static_cast<Dx12QueryPool*>(qp.impl);
+		if (!rec || !rec->heap) return false;
+		auto* out = reinterpret_cast<D3D12QueryPoolInfo*>(outStruct);
+		out->queryPool = rec->heap.Get(); // ID3D12QueryHeap*
+		out->version = 1;
+		return true;
+	}
+
+    bool QueryNativePipeline(Pipeline p, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
+        if (!p.IsValid() || !outStruct) return false;
+        if (iid != RHI_IID_D3D12_PIPELINE) return false;
+        if (outSize < sizeof(D3D12PipelineInfo)) return false;
+        auto* rec = static_cast<Dx12Pipeline*>(p.impl);
+        if (!rec || !rec->pso) return false;
+        auto* out = reinterpret_cast<D3D12PipelineInfo*>(outStruct);
+        out->pipeline = rec->pso.Get(); // ID3D12PipelineState*
+        out->version = 1;
+        return true;
+	}
+
+    bool QueryNativePipelineLayout(PipelineLayout pl, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
+        if (!pl.IsValid() || !outStruct) return false;
+        if (iid != RHI_IID_D3D12_PIPELINE_LAYOUT) return false;
+        if (outSize < sizeof(D3D12PipelineLayoutInfo)) return false;
+        auto* rec = static_cast<Dx12PipelineLayout*>(pl.impl);
+        if (!rec || !rec->root) return false;
+        auto* out = reinterpret_cast<D3D12PipelineLayoutInfo*>(outStruct);
+        out->layout = rec->root.Get(); // ID3D12RootSignature*
+        out->version = 1;
+        return true;
+    }
+
+    bool QueryNativeDescriptorHeap(DescriptorHeap dh, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
+        if (!dh.IsValid() || !outStruct) return false;
+        if (iid != RHI_IID_D3D12_DESCRIPTOR_HEAP) return false;
+        if (outSize < sizeof(D3D12DescriptorHeapInfo)) return false;
+        auto* rec = static_cast<Dx12DescriptorHeap*>(dh.impl);
+        if (!rec || !rec->heap) return false;
+        auto* out = reinterpret_cast<D3D12DescriptorHeapInfo*>(outStruct);
+        out->descHeap = rec->heap.Get(); // ID3D12DescriptorHeap*
+        out->version = 1;
+        return true;
+	}
+
+    bool QueryNativeCommandSignature(CommandSignature cs, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
+        if (!cs.IsValid() || !outStruct) return false;
+        if (iid != RHI_IID_D3D12_COMMAND_SIGNATURE) return false;
+        if (outSize < sizeof(D3D12CommandSignatureInfo)) return false;
+        auto* rec = static_cast<Dx12CommandSignature*>(cs.impl);
+        if (!rec || !rec->sig) return false;
+        auto* out = reinterpret_cast<D3D12CommandSignatureInfo*>(outStruct);
+        out->cmdSig = rec->sig.Get(); // ID3D12CommandSignature*
+        out->version = 1;
+        return true;
+    }
+
+    bool QueryNativeTimeline(Timeline t, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
+        if (!t.IsValid() || !outStruct) return false;
+        if (iid != RHI_IID_D3D12_TIMELINE) return false;
+        if (outSize < sizeof(D3D12TimelineInfo)) return false;
+        auto* rec = static_cast<Dx12Timeline*>(t.impl);
+        if (!rec || !rec->fence) return false;
+        auto* out = reinterpret_cast<D3D12TimelineInfo*>(outStruct);
+        out->timeline = rec->fence.Get(); // ID3D12Fence*
+        out->version = 1;
+        return true;
 	}
 
     namespace dx12 {

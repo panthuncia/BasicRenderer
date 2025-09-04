@@ -17,6 +17,12 @@ namespace rhi {
 	constexpr uint32_t RHI_IID_D3D12_SWAPCHAIN = 0x1004;
 	constexpr uint32_t RHI_IID_D3D12_RESOURCE = 0x1005;
 	constexpr uint32_t RHI_IID_D3D12_HEAP = 0x1006;
+	constexpr uint32_t RHI_IID_D3D12_QUERY_POOL = 0x1007;
+	constexpr uint32_t RHI_IID_D3D12_PIPELINE = 0x1008;
+	constexpr uint32_t RHI_IID_D3D12_PIPELINE_LAYOUT = 0x1009;
+	constexpr uint32_t RHI_IID_D3D12_COMMAND_SIGNATURE = 0x100A;
+	constexpr uint32_t RHI_IID_D3D12_DESCRIPTOR_HEAP = 0x100B;
+	constexpr uint32_t RHI_IID_D3D12_TIMELINE = 0x100C;
 
 	constexpr uint32_t RHI_IID_VK_DEVICE = 0x2001;
 	constexpr uint32_t RHI_IID_VK_QUEUE = 0x2002;
@@ -24,6 +30,12 @@ namespace rhi {
 	constexpr uint32_t RHI_IID_VK_SWAPCHAIN = 0x2004;
 	constexpr uint32_t RHI_IID_VK_RESOURCE = 0x2005;
 	constexpr uint32_t RHI_IID_VK_HEAP = 0x2006;
+	constexpr uint32_t RHI_IID_VK_QUERY_POOL = 0x2007;
+	constexpr uint32_t RHI_IID_VK_PIPELINE = 0x2008;
+	constexpr uint32_t RHI_IID_VK_PIPELINE_LAYOUT = 0x2009;
+	constexpr uint32_t RHI_IID_VK_COMMAND_SIGNATURE = 0x200A;
+	constexpr uint32_t RHI_IID_VK_DESCRIPTOR_HEAP = 0x200B;
+	constexpr uint32_t RHI_IID_VK_TIMELINE = 0x200C;
 
 	// --- Narrow, typed query surface (no native types)
 	struct D3D12DeviceInfo { void* device; void* factory; void* adapter; uint32_t version; };
@@ -32,6 +44,12 @@ namespace rhi {
 	struct D3D12SwapchainInfo { void* swapchain; uint32_t version; };
 	struct D3D12ResourceInfo { void* resource; uint32_t version; };
 	struct D3D12HeapInfo { void* heap; uint32_t version; };
+	struct D3D12QueryPoolInfo { void* queryPool; uint32_t version; };
+	struct D3D12PipelineInfo { void* pipeline; uint32_t version; };
+	struct D3D12PipelineLayoutInfo { void* layout; uint32_t version; };
+	struct D3D12CommandSignatureInfo { void* cmdSig; uint32_t version; };
+	struct D3D12DescriptorHeapInfo { void* descHeap; uint32_t version; };
+	struct D3D12TimelineInfo { void* timeline; uint32_t version; };
 
 	struct VulkanDeviceInfo { void* instance; void* physicalDevice; void* device; uint32_t version; };
 	struct VulkanQueueInfo { void* queue; uint32_t familyIndex; uint32_t version; };
@@ -39,6 +57,12 @@ namespace rhi {
 	struct VulkanSwapchainInfo { void* swapchain; uint32_t version; };
 	struct VulkanResourceInfo { void* resource; uint32_t version; };
 	struct VulkanHeapInfo { void* heap; uint32_t version; };
+	struct VulkanQueryPoolInfo { void* queryPool; uint32_t version; };
+	struct VulkanPipelineInfo { void* pipeline; uint32_t version; };
+	struct VulkanPipelineLayoutInfo { void* layout; uint32_t version; };
+	struct VulkanCommandSignatureInfo { void* cmdSig; uint32_t version; };
+	struct VulkanDescriptorHeapInfo { void* descHeap; uint32_t version; };
+	struct VulkanTimelineInfo { void* timeline; uint32_t version; };
 
 	// --- Query interface entry points (implemented by each backend)
 	bool QueryNativeDevice(Device, uint32_t iid /*RHI_IID_...*/, void* outStruct /*typed*/, uint32_t outSize) noexcept;
@@ -47,4 +71,10 @@ namespace rhi {
 	bool QueryNativeSwapchain(Swapchain, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
 	bool QueryNativeResource(Resource, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
 	bool QueryNativeHeap(Heap, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
+	bool QueryNativeQueryPool(QueryPool, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
+	bool QueryNativePipeline(Pipeline, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
+	bool QueryNativePipelineLayout(PipelineLayout, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
+	bool QueryNativeCommandSignature(CommandSignature, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
+	bool QueryNativeDescriptorHeap(DescriptorHeap, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
+	bool QueryNativeTimeline(Timeline, uint32_t iid, void* outStruct, uint32_t outSize) noexcept;
 } // namespace rhi

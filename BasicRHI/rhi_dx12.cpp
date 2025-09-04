@@ -39,11 +39,7 @@ namespace rhi {
 		&d_waitIdle,
 		&d_flushDeletionQueue,
 		&d_getDescriptorHandleIncrementSize,
-		&d_timelineCompletedValue,
-		&d_timelineHostWait,
 		&d_getTimestampCalibration,
-		&d_getQueryResultInfo,
-		&d_getPipelineStatsLayout,
 
 		&d_setNameBuffer,
 		&d_setNameTexture,
@@ -121,6 +117,8 @@ namespace rhi {
 		1
 	};
 	const QueryPoolVTable g_qpvt = {
+		&qp_getQueryResultInfo,
+		&qp_getPipelineStatsLayout,
 		&qp_setName,
 		1u
 	};
@@ -145,6 +143,8 @@ namespace rhi {
 		1u
 	};
 	const TimelineVTable g_tlvt = {
+		&tl_timelineCompletedValue,
+		&tl_timelineHostWait,
 		&tl_setName,
 		1u
 	};

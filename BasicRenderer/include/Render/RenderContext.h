@@ -26,9 +26,9 @@ public:
     rhi::Device device;
     rhi::CommandList commandList;
 	rhi::Queue commandQueue;
-    rhi::DescriptorHeapHandle textureDescriptorHeap;
-	rhi::DescriptorHeapHandle samplerDescriptorHeap;
-	rhi::DescriptorHeapHandle rtvHeap;
+    rhi::DescriptorHeap textureDescriptorHeap;
+	rhi::DescriptorHeap samplerDescriptorHeap;
+	rhi::DescriptorHeap rtvHeap;
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;
     UINT frameIndex;

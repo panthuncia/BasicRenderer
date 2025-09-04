@@ -759,11 +759,11 @@ namespace rhi {
 		if (FAILED(dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) return {};
 
 		auto handle = dimpl->pipelines.alloc(Dx12Pipeline{ pso, isCompute });
-		Pipeline out = { handle };
+		Pipeline out(handle);
 		out.vt = &g_psovt;
 		out.impl = dimpl->pipelines.get(handle);;
 
-		return MakePipelinePtr(d, handle);
+		return MakePipelinePtr(d, out);
 	}
 
 	static void d_destroyBuffer(Device* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->buffers.free(h); }
@@ -973,7 +973,7 @@ namespace rhi {
 			L.staticSamplers.assign(ld.staticSamplers.data, ld.staticSamplers.data + ld.staticSamplers.size);
 		L.root = root;
 		auto handle = impl->pipelineLayouts.alloc(std::move(L));
-		PipelineLayout out = { handle };
+		PipelineLayout out(handle);
 		out.vt = &g_plvt;
 		out.impl = impl->pipelineLayouts.get(handle);
 		return MakePipelineLayoutPtr(d, out);
@@ -1045,7 +1045,7 @@ namespace rhi {
 		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) return {};
 		Dx12CommandSignature S{ cs, cd.byteStride };
 		auto handle = impl->commandSignatures.alloc(std::move(S));
-		CommandSignature out = { handle };
+		CommandSignature out(handle);
 		out.vt = &g_csvt;
 		out.impl = impl->commandSignatures.get(handle);
 		return MakeCommandSignaturePtr(d, out);
@@ -1074,7 +1074,7 @@ namespace rhi {
 		if (H.shaderVisible) H.gpuStart = heap->GetGPUDescriptorHandleForHeapStart();
 
 		auto handle = impl->descHeaps.alloc(std::move(H));
-		DescriptorHeap out = { handle };
+		DescriptorHeap out(handle);
 		out.vt = &g_dhvt;
 		out.impl = impl->descHeaps.get(handle);
 		return MakeDescriptorHeapPtr(d, out);
@@ -1786,24 +1786,6 @@ namespace rhi {
 		impl->timelines.free(t);
 	}
 
-	static uint64_t d_timelineCompletedValue(Device* d, TimelineHandle t) noexcept {
-		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (auto* TL = impl->timelines.get(t)) return TL->fence->GetCompletedValue();
-		return 0;
-	}
-
-	static Result d_timelineHostWait(Device* d, const TimelinePoint& p) noexcept {
-		auto* impl = static_cast<Dx12Device*>(d->impl);
-		auto* TL = impl->timelines.get(p.t); if (!TL) return Result::InvalidArg;
-		HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-		if (!e) return Result::Failed;
-		HRESULT hr = TL->fence->SetEventOnCompletion(p.value, e);
-		if (FAILED(hr)) { CloseHandle(e); return Result::Failed; }
-		WaitForSingleObject(e, INFINITE);
-		CloseHandle(e);
-		return Result::Ok;
-	}
-
 	static HeapPtr d_createHeap(Device* d, const HeapDesc& hd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || hd.sizeBytes == 0) return {};
@@ -1945,7 +1927,10 @@ namespace rhi {
 		T.fmt = desc.Format;
 		T.w = td.texture.width; T.h = td.texture.height;
 		auto handle = impl->textures.alloc(std::move(T));
-		return MakeTexturePtr(d, handle);
+		Resource out(handle, true);
+		out.impl = impl->textures.get(handle);
+		out.vt = &g_tex_rvt;
+		return MakeTexturePtr(d, out);
 	}
 
 	static ResourcePtr d_createPlacedBuffer(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& bd) noexcept {
@@ -1972,7 +1957,10 @@ namespace rhi {
 		Dx12Buffer B{};
 		B.res = std::move(res);
 		auto handle = impl->buffers.alloc(std::move(B));
-		return MakeBufferPtr(d, handle);
+		Resource out{ handle, false };
+		out.impl = impl->buffers.get(handle);
+		out.vt = &g_buf_rvt;
+		return MakeBufferPtr(d, out);
 	}
 
 	static ResourcePtr d_createPlacedResource(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& rd) noexcept {
@@ -2049,96 +2037,6 @@ namespace rhi {
 		UINT64 freq = 0;
 		if (s->q) s->q->GetTimestampFrequency(&freq);
 		return { freq };
-	}
-
-	static QueryResultInfo d_getQueryResultInfo(Device* d, QueryPoolHandle h) noexcept {
-		auto* impl = static_cast<Dx12Device*>(d->impl);
-		auto* P = impl->queryPools.get(h);
-		QueryResultInfo out{};
-		if (!P) return out;
-		out.count = P->count;
-
-		switch (P->type) {
-		case D3D12_QUERY_HEAP_TYPE_TIMESTAMP:
-			out.type = QueryType::Timestamp;
-			out.elementSize = sizeof(uint64_t);
-			break;
-		case D3D12_QUERY_HEAP_TYPE_OCCLUSION:
-			out.type = QueryType::Occlusion;
-			out.elementSize = sizeof(uint64_t);
-			break;
-		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS:
-			out.type = QueryType::PipelineStatistics;
-			out.elementSize = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS);
-			break;
-		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1:
-			out.type = QueryType::PipelineStatistics;
-			out.elementSize = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS1);
-			break;
-		}
-		return out;
-	}
-
-	static PipelineStatsLayout d_getPipelineStatsLayout(Device* d, QueryPoolHandle h,
-		PipelineStatsFieldDesc* outBuf,
-		uint32_t cap) noexcept
-	{
-		auto* impl = static_cast<Dx12Device*>(d->impl);
-		auto* P = impl->queryPools.get(h);
-		PipelineStatsLayout L{};
-		if (!P) return L;
-
-		L.info = d_getQueryResultInfo(d, h);
-
-		// Build a local vector, then copy to outBuf
-		std::vector<PipelineStatsFieldDesc> tmp;
-		tmp.reserve(16);
-
-		if (!P->usePSO1) {
-			using S = D3D12_QUERY_DATA_PIPELINE_STATISTICS;
-			auto push = [&](PipelineStatTypes f, size_t off) {
-				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
-				};
-			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
-			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
-			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
-			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
-			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
-			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
-			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
-			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
-			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
-			// Mesh/Task not supported here
-			tmp.push_back({ PipelineStatTypes::TaskInvocations, 0, 0, false });
-			tmp.push_back({ PipelineStatTypes::MeshInvocations, 0, 0, false });
-			tmp.push_back({ PipelineStatTypes::MeshPrimitives,  0, 0, false });
-		}
-		else {
-			using S = D3D12_QUERY_DATA_PIPELINE_STATISTICS1;
-			auto push = [&](PipelineStatTypes f, size_t off) {
-				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
-				};
-			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
-			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
-			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
-			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
-			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
-			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
-			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
-			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
-			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
-			// Mesh/Task present:
-			push(PipelineStatTypes::TaskInvocations, offsetof(S, ASInvocations));
-			push(PipelineStatTypes::MeshInvocations, offsetof(S, MSInvocations));
-			push(PipelineStatTypes::MeshPrimitives, offsetof(S, MSPrimitives));
-		}
-
-		// Copy out
-		const uint32_t n = std::min<uint32_t>(cap, (uint32_t)tmp.size());
-		if (outBuf && n) std::memcpy(outBuf, tmp.data(), n * sizeof(tmp[0]));
-		// Return layout header: info + fields span (caller knows cap, we return size via .fields.size)
-		L.fields = { outBuf, n };
-		return L;
 	}
 
 	// ---------------- Queue vtable funcs ----------------
@@ -2866,6 +2764,94 @@ namespace rhi {
 	}
 
 	// ------------------ QueryPool vtable funcs ----------------
+	static QueryResultInfo qp_getQueryResultInfo(QueryPool* p) noexcept {
+		auto* P = static_cast<Dx12QueryPool*>(p->impl);
+		QueryResultInfo out{};
+		if (!P) return out;
+		out.count = P->count;
+
+		switch (P->type) {
+		case D3D12_QUERY_HEAP_TYPE_TIMESTAMP:
+			out.type = QueryType::Timestamp;
+			out.elementSize = sizeof(uint64_t);
+			break;
+		case D3D12_QUERY_HEAP_TYPE_OCCLUSION:
+			out.type = QueryType::Occlusion;
+			out.elementSize = sizeof(uint64_t);
+			break;
+		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS:
+			out.type = QueryType::PipelineStatistics;
+			out.elementSize = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS);
+			break;
+		case D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1:
+			out.type = QueryType::PipelineStatistics;
+			out.elementSize = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS1);
+			break;
+		}
+		return out;
+	}
+
+	static PipelineStatsLayout qp_getPipelineStatsLayout(QueryPool* p,
+		PipelineStatsFieldDesc* outBuf,
+		uint32_t cap) noexcept
+	{
+		auto* P = static_cast<Dx12QueryPool*>(p->impl);
+		PipelineStatsLayout L{};
+		if (!P) return L;
+
+		L.info = qp_getQueryResultInfo(p);
+
+		// Build a local vector, then copy to outBuf
+		std::vector<PipelineStatsFieldDesc> tmp;
+		tmp.reserve(16);
+
+		if (!P->usePSO1) {
+			using S = D3D12_QUERY_DATA_PIPELINE_STATISTICS;
+			auto push = [&](PipelineStatTypes f, size_t off) {
+				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
+				};
+			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
+			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
+			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
+			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
+			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
+			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
+			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
+			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
+			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
+			// Mesh/Task not supported here
+			tmp.push_back({ PipelineStatTypes::TaskInvocations, 0, 0, false });
+			tmp.push_back({ PipelineStatTypes::MeshInvocations, 0, 0, false });
+			tmp.push_back({ PipelineStatTypes::MeshPrimitives,  0, 0, false });
+		}
+		else {
+			using S = D3D12_QUERY_DATA_PIPELINE_STATISTICS1;
+			auto push = [&](PipelineStatTypes f, size_t off) {
+				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
+				};
+			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
+			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
+			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
+			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
+			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
+			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
+			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
+			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
+			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
+			// Mesh/Task present:
+			push(PipelineStatTypes::TaskInvocations, offsetof(S, ASInvocations));
+			push(PipelineStatTypes::MeshInvocations, offsetof(S, MSInvocations));
+			push(PipelineStatTypes::MeshPrimitives, offsetof(S, MSPrimitives));
+		}
+
+		// Copy out
+		const uint32_t n = std::min<uint32_t>(cap, (uint32_t)tmp.size());
+		if (outBuf && n) std::memcpy(outBuf, tmp.data(), n * sizeof(tmp[0]));
+		// Return layout header: info + fields span (caller knows cap, we return size via .fields.size)
+		L.fields = { outBuf, n };
+		return L;
+	}
+
 	static void qp_setName(QueryPool* qp, const char* n) noexcept {
 		if (!n) return;
 		auto* Q = static_cast<Dx12QueryPool*>(qp->impl);
@@ -2911,6 +2897,21 @@ namespace rhi {
 	}
 
 	// ------------------ Timeline vtable funcs ----------------
+	static uint64_t tl_timelineCompletedValue(Timeline* t) noexcept {
+		auto* impl = static_cast<Dx12Timeline*>(t->impl);
+		return impl->fence ? impl->fence->GetCompletedValue() : 0;
+	}
+
+	static Result tl_timelineHostWait(Timeline* tl, const TimelinePoint& p) noexcept {
+		auto* TL = static_cast<Dx12Timeline*>(tl->impl);
+		HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		if (!e) return Result::Failed;
+		HRESULT hr = TL->fence->SetEventOnCompletion(p.value, e);
+		if (FAILED(hr)) { CloseHandle(e); return Result::Failed; }
+		WaitForSingleObject(e, INFINITE);
+		CloseHandle(e);
+		return Result::Ok;
+	}
 	static void tl_setName(Timeline* tl, const char* n) noexcept {
 		if (!n) return;
 		auto* T = static_cast<Dx12Timeline*>(tl->impl);
