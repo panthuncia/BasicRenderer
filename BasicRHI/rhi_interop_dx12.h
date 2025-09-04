@@ -4,7 +4,7 @@
 #include "rhi_interop.h"
 #include <d3d12.h>
 #include <dxgi1_6.h>
-#include "ThirdParty/Streamline/sl_core_api.h"
+#include "ThirdParty/sl_result.h"
 
 namespace rhi::dx12 {
 
@@ -48,7 +48,7 @@ namespace rhi::dx12 {
 		if (!QueryNativeResource(h, RHI_IID_D3D12_RESOURCE, &info, sizeof(info))) return nullptr;
 		return static_cast<ID3D12Resource*>(info.resource);
 	}
-    using PFN_UpgradeInterface = sl::Result (*)(void**); // Streamline's slUpgradeInterface-compatible
+    using PFN_UpgradeInterface = sl::Result(*)(void**); // Streamline's slUpgradeInterface-compatible
     bool enable_streamline_interposer(Device, PFN_UpgradeInterface upgrade);
     void disable_streamline_interposer(Device);
 } // namespace rhi::dx12

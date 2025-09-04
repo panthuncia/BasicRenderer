@@ -14,6 +14,9 @@ add_library(BasicRHI STATIC
     rhi_dx12.cpp
  "rhi_interop.h" "rhi_dx12.h"  "rhi_interop_dx12.h" "resource_states.h" "rhi_helpers.h" "rhi_interop_dx12.cpp")
 
+target_compile_options(BasicRHI PRIVATE /WX)
+target_compile_options(BasicRHI PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+
 # Public header(s)
 set_target_properties(BasicRHI PROPERTIES
     PUBLIC_HEADER "rhi.h"

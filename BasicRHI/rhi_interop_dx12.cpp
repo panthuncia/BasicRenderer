@@ -117,12 +117,12 @@ namespace rhi {
 
             // Upgrade factory
             IDXGIFactory7* fac = impl->factory.Get();
-            if (!upgrade(reinterpret_cast<void**>(&fac))) return false;
+            if (!(upgrade(reinterpret_cast<void**>(&fac)) == sl::Result::eOk)) return false;
             impl->slFactory.Attach(fac); // now holds upgraded factory
 
             // upgrade device to base iface
             IUnknown* dev = impl->dev.Get();
-            if (upgrade(reinterpret_cast<void**>(&dev))) {
+            if (upgrade(reinterpret_cast<void**>(&dev)) != sl::Result::eOk) {
                 Microsoft::WRL::ComPtr<ID3D12Device> base;
                 dev->QueryInterface(IID_PPV_ARGS(&base));
                 impl->slDeviceBase = std::move(base);

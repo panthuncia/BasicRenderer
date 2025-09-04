@@ -1,3 +1,4 @@
+﻿#pragma once
 #include "rhi.h"
 
 #ifdef _WIN32
@@ -340,19 +341,19 @@ namespace rhi {
 
 	static D3D12_RESOURCE_FLAGS ToDX(const ResourceFlags flags) {
 		D3D12_RESOURCE_FLAGS f = D3D12_RESOURCE_FLAG_NONE;
-		if (flags & AllowRenderTarget)
+		if (flags & RF_AllowRenderTarget)
 			f |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		if (flags & AllowDepthStencil)
+		if (flags & RF_AllowDepthStencil)
 			f |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-		if (flags & AllowUnorderedAccess)
+		if (flags & RF_AllowUnorderedAccess)
 			f |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-		if (flags & DenyShaderResource)
+		if (flags & RF_DenyShaderResource)
 			f |= D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
-		if (flags & AllowCrossAdapter)
+		if (flags & RF_AllowCrossAdapter)
 			f |= D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
-		if (flags & AllowSimultaneousAccess)
+		if (flags & RF_AllowSimultaneousAccess)
 			f |= D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
-		if (flags & RaytracingAccelerationStructure)
+		if (flags & RF_RaytracingAccelerationStructure)
 			f |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
 		return f;
 	}
@@ -369,7 +370,7 @@ namespace rhi {
 		}
 	}
 
-	static D3D12_BARRIER_SUBRESOURCE_RANGE ToDX(const rhi::TextureSubresourceRange& r) {
+	static D3D12_BARRIER_SUBRESOURCE_RANGE ToDX(const TextureSubresourceRange& r) {
 		D3D12_BARRIER_SUBRESOURCE_RANGE o{};
 		o.IndexOrFirstMipLevel = r.baseMip;
 		o.NumMipLevels = r.mipCount;
@@ -463,21 +464,14 @@ namespace rhi {
 		return d;
 	}
 
-	// tiny handle registry
-	
-	template<class Obj> struct HandleFor;  // no default
-
-	template<> struct HandleFor<Dx12Buffer> { using type = rhi::ResourceHandle; };
-	template<> struct HandleFor<Dx12Texture> { using type = rhi::ResourceHandle; };
-	template<> struct HandleFor<Dx12View> { using type = rhi::ViewHandle; };
-	template<> struct HandleFor<Dx12Sampler> { using type = rhi::SamplerHandle; };
-	template<> struct HandleFor<Dx12PipelineLayout> { using type = rhi::PipelineLayoutHandle; };
-	template<> struct HandleFor<Dx12Pipeline> { using type = rhi::PipelineHandle; };
-	template<> struct HandleFor<Dx12CommandSignature> { using type = rhi::CommandSignatureHandle; };
-	template<> struct HandleFor<Dx12DescHeap> { using type = rhi::DescriptorHeapHandle; };
-	template<> struct HandleFor<Dx12Timeline> { using type = rhi::TimelineHandle; };
-	template<> struct HandleFor<Dx12Allocator> { using type = rhi::CommandAllocatorHandle; };
-	template<> struct HandleFor<Dx12CommandList> { using type = rhi::CommandListHandle; };
+	struct Dx12DescHeap {
+		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
+		D3D12_DESCRIPTOR_HEAP_TYPE type{};
+		UINT inc{ 0 };
+		bool shaderVisible{ false };
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuStart{};
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
+	};
 
 	struct Dx12Timeline { Microsoft::WRL::ComPtr<ID3D12Fence> fence; };
 
@@ -504,6 +498,23 @@ namespace rhi {
 		// For pipeline stats, remember if we used *_STATISTICS1 (mesh/task) or legacy
 		bool usePSO1 = false;
 	};
+
+	// tiny handle registry
+	template<class Obj> struct HandleFor;  // no default
+
+	template<> struct HandleFor<Dx12Buffer> { using type = ResourceHandle; };
+	template<> struct HandleFor<Dx12Texture> { using type = ResourceHandle; };
+	template<> struct HandleFor<Dx12View> { using type = ViewHandle; };
+	template<> struct HandleFor<Dx12Sampler> { using type = SamplerHandle; };
+	template<> struct HandleFor<Dx12PipelineLayout> { using type = PipelineLayoutHandle; };
+	template<> struct HandleFor<Dx12Pipeline> { using type = PipelineHandle; };
+	template<> struct HandleFor<Dx12CommandSignature> { using type = CommandSignatureHandle; };
+	template<> struct HandleFor<Dx12DescHeap> { using type = DescriptorHeapHandle; };
+	template<> struct HandleFor<Dx12Timeline> { using type = TimelineHandle; };
+	template<> struct HandleFor<Dx12Allocator> { using type = CommandAllocatorHandle; };
+	template<> struct HandleFor<Dx12CommandList> { using type = CommandListHandle; };
+	template<> struct HandleFor<Dx12Heap> { using type = HeapHandle; };
+	template<> struct HandleFor<Dx12QueryPool> { using type = QueryPoolHandle; };
 
 	template<typename T>
 	struct Slot { T obj{}; uint32_t generation{ 1 }; bool alive{ false }; };
@@ -571,15 +582,6 @@ namespace rhi {
 		Dx12QueueState gfx{}, comp{}, copy{};
 	};
 
-	struct Dx12DescHeap {
-		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
-		D3D12_DESCRIPTOR_HEAP_TYPE type{};
-		UINT inc{ 0 };
-		bool shaderVisible{ false };
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuStart{};
-		D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
-	};
-
 	// ---------------- VTables forward ----------------
 	extern const DeviceVTable g_devvt; 
 	extern const QueueVTable g_qvt; 
@@ -601,7 +603,7 @@ namespace rhi {
 
 	// ---------------- Device vtable funcs ----------------
 
-	static uint8_t getWriteMask(rhi::ColorWriteEnable e) {
+	static uint8_t getWriteMask(ColorWriteEnable e) {
 		return static_cast<uint8_t>(e);
 	}
 
@@ -939,7 +941,7 @@ namespace rhi {
 			D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED |
 			D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
 
-		if (ld.flags & rhi::PipelineLayoutFlags::AllowInputAssembler) {
+		if (ld.flags & PipelineLayoutFlags::PF_AllowInputAssembler) {
 			rs.Desc_1_1.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 		}
 
@@ -1958,7 +1960,7 @@ namespace rhi {
 			return d_createPlacedTexture(d, hh, offset, rd);
 		case ResourceType::Unknown: return {};
 		}
-
+		return {};
 	}
 
 	static QueryPoolPtr d_createQueryPool(Device* d, const QueryPoolDesc& qd) noexcept {
@@ -2008,10 +2010,6 @@ namespace rhi {
 				static_cast<Dx12Device*>(dev->impl)->queryPools.free(hh);
 			}
 		);
-	}
-
-	static void d_destroyQueryPool(Device* d, QueryPoolHandle h) noexcept {
-		static_cast<Dx12Device*>(d->impl)->queryPools.free(h);
 	}
 
 	static void d_destroyQueryPool(Device* d, QueryPoolHandle h) noexcept {
@@ -2163,7 +2161,7 @@ namespace rhi {
 		return (std::max)(1u, base >> mip);
 	}
 
-	static inline UINT CalcSubresourceFor(const rhi::Dx12Texture& T, UINT mip, UINT arraySlice) {
+	static inline UINT CalcSubresourceFor(const Dx12Texture& T, UINT mip, UINT arraySlice) {
 		// PlaneSlice = 0 (non-planar). TODO: support planar formats
 		return D3D12CalcSubresource(mip, arraySlice, 0, T.mips, T.arraySize);
 	}
@@ -2172,7 +2170,7 @@ namespace rhi {
 		auto* w = static_cast<Dx12CommandList*>(cl->impl);
 		w->cl->Close();
 	}
-	static void cl_reset(CommandList* cl, CommandAllocator& ca) noexcept {
+	static void cl_reset(CommandList* cl, const CommandAllocator& ca) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* a = static_cast<Dx12Allocator*>(ca.impl);
 		if (!l) return;
@@ -2324,7 +2322,7 @@ namespace rhi {
 		}
 	}
 
-	static void cl_barrier(rhi::CommandList* cl, const rhi::BarrierBatch& b) noexcept {
+	static void cl_barrier(CommandList* cl, const BarrierBatch& b) noexcept {
 		if (!cl || !cl->impl) return;
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* dev = l->dev;
@@ -2414,11 +2412,11 @@ namespace rhi {
 		}
 	}
 
-	static void cl_clearUavUint(rhi::CommandList* cl,
-		const rhi::UavClearInfo& u,
-		const rhi::UavClearUint& v) noexcept
+	static void cl_clearUavUint(CommandList* cl,
+		const UavClearInfo& u,
+		const UavClearUint& v) noexcept
 	{
-		auto* rec = static_cast<rhi::Dx12CommandList*>(cl->impl);
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
 		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) return;
 
@@ -2443,11 +2441,11 @@ namespace rhi {
 		rec->cl->ClearUnorderedAccessViewUint(gpu, cpu, res, v.v, 0, nullptr);
 	}
 
-	static void cl_clearUavFloat(rhi::CommandList* cl,
-		const rhi::UavClearInfo& u,
-		const rhi::UavClearFloat& v) noexcept
+	static void cl_clearUavFloat(CommandList* cl,
+		const UavClearInfo& u,
+		const UavClearFloat& v) noexcept
 	{
-		auto* rec = static_cast<rhi::Dx12CommandList*>(cl->impl);
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
 		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) return;
 
@@ -2512,11 +2510,11 @@ namespace rhi {
 	}
 
 	static void cl_copyTextureRegion(
-		rhi::CommandList* cl,
-		const rhi::TextureCopyRegion& dst,
-		const rhi::TextureCopyRegion& src) noexcept
+		CommandList* cl,
+		const TextureCopyRegion& dst,
+		const TextureCopyRegion& src) noexcept
 	{
-		auto* rec = static_cast<rhi::Dx12CommandList*>(cl->impl);
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
 		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) return;
 
@@ -2579,7 +2577,7 @@ namespace rhi {
 		auto* S = dev->buffers.get(src);
 		if (!D || !S || !D->res || !S->res) return;
 
-		// We don't validate bounds here (we don�t store sizes). DX12 will validate.
+		// We don't validate bounds here (we don’t store sizes). DX12 will validate.
 		// Required states (caller's responsibility via barriers):
 		//   src:  COPY_SOURCE   (ResourceAccessType::CopySource / Layout::CopySource)
 		//   dst:  COPY_DEST     (ResourceAccessType::CopyDest   / Layout::CopyDest)
@@ -2696,6 +2694,7 @@ namespace rhi {
 		s->fmt = ToDxgi(newFormat);
 		s->count = numBuffers;
 		s->sc->ResizeBuffers(s->count, w, h, s->fmt, flags); // TODO: Is there anything else to do here?
+		return Result::Ok;
 	}
 	static void sc_setName(Swapchain* sc, const char* n) noexcept {} // Cannot name IDXGISwapChain
 	// ---------------- Resource vtable funcs ----------------
