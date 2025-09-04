@@ -479,6 +479,32 @@ namespace rhi {
 	template<> struct HandleFor<Dx12Allocator> { using type = rhi::CommandAllocatorHandle; };
 	template<> struct HandleFor<Dx12CommandList> { using type = rhi::CommandListHandle; };
 
+	struct Dx12Timeline { Microsoft::WRL::ComPtr<ID3D12Fence> fence; };
+
+	struct Dx12QueueState {
+		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
+		Microsoft::WRL::ComPtr<ID3D12Fence> fence; UINT64 value = 0;
+		Dx12Device* owner{};
+	};
+
+	struct Dx12Swapchain {
+		ComPtr<IDXGISwapChain3> sc; DXGI_FORMAT fmt{}; UINT w{}, h{}, count{}; UINT current{};
+		ComPtr<ID3D12DescriptorHeap> rtvHeap; UINT rtvInc{}; std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU;
+		std::vector<ComPtr<ID3D12Resource>> images;
+		std::vector<ResourceHandle> imageHandles; std::vector<ViewHandle> rtvHandles;
+	};
+
+	struct Dx12Heap { Microsoft::WRL::ComPtr<ID3D12Heap> heap; uint64_t size{}; };
+
+	struct Dx12QueryPool {
+		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
+		D3D12_QUERY_HEAP_TYPE type{};
+		uint32_t count = 0;
+
+		// For pipeline stats, remember if we used *_STATISTICS1 (mesh/task) or legacy
+		bool usePSO1 = false;
+	};
+
 	template<typename T>
 	struct Slot { T obj{}; uint32_t generation{ 1 }; bool alive{ false }; };
 
@@ -517,33 +543,6 @@ namespace rhi {
 			return &s.obj;
 		}
 	};
-
-	struct Dx12Timeline { Microsoft::WRL::ComPtr<ID3D12Fence> fence; };
-
-	struct Dx12QueueState {
-		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
-		Microsoft::WRL::ComPtr<ID3D12Fence> fence; UINT64 value = 0;
-		Dx12Device* owner{};
-	};
-
-	struct Dx12Swapchain {
-		ComPtr<IDXGISwapChain3> sc; DXGI_FORMAT fmt{}; UINT w{}, h{}, count{}; UINT current{};
-		ComPtr<ID3D12DescriptorHeap> rtvHeap; UINT rtvInc{}; std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU;
-		std::vector<ComPtr<ID3D12Resource>> images;
-		std::vector<ResourceHandle> imageHandles; std::vector<ViewHandle> rtvHandles;
-	};
-
-	struct Dx12Heap { Microsoft::WRL::ComPtr<ID3D12Heap> heap; uint64_t size{}; };
-
-	struct Dx12QueryPool {
-		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
-		D3D12_QUERY_HEAP_TYPE type{};
-		uint32_t count = 0;
-
-		// For pipeline stats, remember if we used *_STATISTICS1 (mesh/task) or legacy
-		bool usePSO1 = false;
-	};
-
 
 	struct Dx12Device {
 		Device self{};
@@ -1090,7 +1089,7 @@ namespace rhi {
 			? D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING
 			: dv.componentMapping;
 
-		switch (dv.dim) {
+		switch (dv.dimension) {
 		case SrvDim::Buffer: {
 			auto* B = impl->buffers.get(dv.resource);
 			if (!B || !B->res) return Result::InvalidArg;
@@ -1256,7 +1255,7 @@ namespace rhi {
 		ID3D12Resource* pResource = nullptr;
 		ID3D12Resource* pCounterResource = nullptr; // optional, for structured append/consume
 
-		switch (dv.texDim)
+		switch (dv.dimension)
 		{
 			// ========================= Buffer UAV =========================
 		case UavDim::Buffer:
@@ -1304,7 +1303,7 @@ namespace rhi {
 
 			desc.Format = T->fmt;
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1D;
-			desc.Texture1D.MipSlice = dv.tex1D.mipSlice;
+			desc.Texture1D.MipSlice = dv.texture1D.mipSlice;
 
 			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
@@ -1318,9 +1317,9 @@ namespace rhi {
 
 			desc.Format = T->fmt;
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1DARRAY;
-			desc.Texture1DArray.MipSlice = dv.tex1DArray.mipSlice;
-			desc.Texture1DArray.FirstArraySlice = dv.tex1DArray.firstArraySlice;
-			desc.Texture1DArray.ArraySize = dv.tex1DArray.arraySize;
+			desc.Texture1DArray.MipSlice = dv.texture1DArray.mipSlice;
+			desc.Texture1DArray.FirstArraySlice = dv.texture1DArray.firstArraySlice;
+			desc.Texture1DArray.ArraySize = dv.texture1DArray.arraySize;
 
 			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
@@ -1334,8 +1333,8 @@ namespace rhi {
 
 			desc.Format = T->fmt;
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-			desc.Texture2D.MipSlice = dv.tex2D.mipSlice;
-			desc.Texture2D.PlaneSlice = dv.tex2D.planeSlice;
+			desc.Texture2D.MipSlice = dv.texture2D.mipSlice;
+			desc.Texture2D.PlaneSlice = dv.texture2D.planeSlice;
 
 			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
@@ -1349,10 +1348,10 @@ namespace rhi {
 
 			desc.Format = T->fmt;
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-			desc.Texture2DArray.MipSlice = dv.tex2DArray.mipSlice;
-			desc.Texture2DArray.FirstArraySlice = dv.tex2DArray.firstArraySlice;
-			desc.Texture2DArray.ArraySize = dv.tex2DArray.arraySize;
-			desc.Texture2DArray.PlaneSlice = dv.tex2DArray.planeSlice;
+			desc.Texture2DArray.MipSlice = dv.texture2DArray.mipSlice;
+			desc.Texture2DArray.FirstArraySlice = dv.texture2DArray.firstArraySlice;
+			desc.Texture2DArray.ArraySize = dv.texture2DArray.arraySize;
+			desc.Texture2DArray.PlaneSlice = dv.texture2DArray.planeSlice;
 
 			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
@@ -1366,9 +1365,9 @@ namespace rhi {
 
 			desc.Format = T->fmt;
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-			desc.Texture3D.MipSlice = dv.tex3D.mipSlice;
-			desc.Texture3D.FirstWSlice = dv.tex3D.firstWSlice;
-			desc.Texture3D.WSize = (dv.tex3D.wSize == 0) ? UINT(-1) : dv.tex3D.wSize;
+			desc.Texture3D.MipSlice = dv.texture3D.mipSlice;
+			desc.Texture3D.FirstWSlice = dv.texture3D.firstWSlice;
+			desc.Texture3D.WSize = (dv.texture3D.wSize == 0) ? UINT(-1) : dv.texture3D.wSize;
 
 			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
@@ -1423,12 +1422,12 @@ namespace rhi {
 
 		// For texture RTVs we expect a texture resource
 		auto* T = impl->textures.get(rd.texture);
-		if (!T && rd.dim != RtvDim::Buffer) return Result::InvalidArg;
+		if (!T && rd.dimension != RtvDim::Buffer) return Result::InvalidArg;
 
 		D3D12_RENDER_TARGET_VIEW_DESC r{};
 		ID3D12Resource* pRes = nullptr;
 
-		switch (rd.dim)
+		switch (rd.dimension)
 		{
 		case RtvDim::Texture1D:
 		{
@@ -1533,7 +1532,7 @@ namespace rhi {
 		z.Flags = (dd.readOnlyDepth ? D3D12_DSV_FLAG_READ_ONLY_DEPTH : (D3D12_DSV_FLAGS)0) |
 			(dd.readOnlyStencil ? D3D12_DSV_FLAG_READ_ONLY_STENCIL : (D3D12_DSV_FLAGS)0);
 
-		switch (dd.dim)
+		switch (dd.dimension)
 		{
 		case DsvDim::Texture1D:
 			z.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE1D;
@@ -2563,6 +2562,33 @@ namespace rhi {
 			&dxSrc,
 			&srcBox);
 	}
+
+	static void cl_copyBufferRegion( CommandList* cl,
+		ResourceHandle dst, uint64_t dstOffset,
+		ResourceHandle src, uint64_t srcOffset,
+		uint64_t numBytes) noexcept
+	{
+		if (!cl || !cl->IsValid() || numBytes == 0) return;
+
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = rec->dev;
+		if (!rec || !dev) return;
+
+		// Look up buffer resources
+		auto* D = dev->buffers.get(dst);
+		auto* S = dev->buffers.get(src);
+		if (!D || !S || !D->res || !S->res) return;
+
+		// We don't validate bounds here (we don’t store sizes). DX12 will validate.
+		// Required states (caller's responsibility via barriers):
+		//   src:  COPY_SOURCE   (ResourceAccessType::CopySource / Layout::CopySource)
+		//   dst:  COPY_DEST     (ResourceAccessType::CopyDest   / Layout::CopyDest)
+		rec->cl->CopyBufferRegion(
+			D->res.Get(), dstOffset,
+			S->res.Get(), srcOffset,
+			numBytes);
+	}
+
 	static void cl_setName(CommandList* cl, const char* n) noexcept {
 		if (!n) return;
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
@@ -2570,7 +2596,7 @@ namespace rhi {
 		l->cl->SetName(std::wstring(n, n + ::strlen(n)).c_str());
 	}
 
-	static void cl_writeTimestamp(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
+	static void cl_writeTimestamp(CommandList* cl, QueryPoolHandle pool, uint32_t index, Stage /*ignored*/) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
 		auto* impl = rec ? rec->dev : nullptr;
 		if (!impl) return;

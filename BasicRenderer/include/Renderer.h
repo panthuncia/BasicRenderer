@@ -149,7 +149,7 @@ private:
 	void ToggleMeshShaders(bool useMeshShaders);
 
     void WaitForFrame(uint8_t frameIndex);
-    void SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t currentFrameIndex);
+    void SignalFence(rhi::Queue commandQueue, uint8_t currentFrameIndex);
     void AdvanceFrameIndex();
     void CheckDebugMessages();
     void FlushCommandQueue();

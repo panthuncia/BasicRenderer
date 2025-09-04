@@ -135,7 +135,7 @@ public:
 
 		rhi::SrvDesc srvDesc = {};
 		srvDesc.formatOverride = rhi::Format::Unknown;
-		srvDesc.dim = rhi::SrvDim::Buffer;
+		srvDesc.dimension = rhi::SrvDim::Buffer;
 		srvDesc.buffer.numElements = static_cast<UINT>(numElements);
 		srvDesc.buffer.structureByteStride = static_cast<UINT>(elementSize);
 		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
@@ -148,17 +148,17 @@ public:
 
         if (UAV) {
             rhi::UavDesc uavDesc = {};
-			uavDesc.type = rhi::UAVType::Buffer;
 			uavDesc.resource = dataBuffer->m_buffer->GetHandle();
-			uavDesc.bufKind = rhi::BufferViewKind::Structured;
-			uavDesc.bufFormat = rhi::Format::Unknown;
-			uavDesc.numElements = static_cast<UINT>(numElements);
-			uavDesc.structureByteStride = static_cast<UINT>(elementSize);
+            uavDesc.formatOverride = rhi::Format::Unknown;
+            uavDesc.dimension = rhi::UavDim::Buffer;
+			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
+			uavDesc.buffer.numElements = static_cast<UINT>(numElements);
+			uavDesc.buffer.structureByteStride = static_cast<UINT>(elementSize);
             if (UAVCounter) {
-                uavDesc.counterOffsetBytes = counterOffset;
+                uavDesc.buffer.counterOffsetInBytes = counterOffset;
             }
             else {
-                uavDesc.counterOffsetBytes = 0;
+                uavDesc.buffer.counterOffsetInBytes = 0;
 			}
 
 			// Shader visible UAV
@@ -286,7 +286,7 @@ public:
         // Create a Shader Resource View for the buffer
 		rhi::SrvDesc srvDesc = {};
 		srvDesc.formatOverride = rhi::Format::Unknown;
-		srvDesc.dim = rhi::SrvDim::Buffer;
+		srvDesc.dimension = rhi::SrvDim::Buffer;
 		srvDesc.buffer.numElements = capacity;
 		srvDesc.buffer.structureByteStride = typeSize;
 		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
@@ -299,13 +299,13 @@ public:
         if (UAV){
 
 			rhi::UavDesc uavDesc = {};
-			uavDesc.type = rhi::UAVType::Buffer;
-            uavDesc.resource = buffer->GetAPIResource();
-			uavDesc.bufKind = rhi::BufferViewKind::Structured;
-			uavDesc.bufFormat = rhi::Format::Unknown;
-			uavDesc.numElements = capacity;
-			uavDesc.structureByteStride = typeSize;
-			uavDesc.counterOffsetBytes = 0;
+            uavDesc.formatOverride = rhi::Format::Unknown;
+            uavDesc.dimension = rhi::UavDim::Buffer;
+            uavDesc.resource = buffer->GetAPIResource().GetHandle();
+			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
+			uavDesc.buffer.numElements = capacity;
+			uavDesc.buffer.structureByteStride = typeSize;
+			uavDesc.buffer.counterOffsetInBytes = 0;
 
             // Shader visible UAV
             auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).index;
@@ -343,7 +343,7 @@ public:
 
 		rhi::SrvDesc srvDesc = {};
 		srvDesc.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown;
-		srvDesc.dim = rhi::SrvDim::Buffer;
+		srvDesc.dimension = rhi::SrvDim::Buffer;
 		srvDesc.buffer.firstElement = 0;
 		srvDesc.buffer.numElements = static_cast<UINT>(byteAddress ? numElements / 4 : numElements);
 		srvDesc.buffer.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
@@ -354,13 +354,13 @@ public:
         if (UAV) {
 
 			rhi::UavDesc uavDesc = {};
-			uavDesc.type = rhi::UAVType::Buffer;
-			uavDesc.resource = buffer->GetAPIResource();
-			uavDesc.bufKind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured;
-			uavDesc.bufFormat = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown;
-			uavDesc.numElements = static_cast<UINT>(byteAddress ? numElements / 4 : numElements);
-			uavDesc.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
-			uavDesc.counterOffsetBytes = 0;
+			uavDesc.dimension = rhi::UavDim::Buffer;
+			uavDesc.resource = buffer->GetAPIResource().GetHandle();
+			uavDesc.buffer.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured;
+			uavDesc.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown;
+			uavDesc.buffer.numElements = static_cast<UINT>(byteAddress ? numElements / 4 : numElements);
+			uavDesc.buffer.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
+			uavDesc.buffer.counterOffsetInBytes = 0;
 
             // Shader visible UAV
 			auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).index;

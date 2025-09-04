@@ -89,6 +89,7 @@ namespace rhi {
 		&cl_clearUavFloat,
 		&cl_copyBufferToTexture,
 		&cl_copyTextureRegion,
+		&cl_copyBufferRegion,
 		&cl_writeTimestamp,
 		&cl_beginQuery,
 		&cl_endQuery,

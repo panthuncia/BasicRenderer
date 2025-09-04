@@ -162,7 +162,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
-    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_device(m_device), rhi::dx12::get_queue(graphicsQueue), rhi::dx12::get_swapchain(swapChain.Get())); // TODO: VK imgui
+    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_device(m_device), rhi::dx12::get_queue(graphicsQueue), rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
 	StatisticsManager::GetInstance().Initialize();
@@ -725,8 +725,11 @@ void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 void Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
-	StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, computeQueue.Get()); // Gather statistics for the last iteration of the frame
-    StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, graphicsQueue.Get()); // Gather statistics for the last iteration of the frame
+	auto& deviceManager = DeviceManager::GetInstance();
+	auto graphicsQueue = deviceManager.GetGraphicsQueue();
+	auto computeQueue = deviceManager.GetComputeQueue();
+	StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
+    StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
 
 	m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
 
@@ -758,7 +761,7 @@ void Renderer::Update(float elapsedSeconds) {
 	auto& commandList = m_commandLists[m_frameIndex];
 
 
-    ThrowIfFailed(commandAllocator->Reset());
+    commandAllocator->Recycle();
     auto& resourceManager = ResourceManager::GetInstance();
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, m_frameIndex);
@@ -766,11 +769,11 @@ void Renderer::Update(float elapsedSeconds) {
 	currentRenderGraph->Update();
 
 	updateManager.ResetAllocators(m_frameIndex); // Reset allocators to avoid leaking memory
-    updateManager.ExecuteResourceCopies(m_frameIndex, graphicsQueue.Get());// copies come before uploads to avoid overwriting data
-	updateManager.ProcessUploads(m_frameIndex, graphicsQueue.Get());
+    updateManager.ExecuteResourceCopies(m_frameIndex, graphicsQueue);// copies come before uploads to avoid overwriting data
+	updateManager.ProcessUploads(m_frameIndex, graphicsQueue);
 
     //resourceManager.ExecuteResourceTransitions();
-    ThrowIfFailed(commandList->Reset(commandAllocator.Get(), NULL));
+    commandList->Recycle(commandAllocator.Get());
 }
 
 void Renderer::Render() {
@@ -792,7 +795,7 @@ void Renderer::Render() {
 	m_context.commandQueue = deviceManager.GetGraphicsQueue();
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap();
-    m_context.rtvHeap = rtvHeap;
+    m_context.rtvHeap = rtvHeap.Get();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
     m_context.frameIndex = m_frameIndex;
@@ -823,34 +826,52 @@ void Renderer::Render() {
     }
 	m_context.globalPSOFlags = globalPSOFlags;
 
+    // TODO: Incorporate this into the render graph
     // Indicate that the back buffer will be used as a render target
-    CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    commandList->ResourceBarrier(1, &barrier);
+	rhi::TextureBarrier rtvBarrier = {};
+	rtvBarrier.afterAccess = rhi::ResourceAccessType::RenderTarget;
+	rtvBarrier.afterLayout = rhi::ResourceLayout::RenderTarget;
+	rtvBarrier.afterSync = rhi::ResourceSyncState::All;
+	rtvBarrier.beforeAccess = rhi::ResourceAccessType::Common;
+	rtvBarrier.beforeLayout = rhi::ResourceLayout::Common;
+	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
+
+	rtvBarrier.texture = renderTargets[m_frameIndex].GetHandle();
+    rhi::BarrierBatch batch = {};
+	batch.textures = { &rtvBarrier };
+
+    commandList->Barriers(batch);
    
-    commandList->Close();
+    commandList->End();
 
     // Execute the command list
-    ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
-    deviceManager.GetGraphicsQueue().Submit(_countof(ppCommandLists), ppCommandLists);
+    auto graphicsQueue = deviceManager.GetGraphicsQueue();
+    graphicsQueue.Submit({ &commandList.Get() });
 
 	currentRenderGraph->Execute(m_context); // Main render graph execution
 
 	Menu::GetInstance().Render(m_context); // Render menu
 
-    commandList->Reset(commandAllocator.Get(), nullptr);
+    commandList->Recycle(commandAllocator.Get());
 
     // Indicate that the back buffer will now be used to present
-    barrier = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-    commandList->ResourceBarrier(1, &barrier);
+	rtvBarrier.afterAccess = rhi::ResourceAccessType::Common;
+	rtvBarrier.afterLayout = rhi::ResourceLayout::Common;
+	rtvBarrier.afterSync = rhi::ResourceSyncState::All;
+	rtvBarrier.beforeAccess = rhi::ResourceAccessType::RenderTarget;
+	rtvBarrier.beforeLayout = rhi::ResourceLayout::RenderTarget;
+	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
+	rtvBarrier.texture = renderTargets[m_frameIndex].GetHandle();
+	batch.textures = { &rtvBarrier };
+	commandList->Barriers(batch);
 
-    ThrowIfFailed(commandList->Close());
+    commandList->End();
 
     // Execute the command list
-    ppCommandLists[0] = commandList.Get();
-    graphicsQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    graphicsQueue.Submit({ &commandList.Get() });
 
     // Present the frame
-    swapChain->Present(!m_allowTearing);
+    m_swapChain->Present(!m_allowTearing);
 
     AdvanceFrameIndex();
 
@@ -861,10 +882,10 @@ void Renderer::Render() {
     DeletionManager::GetInstance().ProcessDeletions();
 }
 
-void Renderer::SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t frameIndexToSignal) {
+void Renderer::SignalFence(rhi::Queue commandQueue, uint8_t frameIndexToSignal) {
     // Signal the fence
     m_currentFrameFenceValue++;
-    ThrowIfFailed(commandQueue->Signal(m_frameFence.Get(), m_currentFrameFenceValue));
+	commandQueue.Signal({ m_frameFence.Get(), m_currentFrameFenceValue });
 
     // Store the fence value for the current frame
     m_frameFenceValues[frameIndexToSignal] = m_currentFrameFenceValue;
@@ -903,7 +924,6 @@ void Renderer::Cleanup() {
     spdlog::info("In cleanup");
     // Wait for all GPU frames to complete
 	StallPipeline();
-    CloseHandle(m_frameFenceEvent);
     currentRenderGraph.reset();
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();

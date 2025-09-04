@@ -5,6 +5,8 @@
 #include "Resources/Resource.h"
 #include "Import/Filetypes.h"
 
+#include <rhi.h>
+
 class PixelBuffer;
 class Sampler;
 class RenderContext;
@@ -17,9 +19,9 @@ public:
 		return m_image;
 	}
 	void SetFilepath(const std::string& path);
-	BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState);
+	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	virtual void SetName(const std::wstring& name);
-	ID3D12Resource* GetAPIResource() const override;
+	rhi::Resource GetAPIResource() const override;
 	void SetFileType(ImageFiletype fileType) { m_fileType = fileType; }
 	ImageFiletype GetFileType() const { return m_fileType; }
 	std::string GetFilePath() const { return m_filePath; }
@@ -27,9 +29,9 @@ public:
 	bool AlphaIsAllOpaque() const { return m_alphaIsAllOpaque; }
 	void SetAlphaIsAllOpaque(bool value) { m_alphaIsAllOpaque = value; }
 	virtual uint64_t GetGlobalResourceID() const;
-	ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override;
-	ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override;
-	ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override;
+	rhi::ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override;
+	rhi::ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override;
+	rhi::ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override;
 	virtual SymbolicTracker* GetStateTracker() override;
 private:
 	std::shared_ptr<PixelBuffer> m_image;

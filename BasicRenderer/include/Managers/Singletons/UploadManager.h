@@ -1,9 +1,9 @@
 #pragma once
 #include <wrl/client.h>
-#include <d3d12.h>
 #include <vector>
 #include <memory>
 #include <functional>
+#include <rhi.h>
 
 #include "Resources/Buffers/BufferView.h"
 #include "Resources/Buffers/MemoryBlock.h"
@@ -43,9 +43,9 @@ public:
 	static UploadManager& GetInstance();
 	void Initialize();
 	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset);
-	void ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue);
+	void ProcessUploads(uint8_t frameIndex, rhi::Queue queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
-	void ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue);
+	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);
 	void ResetAllocators(uint8_t frameIndex);
 	void ProcessDeferredReleases(uint8_t frameIndex);
 
@@ -63,9 +63,9 @@ private:
 	std::vector<size_t>           m_frameStart;      // size = numFramesInFlight
 
 	uint8_t m_numFramesInFlight = 0;
-	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> m_commandLists;
+	rhi::Queue m_commandQueue;
+	std::vector<rhi::CommandAllocatorPtr> m_commandAllocators;
+	std::vector<rhi::CommandListPtr> m_commandLists;
 
 	std::function<uint8_t()> getNumFramesInFlight;
 	std::vector<ResourceUpdate> m_resourceUpdates;

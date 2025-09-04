@@ -1,6 +1,7 @@
 #include "Managers/Singletons/UploadManager.h"
 
 #include <ThirdParty/pix/pix3.h>
+#include <rhi_helpers.h>
 
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
@@ -10,14 +11,14 @@
 #include "Managers/Singletons/DeviceManager.h"
 
 void UploadManager::Initialize() {
-	auto& device = DeviceManager::GetInstance().GetDevice();
+	auto device = DeviceManager::GetInstance().GetDevice();
 
 	m_numFramesInFlight = SettingsManager::GetInstance()
 		.getSettingGetter<uint8_t>("numFramesInFlight")();
 
 	m_currentCapacity = 1024 * 1024 * 4; // 4MB
 
-	m_pages.push_back({ Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, kPageSize, true, false), 0});
+	m_pages.push_back({ Buffer::CreateShared(device, ResourceCPUAccessType::WRITE, kPageSize, true, false), 0});
 
 	// ring buffer pointers
 	m_headOffset = 0;
@@ -26,17 +27,8 @@ void UploadManager::Initialize() {
 
 	// create one allocator+list per frame
 	for (int i = 0; i < m_numFramesInFlight; i++) {
-		ComPtr<ID3D12CommandAllocator> alloc;
-		ComPtr<ID3D12GraphicsCommandList7> list;
-		ThrowIfFailed(device->CreateCommandAllocator(
-			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc)));
-		ThrowIfFailed(device->CreateCommandList(
-			0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-			alloc.Get(), nullptr, IID_PPV_ARGS(&list)));
-		list->Close();
-
-		m_commandAllocators.push_back(alloc);
-		m_commandLists.push_back(list);
+		m_commandAllocators.push_back(device.CreateCommandAllocator(rhi::QueueKind::Graphics));
+		m_commandLists.push_back(device.CreateCommandList(rhi::QueueKind::Graphics, m_commandAllocators.back().Get()));
 	}
 
 	getNumFramesInFlight =
@@ -74,8 +66,8 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 		if (m_activePage >= m_pages.size()) {
 			// allocate another fresh page
 			size_t allocSize = std::max(kPageSize, size);
-			auto& device = DeviceManager::GetInstance().GetDevice();
-			m_pages.push_back({ Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, allocSize, true, false), 0});
+			auto device = DeviceManager::GetInstance().GetDevice();
+			m_pages.push_back({ Buffer::CreateShared(device, ResourceCPUAccessType::WRITE, allocSize, true, false), 0});
 		}
 		page = &m_pages[m_activePage];
 		page->tailOffset = 0;
@@ -86,10 +78,9 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 	page->tailOffset += size;
 
 	uint8_t* mapped = nullptr;
-	CD3DX12_RANGE readRange(0,0);
-	page->buffer->m_buffer->Map(0, &readRange, reinterpret_cast<void**>(&mapped));
+	page->buffer->m_buffer->Map(reinterpret_cast<void**>(&mapped), 0, size);
 	memcpy(mapped + uploadOffset, data, size);
-	page->buffer->m_buffer->Unmap(0, nullptr);
+	page->buffer->m_buffer->Unmap(0, 0);
 
 	// queue up the GPU copy
 	ResourceUpdate update;
@@ -135,11 +126,11 @@ void UploadManager::ProcessDeferredReleases(uint8_t frameIndex)
 	m_commandAllocators[frameIndex]->Reset();
 }
 
-void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue) {
+void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
-	commandList->Reset(commandAllocator.Get(), nullptr);
-	DEBUG_ONLY(PIXBeginEvent(commandList.Get(), 0, L"UploadManager::ProcessUploads"));
+	commandList->Recycle(commandAllocator.Get());
+	DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ProcessUploads"));
 	//auto maxNumTransitions = m_resourceUpdates.size();
 	//std::vector<D3D12_RESOURCE_BARRIER> barriers;
 	//barriers.reserve(maxNumTransitions);
@@ -172,9 +163,9 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 	for (auto& update : m_resourceUpdates) {
 		Resource* buffer = update.resourceToUpdate;
 		commandList->CopyBufferRegion(
-			buffer->GetAPIResource(),
+			buffer->GetAPIResource().GetHandle(),
 			update.dataBufferOffset,
-			update.uploadBuffer->GetAPIResource(),
+			update.uploadBuffer->GetAPIResource().GetHandle(),
 			update.uploadBufferOffset,
 			update.size
 		);
@@ -191,11 +182,10 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, ID3D12CommandQueue* queue
 
  //   }
 	//commandList->ResourceBarrier(barriers.size(), barriers.data());
-	DEBUG_ONLY(PIXEndEvent(commandList.Get()));
-	commandList->Close();
+	DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
+	commandList->End();
 
-	ID3D12CommandList* commandLists[] = { commandList.Get() };
-	queue->ExecuteCommandLists(1, commandLists);
+	queue.Submit({ &commandList.Get()});
 
 	m_resourceUpdates.clear();
 }
@@ -208,11 +198,11 @@ void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destinati
     queuedResourceCopies.push_back(copy);
 }
 
-void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue* queue) {
+void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
-	commandList->Reset(commandAllocator.Get(), nullptr);
-	DEBUG_ONLY(PIXBeginEvent(commandList.Get(), 0, L"UploadManager::ExecuteResourceCopies"));
+	commandList->Recycle(commandAllocator.Get());
+	DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ExecuteResourceCopies"));
 	for (auto& copy : queuedResourceCopies) {
 
 		// Copy initial state of the resources
@@ -221,14 +211,14 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 
 		RangeSpec range = {};
 		ResourceState sourceState;
-		sourceState.access = ResourceAccessType::COPY_SOURCE;
-		sourceState.layout = ResourceLayout::LAYOUT_COPY_SOURCE;
-		sourceState.sync = ResourceSyncState::COPY;
+		sourceState.access = rhi::ResourceAccessType::CopySource;
+		sourceState.layout = rhi::ResourceLayout::CopySource;
+		sourceState.sync = rhi::ResourceSyncState::Copy;
 
 		ResourceState destinationState;
-		destinationState.access = ResourceAccessType::COPY_DEST;
-		destinationState.layout = ResourceLayout::LAYOUT_COPY_DEST;
-		destinationState.sync = ResourceSyncState::COPY;
+		destinationState.access = rhi::ResourceAccessType::CopyDest;
+		destinationState.layout = rhi::ResourceLayout::CopyDest;
+		destinationState.sync = rhi::ResourceSyncState::Copy;
 
 		// Compute transitions to bring full resources into COPY_SOURCE and COPY_DEST
 		std::vector<ResourceTransition> transitions;
@@ -236,26 +226,21 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 		copy.destination->GetStateTracker()->Apply(range, copy.destination.get(), destinationState, transitions);
 
 		std::vector<D3D12_BARRIER_GROUP> barriers;
-
-		std::vector<BarrierGroups> sourceTransitions;
+		std::vector<rhi::BarrierBatch> sourceTransitions;
 		for (auto& transition : transitions) {
 			auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			sourceTransitions.push_back(std::move(sourceTransition));
+			sourceTransitions.push_back(sourceTransition);
 		}
-		for (auto& transition : sourceTransitions) {
-			barriers.reserve(barriers.size() + transition.bufferBarriers.size() + transition.textureBarriers.size() + transition.globalBarriers.size());
-			barriers.insert(barriers.end(), transition.bufferBarriers.begin(), transition.bufferBarriers.end());
-			barriers.insert(barriers.end(), transition.textureBarriers.begin(), transition.textureBarriers.end());
-			barriers.insert(barriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
-		}
+		
+		auto batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
 
-		commandList->Barrier(static_cast<uint32_t>(barriers.size()), barriers.data());
+		commandList->Barriers(batch.View());
 
 		// Perform the copy
         commandList->CopyBufferRegion(
-            copy.destination->GetAPIResource(),
+            copy.destination->GetAPIResource().GetHandle(),
             0,
-            copy.source->GetAPIResource(),
+            copy.source->GetAPIResource().GetHandle(),
             0,
             copy.size);
 
@@ -271,25 +256,20 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, ID3D12CommandQueue
 		}
 
 		sourceTransitions.clear();
+		batch.Clear();
 		for (auto& transition : transitions) {
 			auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			sourceTransitions.push_back(std::move(sourceTransition));
 		}
+		
+		batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
 
-		for (auto& transition : sourceTransitions) {
-			barriers.reserve(barriers.size() + transition.bufferBarriers.size() + transition.textureBarriers.size() + transition.globalBarriers.size());
-			barriers.insert(barriers.end(), transition.bufferBarriers.begin(), transition.bufferBarriers.end());
-			barriers.insert(barriers.end(), transition.textureBarriers.begin(), transition.textureBarriers.end());
-			barriers.insert(barriers.end(), transition.globalBarriers.begin(), transition.globalBarriers.end());
-		}
-
-		commandList->Barrier(static_cast<uint32_t>(barriers.size()), barriers.data());
+		commandList->Barriers(batch.View());
 	}
-	DEBUG_ONLY(PIXEndEvent(commandList.Get()));
-	commandList->Close();
+	DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
+	commandList->End();
 
-	ID3D12CommandList* commandLists[] = { commandList.Get() };
-	queue->ExecuteCommandLists(1, commandLists);
+	queue.Submit({ &commandList.Get() });
 
 	queuedResourceCopies.clear();
 }

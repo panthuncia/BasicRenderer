@@ -8,6 +8,90 @@
 
 namespace rhi {
     namespace helpers {
+
+        static inline Format ToRHI(const DXGI_FORMAT f) {
+            switch (f) {
+            case DXGI_FORMAT_UNKNOWN: return Format::Unknown;
+            case DXGI_FORMAT_R32G32B32A32_TYPELESS: return Format::R32G32B32A32_Typeless;
+            case DXGI_FORMAT_R32G32B32A32_FLOAT: return Format::R32G32B32A32_Float;
+            case DXGI_FORMAT_R32G32B32A32_UINT: return Format::R32G32B32A32_UInt;
+            case DXGI_FORMAT_R32G32B32A32_SINT: return Format::R32G32B32A32_SInt;
+            case DXGI_FORMAT_R32G32B32_TYPELESS: return Format::R32G32B32_Typeless;
+            case DXGI_FORMAT_R32G32B32_FLOAT: return Format::R32G32B32_Float;
+            case DXGI_FORMAT_R32G32B32_UINT: return Format::R32G32B32_UInt;
+            case DXGI_FORMAT_R32G32B32_SINT: return Format::R32G32B32_SInt;
+            case DXGI_FORMAT_R16G16B16A16_TYPELESS: return Format::R16G16B16A16_Typeless;
+            case DXGI_FORMAT_R16G16B16A16_FLOAT: return Format::R16G16B16A16_Float;
+            case DXGI_FORMAT_R16G16B16A16_UNORM: return Format::R16G16B16A16_UNorm;
+            case DXGI_FORMAT_R16G16B16A16_UINT: return Format::R16G16B16A16_UInt;
+            case DXGI_FORMAT_R16G16B16A16_SNORM: return Format::R16G16B16A16_SNorm;
+            case DXGI_FORMAT_R16G16B16A16_SINT: return Format::R16G16B16A16_SInt;
+            case DXGI_FORMAT_R32G32_TYPELESS: return Format::R32G32_Typeless;
+            case DXGI_FORMAT_R32G32_FLOAT: return Format::R32G32_Float;
+            case DXGI_FORMAT_R32G32_UINT: return Format::R32G32_UInt;
+            case DXGI_FORMAT_R32G32_SINT: return Format::R32G32_SInt;
+            case DXGI_FORMAT_R10G10B10A2_TYPELESS: return Format::R10G10B10A2_Typeless;
+            case DXGI_FORMAT_R10G10B10A2_UNORM: return Format::R10G10B10A2_UNorm;
+            case DXGI_FORMAT_R10G10B10A2_UINT: return Format::R10G10B10A2_UInt;
+            case DXGI_FORMAT_R11G11B10_FLOAT: return Format::R11G11B10_Float;
+            case DXGI_FORMAT_R8G8B8A8_TYPELESS: return Format::R8G8B8A8_Typeless;
+            case DXGI_FORMAT_R8G8B8A8_UNORM: return Format::R8G8B8A8_UNorm;
+            case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return Format::R8G8B8A8_UNorm_sRGB;
+            case DXGI_FORMAT_R8G8B8A8_UINT: return Format::R8G8B8A8_UInt;
+            case DXGI_FORMAT_R8G8B8A8_SNORM: return Format::R8G8B8A8_SNorm;
+            case DXGI_FORMAT_R8G8B8A8_SINT: return Format::R8G8B8A8_SInt;
+            case DXGI_FORMAT_R16G16_TYPELESS: return Format::R16G16_Typeless;
+            case DXGI_FORMAT_R16G16_FLOAT: return Format::R16G16_Float;
+            case DXGI_FORMAT_R16G16_UNORM: return Format::R16G16_UNorm;
+            case DXGI_FORMAT_R16G16_UINT: return Format::R16G16_UInt;
+            case DXGI_FORMAT_R16G16_SNORM: return Format::R16G16_SNorm;
+            case DXGI_FORMAT_R16G16_SINT: return Format::R16G16_SInt;
+            case DXGI_FORMAT_R32_TYPELESS: return Format::R32_Typeless;
+            case DXGI_FORMAT_D32_FLOAT: return Format::D32_Float;
+            case DXGI_FORMAT_R32_FLOAT: return Format::R32_Float;
+            case DXGI_FORMAT_R32_UINT: return Format::R32_UInt;
+            case DXGI_FORMAT_R32_SINT: return Format::R32_SInt;
+            case DXGI_FORMAT_R8G8_TYPELESS: return Format::R8G8_Typeless;
+            case DXGI_FORMAT_R8G8_UNORM: return Format::R8G8_UNorm;
+            case DXGI_FORMAT_R8G8_UINT: return Format::R8G8_UInt;
+            case DXGI_FORMAT_R8G8_SNORM: return Format::R8G8_SNorm;
+            case DXGI_FORMAT_R8G8_SINT: return Format::R8G8_SInt;
+            case DXGI_FORMAT_R16_TYPELESS: return Format::R16_Typeless;
+            case DXGI_FORMAT_R16_FLOAT: return Format::R16_Float;
+            case DXGI_FORMAT_R16_UNORM: return Format::R16_UNorm;
+            case DXGI_FORMAT_R16_UINT: return Format::R16_UInt;
+            case DXGI_FORMAT_R16_SNORM: return Format::R16_SNorm;
+            case DXGI_FORMAT_R16_SINT: return Format::R16_SInt;
+            case DXGI_FORMAT_R8_TYPELESS: return Format::R8_Typeless;
+            case DXGI_FORMAT_R8_UNORM: return Format::R8_UNorm;
+            case DXGI_FORMAT_R8_UINT: return Format::R8_UInt;
+            case DXGI_FORMAT_R8_SNORM: return Format::R8_SNorm;
+            case DXGI_FORMAT_R8_SINT: return Format::R8_SInt;
+            case DXGI_FORMAT_BC1_TYPELESS: return Format::BC1_Typeless;
+            case DXGI_FORMAT_BC1_UNORM: return Format::BC1_UNorm;
+            case DXGI_FORMAT_BC1_UNORM_SRGB: return Format::BC1_UNorm_sRGB;
+            case DXGI_FORMAT_BC2_TYPELESS: return Format::BC2_Typeless;
+            case DXGI_FORMAT_BC2_UNORM: return Format::BC2_UNorm;
+            case DXGI_FORMAT_BC2_UNORM_SRGB: return Format::BC2_UNorm_sRGB;
+            case DXGI_FORMAT_BC3_TYPELESS: return Format::BC3_Typeless;
+            case DXGI_FORMAT_BC3_UNORM: return Format::BC3_UNorm;
+            case DXGI_FORMAT_BC3_UNORM_SRGB: return Format::BC3_UNorm_sRGB;
+            case DXGI_FORMAT_BC4_TYPELESS: return Format::BC4_Typeless;
+            case DXGI_FORMAT_BC4_UNORM: return Format::BC4_UNorm;
+            case DXGI_FORMAT_BC4_SNORM: return Format::BC4_SNorm;
+            case DXGI_FORMAT_BC5_TYPELESS: return Format::BC5_Typeless;
+            case DXGI_FORMAT_BC5_UNORM: return Format::BC5_UNorm;
+            case DXGI_FORMAT_BC5_SNORM: return Format::BC5_SNorm;
+            case DXGI_FORMAT_BC6H_TYPELESS: return Format::BC6H_Typeless;
+            case DXGI_FORMAT_BC6H_UF16: return Format::BC6H_UF16;
+            case DXGI_FORMAT_BC6H_SF16: return Format::BC6H_SF16;
+            case DXGI_FORMAT_BC7_TYPELESS: return Format::BC7_Typeless;
+            case DXGI_FORMAT_BC7_UNORM: return Format::BC7_UNorm;
+            case DXGI_FORMAT_BC7_UNORM_SRGB: return Format::BC7_UNorm_sRGB;
+            default: return Format::Unknown;
+            }
+        }
+
         bool IsTextureResourceType(ResourceType type) noexcept {
             return (type == ResourceType::Texture1D ||
                 type == ResourceType::Texture2D ||
@@ -361,6 +445,75 @@ namespace rhi {
             }
 
             return upload; // keep alive until GPU finishes (caller can fence/wait)
+        }
+        struct OwnedBarrierBatch {
+            std::vector<TextureBarrier> textures;
+            std::vector<BufferBarrier>  buffers;
+            std::vector<GlobalBarrier>  globals;
+
+            // Convert owned storage to a non-owning BarrierBatch view
+            BarrierBatch View() const noexcept {
+                BarrierBatch b{};
+                b.textures = { textures.empty() ? nullptr : textures.data(),
+                               static_cast<uint32_t>(textures.size()) };
+                b.buffers = { buffers.empty() ? nullptr : buffers.data(),
+                               static_cast<uint32_t>(buffers.size()) };
+                b.globals = { globals.empty() ? nullptr : globals.data(),
+                               static_cast<uint32_t>(globals.size()) };
+                return b;
+            }
+
+            void Clear() noexcept { textures.clear(); buffers.clear(); globals.clear(); }
+        };
+
+        // Append multiple batches into an existing OwnedBarrierBatch
+        inline void AppendBarrierBatches(OwnedBarrierBatch& out,
+            Span<const BarrierBatch> srcs) {
+            size_t t = 0, b = 0, g = 0;
+            for (uint32_t i = 0; i < srcs.size; ++i) {
+                const BarrierBatch& s = srcs.data[i];
+                t += s.textures.size;
+                b += s.buffers.size;
+                g += s.globals.size;
+            }
+            out.textures.reserve(out.textures.size() + t);
+            out.buffers.reserve(out.buffers.size() + b);
+            out.globals.reserve(out.globals.size() + g);
+
+            // Concatenate ranges
+            for (uint32_t i = 0; i < srcs.size; ++i) {
+                const BarrierBatch& s = srcs.data[i];
+
+                if (s.textures.size) {
+                    const auto* p = s.textures.data;
+                    out.textures.insert(out.textures.end(), p, p + s.textures.size);
+                }
+                if (s.buffers.size) {
+                    const auto* p = s.buffers.data;
+                    out.buffers.insert(out.buffers.end(), p, p + s.buffers.size);
+                }
+                if (s.globals.size) {
+                    const auto* p = s.globals.data;
+                    out.globals.insert(out.globals.end(), p, p + s.globals.size);
+                }
+            }
+        }
+
+        inline OwnedBarrierBatch CombineBarrierBatches(Span<const BarrierBatch> srcs) {
+            OwnedBarrierBatch out;
+            AppendBarrierBatches(out, srcs);
+            return out;
+        }
+
+        inline OwnedBarrierBatch CombineBarrierBatches(std::initializer_list<BarrierBatch> srcs) {
+            Span<const BarrierBatch> s{ srcs.begin(), static_cast<uint32_t>(srcs.size()) };
+            return CombineBarrierBatches(s);
+        }
+
+        template<class ContiguousContainer>
+        inline OwnedBarrierBatch CombineBarrierBatches(const ContiguousContainer& c) {
+            Span<const BarrierBatch> s{ c.data(), static_cast<uint32_t>(c.size()) };
+            return CombineBarrierBatches(s);
         }
     } // namespace helpers
 } // namespace rhi

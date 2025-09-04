@@ -446,7 +446,7 @@ namespace rhi {
     using ComponentMapping = uint32_t;
 
     struct SrvDesc {
-        SrvDim        dim{ SrvDim::Undefined };
+        SrvDim        dimension{ SrvDim::Undefined };
         ResourceHandle resource{};
         Format        formatOverride{ Format::Unknown }; // textures + typed buffers
         ComponentMapping componentMapping{ 0 };          // optional, 0 = default
@@ -528,8 +528,9 @@ namespace rhi {
 
     struct UavDesc {
         ResourceHandle  resource{};
+		Format          formatOverride{ Format::Unknown }; // textures + typed buffers
         // Texture path
-        UavDim        texDim{ UavDim::Buffer };
+        UavDim        dimension{ UavDim::Buffer };
         union {
             struct { // ===== Buffer UAV =====
                 BufferViewKind kind{ BufferViewKind::Raw }; // Raw/Structured/Typed
@@ -541,34 +542,34 @@ namespace rhi {
 			} buffer;
             struct { // ===== TEX1D =====
                 uint32_t mipSlice{ 0 };
-            } tex1D;
+            } texture1D;
             struct { // ===== TEX1D ARRAY =====
                 uint32_t mipSlice{ 0 };
                 uint32_t firstArraySlice{ 0 };
                 uint32_t arraySize{ 0 };
-            } tex1DArray;
+            } texture1DArray;
             struct { // ===== TEX2D =====
                 uint32_t mipSlice{ 0 };
                 uint32_t planeSlice{ 0 }; // for planar formats
-            } tex2D;
+            } texture2D;
             struct { // ===== TEX2D ARRAY =====
                 uint32_t mipSlice{ 0 };
                 uint32_t firstArraySlice{ 0 };
                 uint32_t arraySize{ 0 };
                 uint32_t planeSlice{ 0 }; // for planar formats
-            } tex2DArray;
+            } texture2DArray;
             struct { // ===== TEX2DMS =====
                 // no fields
-            } tex2DMS;
+            } texture2DMS;
             struct { // ===== TEX2DMS ARRAY =====
                 uint32_t firstArraySlice{ 0 };
                 uint32_t arraySize{ 0 };
-            } tex2DMSArray;
+            } texture2DMSArray;
             struct { // ===== TEX3D =====
                 uint32_t mipSlice{ 0 };
                 uint32_t firstWSlice{ 0 };
                 uint32_t wSize{ 0 };
-			} tex3D;
+			} texture3D;
         };
     };
 
@@ -577,13 +578,13 @@ namespace rhi {
     // RTV/DSV descriptions (texture-only)
     struct RtvDesc {
         ResourceHandle texture{};
-        RtvDim dim{ RtvDim::Texture2D };
+        RtvDim dimension{ RtvDim::Texture2D };
         TextureSubresourceRange range{};
         Format formatOverride{ Format::Unknown };
     };
     struct DsvDesc {
         ResourceHandle texture{};
-        DsvDim dim{ DsvDim::Texture2D };
+        DsvDim dimension{ DsvDim::Texture2D };
         TextureSubresourceRange range{};
         Format formatOverride{ Format::Unknown };
         bool readOnlyDepth{ false };
@@ -959,7 +960,7 @@ namespace rhi {
         }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-        Result Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept;
+        Result Submit(Span<CommandList> lists, const SubmitDesc& s = {}) noexcept;
         Result Signal(const TimelinePoint& p) noexcept;
         Result Wait(const TimelinePoint& p) noexcept;
     };
@@ -997,6 +998,7 @@ namespace rhi {
         void ClearUavFloat(const UavClearInfo& u, const UavClearFloat& v) noexcept;
         void CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept;
         void CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept;
+        void CopyBufferRegion(ResourceHandle dst, uint64_t dstOffset, ResourceHandle src, uint64_t srcOffset, uint64_t numBytes) noexcept;
         void WriteTimestamp(QueryPoolHandle p, uint32_t idx, Stage s) noexcept;
         void BeginQuery(QueryPoolHandle p, uint32_t idx) noexcept;
         void EndQuery(QueryPoolHandle p, uint32_t idx) noexcept;
@@ -1139,6 +1141,7 @@ namespace rhi {
         void (*clearUavFloat)(CommandList*, const UavClearInfo&, const UavClearFloat&) noexcept;
         void (*copyBufferToTexture)(CommandList*, const TextureCopyRegion&, const BufferTextureCopy&) noexcept;
         void (*copyTextureRegion)(CommandList*, const TextureCopyRegion&, const TextureCopyRegion&) noexcept;
+        void (*copyBufferRegion)(CommandList*, ResourceHandle dst, uint64_t dstOffset, ResourceHandle src, uint64_t srcOffset, uint64_t numBytes) noexcept;
         void (*writeTimestamp)(CommandList*, QueryPoolHandle, uint32_t index, Stage stageHint) noexcept; // Timestamp: writes at 'index' (stage ignored on DX12, used on Vulkan)
         void (*beginQuery)(CommandList*, QueryPoolHandle, uint32_t index) noexcept; // Begin/End for occlusion & pipeline stats (no-op for timestamps)
         void (*endQuery)  (CommandList*, QueryPoolHandle, uint32_t index) noexcept;
@@ -1229,26 +1232,22 @@ namespace rhi {
     inline void CommandList::DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept { vt->drawIndexed(this, i, inst, firstIdx, vOff, firstI); }
     inline void CommandList::Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept { vt->dispatch(this, x, y, z); }
     inline void CommandList::ClearRenderTargetView(ViewHandle v, const ClearValue& c) noexcept { vt->clearRenderTargetView(this, v, c); }
-    inline void CommandList::ExecuteIndirect(CommandSignatureHandle sig,
-        ResourceHandle argBuf, uint64_t argOff,
-        ResourceHandle cntBuf, uint64_t cntOff,
-        uint32_t maxCount) noexcept
-    { vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
+    inline void CommandList::ExecuteIndirect(CommandSignatureHandle sig, ResourceHandle argBuf, uint64_t argOff, ResourceHandle cntBuf, uint64_t cntOff, uint32_t maxCount) noexcept { 
+        vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount); }
     inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
     inline void CommandList::ClearUavUint(const UavClearInfo& i, const UavClearUint& v) noexcept { vt->clearUavUint(this, i, v); }
     inline void CommandList::CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept { vt->copyBufferToTexture(this, dst, src); }
     inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
     inline void CommandList::CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept { vt->copyTextureRegion(this, dst, src); }
+    inline void CommandList::CopyBufferRegion(ResourceHandle dst, uint64_t dstOffset, ResourceHandle src, uint64_t srcOffset, uint64_t numBytes) noexcept {
+        vt->copyBufferRegion(this, dst, dstOffset, src, srcOffset, numBytes); }
     inline void CommandList::WriteTimestamp(QueryPoolHandle p, uint32_t idx, Stage s) noexcept { vt->writeTimestamp(this, p, idx, s); }
     inline void CommandList::BeginQuery(QueryPoolHandle p, uint32_t idx) noexcept { vt->beginQuery(this, p, idx); }
     inline void CommandList::EndQuery(QueryPoolHandle p, uint32_t idx) noexcept { vt->endQuery(this, p, idx); }
-    inline void CommandList::ResolveQueryData(QueryPoolHandle p, uint32_t first, uint32_t count,
-        ResourceHandle dst, uint64_t off) noexcept {
-        vt->resolveQueryData(this, p, first, count, dst, off);
-    }
+    inline void CommandList::ResolveQueryData(QueryPoolHandle p, uint32_t first, uint32_t count, ResourceHandle dst, uint64_t off) noexcept {
+        vt->resolveQueryData(this, p, first, count, dst, off); }
     inline void CommandList::ResetQueries(QueryPoolHandle p, uint32_t first, uint32_t count) noexcept {
-        vt->resetQueries(this, p, first, count);
-    }
+        vt->resetQueries(this, p, first, count); }
 	inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
 
     inline uint32_t Swapchain::ImageCount() noexcept { return vt->imageCount(this); }
