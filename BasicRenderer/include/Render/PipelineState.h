@@ -15,15 +15,15 @@ struct PipelineResources {
 
 class PipelineState {
 public:
-	PipelineState(rhi::PipelineHandle pso,
+	PipelineState(rhi::PipelinePtr pso,
 		uint64_t resourceIDsHash, 
 		PipelineResources resources) :
 		m_resourceIDsHash(resourceIDsHash), 
-		m_pso(pso),
+		m_pso(std::move(pso)),
 		m_pipelineResources(resources){}
-	PipelineState() = default;
+	PipelineState() : m_pso({}) {};
 	const rhi::PipelineHandle& GetAPIPipelineState() const {
-		return m_pso;
+		return m_pso.Get();
 	}
 	uint64_t GetResourceIDsHash() const {
 		return m_resourceIDsHash;
@@ -33,7 +33,7 @@ public:
 	}
 private:
 	uint64_t m_resourceIDsHash = 0;
-	rhi::PipelineHandle m_pso;
+	rhi::PipelinePtr m_pso;
 	std::unordered_map<std::string, unsigned int> m_resourceSlots;
 	PipelineResources m_pipelineResources; // Descriptor slots are always 0->n, mandatory first, then optional
 };

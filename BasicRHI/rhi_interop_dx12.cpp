@@ -110,6 +110,11 @@ namespace rhi {
 		return false;
 	}
 
+    bool QueryNativeHeap(Heap h, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {
+        // Not implemented in BasicRHI yet
+        return false;
+	}
+
     namespace dx12 {
 
         bool enable_streamline_interposer(Device d, PFN_UpgradeInterface upgrade) {

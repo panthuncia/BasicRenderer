@@ -464,7 +464,7 @@ namespace rhi {
 		return d;
 	}
 
-	struct Dx12DescHeap {
+	struct Dx12DescriptorHeap {
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
 		D3D12_DESCRIPTOR_HEAP_TYPE type{};
 		UINT inc{ 0 };
@@ -509,7 +509,7 @@ namespace rhi {
 	template<> struct HandleFor<Dx12PipelineLayout> { using type = PipelineLayoutHandle; };
 	template<> struct HandleFor<Dx12Pipeline> { using type = PipelineHandle; };
 	template<> struct HandleFor<Dx12CommandSignature> { using type = CommandSignatureHandle; };
-	template<> struct HandleFor<Dx12DescHeap> { using type = DescriptorHeapHandle; };
+	template<> struct HandleFor<Dx12DescriptorHeap> { using type = DescriptorHeapHandle; };
 	template<> struct HandleFor<Dx12Timeline> { using type = TimelineHandle; };
 	template<> struct HandleFor<Dx12Allocator> { using type = CommandAllocatorHandle; };
 	template<> struct HandleFor<Dx12CommandList> { using type = CommandListHandle; };
@@ -572,7 +572,7 @@ namespace rhi {
 		Registry<Dx12PipelineLayout> pipelineLayouts;
 		Registry<Dx12Pipeline> pipelines;
 		Registry<Dx12CommandSignature> commandSignatures;
-		Registry<Dx12DescHeap> descHeaps;
+		Registry<Dx12DescriptorHeap> descHeaps;
 		Registry<Dx12Allocator> allocators;
 		Registry<Dx12CommandList> commandLists;
 		Registry<Dx12Timeline> timelines;
@@ -590,6 +590,14 @@ namespace rhi {
 	extern const CommandAllocatorVTable g_calvt;
 	extern const ResourceVTable g_buf_rvt;
 	extern const ResourceVTable g_tex_rvt;
+	extern const QueryPoolVTable g_qpvt;
+	extern const PipelineVTable g_psovt;
+	extern const PipelineLayoutVTable g_plvt;
+	extern const CommandSignatureVTable g_csvt;
+	extern const DescriptorHeapVTable g_dhvt;
+	extern const SamplerVTable g_svt;
+	extern const TimelineVTable g_tlvt;
+	extern const HeapVTable g_hevt;
 
 	// ---------------- Helpers ----------------
 	static void EnableDebug(ID3D12Device* device) {
@@ -611,7 +619,7 @@ namespace rhi {
 		const PipelineStreamItem* items,
 		uint32_t count) noexcept
 	{
-		auto* impl = static_cast<Dx12Device*>(d->impl);
+		auto* dimpl = static_cast<Dx12Device*>(d->impl);
 
 		// Collect RHI subobjects
 		ID3D12RootSignature* root = nullptr;
@@ -629,7 +637,7 @@ namespace rhi {
 			switch (items[i].type) {
 			case PsoSubobj::Layout: {
 				auto& L = *static_cast<const SubobjLayout*>(items[i].data);
-				auto* pl = impl->pipelineLayouts.get(L.layout);
+				auto* pl = dimpl->pipelineLayouts.get(L.layout);
 				if (!pl || !pl->root) return {};
 				root = pl->root.Get();
 			} break;
@@ -748,9 +756,13 @@ namespace rhi {
 		sd.SizeInBytes = (UINT)stream.size();
 
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-		if (FAILED(impl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) return {};
+		if (FAILED(dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) return {};
 
-		auto handle = impl->pipelines.alloc(Dx12Pipeline{ pso, isCompute });
+		auto handle = dimpl->pipelines.alloc(Dx12Pipeline{ pso, isCompute });
+		Pipeline out = { handle };
+		out.vt = &g_psovt;
+		out.impl = dimpl->pipelines.get(handle);;
+
 		return MakePipelinePtr(d, handle);
 	}
 
@@ -961,7 +973,10 @@ namespace rhi {
 			L.staticSamplers.assign(ld.staticSamplers.data, ld.staticSamplers.data + ld.staticSamplers.size);
 		L.root = root;
 		auto handle = impl->pipelineLayouts.alloc(std::move(L));
-		return MakePipelineLayoutPtr(d, handle);
+		PipelineLayout out = { handle };
+		out.vt = &g_plvt;
+		out.impl = impl->pipelineLayouts.get(handle);
+		return MakePipelineLayoutPtr(d, out);
 	}
 
 
@@ -1030,7 +1045,10 @@ namespace rhi {
 		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) return {};
 		Dx12CommandSignature S{ cs, cd.byteStride };
 		auto handle = impl->commandSignatures.alloc(std::move(S));
-		return MakeCommandSignaturePtr(d, handle);
+		CommandSignature out = { handle };
+		out.vt = &g_csvt;
+		out.impl = impl->commandSignatures.get(handle);
+		return MakeCommandSignaturePtr(d, out);
 	}
 
 	static void d_destroyCommandSignature(Device* d, CommandSignatureHandle h) noexcept {
@@ -1048,7 +1066,7 @@ namespace rhi {
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
 		if (FAILED(impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
 
-		Dx12DescHeap H{};
+		Dx12DescriptorHeap H{};
 		H.heap = heap; H.type = desc.Type;
 		H.inc = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
 		H.shaderVisible = (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0;
@@ -1056,7 +1074,10 @@ namespace rhi {
 		if (H.shaderVisible) H.gpuStart = heap->GetGPUDescriptorHandleForHeapStart();
 
 		auto handle = impl->descHeaps.alloc(std::move(H));
-		return MakeDescriptorHeapPtr(d, handle);
+		DescriptorHeap out = { handle };
+		out.vt = &g_dhvt;
+		out.impl = impl->descHeaps.get(handle);
+		return MakeDescriptorHeapPtr(d, out);
 	}
 	static void d_destroyDescriptorHeap(Device* d, DescriptorHeapHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->descHeaps.free(h);
@@ -1753,7 +1774,10 @@ namespace rhi {
 		if (dbg) { std::wstring w(dbg, dbg + ::strlen(dbg)); f->SetName(w.c_str()); }
 		Dx12Timeline T{ f };
 		auto h = impl->timelines.alloc(std::move(T));
-		return MakeTimelinePtr(d, h);
+		Timeline out{ h };
+		out.impl = impl->timelines.get(h);
+		out.vt = &g_tlvt;
+		return MakeTimelinePtr(d, out);
 	}
 
 
@@ -1806,7 +1830,10 @@ namespace rhi {
 
 		Dx12Heap H{ heap, hd.sizeBytes };
 		auto h = impl->heaps.alloc(std::move(H));
-		return MakeHeapPtr(d, HeapHandle{ h.index, h.generation });
+		Heap out{ h };
+		out.impl = impl->heaps.get(h);
+		out.vt = &g_hevt;
+		return MakeHeapPtr(d, out);
 	}
 
 	static void d_destroyHeap(Device* d, HeapHandle h) noexcept {
@@ -1964,8 +1991,8 @@ namespace rhi {
 	}
 
 	static QueryPoolPtr d_createQueryPool(Device* d, const QueryPoolDesc& qd) noexcept {
-		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || qd.count == 0) return {};
+		auto* dimpl = static_cast<Dx12Device*>(d->impl);
+		if (!dimpl || qd.count == 0) return {};
 
 		Dx12QueryPool qp{};
 		D3D12_QUERY_HEAP_DESC desc{};
@@ -1985,7 +2012,7 @@ namespace rhi {
 			bool needMesh = (qd.statsMask & (PS_TaskInvocations | PS_MeshInvocations | PS_MeshPrimitives)) != 0;
 
 			D3D12_FEATURE_DATA_D3D12_OPTIONS9 opts9{};
-			bool haveOpt9 = SUCCEEDED(impl->dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opts9, sizeof(opts9)));
+			bool haveOpt9 = SUCCEEDED(dimpl->dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opts9, sizeof(opts9)));
 			bool canMeshStats = haveOpt9 && !!opts9.MeshShaderPipelineStatsSupported;
 
 			if (needMesh && !canMeshStats && qd.requireAllStats)
@@ -2000,16 +2027,16 @@ namespace rhi {
 		}
 
 		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
-		if (FAILED(impl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
+		if (FAILED(dimpl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
 		qp.heap = heap;
 		qp.count = qd.count;
 
-		auto handle = impl->queryPools.alloc(std::move(qp));
-		return QueryPoolPtr(d, handle,
-			[](Device* dev, QueryPoolHandle hh) noexcept {
-				static_cast<Dx12Device*>(dev->impl)->queryPools.free(hh);
-			}
-		);
+		auto handle = dimpl->queryPools.alloc(std::move(qp));
+		QueryPool out{ handle };
+		out.impl = dimpl->queryPools.get(handle);
+		out.vt = &g_qpvt;
+
+		return MakeQueryPoolPtr(d, out);
 	}
 
 	static void d_destroyQueryPool(Device* d, QueryPoolHandle h) noexcept {
@@ -2153,6 +2180,14 @@ namespace rhi {
 		auto* dev = qs->owner; if (!dev) return Result::Failed;
 		auto* TL = dev->timelines.get(p.t); if (!TL) return Result::InvalidArg;
 		return SUCCEEDED(qs->q->Wait(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
+	}
+
+	static void q_setName(Queue* q, const char* n) noexcept {
+		if (!n) return;
+		auto* qs = static_cast<Dx12QueueState*>(q->impl);
+		if (!qs || !qs->q) return;
+		std::wstring w(n, n + ::strlen(n));
+		qs->q->SetName(w.c_str());
 	}
 
 	// ---------------- CommandList vtable funcs ----------------
@@ -2828,6 +2863,67 @@ namespace rhi {
 		if (!ca || !ca->impl) return;
 		auto* A = static_cast<Dx12Allocator*>(ca->impl);
 		A->alloc->Reset(); // ID3D12CommandAllocator::Reset()
+	}
+
+	// ------------------ QueryPool vtable funcs ----------------
+	static void qp_setName(QueryPool* qp, const char* n) noexcept {
+		if (!n) return;
+		auto* Q = static_cast<Dx12QueryPool*>(qp->impl);
+		if (!Q || !Q->heap) return;
+		Q->heap->SetName(s2ws(n).c_str());
+	}
+
+	// ------------------ Pipeline vtable funcs ----------------
+	static void pso_setName(Pipeline* p, const char* n) noexcept {
+		if (!n) return;
+		auto* P = static_cast<Dx12Pipeline*>(p->impl);
+		if (!P || !P->pso) return;
+		P->pso->SetName(s2ws(n).c_str());
+	}
+
+	// ------------------ PipelineLayout vtable funcs ----------------
+	static void pl_setName(PipelineLayout* pl, const char* n) noexcept {
+		if (!n) return;
+		auto* L = static_cast<Dx12PipelineLayout*>(pl->impl);
+		if (!L || !L->root) return;
+		L->root->SetName(s2ws(n).c_str());
+	}
+
+	// ------------------ CommandSignature vtable funcs ----------------
+	static void cs_setName(CommandSignature* cs, const char* n) noexcept {
+		if (!n) return;
+		auto* S = static_cast<Dx12CommandSignature*>(cs->impl);
+		if (!S || !S->sig) return;
+		S->sig->SetName(s2ws(n).c_str());
+	}
+
+	// ------------------ DescriptorHeap vtable funcs ----------------
+	static void dh_setName(DescriptorHeap* dh, const char* n) noexcept {
+		if (!n) return;
+		auto* H = static_cast<Dx12DescriptorHeap*>(dh->impl);
+		if (!H || !H->heap) return;
+		H->heap->SetName(s2ws(n).c_str());
+	}
+
+	// ------------------ Sampler vtable funcs ----------------
+	static void s_setName(Sampler* s, const char* n) noexcept {
+		return; // cannot name ID3D12SamplerState
+	}
+
+	// ------------------ Timeline vtable funcs ----------------
+	static void tl_setName(Timeline* tl, const char* n) noexcept {
+		if (!n) return;
+		auto* T = static_cast<Dx12Timeline*>(tl->impl);
+		if (!T || !T->fence) return;
+		T->fence->SetName(s2ws(n).c_str());
+	}
+
+	// ------------------ Heap vtable funcs ----------------
+	static void h_setName(Heap* h, const char* n) noexcept {
+		if (!n) return;
+		auto* H = static_cast<Dx12Heap*>(h->impl);
+		if (!H || !H->heap) return;
+		H->heap->SetName(s2ws(n).c_str());
 	}
 
 } // namespace rhi

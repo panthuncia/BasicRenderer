@@ -3,6 +3,8 @@
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <rhi.h>
+
 #include "Resources/Resource.h"
 #include "Resources/GloballyIndexedResource.h"
 #include "Render/RenderContext.h"
@@ -34,103 +36,62 @@ public:
 		resourcesByID.clear();
 	}
 
-	ID3D12Resource* GetAPIResource() const override {
+	rhi::Resource GetAPIResource() const override {
 		spdlog::error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
-		return nullptr;
+		return {};
 	}
 
 protected:
 
-	BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
 
-		std::vector<BarrierGroups> children;
-		children.reserve(standardTransitionResources.size());
+		m_childBatches.clear();
+		m_childBatches.reserve(standardTransitionResources.size());
 
-		size_t totalBufDescs   = 0,
-			totalTexDescs   = 0,
-			totalGlobDescs  = 0,
-			totalBufGroups  = 0,
-			totalTexGroups  = 0,
-			totalGlobGroups = 0;
+		size_t totalTex = 0, totalBuf = 0, totalGlob = 0;
 
 		for (auto& r : standardTransitionResources) {
-			auto child = r->GetEnhancedBarrierGroup(
-				range,
-				prevAccessType, newAccessType,
-				prevLayout,    newLayout,
-				prevSyncState, newSyncState);
+			rhi::BarrierBatch child = r->GetEnhancedBarrierGroup(
+				range, prevAccessType, newAccessType,
+				prevLayout, newLayout, prevSyncState, newSyncState);
 
-			totalBufDescs   += child.bufferBarrierDescs.size();
-			totalTexDescs   += child.textureBarrierDescs.size();
-			totalGlobDescs  += child.globalBarrierDescs.size();
-
-			totalBufGroups  += child.bufferBarriers.size();
-			totalTexGroups  += child.textureBarriers.size();
-			totalGlobGroups += child.globalBarriers.size();
-
-			children.push_back(std::move(child));
+			totalTex += child.textures.size;
+			totalBuf += child.buffers.size;
+			totalGlob += child.globals.size;
+			m_childBatches.push_back(child);
 		}
 
-		BarrierGroups merged;
+		m_texBarriers.clear();
+		m_bufBarriers.clear();
+		m_globBarriers.clear();
 
-		// prevent any reallocation
-		merged.bufferBarrierDescs.reserve(totalBufDescs);
-		merged.textureBarrierDescs.reserve(totalTexDescs);
-		merged.globalBarrierDescs.reserve(totalGlobDescs);
+		m_texBarriers.reserve(totalTex);
+		m_bufBarriers.reserve(totalBuf);
+		m_globBarriers.reserve(totalGlob);
 
-		merged.bufferBarriers.reserve(totalBufGroups);
-		merged.textureBarriers.reserve(totalTexGroups);
-		merged.globalBarriers.reserve(totalGlobGroups);
+		for (const auto& c : m_childBatches) {
+			m_texBarriers.insert(
+				m_texBarriers.end(),
+				c.textures.begin(),
+				c.textures.end());
 
-		for (auto& child : children) {
-			size_t bufDescOffset = merged.bufferBarrierDescs.size();
-			merged.bufferBarrierDescs.insert(
-				merged.bufferBarrierDescs.end(),
-				child.bufferBarrierDescs.begin(),
-				child.bufferBarrierDescs.end());
+			m_bufBarriers.insert(
+				m_bufBarriers.end(),
+				c.buffers.begin(),
+				c.buffers.end());
 
-			for (auto const& grp : child.bufferBarriers) {
-				D3D12_BARRIER_GROUP g = grp;
-				// this was the index *within* the child's desc array
-				ptrdiff_t idx = grp.pBufferBarriers
-					- child.bufferBarrierDescs.data();
-				// now point at merged + offset
-				g.pBufferBarriers = merged.bufferBarrierDescs.data()
-					+ (bufDescOffset + idx);
-				merged.bufferBarriers.push_back(g);
-			}
-
-			size_t texDescOffset = merged.textureBarrierDescs.size();
-			merged.textureBarrierDescs.insert(
-				merged.textureBarrierDescs.end(),
-				child.textureBarrierDescs.begin(),
-				child.textureBarrierDescs.end());
-
-			for (auto const& grp : child.textureBarriers) {
-				D3D12_BARRIER_GROUP g = grp;
-				ptrdiff_t idx = grp.pTextureBarriers
-					- child.textureBarrierDescs.data();
-				g.pTextureBarriers = merged.textureBarrierDescs.data()
-					+ (texDescOffset + idx);
-				merged.textureBarriers.push_back(g);
-			}
-
-			size_t globDescOffset = merged.globalBarrierDescs.size();
-			merged.globalBarrierDescs.insert(
-				merged.globalBarrierDescs.end(),
-				child.globalBarrierDescs.begin(),
-				child.globalBarrierDescs.end());
-
-			for (auto const& grp : child.globalBarriers) {
-				D3D12_BARRIER_GROUP g = grp;
-				ptrdiff_t idx = grp.pGlobalBarriers
-					- child.globalBarrierDescs.data();
-				g.pGlobalBarriers = merged.globalBarrierDescs.data()
-					+ (globDescOffset + idx);
-				merged.globalBarriers.push_back(g);
-			}
+			m_globBarriers.insert(
+				m_globBarriers.end(),
+				c.globals.begin(),
+				c.globals.end());
 		}
-		return merged;
+
+		// Return Span views into the owned vectors
+		return rhi::BarrierBatch{
+			{ m_texBarriers.data(), static_cast<uint32_t>(m_texBarriers.size()) },
+			{ m_bufBarriers.data(), static_cast<uint32_t>(m_bufBarriers.size()) },
+			{ m_globBarriers.data(), static_cast<uint32_t>(m_globBarriers.size()) }
+		};
 	}
 
     std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
@@ -139,11 +100,11 @@ protected:
     std::vector<D3D12_RESOURCE_BARRIER> m_transitions;
 	
 	// New barriers
-	std::vector<D3D12_BARRIER_GROUP> m_bufferBarriers;
-	std::vector<D3D12_BARRIER_GROUP> m_textureBarriers;
-	std::vector<D3D12_BARRIER_GROUP> m_globalBarriers;
+	std::vector<rhi::TextureBarrier> m_texBarriers;
+	std::vector<rhi::BufferBarrier>  m_bufBarriers;
+	std::vector<rhi::GlobalBarrier>  m_globBarriers;
 
-	BarrierGroups m_barrierGroups;
+	std::vector<rhi::BarrierBatch>   m_childBatches;
 
 private:
 

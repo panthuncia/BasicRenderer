@@ -6,6 +6,7 @@
 #include <functional>
 #include <string>
 #include <algorithm> // For std::lower_bound, std::upper_bound
+#include <rhi.h>
 
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/Buffer.h"
@@ -78,13 +79,13 @@ public:
         return static_cast<UINT>(m_data.size());
     }
 
-	ID3D12Resource* GetAPIResource() const override {
+    rhi::Resource GetAPIResource() const override {
 		return m_dataBuffer->GetAPIResource();
 	}
 
 protected:
 
-    BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
         m_subresourceAccessTypes[0] = newAccessType;
         m_subresourceLayouts[0] = newLayout;
         m_subresourceSyncStates[0] = newSyncState;
@@ -96,9 +97,9 @@ private:
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
         CreateBuffer(capacity);
         SetName(name);
-        m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
-        m_subresourceLayouts.push_back(ResourceLayout::LAYOUT_COMMON);
-        m_subresourceSyncStates.push_back(ResourceSyncState::ALL);
+        m_subresourceAccessTypes.push_back(rhi::ResourceAccessType::Common);
+        m_subresourceLayouts.push_back(rhi::ResourceLayout::Common);
+        m_subresourceSyncStates.push_back(rhi::ResourceSyncState::All);
     }
 
     void OnSetName() override {
@@ -124,17 +125,17 @@ private:
 	bool m_UAV = false;
 
     void CreateBuffer(uint64_t capacity) {
-		auto& device = DeviceManager::GetInstance().GetDevice();
+		auto device = DeviceManager::GetInstance().GetDevice();
 		m_capacity = capacity;
-		m_dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, capacity * sizeof(unsigned int), false, m_UAV);
+		m_dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, capacity * sizeof(unsigned int), m_UAV);
     }
 
     void GrowBuffer(uint64_t newSize) {
-		auto& device = DeviceManager::GetInstance().GetDevice();
+		auto device = DeviceManager::GetInstance().GetDevice();
 		if (m_dataBuffer != nullptr) {
 			DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
 		}
-		auto newDataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, newSize * sizeof(unsigned int), false, m_UAV);
+		auto newDataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, newSize * sizeof(unsigned int), m_UAV);
 		UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity*sizeof(unsigned int));
 		m_dataBuffer = newDataBuffer;
 

@@ -14,8 +14,16 @@ namespace rhi {
     inline constexpr uint32_t RHI_SC_ABI_MIN = 1;
     inline constexpr uint32_t RHI_CA_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_RESOURCE_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_HEAP_ABI_MIN = 1;
+    inline constexpr uint32_t RHI_QUERYPOOL_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_PIPELINE_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_PIPELINELAYOUT_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_COMMANDSIGNATURE_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_SAMPLER_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_DESCRIPTORHEAP_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_TIMELINE_ABI_MIN = 1;
 
-    struct Device;
+    class Device;
 
     namespace detail {
         // tag types for each handle family
@@ -29,9 +37,9 @@ namespace rhi {
         struct HCmdAlloc {};
         struct HTimeline {};
         struct HCommandAllocator {};
-		struct HCommandList {};
-		struct HHeap {};
-		struct HQueryPool {};
+        struct HCommandList {};
+        struct HHeap {};
+        struct HQueryPool {};
 
         // forward-declared trait; default is no-op (safe in release)
         template<class Tag> struct NameOps {
@@ -58,84 +66,11 @@ namespace rhi {
     using CommandSignatureHandle = Handle<detail::HCmdSig>;
     using PipelineLayoutHandle = Handle<detail::HPipelineLayout>;
     using DescriptorHeapHandle = Handle<detail::HDescHeap>;
-	using TimelineHandle = Handle<detail::HTimeline>;
-	using CommandAllocatorHandle = Handle<detail::HCommandAllocator>;
-	using CommandListHandle = Handle<detail::HCommandList>;
-	using HeapHandle = Handle<detail::HHeap>;
-	using QueryPoolHandle = Handle<detail::HQueryPool>;
-
-    //RAII unique smart pointer
-
-    // THandle handle type, e.g. PipelineHandle, ResourceHandle
-    template<class THandle>
-    class UniqueHandle {
-    public:
-        using DestroyFn = void(*)(Device*, THandle) noexcept;
-        using NameFn = void(*)(Device*, THandle, const char*) noexcept;
-
-        UniqueHandle() = default;
-        UniqueHandle(Device* d, THandle h, DestroyFn dfn
-            , NameFn nfn = nullptr
-        ) : dev_(d), h_(h), destroy_(dfn)
-            , setname_(nfn)
-        {
-        }
-
-        ~UniqueHandle() { Reset(); }
-
-        UniqueHandle(const UniqueHandle&) = delete;
-        UniqueHandle& operator=(const UniqueHandle&) = delete;
-
-        UniqueHandle(UniqueHandle&& o) noexcept { Swap(o); }
-        UniqueHandle& operator=(UniqueHandle&& o) noexcept {
-            if (this != &o) { Reset(); Swap(o); }
-            return *this;
-        }
-
-        THandle Get() const noexcept { return h_; }
-        explicit operator bool() const noexcept { return h_.valid(); }
-        bool Valid() const noexcept { return dev_ && h_.valid(); }
-        Device* DevicePtr() const noexcept { return dev_; }
-
-        THandle Release() noexcept {
-            auto t = h_;
-            h_ = {}; dev_ = nullptr; destroy_ = nullptr;
-            setname_ = nullptr;
-            return t;
-        }
-
-        void Reset() noexcept {
-            if (dev_ && h_.valid() && destroy_) destroy_(dev_, h_);
-            h_ = {}; dev_ = nullptr; destroy_ = nullptr;
-            setname_ = nullptr;
-        }
-
-        void SetName(const char* n) const noexcept {
-            if (dev_ && h_.valid() && setname_) setname_(dev_, h_, n);
-        }
-
-    private:
-        void Swap(UniqueHandle& o) noexcept {
-            std::swap(dev_, o.dev_);
-            std::swap(h_, o.h_);
-            std::swap(destroy_, o.destroy_);
-            std::swap(setname_, o.setname_);
-        }
-
-        Device* dev_{};
-        THandle  h_{};
-        DestroyFn destroy_{};
-        NameFn    setname_{};
-    };
-
-	// Anything that is not trivially destructible needs its own tag with a destructor
-    using PipelinePtr = UniqueHandle<PipelineHandle>;
-    using PipelineLayoutPtr = UniqueHandle<PipelineLayoutHandle>;
-    using CommandSignaturePtr = UniqueHandle<CommandSignatureHandle>;
-    using DescriptorHeapPtr = UniqueHandle<DescriptorHeapHandle>;
-    using SamplerPtr = UniqueHandle<SamplerHandle>;
-	using TimelinePtr = UniqueHandle<TimelineHandle>;
-	using HeapPtr = UniqueHandle<HeapHandle>;
+    using TimelineHandle = Handle<detail::HTimeline>;
+    using CommandAllocatorHandle = Handle<detail::HCommandAllocator>;
+    using CommandListHandle = Handle<detail::HCommandList>;
+    using HeapHandle = Handle<detail::HHeap>;
+    using QueryPoolHandle = Handle<detail::HQueryPool>;
 
     template<class TObject>
     class ObjectPtr {
@@ -869,25 +804,203 @@ namespace rhi {
     };
 
     // ---------------- POD wrappers + VTables ----------------
-    struct Device;       struct Queue;       class CommandList;        struct Swapchain;       class CommandAllocator;
+    class Device;       class Queue;       class CommandList;        class Swapchain;       class CommandAllocator;
     struct DeviceVTable; struct QueueVTable; struct CommandListVTable; struct SwapchainVTable; struct CommandAllocatorVTable;
 	class Resource;      struct ResourceVTable;
+	class QueryPool;    struct QueryPoolVTable;
+    class Pipeline;     struct PipelineVTable;
+    class PipelineLayout; struct PipelineLayoutVTable;
+    class CommandSignature; struct CommandSignatureVTable;
+	class DescriptorHeap; struct DescriptorHeapVTable;
+    class Sampler;     struct SamplerVTable;
+    class Timeline;    struct TimelineVTable;
+    class Heap;        struct HeapVTable;
 
     using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
     using CommandListPtr = ObjectPtr<CommandList>;
     using SwapchainPtr = ObjectPtr<Swapchain>;
     using DevicePtr = ObjectPtr<Device>;
     using ResourcePtr = ObjectPtr<Resource>;
-    using QueryPoolPtr = UniqueHandle<QueryPoolHandle>;
+    using QueryPoolPtr = ObjectPtr<QueryPool>;
+    using PipelinePtr = ObjectPtr<Pipeline>;
+    using PipelineLayoutPtr = ObjectPtr<PipelineLayout>;
+    using CommandSignaturePtr = ObjectPtr<CommandSignature>;
+    using DescriptorHeapPtr = ObjectPtr<DescriptorHeap>;
+    using SamplerPtr = ObjectPtr<Sampler>;
+    using TimelinePtr = ObjectPtr<Timeline>;
+    using HeapPtr = ObjectPtr<Heap>;
+
+    struct QueryPoolVTable {
+		void (*setName)(QueryPool*, const char*) noexcept;
+        uint32_t abi_version = 1;
+	};
+	class QueryPool {
+	public:
+		QueryPool(QueryPoolHandle h = {}) : handle(h) {}
+		void* impl{};
+		const QueryPoolVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_QUERYPOOL_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+        QueryPoolHandle GetHandle() const noexcept { return handle; }
+        void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		QueryPoolHandle handle;
+	};
+
+    struct PipelineVTable {
+		void (*setName)(Pipeline*, const char*) noexcept;
+		uint32_t abi_version = 1;
+	};
+	class Pipeline {
+	public:
+		Pipeline(PipelineHandle h = {}) : handle(h) {}
+		void* impl{};
+		const PipelineVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_PIPELINE_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		PipelineHandle GetHandle() const noexcept { return handle; }
+		void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		PipelineHandle handle;
+	};
+
+	struct PipelineLayoutVTable {
+		void (*setName)(PipelineLayout*, const char*) noexcept;
+		uint32_t abi_version = 1;
+	};
+    class PipelineLayout {
+	public:
+		PipelineLayout(PipelineLayoutHandle h = {}) : handle(h) {}
+		void* impl{};
+		const PipelineLayoutVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_PIPELINELAYOUT_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		PipelineLayoutHandle GetHandle() const noexcept { return handle; }
+        void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		PipelineLayoutHandle handle;
+	};
+
+	struct CommandSignatureVTable {
+		void (*setName)(CommandSignature*, const char*) noexcept;
+		uint32_t abi_version = 1;
+	};
+    class CommandSignature {
+	public:
+		CommandSignature(CommandSignatureHandle h = {}) : handle(h) {}
+		void* impl{};
+		const CommandSignatureVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_COMMANDSIGNATURE_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		CommandSignatureHandle GetHandle() const noexcept { return handle; }
+        void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		CommandSignatureHandle handle;
+	};
+
+    struct DescriptorHeapVTable {
+		void (*setName)(DescriptorHeap*, const char*) noexcept;
+        uint32_t abi_version = 1;
+	};
+
+    class DescriptorHeap {
+	public:
+		DescriptorHeap(DescriptorHeapHandle h = {}) : handle(h) {}
+        void* impl{};
+		const DescriptorHeapVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_DESCRIPTORHEAP_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		DescriptorHeapHandle GetHandle() const noexcept { return handle; }
+        void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		DescriptorHeapHandle handle;
+	};
+
+    struct SamplerVTable {
+		void (*setName)(Sampler*, const char*) noexcept;
+		uint32_t abi_version = 1;
+	};
+    class Sampler {
+	public:
+		Sampler(SamplerHandle h = {}) : handle(h) {}
+		void* impl{};
+		const SamplerVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_SAMPLER_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		SamplerHandle GetHandle() const noexcept { return handle; }
+        void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		SamplerHandle handle;
+	};
+
+    struct TimelineVTable {
+		void (*setName)(Timeline*, const char*) noexcept;
+		uint32_t abi_version = 1;
+	};
+    class Timeline {
+	public:
+		Timeline(TimelineHandle h = {}) : handle(h) {}
+		void* impl{};
+		const TimelineVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_TIMELINE_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		TimelineHandle GetHandle() const noexcept { return handle; }
+        void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		TimelineHandle handle;
+	};
+
+	struct HeapVTable {
+		void (*setName)(Heap*, const char*) noexcept;
+		uint32_t abi_version = 1;
+	};
+    class Heap {
+	public:
+		Heap(HeapHandle h = {}) : handle(h) {}
+		void* impl{};
+		const HeapVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_HEAP_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		HeapHandle GetHandle() const noexcept { return handle; }
+        void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		HeapHandle handle;
+	};
 
     struct QueueVTable {
         Result(*submit)(Queue*, Span<CommandList>, const SubmitDesc&) noexcept;
         Result(*signal)(Queue*, const TimelinePoint&) noexcept;
-        Result(*wait)(Queue*, const TimelinePoint&) noexcept; uint32_t abi_version = 1;
+        Result(*wait)(Queue*, const TimelinePoint&) noexcept;
         void (*setName)(Queue*, const char*) noexcept;
+		uint32_t abi_version = 1;
     };
 
-    struct Queue { 
+    class Queue {
+    public:
         void* impl{}; 
         const QueueVTable* vt{}; 
         explicit constexpr operator bool() const noexcept {
@@ -906,7 +1019,6 @@ namespace rhi {
         void (*setName)(Resource*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
-
     class Resource {
     public:
         Resource(ResourceHandle h = {}, bool isTexture = false) : handle(h) {}
@@ -1026,7 +1138,8 @@ namespace rhi {
         uint32_t abi_version = 1;
     };
 
-    struct Swapchain { 
+    class Swapchain {
+    public:
         void* impl{}; 
         const SwapchainVTable* vt{}; 
         explicit constexpr operator bool() const noexcept {
@@ -1126,7 +1239,8 @@ namespace rhi {
         CommandAllocatorHandle handle;
     };
 
-    struct Device {
+    class Device {
+	public:
         void* impl{}; 
         const DeviceVTable* vt{};
         explicit constexpr operator bool() const noexcept {
@@ -1319,6 +1433,54 @@ namespace rhi {
             [](Resource* p, const char* n) noexcept { if (p) p->SetName(n); }
         );
 	}
+    inline QueryPoolPtr MakeQueryPoolPtr(Device* d, QueryPool h) noexcept {
+        return QueryPoolPtr(d, h,
+            [](Device* dev, QueryPool* hh) noexcept { if (dev) dev->DestroyQueryPool(hh->GetHandle()); },
+			[](QueryPool* h, const char* n) noexcept { h->SetName(n); }
+		);
+	}
+    inline PipelinePtr MakePipelinePtr(Device* d, Pipeline h) noexcept {
+        return PipelinePtr(d, h,
+            [](Device* dev, Pipeline* hh) noexcept { if (dev) dev->DestroyPipeline(hh->GetHandle()); },
+            [](Pipeline* h, const char* n) noexcept { h->SetName(n); }
+        );
+	}
+    inline PipelineLayoutPtr MakePipelineLayoutPtr(Device* d, PipelineLayout h) noexcept {
+        return PipelineLayoutPtr(d, h,
+            [](Device* dev, PipelineLayout* hh) noexcept { if (dev) dev->DestroyPipelineLayout(hh->GetHandle()); },
+            [](PipelineLayout* h, const char* n) noexcept { h->SetName(n); }
+		);
+	}
+    inline CommandSignaturePtr MakeCommandSignaturePtr(Device* d, CommandSignature h) noexcept {
+        return CommandSignaturePtr(d, h,
+            [](Device* dev, CommandSignature* hh) noexcept { if (dev) dev->DestroyCommandSignature(hh->GetHandle()); },
+			[](CommandSignature* h, const char* n) noexcept { h->SetName(n); }
+		);
+	}
+	inline DescriptorHeapPtr MakeDescriptorHeapPtr(Device* d, DescriptorHeap h) noexcept {
+        return DescriptorHeapPtr(d, h,
+			[](Device* dev, DescriptorHeap* hh) noexcept { if (dev) dev->DestroyDescriptorHeap(hh->GetHandle()); },
+			[](DescriptorHeap* h, const char* n) noexcept { h->SetName(n); }
+		);
+	}
+	inline SamplerPtr MakeSamplerPtr(Device* d, Sampler h) noexcept {
+		return SamplerPtr(d, h,
+			[](Device* dev, Sampler* hh) noexcept { if (dev) dev->DestroySampler(hh->GetHandle()); },
+			[](Sampler* h, const char* n) noexcept { h->SetName(n); }
+		);
+	}
+    inline TimelinePtr MakeTimelinePtr(Device* d, Timeline h) noexcept {
+        return TimelinePtr(d, h,
+            [](Device* dev, Timeline* hh) noexcept { if (dev) dev->DestroyTimeline(hh->GetHandle()); },
+            [](Timeline* h, const char* n) noexcept { h->SetName(n); }
+        );
+	}
+    inline HeapPtr MakeHeapPtr(Device* d, Heap h) noexcept {
+        return HeapPtr(d, h,
+            [](Device* dev, Heap* hh) noexcept { if (dev) dev->DestroyHeap(hh->GetHandle()); },
+            [](Heap* h, const char* n) noexcept { h->SetName(n); }
+		);
+	}
 
     inline void name_buffer(Device* d, ResourceHandle h, const char* n) noexcept {
         if (d && d->vt && d->vt->setNameBuffer) d->vt->setNameBuffer(d, h, n);
@@ -1348,48 +1510,48 @@ namespace rhi {
         if (d && d->vt && d->vt->setNameHeap) d->vt->setNameHeap(d, h, n);
     }
 
-    inline PipelinePtr MakePipelinePtr(Device* d, PipelineHandle h) noexcept {
-        return PipelinePtr(d, h,
-            [](Device* d, PipelineHandle hh) noexcept { d->DestroyPipeline(hh); }
-            , &name_pipeline
-        );
-    }
-    inline PipelineLayoutPtr MakePipelineLayoutPtr(Device* d, PipelineLayoutHandle h) noexcept {
-        return PipelineLayoutPtr(d, h,
-            [](Device* d, PipelineLayoutHandle hh) noexcept { d->DestroyPipelineLayout(hh); }
-            , &name_layout
-        );
-    }
-    inline CommandSignaturePtr MakeCommandSignaturePtr(Device* d, CommandSignatureHandle h) noexcept {
-        return CommandSignaturePtr(d, h,
-            [](Device* d, CommandSignatureHandle hh) noexcept { d->DestroyCommandSignature(hh); }
-            , &name_cmdsig
-        );
-    }
-    inline DescriptorHeapPtr MakeDescriptorHeapPtr(Device* d, DescriptorHeapHandle h) noexcept {
-        return DescriptorHeapPtr(d, h,
-            [](Device* d, DescriptorHeapHandle hh) noexcept { d->DestroyDescriptorHeap(hh); }
-            , &name_heap
-        );
-    }
-    inline SamplerPtr MakeSamplerPtr(Device* d, SamplerHandle h) noexcept {
-        return SamplerPtr(d, h,
-            [](Device* d, SamplerHandle hh) noexcept { d->DestroySampler(hh); }
-            , &name_sampler
-        );
-    }
-    inline TimelinePtr MakeTimelinePtr(Device* d, TimelineHandle h) noexcept {
-        return TimelinePtr(d, h,
-            [](Device* d, TimelineHandle hh) noexcept { d->DestroyTimeline(hh); }
-            , &name_timeline
-        );
-    }
-    inline HeapPtr MakeHeapPtr(Device* d, HeapHandle h) noexcept {
-        return HeapPtr(d, h,
-            [](Device* d, HeapHandle hh) noexcept { d->DestroyHeap(hh); }
-            , &name_heap
-        );
-    }
+    //inline PipelinePtr MakePipelinePtr(Device* d, PipelineHandle h) noexcept {
+    //    return PipelinePtr(d, h,
+    //        [](Device* d, PipelineHandle hh) noexcept { d->DestroyPipeline(hh); }
+    //        , &name_pipeline
+    //    );
+    //}
+    //inline PipelineLayoutPtr MakePipelineLayoutPtr(Device* d, PipelineLayoutHandle h) noexcept {
+    //    return PipelineLayoutPtr(d, h,
+    //        [](Device* d, PipelineLayoutHandle hh) noexcept { d->DestroyPipelineLayout(hh); }
+    //        , &name_layout
+    //    );
+    //}
+    //inline CommandSignaturePtr MakeCommandSignaturePtr(Device* d, CommandSignatureHandle h) noexcept {
+    //    return CommandSignaturePtr(d, h,
+    //        [](Device* d, CommandSignatureHandle hh) noexcept { d->DestroyCommandSignature(hh); }
+    //        , &name_cmdsig
+    //    );
+    //}
+    //inline DescriptorHeapPtr MakeDescriptorHeapPtr(Device* d, DescriptorHeapHandle h) noexcept {
+    //    return DescriptorHeapPtr(d, h,
+    //        [](Device* d, DescriptorHeapHandle hh) noexcept { d->DestroyDescriptorHeap(hh); }
+    //        , &name_heap
+    //    );
+    //}
+    //inline SamplerPtr MakeSamplerPtr(Device* d, SamplerHandle h) noexcept {
+    //    return SamplerPtr(d, h,
+    //        [](Device* d, SamplerHandle hh) noexcept { d->DestroySampler(hh); }
+    //        , &name_sampler
+    //    );
+    //}
+    //inline TimelinePtr MakeTimelinePtr(Device* d, TimelineHandle h) noexcept {
+    //    return TimelinePtr(d, h,
+    //        [](Device* d, TimelineHandle hh) noexcept { d->DestroyTimeline(hh); }
+    //        , &name_timeline
+    //    );
+    //}
+    //inline HeapPtr MakeHeapPtr(Device* d, HeapHandle h) noexcept {
+    //    return HeapPtr(d, h,
+    //        [](Device* d, HeapHandle hh) noexcept { d->DestroyHeap(hh); }
+    //        , &name_heap
+    //    );
+    //}
 
     DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept; // implemented in rhi_dx12.cpp
 

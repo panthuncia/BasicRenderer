@@ -388,7 +388,7 @@ namespace rhi {
             ResourceDesc upDesc{};
             upDesc.type = ResourceType::Buffer;
             upDesc.memory = Memory::Upload;
-            upDesc.flags = ResourceFlags::None;
+            upDesc.flags = rhi::ResourceFlags::RF_None;
             upDesc.buffer.sizeBytes = totalSize;
             upDesc.debugName = "TextureUpload";
             auto upload = dev.CreateCommittedResource(upDesc);

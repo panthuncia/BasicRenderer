@@ -509,7 +509,7 @@ inline void Menu::Render(const RenderContext& context) {
     frameCtx->CommandAllocator->Reset();
     m_commandList->Reset(frameCtx->CommandAllocator, nullptr);
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rhi::dx12::context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
 	auto dsvHandle = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>().depthMap->GetDSVInfo(0).cpuHandle;
     m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	auto heap = g_pd3dSrvDescHeap.Get();

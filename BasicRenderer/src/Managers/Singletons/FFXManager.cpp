@@ -11,8 +11,8 @@
 extern ffxFunctions ffxModule;
 
 FfxResource getFFXResource(Resource* resource, const wchar_t* name, FfxResourceStates state) {
-    auto desc = ffxGetResourceDescriptionDX12(resource->GetAPIResource(), FFX_RESOURCE_USAGE_READ_ONLY);
-    auto ffxResource = ffxGetResourceDX12(resource->GetAPIResource(), desc, name, state);
+    auto desc = ffxGetResourceDescriptionDX12(rhi::dx12::get_resource(resource->GetAPIResource()), FFX_RESOURCE_USAGE_READ_ONLY);
+    auto ffxResource = ffxGetResourceDX12(rhi::dx12::get_resource(resource->GetAPIResource()), desc, name, state);
     if (ffxResource.resource == nullptr) {
         spdlog::error("Failed to get FFX resource for resource");
     }
@@ -25,7 +25,7 @@ bool FFXManager::InitFFX() {
     auto outputRes = m_getOutputRes();
     auto renderRes = m_getRenderRes();
 
-    auto device = ffxGetDeviceDX12(DeviceManager::GetInstance().GetDevice().Get());
+    auto device = ffxGetDeviceDX12(rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice()));
     auto scratchMemorySize = ffxGetScratchMemorySizeDX12(10);
 
     // Why can't FFX allocate this itself?
@@ -89,7 +89,7 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
 	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.view), camera.info.view);
 	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invView), camera.info.viewInverse);
     DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.prevViewProjection), prevViewProjection);
-    sssrDesc.commandList = context.commandList;
+    sssrDesc.commandList = rhi::dx12::get_cmd_list(context.commandList);
     auto renderSize = m_getRenderRes();
     sssrDesc.renderSize = { renderSize.x, renderSize.y };
 	sssrDesc.motionVectorScale = { -1.f, 1.f }; // TODO: I think these should be -.5f, .5f, but that produces black fringing in motion

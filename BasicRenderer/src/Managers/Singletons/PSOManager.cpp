@@ -35,7 +35,7 @@ void PSOManager::initialize() {
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(pCompiler.GetAddressOf()));
 }
 
-PipelineState PSOManager::GetPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_psoCache.find(key) == m_psoCache.end()) {
         m_psoCache[key] = CreatePSO(psoFlags, blendState, wireframe);
@@ -43,7 +43,7 @@ PipelineState PSOManager::GetPSO(UINT psoFlags, BlendState blendState, bool wire
     return m_psoCache[key];
 }
 
-PipelineState PSOManager::GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_shadowPSOCache.find(key) == m_shadowPSOCache.end()) {
         m_shadowPSOCache[key] = CreateShadowPSO(psoFlags, blendState, wireframe);
@@ -51,7 +51,7 @@ PipelineState PSOManager::GetShadowPSO(UINT psoFlags, BlendState blendState, boo
     return m_shadowPSOCache[key];
 }
 
-PipelineState PSOManager::GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_shadowMeshPSOCache.find(key) == m_shadowMeshPSOCache.end()) {
         m_shadowMeshPSOCache[key] = CreateShadowMeshPSO(psoFlags, blendState, wireframe);
@@ -59,7 +59,7 @@ PipelineState PSOManager::GetShadowMeshPSO(UINT psoFlags, BlendState blendState,
     return m_shadowMeshPSOCache[key];
 }
 
-PipelineState PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_prePassPSOCache.find(key) == m_prePassPSOCache.end()) {
         m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, blendState, wireframe);
@@ -67,7 +67,7 @@ PipelineState PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bo
     return m_prePassPSOCache[key];
 }
 
-PipelineState PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPrePassPSOCache.find(key) == m_meshPrePassPSOCache.end()) {
         m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, blendState, wireframe);
@@ -75,7 +75,7 @@ PipelineState PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState
     return m_meshPrePassPSOCache[key];
 }
 
-PipelineState PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_PPLLPSOCache.find(key) == m_PPLLPSOCache.end()) {
         m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, blendState, wireframe);
@@ -83,7 +83,7 @@ PipelineState PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool 
     return m_PPLLPSOCache[key];
 }
 
-PipelineState PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPSOCache.find(key) == m_meshPSOCache.end()) {
         m_meshPSOCache[key] = CreateMeshPSO(psoFlags, blendState, wireframe);
@@ -91,7 +91,7 @@ PipelineState PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool 
     return m_meshPSOCache[key];
 }
 
-PipelineState PSOManager::GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
+const PipelineState& PSOManager::GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
     PSOKey key(psoFlags, blendState, wireframe);
     if (m_meshPPLLPSOCache.find(key) == m_meshPPLLPSOCache.end()) {
         m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, blendState, wireframe);
@@ -99,7 +99,7 @@ PipelineState PSOManager::GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, b
     return m_meshPPLLPSOCache[key];
 }
 
-PipelineState PSOManager::GetDeferredPSO(UINT psoFlags) {
+const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
     if (m_deferredPSOCache.find(psoFlags) == m_deferredPSOCache.end()) {
         m_deferredPSOCache[psoFlags] = CreateDeferredPSO(psoFlags);
     }
@@ -168,13 +168,13 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool w
         rhi::Make(soSmp),
     };
 
-    auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create PSO (RHI)");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe)
@@ -231,13 +231,13 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, 
         rhi::Make(soSmp),
     };
 
-    auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create Shadow PSO (RHI)");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 
@@ -308,13 +308,13 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState,
         rhi::Make(soSmp),
     };
 
-    auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create PrePass PSO");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe)
@@ -375,13 +375,13 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bo
         rhi::Make(soSmp),
     };
 
-    auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create PPLL PSO");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPSO(
@@ -452,13 +452,13 @@ PipelineState PSOManager::CreateMeshPSO(
         rhi::Make(soSmp),
     };
 
-    auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create Mesh PSO");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateShadowMeshPSO(
@@ -523,13 +523,13 @@ PipelineState PSOManager::CreateShadowMeshPSO(
         rhi::Make(soSmp),
     };
 
-    auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create Shadow Mesh PSO");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPrePassPSO(
@@ -603,13 +603,13 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
         rhi::Make(soSmp),
     };
 
-	auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+	auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateMeshPPLLPSO(
@@ -681,10 +681,10 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
       rhi::Make(soRaster), rhi::Make(soBlend), rhi::Make(soDepth),
       rhi::Make(soRTV), rhi::Make(soDSV), rhi::Make(soSmp),
     };
-	auto& device = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle psoPrepass = device.CreatePipeline(items, (uint32_t)std::size(items));
+	auto device = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr psoPrepass = device.CreatePipeline(items, (uint32_t)std::size(items));
 
-    return { psoPrepass, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(psoPrepass), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
@@ -759,13 +759,13 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
         rhi::Make(soSmp),
     };
 
-    auto& dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelineHandle pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.valid()) {
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso.Get().valid()) {
         throw std::runtime_error("Failed to create Deferred PSO (RHI)");
     }
 
-    return { pso, compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
@@ -1751,7 +1751,7 @@ void PSOManager::WriteDebugArtifacts(
 
 void PSOManager::createRootSignature() {
 
-    auto& device = DeviceManager::GetInstance().GetDevice();
+    auto device = DeviceManager::GetInstance().GetDevice();
 
     rhi::PushConstantRangeDesc pcs[] = {
     { rhi::ShaderStage::All, NumPerObjectRootConstants, /*set*/0, /*binding*/1 },
@@ -1775,7 +1775,7 @@ void PSOManager::createRootSignature() {
             .ranges = {},
             .pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
             .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
-            .flags = rhi::PipelineLayoutFlags::AllowInputAssembler
+            .flags = rhi::PipelineLayoutFlags::PF_AllowInputAssembler
         });
 
     m_computeRootSignature = device.CreatePipelineLayout(
@@ -1783,7 +1783,7 @@ void PSOManager::createRootSignature() {
             .ranges = {},
             .pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
             .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
-            .flags = rhi::PipelineLayoutFlags::None
+            .flags = rhi::PipelineLayoutFlags::PF_None
         });
 }
 

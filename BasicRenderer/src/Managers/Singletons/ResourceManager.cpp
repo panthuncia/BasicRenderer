@@ -195,7 +195,7 @@ void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandL
 
 std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto dataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+	auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
 	if (pInitialData) {
 		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}
@@ -208,48 +208,6 @@ std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* p
 	return dataBuffer;
 }
 
-//void ResourceManager::QueueResourceTransition(const ResourceTransition& transition) {
-//	queuedResourceTransitions.push_back(transition);
-//}
-
-//void ResourceManager::ExecuteResourceTransitions() {
-//	queuedResourceTransitions.clear();
-//	return;
-//	auto& device = DeviceManager::GetInstance().GetDevice();
-//	auto& commandList = transitionCommandList;
-//	auto& commandAllocator = transitionCommandAllocator;
-//	if (queuedResourceTransitions.size() == 0) {
-//		return;
-//	}
-//
-//	auto hr = commandList->Reset(commandAllocator.Get(), nullptr);
-//	if (FAILED(hr)) {
-//		spdlog::error("Failed to reset command list");
-//	}
-//	std::vector<D3D12_RESOURCE_BARRIER> barriers;
-//	for (auto& transition : queuedResourceTransitions) {
-//		if (transition.resource == nullptr) {
-//			spdlog::error("Resource is null in transition");
-//			throw std::runtime_error("Resource is null");
-//		}
-//		auto& trans = transition.resource->GetTransitions(transition.beforeState, transition.afterState);
-//		for (auto& barrier : trans) {
-//			barriers.push_back(barrier);
-//		}
-//		transition.resource->SetState(transition.afterState);
-//	}
-//	transitionCommandList->ResourceBarrier(barriers.size(), barriers.data());
-//
-//	hr = commandList->Close();
-//	if (FAILED(hr)) {
-//		spdlog::error("Failed to close command list");
-//	}
-//
-//	ID3D12CommandList* ppCommandLists[] = { transitionCommandList.Get() };
-//	transitionCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-//
-//	//queuedResourceTransitions.clear();
-//}
 
 std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress, bool UAV) {
 #if defined(_DEBUG)
@@ -283,7 +241,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		{ m_cbvSrvUavHeap->GetHeap(), index }, 
 		{
 			.dimension = rhi::SrvDim::Buffer,
-			.resource = pDynamicBuffer->GetBuffer()->GetAPIResource(),
+			.resource = pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 			.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown,
 			.buffer = {
 				.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
@@ -345,7 +303,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 		{ m_cbvSrvUavHeap->GetHeap(), index },
 		{
 			.dimension = rhi::SrvDim::Buffer,
-			.resource = pBuffer->GetBuffer()->GetAPIResource(),
+			.resource = pBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 			.formatOverride = rhi::Format::Unknown,
 			.buffer = {
 				.kind = rhi::BufferViewKind::Structured,
@@ -423,13 +381,13 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 		}
 	};
 	if (desc.hasRTV) {
-		textureDesc.flags |= rhi::ResourceFlags::AllowRenderTarget;
+		textureDesc.flags |= rhi::ResourceFlags::RF_AllowRenderTarget;
 	}
 	if (desc.hasDSV) {
-		textureDesc.flags |= rhi::ResourceFlags::AllowDepthStencil;
+		textureDesc.flags |= rhi::ResourceFlags::RF_AllowDepthStencil;
 	}
 	if (desc.hasUAV) {
-		textureDesc.flags |= rhi::ResourceFlags::AllowUnorderedAccess;
+		textureDesc.flags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
 	}
 	// Create the texture resource
 

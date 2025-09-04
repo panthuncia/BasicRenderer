@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <spdlog/spdlog.h>
+#include <rhi.h>
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Environment.h"
@@ -48,7 +49,7 @@ std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment(std::wstring 
 	prefilteredDesc.channels = 3;
 	prefilteredDesc.isCubemap = true;
 	prefilteredDesc.hasRTV = true;
-	prefilteredDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	prefilteredDesc.format = rhi::Format::R8G8B8A8_UNorm;
 	prefilteredDesc.generateMipMaps = true;
 
 	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
@@ -96,7 +97,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		skyboxDesc.channels = 3;
 		skyboxDesc.isCubemap = true;
 		skyboxDesc.hasRTV = true;
-		skyboxDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		skyboxDesc.format = rhi::Format::R8G8B8A8_UNorm;
 
 		auto envCubemap = PixelBuffer::Create(skyboxDesc);
 		auto sampler = Sampler::GetDefaultSampler();
@@ -130,7 +131,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	prefilteredDesc.channels = 3;
 	prefilteredDesc.isCubemap = true;
 	prefilteredDesc.hasRTV = true;
-	prefilteredDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	prefilteredDesc.format = rhi::Format::R8G8B8A8_UNorm;
 	prefilteredDesc.generateMipMaps = true;
 
 	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);

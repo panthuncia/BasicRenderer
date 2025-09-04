@@ -1,7 +1,5 @@
 #pragma once
 
-#include <directx/d3d12.h>
-#include <wrl.h>
 #include <vector>
 #include <functional>
 #include <typeinfo>
@@ -9,6 +7,7 @@
 #include <concepts>
 #include <memory>
 #include <deque>
+#include <rhi.h>
 
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/Buffer.h"
@@ -90,15 +89,12 @@ public:
 		return m_elementSize;
 	}
 
-	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+	rhi::Resource GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
 
 
 protected:
 
-    BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-        m_subresourceAccessTypes[0] = newAccessType;
-        m_subresourceLayouts[0] = newLayout;
-        m_subresourceSyncStates[0] = newSyncState;
+    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
         return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
     }
 
@@ -111,9 +107,6 @@ private:
 		m_elementSize = static_cast<uint32_t>(((sizeof(T) + alignment - 1) / alignment) * alignment);
         CreateBuffer(capacity);
 		SetName(name);
-        m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
-        m_subresourceLayouts.push_back(ResourceLayout::LAYOUT_COMMON);
-        m_subresourceSyncStates.push_back(ResourceSyncState::ALL);
     }
     void OnSetName() override {
         if (name != L"") {
@@ -137,9 +130,9 @@ private:
     bool m_UAV = false;
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto device = DeviceManager::GetInstance().GetDevice();
 
-        auto newDataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, m_elementSize * capacity, false, m_UAV);
+        auto newDataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, m_elementSize * capacity, m_UAV);
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity*sizeof(T));
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);

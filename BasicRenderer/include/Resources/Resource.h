@@ -52,12 +52,6 @@ public:
 protected:
     virtual void OnSetName() {}
 
-    //ResourceAccessType m_currentAccessType = ResourceAccessType::COMMON;
-    //ResourceLayout m_currentLayout = ResourceLayout::LAYOUT_COMMON;
-    //ResourceSyncState m_prevSyncState = ResourceSyncState::ALL;
-	std::vector<rhi::ResourceAccessType> m_subresourceAccessTypes;
-	std::vector<rhi::ResourceLayout> m_subresourceLayouts;
-	std::vector<rhi::ResourceSyncState> m_subresourceSyncStates;
     std::wstring name;
 	bool m_hasLayout = false; // Only textures have a layout
 	std::vector<Resource*> m_aliasedResources; // Resources that are aliased with this resource

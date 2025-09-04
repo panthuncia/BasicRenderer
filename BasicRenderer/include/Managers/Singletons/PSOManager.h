@@ -88,19 +88,19 @@ public:
 
     void initialize();
 
-    PipelineState GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetDeferredPSO(UINT psoFlags);
+    const PipelineState& GetDeferredPSO(UINT psoFlags);
 
     rhi::PipelineLayoutHandle& GetRootSignature();
     rhi::PipelineLayoutHandle& GetComputeRootSignature();

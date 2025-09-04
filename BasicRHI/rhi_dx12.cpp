@@ -61,7 +61,8 @@ namespace rhi {
     const QueueVTable g_qvt = { 
 		&q_submit,
 		&q_signal,
-		&q_wait, 
+		&q_wait,
+		&q_setName,
 		1u };
 
 	const CommandAllocatorVTable g_calvt = {
@@ -118,5 +119,37 @@ namespace rhi {
 		&tex_unmap,
 		&tex_setName,
 		1
+	};
+	const QueryPoolVTable g_qpvt = {
+		&qp_setName,
+		1u
+	};
+	const PipelineVTable g_psovt = {
+		&pso_setName,
+		1u
+	};
+	const PipelineLayoutVTable g_plvt = {
+		&pl_setName,
+		1u
+	};
+	const CommandSignatureVTable g_csvt = {
+		&cs_setName,
+		1u
+	};
+	const DescriptorHeapVTable g_dhvt = {
+		&dh_setName,
+		1u
+	};
+	const SamplerVTable g_svt = {
+		&s_setName,
+		1u
+	};
+	const TimelineVTable g_tlvt = {
+		&tl_setName,
+		1u
+	};
+	const HeapVTable g_hevt = {
+		&h_setName,
+		1u
 	};
 }

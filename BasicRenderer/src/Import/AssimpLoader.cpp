@@ -5,6 +5,7 @@
 #include <DirectXMath.h>
 #include <filesystem>
 #include <vector>
+#include <rhi.h>
 
 #include "Materials/Material.h"
 #include "Materials/MaterialFlags.h"
@@ -86,7 +87,7 @@ namespace AssimpLoader {
                 dims.slicePitch = width * height * 4;
                 desc.imageDimensions.push_back(dims);
                 desc.channels = static_cast<unsigned short>(channels);
-                desc.format = preferSRGB ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
+                desc.format = preferSRGB ? rhi::Format::R8G8B8A8_UNorm_sRGB : rhi::Format::R8G8B8A8_UNorm;
 
                 // aiTex->pcData is BGRA
                 std::vector<uint8_t> rawData(width * height * channels);

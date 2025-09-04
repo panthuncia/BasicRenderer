@@ -123,7 +123,7 @@ public:
             assert(counterOffset % 4096 == 0);
 		}
 
-        auto dataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, bufferSize, false, UAV);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
         
         //ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
 //#if defined(_DEBUG)
@@ -249,13 +249,13 @@ public:
         if (UAV) {
 
 			rhi::UavDesc uavDesc = {};
-			uavDesc.type = rhi::UAVType::Buffer;
+			uavDesc.dimension = rhi::UavDim::Buffer;
 			uavDesc.resource = pDynamicBuffer->GetAPIResource().GetHandle();
-			uavDesc.bufKind = rhi::BufferViewKind::Structured;
-			uavDesc.bufFormat = rhi::Format::Unknown;
-			uavDesc.numElements = capacity;
-			uavDesc.structureByteStride = sizeof(T);
-			uavDesc.counterOffsetBytes = 0;
+			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
+			uavDesc.formatOverride = rhi::Format::Unknown;
+			uavDesc.buffer.numElements = capacity;
+			uavDesc.buffer.structureByteStride = sizeof(T);
+			uavDesc.buffer.counterOffsetInBytes = 0;
 
             // Shader visible UAV
             unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
