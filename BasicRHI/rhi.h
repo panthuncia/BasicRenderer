@@ -1045,6 +1045,44 @@ namespace rhi {
         Resource resource;        // the resource whose UAV is being cleared. Stores Resource instead of a handle because the backend may need to know if it's a buffer or texture. TODO: better solution?
     };
 
+
+    struct CopyableFootprint {
+        uint64_t offset;      // byte offset in the staging buffer
+        uint32_t rowPitch;    // bytes per row (D3D12 is 256B aligned)
+        uint32_t width;       // texels in X for the subresource
+        uint32_t height;      // texels in Y for the subresource
+        uint32_t depth;       // slices for 3D, else 1
+    };
+
+    struct FootprintRangeDesc {
+        ResourceHandle texture{};
+        uint32_t firstMip{ 0 };
+        uint32_t mipCount{ 1 };
+        uint32_t firstArraySlice{ 0 };
+        uint32_t arraySize{ 1 };
+        uint32_t firstPlane{ 0 };  // 0 for non-planar
+        uint32_t planeCount{ 1 };  // 1 for non-planar
+        uint64_t baseOffset{ 0 };  // starting byte offset into the (readback/upload) buffer
+    };
+
+    struct CopyableFootprintsInfo {
+        uint32_t count{ 0 };     // number of footprints written
+        uint64_t totalBytes{ 0 }; // total size from baseOffset that needs to be allocated
+    };
+
+    struct BufferTextureCopyFootprint {
+        ResourceHandle texture;
+        ResourceHandle buffer;
+
+        uint32_t mip;
+        uint32_t arraySlice;
+        uint32_t x = 0, y = 0, z = 0;   // usually 0 for full-subresource copies
+
+        // Placed footprint coming from Device::GetCopyableFootprints:
+		CopyableFootprint footprint;
+    };
+
+
     struct CommandListVTable {
         void (*end)(CommandList*) noexcept;
         void (*recycle)(CommandList*, const CommandAllocator& alloc) noexcept;
@@ -1067,7 +1105,8 @@ namespace rhi {
         void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle sampler) noexcept;
         void (*clearUavUint)(CommandList*, const UavClearInfo&, const UavClearUint&) noexcept;
         void (*clearUavFloat)(CommandList*, const UavClearInfo&, const UavClearFloat&) noexcept;
-        void (*copyBufferToTexture)(CommandList*, const TextureCopyRegion&, const BufferTextureCopy&) noexcept;
+        void (*copyTextureToBuffer)(CommandList*, const BufferTextureCopyFootprint&) noexcept;
+        void (*copyBufferToTexture)(CommandList*, const BufferTextureCopyFootprint&) noexcept;
         void (*copyTextureRegion)(CommandList*, const TextureCopyRegion&, const TextureCopyRegion&) noexcept;
         void (*copyBufferRegion)(CommandList*, ResourceHandle dst, uint64_t dstOffset, ResourceHandle src, uint64_t srcOffset, uint64_t numBytes) noexcept;
         void (*writeTimestamp)(CommandList*, QueryPoolHandle, uint32_t index, Stage stageHint) noexcept; // Timestamp: writes at 'index' (stage ignored on DX12, used on Vulkan)
@@ -1111,7 +1150,8 @@ namespace rhi {
 		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle samp) noexcept;
 		void ClearUavUint(const UavClearInfo& u, const UavClearUint& v) noexcept;
         void ClearUavFloat(const UavClearInfo& u, const UavClearFloat& v) noexcept;
-        void CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept;
+		void CopyTextureToBuffer(const BufferTextureCopyFootprint& r) noexcept;
+		void CopyBufferToTexture(const BufferTextureCopyFootprint& r) noexcept;
         void CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept;
         void CopyBufferRegion(ResourceHandle dst, uint64_t dstOffset, ResourceHandle src, uint64_t srcOffset, uint64_t numBytes) noexcept;
         void WriteTimestamp(QueryPoolHandle p, uint32_t idx, Stage s) noexcept;
@@ -1195,6 +1235,7 @@ namespace rhi {
         void (*flushDeletionQueue)(Device*) noexcept;
         uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
         TimestampCalibration(*getTimestampCalibration)(Device*, QueueKind) noexcept;
+        CopyableFootprintsInfo(*getCopyableFootprints)(Device*, const FootprintRangeDesc&, CopyableFootprint* out, uint32_t outCap) noexcept;
 
 		// Optional debug name setters (can be nullopt)
         void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
@@ -1278,6 +1319,9 @@ namespace rhi {
         inline QueryPoolPtr CreateQueryPool(const QueryPoolDesc& d) noexcept { return vt->createQueryPool(this, d); }
         inline void DestroyQueryPool(QueryPoolHandle h) noexcept { vt->destroyQueryPool(this, h); }
         inline TimestampCalibration GetTimestampCalibration(QueueKind q) noexcept { return vt->getTimestampCalibration(this, q); }
+        inline CopyableFootprintsInfo GetCopyableFootprints(const FootprintRangeDesc& r, CopyableFootprint* out, uint32_t outCap) noexcept {
+            return vt->getCopyableFootprints(this, r, out, outCap);
+		}
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };
 
@@ -1310,8 +1354,12 @@ namespace rhi {
     }
     inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
     inline void CommandList::ClearUavUint(const UavClearInfo& i, const UavClearUint& v) noexcept { vt->clearUavUint(this, i, v); }
-    inline void CommandList::CopyBufferToTexture(const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept { vt->copyBufferToTexture(this, dst, src); }
-    inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
+    inline void CommandList::CopyTextureToBuffer(const BufferTextureCopyRegion& r) noexcept {
+        vt->copyTextureToBuffer(this, r);
+    }
+    inline void CommandList::CopyBufferToTexture(const BufferTextureCopyRegion& r) noexcept {
+        vt->copyBufferToTexture(this, r);
+    }    inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
     inline void CommandList::CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept { vt->copyTextureRegion(this, dst, src); }
     inline void CommandList::CopyBufferRegion(ResourceHandle dst, uint64_t dstOffset, ResourceHandle src, uint64_t srcOffset, uint64_t numBytes) noexcept {
         vt->copyBufferRegion(this, dst, dstOffset, src, srcOffset, numBytes);

@@ -37,6 +37,9 @@ public:
 	const std::array<float, 4>& GetClearColor() const {
 		return m_clearColor;
 	}
+	rhi::Format GetFormat() const {
+		return m_format;
+	}
 
 	unsigned int GetInternalWidth() const {
 		return m_internalWidth;

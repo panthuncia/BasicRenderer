@@ -20,14 +20,14 @@ public:
 		rhi::Device& device,
 		rhi::Memory accessType, 
 		uint64_t bufferSize, 
-		bool unorderedAccess) {
+		bool unorderedAccess = false) {
 		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
 	}
 	static std::unique_ptr<Buffer> CreateUnique(
 		rhi::Device& device, 
 		rhi::Memory accessType, 
 		uint64_t bufferSize,
-		bool unorderedAccess) {
+		bool unorderedAccess = false) {
 		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
 	}
 

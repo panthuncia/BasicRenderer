@@ -24,7 +24,7 @@ class ReadbackManager {
 public:
 	static ReadbackManager& GetInstance();
 
-	void Initialize(rhi::TimelineHandle readbackFence) {
+	void Initialize(rhi::Timeline readbackFence) {
 		m_readbackPass->Setup();
 		m_readbackFence = readbackFence;
         m_readbackPass->SetReadbackFence(readbackFence);
@@ -82,12 +82,12 @@ private:
             // Cleanup if necessary
         }
 
-		void SetReadbackFence(rhi::TimelineHandle fence) {
+		void SetReadbackFence(rhi::Timeline fence) {
 			m_readbackFence = fence;
 		}
 
     private:
-        rhi::TimelineHandle m_readbackFence;
+        rhi::Timeline m_readbackFence;
 		UINT64 m_fenceValue = 0;
     };
 
@@ -95,12 +95,12 @@ private:
 		m_readbackPass = std::make_shared<ReadbackPass>();
     }
 
-    void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
-    void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, PixelBuffer* texture, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveTextureToDDS(rhi::Device& device, rhi::CommandList& commandList, rhi::Queue& commandQueue, PixelBuffer* texture, const std::wstring& outputFile, UINT64 fenceValue);
 
     std::vector<ReadbackInfo> m_queuedReadbacks;
 	std::shared_ptr<ReadbackPass> m_readbackPass;
-    rhi::TimelineHandle m_readbackFence;
+    rhi::Timeline m_readbackFence;
     std::mutex readbackRequestsMutex;
     std::vector<ReadbackRequest> m_readbackRequests;
 

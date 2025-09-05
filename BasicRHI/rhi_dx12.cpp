@@ -40,6 +40,7 @@ namespace rhi {
 		&d_flushDeletionQueue,
 		&d_getDescriptorHandleIncrementSize,
 		&d_getTimestampCalibration,
+		&d_getCopyableFootprints,
 
 		&d_setNameBuffer,
 		&d_setNameTexture,

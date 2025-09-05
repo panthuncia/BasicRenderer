@@ -515,5 +515,6 @@ namespace rhi {
             Span<const BarrierBatch> s{ c.data(), static_cast<uint32_t>(c.size()) };
             return CombineBarrierBatches(s);
         }
+
     } // namespace helpers
 } // namespace rhi

@@ -12,6 +12,7 @@
 #include <spdlog/spdlog.h>
 
 #include "rhi_interop_dx12.h"
+#include "rhi_conversions_dx12.h"
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -65,351 +66,6 @@ namespace rhi {
 		D3D12_COMMAND_LIST_TYPE type{}; 
 		Dx12Device* dev; 
 	};
-
-	static inline D3D12_BARRIER_ACCESS ToDX(const ResourceAccessType state) {
-		if (state == ResourceAccessType::None) {
-			return D3D12_BARRIER_ACCESS_NO_ACCESS;
-		}
-		D3D12_BARRIER_ACCESS access = D3D12_BARRIER_ACCESS_COMMON;
-		if (state & ResourceAccessType::IndexBuffer) {
-			access |= D3D12_BARRIER_ACCESS_INDEX_BUFFER;
-		}
-		if (state & ResourceAccessType::VertexBuffer) {
-			access |= D3D12_BARRIER_ACCESS_VERTEX_BUFFER;
-		}
-		if (state & ResourceAccessType::ConstantBuffer) {
-			access |= D3D12_BARRIER_ACCESS_CONSTANT_BUFFER;
-		}
-		if (state & ResourceAccessType::ShaderResource) {
-			access |= D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-		}
-		if (state & ResourceAccessType::RenderTarget) {
-			access |= D3D12_BARRIER_ACCESS_RENDER_TARGET;
-		}
-		if (state & ResourceAccessType::DepthReadWrite) {
-			access |= D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
-		}
-		if (state & ResourceAccessType::DepthRead) {
-			access |= D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ;
-		}
-		if (state & ResourceAccessType::CopySource) {
-			access |= D3D12_BARRIER_ACCESS_COPY_SOURCE;
-		}
-		if (state & ResourceAccessType::CopyDest) {
-			access |= D3D12_BARRIER_ACCESS_COPY_DEST;
-		}
-		if (state & ResourceAccessType::UnorderedAccess) {
-			access |= D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-		}
-		if (state & ResourceAccessType::IndirectArgument) {
-			access |= D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT;
-		}
-		if (state & ResourceAccessType::RaytracingAccelerationStructureRead) {
-			access |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_READ;
-		}
-		if (state & ResourceAccessType::RaytracingAccelerationStructureWrite) {
-			access |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_WRITE;
-		}
-		return access;
-	}
-
-	static inline D3D12_BARRIER_LAYOUT ToDX(const ResourceLayout l) {
-		switch (l) {
-		case ResourceLayout::Undefined: return D3D12_BARRIER_LAYOUT_UNDEFINED;
-		case ResourceLayout::Common: return D3D12_BARRIER_LAYOUT_COMMON;
-		case ResourceLayout::Present: return D3D12_BARRIER_LAYOUT_PRESENT;
-		case ResourceLayout::GenericRead: return D3D12_BARRIER_LAYOUT_GENERIC_READ;
-		case ResourceLayout::RenderTarget: return D3D12_BARRIER_LAYOUT_RENDER_TARGET;
-		case ResourceLayout::UnorderedAccess: return D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
-		case ResourceLayout::DepthReadWrite: return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
-		case ResourceLayout::DepthRead: return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_READ;
-		case ResourceLayout::ShaderResource: return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
-		case ResourceLayout::CopySource: return D3D12_BARRIER_LAYOUT_COPY_SOURCE;
-		case ResourceLayout::CopyDest: return D3D12_BARRIER_LAYOUT_COPY_DEST;
-		case ResourceLayout::ResolveSource: return D3D12_BARRIER_LAYOUT_RESOLVE_SOURCE;
-		case ResourceLayout::ResolveDest: return D3D12_BARRIER_LAYOUT_RESOLVE_DEST;
-		case ResourceLayout::ShadingRateSource: return D3D12_BARRIER_LAYOUT_SHADING_RATE_SOURCE;
-		case ResourceLayout::DirectCommon: return D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COMMON;
-		case ResourceLayout::DirectGenericRead: return D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_GENERIC_READ;
-		case ResourceLayout::DirectUnorderedAccess: return D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_UNORDERED_ACCESS;
-		case ResourceLayout::DirectShaderResource: return D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_SHADER_RESOURCE;
-		case ResourceLayout::DirectCopySource: return D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_SOURCE;
-		case ResourceLayout::DirectCopyDest: return D3D12_BARRIER_LAYOUT_DIRECT_QUEUE_COPY_DEST;
-		case ResourceLayout::ComputeCommon: return D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_COMMON;
-		case ResourceLayout::ComputeGenericRead: return D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_GENERIC_READ;
-		case ResourceLayout::ComputeUnorderedAccess: return D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_UNORDERED_ACCESS;
-		case ResourceLayout::ComputeShaderResource: return D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_SHADER_RESOURCE;
-		case ResourceLayout::ComputeCopySource: return D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_COPY_SOURCE;
-		case ResourceLayout::ComputeCopyDest: return D3D12_BARRIER_LAYOUT_COMPUTE_QUEUE_COPY_DEST;
-		default: return D3D12_BARRIER_LAYOUT_UNDEFINED;
-		}
-	}
-
-	inline D3D12_BARRIER_SYNC ToDX(const ResourceSyncState state) {
-		switch (state) {
-		case ResourceSyncState::None:
-			return D3D12_BARRIER_SYNC_NONE;
-		case ResourceSyncState::All:
-			return D3D12_BARRIER_SYNC_ALL;
-		case ResourceSyncState::Draw:
-			return D3D12_BARRIER_SYNC_DRAW;
-		case ResourceSyncState::IndexInput:
-			return D3D12_BARRIER_SYNC_INDEX_INPUT;
-		case ResourceSyncState::VertexShading:
-			return D3D12_BARRIER_SYNC_VERTEX_SHADING;
-		case ResourceSyncState::PixelShading:
-			return D3D12_BARRIER_SYNC_PIXEL_SHADING;
-		case ResourceSyncState::DepthStencil:
-			return D3D12_BARRIER_SYNC_DEPTH_STENCIL;
-		case ResourceSyncState::RenderTarget:
-			return D3D12_BARRIER_SYNC_RENDER_TARGET;
-		case ResourceSyncState::ComputeShading:
-			return D3D12_BARRIER_SYNC_COMPUTE_SHADING;
-		case ResourceSyncState::Raytracing:
-			return D3D12_BARRIER_SYNC_RAYTRACING;
-		case ResourceSyncState::Copy:
-			return D3D12_BARRIER_SYNC_COPY;
-		case ResourceSyncState::Resolve:
-			return D3D12_BARRIER_SYNC_RESOLVE;
-		case ResourceSyncState::ExecuteIndirect:
-			return D3D12_BARRIER_SYNC_EXECUTE_INDIRECT;
-		case ResourceSyncState::Predication:
-			return D3D12_BARRIER_SYNC_PREDICATION;
-		case ResourceSyncState::AllShading:
-			return D3D12_BARRIER_SYNC_ALL_SHADING;
-		case ResourceSyncState::NonPixelShading:
-			return D3D12_BARRIER_SYNC_NON_PIXEL_SHADING;
-		case ResourceSyncState::EmitRaytracingAccelerationStructurePostbuildInfo:
-			return D3D12_BARRIER_SYNC_EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO;
-		case ResourceSyncState::ClearUnorderedAccessView:
-			return D3D12_BARRIER_SYNC_CLEAR_UNORDERED_ACCESS_VIEW;
-		case ResourceSyncState::VideoDecode:
-			return D3D12_BARRIER_SYNC_VIDEO_DECODE;
-		case ResourceSyncState::VideoProcess:
-			return D3D12_BARRIER_SYNC_VIDEO_PROCESS;
-		case ResourceSyncState::VideoEncode:
-			return D3D12_BARRIER_SYNC_VIDEO_ENCODE;
-		case ResourceSyncState::BuildRaytracingAccelerationStructure:
-			return D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE;
-		case ResourceSyncState::CopyRatracingAccelerationStructure:
-			return D3D12_BARRIER_SYNC_COPY_RAYTRACING_ACCELERATION_STRUCTURE;
-		case ResourceSyncState::SyncSplit:
-			return D3D12_BARRIER_SYNC_SPLIT;
-		}
-		return D3D12_BARRIER_SYNC_ALL;
-	}
-
-	static inline D3D12_FILL_MODE ToDx(const FillMode f) { return f == FillMode::Wireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID; }
-	static inline D3D12_CULL_MODE  ToDx(const CullMode c) {
-		switch (c) {
-		case CullMode::None:return D3D12_CULL_MODE_NONE;
-		case CullMode::Front:return D3D12_CULL_MODE_FRONT;
-		default:return D3D12_CULL_MODE_BACK;
-		}
-	}
-	static inline D3D12_COMPARISON_FUNC ToDx(const CompareOp c) {
-		using C = D3D12_COMPARISON_FUNC;
-		switch (c) {
-		case CompareOp::Never:return C::D3D12_COMPARISON_FUNC_NEVER;
-		case CompareOp::Less:return C::D3D12_COMPARISON_FUNC_LESS;
-		case CompareOp::Equal:return C::D3D12_COMPARISON_FUNC_EQUAL;
-		case CompareOp::LessEqual:return C::D3D12_COMPARISON_FUNC_LESS_EQUAL;
-		case CompareOp::Greater:return C::D3D12_COMPARISON_FUNC_GREATER;
-		case CompareOp::NotEqual:return C::D3D12_COMPARISON_FUNC_NOT_EQUAL;
-		case CompareOp::GreaterEqual:return C::D3D12_COMPARISON_FUNC_GREATER_EQUAL;
-		default:return C::D3D12_COMPARISON_FUNC_ALWAYS;
-		}
-	}
-	static inline DXGI_FORMAT ToDxgi(const Format f) {
-		switch (f)
-		{
-		case Format::Unknown: return DXGI_FORMAT_UNKNOWN;
-		case Format::R32G32B32A32_Typeless: return DXGI_FORMAT_R32G32B32A32_TYPELESS;
-		case Format::R32G32B32A32_Float: return DXGI_FORMAT_R32G32B32A32_FLOAT;
-		case Format::R32G32B32A32_UInt: return DXGI_FORMAT_R32G32B32A32_UINT;
-		case Format::R32G32B32A32_SInt: return DXGI_FORMAT_R32G32B32A32_SINT;
-		case Format::R32G32B32_Typeless: return DXGI_FORMAT_R32G32B32_TYPELESS;
-		case Format::R32G32B32_Float: return DXGI_FORMAT_R32G32B32_FLOAT;
-		case Format::R32G32B32_UInt: return DXGI_FORMAT_R32G32B32_UINT;
-		case Format::R32G32B32_SInt: return DXGI_FORMAT_R32G32B32_SINT;
-		case Format::R16G16B16A16_Typeless: return DXGI_FORMAT_R16G16B16A16_TYPELESS;
-		case Format::R16G16B16A16_Float: return DXGI_FORMAT_R16G16B16A16_FLOAT;
-		case Format::R16G16B16A16_UNorm: return DXGI_FORMAT_R16G16B16A16_UNORM;
-		case Format::R16G16B16A16_UInt: return DXGI_FORMAT_R16G16B16A16_UINT;
-		case Format::R16G16B16A16_SNorm: return DXGI_FORMAT_R16G16B16A16_SNORM;
-		case Format::R16G16B16A16_SInt: return DXGI_FORMAT_R16G16B16A16_SINT;
-		case Format::R32G32_Typeless: return DXGI_FORMAT_R32G32_TYPELESS;
-		case Format::R32G32_Float: return DXGI_FORMAT_R32G32_FLOAT;
-		case Format::R32G32_UInt: return DXGI_FORMAT_R32G32_UINT;
-		case Format::R32G32_SInt: return DXGI_FORMAT_R32G32_SINT;
-		case Format::R10G10B10A2_Typeless: return DXGI_FORMAT_R10G10B10A2_TYPELESS;
-		case Format::R10G10B10A2_UNorm: return DXGI_FORMAT_R10G10B10A2_UNORM;
-		case Format::R10G10B10A2_UInt: return DXGI_FORMAT_R10G10B10A2_UINT;
-		case Format::R11G11B10_Float: return DXGI_FORMAT_R11G11B10_FLOAT;
-		case Format::R8G8B8A8_Typeless: return DXGI_FORMAT_R8G8B8A8_TYPELESS;
-		case Format::R8G8B8A8_UNorm: return DXGI_FORMAT_R8G8B8A8_UNORM;
-		case Format::R8G8B8A8_UNorm_sRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-		case Format::R8G8B8A8_UInt: return DXGI_FORMAT_R8G8B8A8_UINT;
-		case Format::R8G8B8A8_SNorm: return DXGI_FORMAT_R8G8B8A8_SNORM;
-		case Format::R8G8B8A8_SInt: return DXGI_FORMAT_R8G8B8A8_SINT;
-		case Format::R16G16_Typeless: return DXGI_FORMAT_R16G16_TYPELESS;
-		case Format::R16G16_Float: return DXGI_FORMAT_R16G16_FLOAT;
-		case Format::R16G16_UNorm: return DXGI_FORMAT_R16G16_UNORM;
-		case Format::R16G16_UInt: return DXGI_FORMAT_R16G16_UINT;
-		case Format::R16G16_SNorm: return DXGI_FORMAT_R16G16_SNORM;
-		case Format::R16G16_SInt: return DXGI_FORMAT_R16G16_SINT;
-		case Format::R32_Typeless: return DXGI_FORMAT_R32_TYPELESS;
-		case Format::D32_Float: return DXGI_FORMAT_D32_FLOAT;
-		case Format::R32_Float: return DXGI_FORMAT_R32_FLOAT;
-		case Format::R32_UInt: return DXGI_FORMAT_R32_UINT;
-		case Format::R32_SInt: return DXGI_FORMAT_R32_SINT;
-		case Format::R8G8_Typeless: return DXGI_FORMAT_R8G8_TYPELESS;
-		case Format::R8G8_UNorm: return DXGI_FORMAT_R8G8_UNORM;
-		case Format::R8G8_UInt: return DXGI_FORMAT_R8G8_UINT;
-		case Format::R8G8_SNorm: return DXGI_FORMAT_R8G8_SNORM;
-		case Format::R8G8_SInt: return DXGI_FORMAT_R8G8_SINT;
-		case Format::R16_Typeless: return DXGI_FORMAT_R16_TYPELESS;
-		case Format::R16_Float: return DXGI_FORMAT_R16_FLOAT;
-		case Format::R16_UNorm: return DXGI_FORMAT_R16_UNORM;
-		case Format::R16_UInt: return DXGI_FORMAT_R16_UINT;
-		case Format::R16_SNorm: return DXGI_FORMAT_R16_SNORM;
-		case Format::R16_SInt: return DXGI_FORMAT_R16_SINT;
-		case Format::R8_Typeless: return DXGI_FORMAT_R8_TYPELESS;
-		case Format::R8_UNorm: return DXGI_FORMAT_R8_UNORM;
-		case Format::R8_UInt: return DXGI_FORMAT_R8_UINT;
-		case Format::R8_SNorm: return DXGI_FORMAT_R8_SNORM;
-		case Format::R8_SInt: return DXGI_FORMAT_R8_SINT;
-		case Format::BC1_Typeless: return DXGI_FORMAT_BC1_TYPELESS;
-		case Format::BC1_UNorm: return DXGI_FORMAT_BC1_UNORM;
-		case Format::BC1_UNorm_sRGB: return DXGI_FORMAT_BC1_UNORM_SRGB;
-		case Format::BC2_Typeless: return DXGI_FORMAT_BC2_TYPELESS;
-		case Format::BC2_UNorm: return DXGI_FORMAT_BC2_UNORM;
-		case Format::BC2_UNorm_sRGB: return DXGI_FORMAT_BC2_UNORM_SRGB;
-		case Format::BC3_Typeless: return DXGI_FORMAT_BC3_TYPELESS;
-		case Format::BC3_UNorm: return DXGI_FORMAT_BC3_UNORM;
-		case Format::BC3_UNorm_sRGB: return DXGI_FORMAT_BC3_UNORM_SRGB;
-		case Format::BC4_Typeless: return DXGI_FORMAT_BC4_TYPELESS;
-		case Format::BC4_UNorm: return DXGI_FORMAT_BC4_UNORM;
-		case Format::BC4_SNorm: return DXGI_FORMAT_BC4_SNORM;
-		case Format::BC5_Typeless: return DXGI_FORMAT_BC5_TYPELESS;
-		case Format::BC5_UNorm: return DXGI_FORMAT_BC5_UNORM;
-		case Format::BC5_SNorm: return DXGI_FORMAT_BC5_SNORM;
-		case Format::BC6H_Typeless: return DXGI_FORMAT_BC6H_TYPELESS;
-		case Format::BC6H_UF16: return DXGI_FORMAT_BC6H_UF16;
-		case Format::BC6H_SF16: return DXGI_FORMAT_BC6H_SF16;
-		case Format::BC7_Typeless: return DXGI_FORMAT_BC7_TYPELESS;
-		case Format::BC7_UNorm: return DXGI_FORMAT_BC7_UNORM;
-		case Format::BC7_UNorm_sRGB: return DXGI_FORMAT_BC7_UNORM_SRGB;
-		default: return DXGI_FORMAT_UNKNOWN;
-		}
-	}
-
-	static inline D3D12_BLEND ToDx(BlendFactor f) {
-		using B = D3D12_BLEND;
-		switch (f) {
-		case BlendFactor::Zero:return B::D3D12_BLEND_ZERO; case BlendFactor::One:return B::D3D12_BLEND_ONE;
-		case BlendFactor::SrcColor:return B::D3D12_BLEND_SRC_COLOR; case BlendFactor::InvSrcColor:return B::D3D12_BLEND_INV_SRC_COLOR;
-		case BlendFactor::SrcAlpha:return B::D3D12_BLEND_SRC_ALPHA; case BlendFactor::InvSrcAlpha:return B::D3D12_BLEND_INV_SRC_ALPHA;
-		case BlendFactor::DstColor:return B::D3D12_BLEND_DEST_COLOR; case BlendFactor::InvDstColor:return B::D3D12_BLEND_INV_DEST_COLOR;
-		case BlendFactor::DstAlpha:return B::D3D12_BLEND_DEST_ALPHA; case BlendFactor::InvDstAlpha:return B::D3D12_BLEND_INV_DEST_ALPHA;
-		}
-		return B::D3D12_BLEND_ONE;
-	}
-	static inline D3D12_BLEND_OP ToDx(const BlendOp o) {
-		switch (o) {
-		case BlendOp::Add:
-			return D3D12_BLEND_OP::D3D12_BLEND_OP_ADD;
-		case BlendOp::Sub:
-			return D3D12_BLEND_OP::D3D12_BLEND_OP_SUBTRACT;
-		case BlendOp::RevSub:
-			return D3D12_BLEND_OP::D3D12_BLEND_OP_REV_SUBTRACT;
-		case BlendOp::Min:
-			return D3D12_BLEND_OP::D3D12_BLEND_OP_MIN;
-		case BlendOp::Max:
-			return D3D12_BLEND_OP::D3D12_BLEND_OP_MAX;
-		} return D3D12_BLEND_OP::D3D12_BLEND_OP_ADD;
-	}
-
-
-	static D3D12_HEAP_TYPE ToDx(const Memory m) {
-		switch (m) {
-		case Memory::Upload:   return D3D12_HEAP_TYPE_UPLOAD;
-		case Memory::Readback: return D3D12_HEAP_TYPE_READBACK;
-		default:               return D3D12_HEAP_TYPE_DEFAULT;
-		}
-	}
-
-	static D3D12_RESOURCE_FLAGS ToDX(const ResourceFlags flags) {
-		D3D12_RESOURCE_FLAGS f = D3D12_RESOURCE_FLAG_NONE;
-		if (flags & RF_AllowRenderTarget)
-			f |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-		if (flags & RF_AllowDepthStencil)
-			f |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-		if (flags & RF_AllowUnorderedAccess)
-			f |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-		if (flags & RF_DenyShaderResource)
-			f |= D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
-		if (flags & RF_AllowCrossAdapter)
-			f |= D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
-		if (flags & RF_AllowSimultaneousAccess)
-			f |= D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
-		if (flags & RF_RaytracingAccelerationStructure)
-			f |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
-		return f;
-	}
-
-	static D3D12_DESCRIPTOR_HEAP_TYPE ToDX(const DescriptorHeapType t) {
-		switch (t) {
-		case DescriptorHeapType::Sampler: return D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
-		case DescriptorHeapType::CbvSrvUav: return D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		case DescriptorHeapType::RTV: return D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-		case DescriptorHeapType::DSV: return D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-		default:
-			assert(false && "Invalid DescriptorType");
-			return D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-		}
-	}
-
-	static D3D12_BARRIER_SUBRESOURCE_RANGE ToDX(const TextureSubresourceRange& r) {
-		D3D12_BARRIER_SUBRESOURCE_RANGE o{};
-		o.IndexOrFirstMipLevel = r.baseMip;
-		o.NumMipLevels = r.mipCount;
-		o.FirstArraySlice = r.baseLayer;
-		o.NumArraySlices = r.layerCount;
-		o.FirstPlane = 0;
-		o.NumPlanes = 1;
-		return o;
-	}
-	
-	D3D12_CLEAR_VALUE ToDX(const ClearValue& cv) {
-		D3D12_CLEAR_VALUE v{};
-		v.Format = ToDxgi(cv.format);
-		if (cv.type == ClearValueType::Color) {
-			for (int i = 0; i < 4; ++i) v.Color[i] = cv.rgba[i];
-		}
-		else {
-			v.DepthStencil.Depth = cv.depthStencil.depth;
-			v.DepthStencil.Stencil = cv.depthStencil.stencil;
-		}
-		return v;
-	}
-
-	static D3D12_HEAP_FLAGS ToDX(HeapFlags f) {
-		D3D12_HEAP_FLAGS out = D3D12_HEAP_FLAG_NONE;
-		auto test = [&](HeapFlags b) { return (static_cast<uint32_t>(f) & static_cast<uint32_t>(b)) != 0; };
-		if (test(HeapFlags::AllowOnlyBuffers))            out |= D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
-		if (test(HeapFlags::AllowOnlyNonRtDsTextures))    out |= D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
-		if (test(HeapFlags::AllowOnlyRtDsTextures))       out |= D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
-		if (test(HeapFlags::DenyBuffers))                 out |= D3D12_HEAP_FLAG_DENY_BUFFERS;
-		if (test(HeapFlags::DenyRtDsTextures))            out |= D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES;
-		if (test(HeapFlags::DenyNonRtDsTextures))         out |= D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES;
-		if (test(HeapFlags::Shared))                      out |= D3D12_HEAP_FLAG_SHARED;
-		if (test(HeapFlags::SharedCrossAdapter))          out |= D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
-		if (test(HeapFlags::CreateNotResident))           out |= D3D12_HEAP_FLAG_CREATE_NOT_RESIDENT;
-		if (test(HeapFlags::CreateNotZeroed))             out |= D3D12_HEAP_FLAG_CREATE_NOT_ZEROED;
-		if (test(HeapFlags::AllowAllBuffersAndTextures))  out |= D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
-		return out;
-	}
 
 	// Build D3D12_RESOURCE_DESC1 for buffers
 	static D3D12_RESOURCE_DESC1 MakeBufferDesc1(uint64_t bytes, D3D12_RESOURCE_FLAGS flags) {
@@ -2039,6 +1695,72 @@ namespace rhi {
 		return { freq };
 	}
 
+	static CopyableFootprintsInfo d_getCopyableFootprints(
+		Device* d,
+		const FootprintRangeDesc& in,
+		CopyableFootprint* out,
+		uint32_t outCap) noexcept
+	{
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || !out || outCap == 0) return {};
+
+		auto* T = impl->textures.get(in.texture);
+		if (!T || !T->res) return {};
+
+		const D3D12_RESOURCE_DESC desc = T->res->GetDesc();
+
+		// Resource-wide properties
+		const UINT mipLevels = desc.MipLevels;
+		const UINT arrayLayers = (desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? 1u : desc.DepthOrArraySize;
+
+		// Plane count per DXGI format
+		const UINT resPlaneCount = D3D12GetFormatPlaneCount(impl->dev.Get(), desc.Format);
+
+		// Clamp input range to resource
+		const UINT firstMip = std::min<UINT>(in.firstMip, mipLevels ? mipLevels - 1u : 0u);
+		const UINT mipCount = std::min<UINT>(in.mipCount, mipLevels - firstMip);
+		const UINT firstArray = std::min<UINT>(in.firstArraySlice, arrayLayers ? arrayLayers - 1u : 0u);
+		const UINT arrayCount = std::min<UINT>(in.arraySize, arrayLayers - firstArray);
+		const UINT firstPlane = std::min<UINT>(in.firstPlane, resPlaneCount ? resPlaneCount - 1u : 0u);
+		const UINT planeCount = std::min<UINT>(in.planeCount, resPlaneCount - firstPlane);
+
+		if (mipCount == 0 || arrayCount == 0 || planeCount == 0) return {};
+
+		const UINT totalSubs = mipCount * arrayCount * planeCount;
+		if (outCap < totalSubs) return {}; // TODO: partial?
+
+		// D3D12 subresource layout: Mip + Array*NumMips + Plane*NumMips*ArraySize
+		const UINT firstSubresource =
+			firstMip + firstArray * mipLevels + firstPlane * mipLevels * arrayLayers;
+
+		std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> placed(totalSubs);
+		std::vector<UINT>  numRows(totalSubs);
+		std::vector<UINT64> rowSizes(totalSubs);
+		UINT64 totalBytes = 0;
+
+		impl->dev->GetCopyableFootprints(
+			&desc,
+			firstSubresource,
+			totalSubs,
+			in.baseOffset, // base offset you want footprints relative to
+			placed.data(),
+			numRows.data(),
+			rowSizes.data(),
+			&totalBytes);
+
+		// Pack back into RHI-friendly structure
+		for (UINT i = 0; i < totalSubs; ++i) {
+			const auto& f = placed[i].Footprint;
+			out[i].offset = placed[i].Offset;
+			out[i].rowPitch = f.RowPitch;     // bytes
+			out[i].height = f.Height;       // texel rows used for the copy
+			out[i].width = f.Width;        // texels
+			out[i].depth = f.Depth;        // slices for 3D (else 1)
+		}
+
+		return { totalSubs, totalBytes };
+	}
+
 	// ---------------- Queue vtable funcs ----------------
 	static Result q_submit(Queue* q, Span<CommandList> lists, const SubmitDesc& s) noexcept {
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
@@ -2399,47 +2121,65 @@ namespace rhi {
 		rec->cl->ClearUnorderedAccessViewFloat(gpu, cpu, res, v.v, 0, nullptr);
 	}
 
-	static void cl_copyBufferToTexture(CommandList* cl, const TextureCopyRegion& dst, const BufferTextureCopy& src) noexcept {
-		if (!cl || !cl->impl) return;
+	static UINT Align256(UINT x) { return (x + 255u) & ~255u; }
+
+	// texture -> buffer
+	static void cl_copyTextureToBufferFp(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = rec->dev;
-		if (!dev) return;
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!rec || !impl) return;
 
-		// Resolve destination texture & source buffer
-		auto* T = dev->textures.get(dst.texture);
-		auto* B = dev->buffers.get(src.buffer);
-		if (!T || !T->res || !B || !B->res) return;
+		auto* T = impl->textures.get(r.texture);
+		auto* B = impl->buffers.get(r.buffer);
+		if (!T || !B || !T->res || !B->res) return;
 
-		// Compute subresource index (plane slice = 0 for non-planar formats)
-		const UINT plane = 0;
-		UINT subresource = 0;
-		if (T->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) {
-			subresource = D3D12CalcSubresource(dst.mip, /*arraySlice*/0, plane, T->mips, /*ArraySize*/1);
-		}
-		else {
-			// 1D/2D/2DArray/Cube/CubeArray: array slice is meaningful
-			subresource = D3D12CalcSubresource(dst.mip, dst.arraySlice, plane, T->mips, T->arraySize);
-		}
+		D3D12_TEXTURE_COPY_LOCATION dst{};
+		dst.pResource = B->res.Get();
+		dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		dst.PlacedFootprint.Offset = r.footprint.offset;
+		dst.PlacedFootprint.Footprint.Format = T->fmt;     // texture’s actual DXGI format
+		dst.PlacedFootprint.Footprint.Width = r.footprint.width;
+		dst.PlacedFootprint.Footprint.Height = r.footprint.height;
+		dst.PlacedFootprint.Footprint.Depth = r.footprint.depth;
+		dst.PlacedFootprint.Footprint.RowPitch = r.footprint.rowPitch;
 
-		// Destination: texture subresource
-		D3D12_TEXTURE_COPY_LOCATION dstLoc{};
-		dstLoc.pResource = T->res.Get();
-		dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-		dstLoc.SubresourceIndex = subresource;
+		D3D12_TEXTURE_COPY_LOCATION src{};
+		src.pResource = T->res.Get();
+		src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		src.SubresourceIndex = CalcSubresourceFor(*T, r.mip,
+			(T->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? 0u : r.arraySlice);
 
-		// Source: buffer with placed footprint
-		D3D12_TEXTURE_COPY_LOCATION srcLoc{};
-		srcLoc.pResource = B->res.Get();
-		srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-		srcLoc.PlacedFootprint.Offset = src.offset;
-		srcLoc.PlacedFootprint.Footprint.Format = T->fmt;
-		srcLoc.PlacedFootprint.Footprint.Width = dst.width;
-		srcLoc.PlacedFootprint.Footprint.Height = dst.height;
-		srcLoc.PlacedFootprint.Footprint.Depth = dst.depth;   // usually 1 for 2D uploads; >1 for 3D slices
-		srcLoc.PlacedFootprint.Footprint.RowPitch = src.rowPitch; // must satisfy D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256)
+		// Full subresource copy (nullptr box) at (x,y,z) inside the texture
+		rec->cl->CopyTextureRegion(&dst, r.x, r.y, r.z, &src, nullptr);
+	}
 
-		// pSrcBox must be nullptr when source is a buffer (footprint defines size)
-		rec->cl->CopyTextureRegion(&dstLoc, dst.x, dst.y, dst.z, &srcLoc, nullptr);
+	// buffer -> texture (symmetric)
+	static void cl_copyBufferToTextureFp(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
+		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
+		auto* impl = rec ? rec->dev : nullptr;
+		if (!rec || !impl) return;
+
+		auto* T = impl->textures.get(r.texture);
+		auto* B = impl->buffers.get(r.buffer);
+		if (!T || !B || !T->res || !B->res) return;
+
+		D3D12_TEXTURE_COPY_LOCATION src{};
+		src.pResource = B->res.Get();
+		src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		src.PlacedFootprint.Offset = r.footprint.offset;
+		src.PlacedFootprint.Footprint.Format = T->fmt;
+		src.PlacedFootprint.Footprint.Width = r.footprint.width;
+		src.PlacedFootprint.Footprint.Height = r.footprint.height;
+		src.PlacedFootprint.Footprint.Depth = r.footprint.depth;
+		src.PlacedFootprint.Footprint.RowPitch = r.footprint.rowPitch;
+
+		D3D12_TEXTURE_COPY_LOCATION dst{};
+		dst.pResource = T->res.Get();
+		dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dst.SubresourceIndex = CalcSubresourceFor(*T, r.mip,
+			(T->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? 0u : r.arraySlice);
+
+		rec->cl->CopyTextureRegion(&dst, r.x, r.y, r.z, &src, nullptr);
 	}
 
 	static void cl_copyTextureRegion(
@@ -2474,7 +2214,7 @@ namespace rhi {
 		UINT srcD = src.depth ? src.depth : ((SrcT->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
 			? MipDim(SrcT->depth, src.mip) : 1u);
 
-		// Clamp box to the src subresource bounds just in case (optional; D3D will also validate)
+		// Clamp box to the src subresource bounds just in case
 		if (SrcT->dim != D3D12_RESOURCE_DIMENSION_TEXTURE3D) { srcD = 1; }
 
 		D3D12_BOX srcBox{};
