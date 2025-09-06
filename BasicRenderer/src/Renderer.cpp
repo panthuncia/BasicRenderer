@@ -162,7 +162,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
-    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_device(m_device), rhi::dx12::get_queue(graphicsQueue), rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
+    Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
 	ECSManager::GetInstance().Initialize();
 	StatisticsManager::GetInstance().Initialize();
@@ -678,10 +678,6 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
     // Release the resources tied to the swap chain
     auto numFramesInFlight = getNumFramesInFlight();
 
-    for (int i = 0; i < numFramesInFlight; ++i) {
-        renderTargets[i].Reset();
-    }
-
     // Resize the swap chain
 	m_swapChain->ResizeBuffers(m_numFramesInFlight, newWidth, newHeight, rhi::Format::R8G8B8A8_UNorm, DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH); // TODO: Port flags to RHI
 
@@ -692,11 +688,11 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
     for (UINT n = 0; n < m_numFramesInFlight; n++) {
         renderTargets[n] = m_swapChain->Image(n);
 		rhi::RtvDesc rtvDesc = {};
-		rtvDesc.dim = rhi::RtvDim::Texture2D;
+		rtvDesc.dimension = rhi::RtvDim::Texture2D;
 		rtvDesc.formatOverride = rhi::Format::R8G8B8A8_UNorm;
 		rtvDesc.range = { 0, 1, 0, 1 };
-		rtvDesc.texture = renderTargets[n].GetHandle();
-		device.CreateRenderTargetView({ rtvHeap.Get(), n }, rtvDesc);
+		rtvDesc.texture = renderTargets[n];
+		device.CreateRenderTargetView({ rtvHeap->GetHandle(), n}, rtvDesc);
     }
 
 	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("outputResolution")({ newWidth, newHeight });
@@ -716,9 +712,9 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
 void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 	// Wait until the GPU has completed commands up to this fence point.
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto completedValue = device.TimelineCompletedValue(m_frameFence.Get());
+	auto completedValue = m_frameFence->GetCompletedValue();
     if (completedValue < m_frameFenceValues[currentFrameIndex]) {
-        device.TimelineHostWait({ m_frameFence.Get(), m_frameFenceValues[currentFrameIndex] });
+        m_frameFence->HostWait(m_frameFenceValues[currentFrameIndex]);
     }
 }
 
@@ -836,7 +832,7 @@ void Renderer::Render() {
 	rtvBarrier.beforeLayout = rhi::ResourceLayout::Common;
 	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
 
-	rtvBarrier.texture = renderTargets[m_frameIndex].GetHandle();
+	rtvBarrier.texture = renderTargets[m_frameIndex];
     rhi::BarrierBatch batch = {};
 	batch.textures = { &rtvBarrier };
 
@@ -861,7 +857,7 @@ void Renderer::Render() {
 	rtvBarrier.beforeAccess = rhi::ResourceAccessType::RenderTarget;
 	rtvBarrier.beforeLayout = rhi::ResourceLayout::RenderTarget;
 	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
-	rtvBarrier.texture = renderTargets[m_frameIndex].GetHandle();
+	rtvBarrier.texture = renderTargets[m_frameIndex];
 	batch.textures = { &rtvBarrier };
 	commandList->Barriers(batch);
 
@@ -885,7 +881,7 @@ void Renderer::Render() {
 void Renderer::SignalFence(rhi::Queue commandQueue, uint8_t frameIndexToSignal) {
     // Signal the fence
     m_currentFrameFenceValue++;
-	commandQueue.Signal({ m_frameFence.Get(), m_currentFrameFenceValue });
+	commandQueue.Signal({ m_frameFence->GetHandle(), m_currentFrameFenceValue });
 
     // Store the fence value for the current frame
     m_frameFenceValues[frameIndexToSignal] = m_currentFrameFenceValue;
@@ -906,11 +902,11 @@ void Renderer::FlushCommandQueue() {
     auto computeQueue = DeviceManager::GetInstance().GetComputeQueue();
 
     // Signal the fence and wait
-    graphicsQueue.Signal({ flushFence.Get(), 1 });
-	computeQueue.Signal({ flushFence.Get(), 2 });
+    graphicsQueue.Signal({ flushFence->GetHandle(), 1 });
+	computeQueue.Signal({ flushFence->GetHandle(), 2 });
     
-	device.TimelineHostWait({ flushFence.Get(), 1 });
-    device.TimelineHostWait({ flushFence.Get(), 2 });
+	flushFence->HostWait(1);
+    flushFence->HostWait(2);
 }
 
 void Renderer::StallPipeline() {

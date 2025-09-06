@@ -10,6 +10,7 @@
 #include <vector>
 #include <cassert>
 #include <spdlog/spdlog.h>
+#include <optional>
 
 #include "rhi_interop_dx12.h"
 #include "rhi_conversions_dx12.h"
@@ -1915,14 +1916,14 @@ namespace rhi {
 		}
 		l->cl->IASetVertexBuffers(startSlot, (UINT)numViews, views.data());
 	}
-	static void cl_setIB(CommandList* cl, ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32) noexcept {
+	static void cl_setIB(CommandList* cl, ResourceHandle b, const IndexBufferView& view) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* dev = l->dev;
 		if (auto* B = dev->buffers.get(b)) {
 			D3D12_INDEX_BUFFER_VIEW ibv{};
-			ibv.BufferLocation = B->res->GetGPUVirtualAddress() + offset;
-			ibv.SizeInBytes = sizeBytes;
-			ibv.Format = idx32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
+			ibv.BufferLocation = B->res->GetGPUVirtualAddress() + view.offset;
+			ibv.SizeInBytes = view.sizeBytes;
+			ibv.Format = ToDxgi(view.format);
 			l->cl->IASetIndexBuffer(&ibv);
 		}
 	}
@@ -1977,14 +1978,20 @@ namespace rhi {
 			argB->res.Get(), argOff,
 			cntRes, cntOff);
 	}
-	static void cl_setDescriptorHeaps(CommandList* cl, DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept {
+	static void cl_setDescriptorHeaps(CommandList* cl, DescriptorHeapHandle csu, std::optional<DescriptorHeapHandle> samp) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* dev = l->dev;
 
 		ID3D12DescriptorHeap* heaps[2]{};
 		UINT n = 0;
-		if (auto* H = dev->descHeaps.get(csu))  heaps[n++] = H->heap.Get();
-		if (auto* H = dev->descHeaps.get(samp)) heaps[n++] = H->heap.Get();
+		if (auto* H = dev->descHeaps.get(csu)) {
+			heaps[n++] = H->heap.Get();
+		}
+		if (samp.has_value()) {
+			if (auto* H = dev->descHeaps.get(samp.value())) {
+				heaps[n++] = H->heap.Get();
+			}
+		}
 		if (n) {
 			l->cl->SetDescriptorHeaps(n, heaps);
 		}

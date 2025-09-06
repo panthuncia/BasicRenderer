@@ -1,8 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
-#include <wrl/client.h>
-#include <d3d12.h>
+#include <rhi.h>
 #include "Render/CommandListPool.h"
 #include "Render/QueueKind.h"
 
@@ -16,16 +15,16 @@ enum class ComputeMode : uint8_t { Async, AliasToGraphics };
 class CommandRecordingManager {
 public:
     struct Init {
-        ID3D12CommandQueue* graphicsQ = nullptr;
-        ID3D12Fence* graphicsF = nullptr;
+        rhi::Queue* graphicsQ = nullptr;
+        rhi::Timeline* graphicsF = nullptr;
         CommandListPool* graphicsPool = nullptr; // pool created with DIRECT
 
-        ID3D12CommandQueue* computeQ = nullptr; // may be same as graphicsQ
-        ID3D12Fence* computeF = nullptr;
+        rhi::Queue* computeQ = nullptr; // may be same as graphicsQ
+        rhi::Timeline* computeF = nullptr;
         CommandListPool* computePool = nullptr; // pool created with COMPUTE
 
-        ID3D12CommandQueue* copyQ = nullptr;
-        ID3D12Fence* copyF = nullptr;
+        rhi::Queue* copyQ = nullptr;
+        rhi::Timeline* copyF = nullptr;
         CommandListPool* copyPool = nullptr; // pool created with COPY
 
         ComputeMode computeMode = ComputeMode::Async;
@@ -34,7 +33,7 @@ public:
     explicit CommandRecordingManager(const Init& init);
 
     // Get an open list for 'qk'. Creates one if needed, bound to 'frameEpoch'.
-    ID3D12GraphicsCommandList10* EnsureOpen(QueueKind qk, uint32_t frameEpoch);
+    rhi::CommandList EnsureOpen(QueueKind qk, uint32_t frameEpoch);
 
     // Close + Execute current list if dirty; optionally Signal. Returns the signaled value (or 0).
     uint64_t Flush(QueueKind qk, Signal sig = {});
@@ -42,18 +41,18 @@ public:
     // Recycle allocators whose fences have completed (once per frame).
     void EndFrame();
 
-    ID3D12Fence* Fence(QueueKind qk) const;
-    ID3D12CommandQueue* Queue(QueueKind qk) const;
+    rhi::Timeline* Fence(QueueKind qk) const;
+    rhi::Queue* Queue(QueueKind qk) const;
 
     // For aliasing mode: set at frame begin
     void SetComputeMode(ComputeMode mode) { m_computeMode = mode; }
 
 private:
     struct QueueBinding {
-        ID3D12CommandQueue* queue = nullptr;
-        ID3D12Fence* fence = nullptr;
+        rhi::Queue* queue = nullptr;
+        rhi::Timeline* fence = nullptr;
         CommandListPool* pool = nullptr;
-        D3D12_COMMAND_LIST_TYPE listType = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        rhi::QueueKind listType = rhi::QueueKind::Graphics;
         bool valid() const { return queue && fence && pool; }
     };
 
@@ -65,8 +64,8 @@ private:
 
     //Per-thread recording state
     struct PerQueueCtx {
-        Microsoft::WRL::ComPtr<ID3D12CommandAllocator>   alloc;
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> list;
+        rhi::CommandAllocatorPtr   alloc;
+        rhi::CommandListPtr list;
         uint32_t epoch = ~0u;
         bool dirty = false;
         void reset_soft() { list.Reset(); alloc.Reset(); dirty = false; epoch = ~0u; }

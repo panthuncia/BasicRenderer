@@ -91,7 +91,7 @@ private:
     rhi::SwapchainPtr m_swapChain;
 
     rhi::DescriptorHeapPtr rtvHeap;
-	std::vector<rhi::Resource> renderTargets;
+	std::vector<rhi::ResourceHandle> renderTargets;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;

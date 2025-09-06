@@ -88,7 +88,7 @@ void StatisticsManager::SetupQueryHeap() {
 	m_pipelineStatsFields.resize(2);
     m_pipelineStatsFields[0].field = rhi::PipelineStatTypes::MeshInvocations;
     m_pipelineStatsFields[1].field = rhi::PipelineStatTypes::MeshPrimitives;
-    m_pipelineStatsLayout = m_pipelineStatsPool->GetPipelineStatsLayout(m_pipelineStatsFields.data(), m_pipelineStatsFields.size());
+    m_pipelineStatsLayout = m_pipelineStatsPool->GetPipelineStatsLayout(m_pipelineStatsFields.data(), static_cast<uint32_t>(m_pipelineStatsFields.size()));
 }
 
 void StatisticsManager::BeginQuery(

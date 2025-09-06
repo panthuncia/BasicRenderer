@@ -20,19 +20,19 @@ public:
     void Initialize();
 	void DiagnoseDeviceRemoval();
 	rhi::Device GetDevice() {
-        return device.Get();
+        return m_device.Get();
     }
 
-	rhi::Queue GetGraphicsQueue() {
-		return device->GetQueue(rhi::QueueKind::Graphics);
+	rhi::Queue& GetGraphicsQueue() {
+		return m_graphicsQueue;
 	}
 
-	rhi::Queue GetComputeQueue() {
-		return device->GetQueue(rhi::QueueKind::Compute);
+	rhi::Queue& GetComputeQueue() {
+		return m_computeQueue;
 	}
 
-	rhi::Queue GetCopyQueue() {
-		return device->GetQueue(rhi::QueueKind::Copy);
+	rhi::Queue& GetCopyQueue() {
+		return m_copyQueue;
 	}
 
 	bool GetMeshShadersSupported() {
@@ -43,10 +43,10 @@ private:
 	ComPtr<ID3D12DeviceRemovedExtendedData> dred;
 
     DeviceManager() = default;
-	rhi::DevicePtr device;
-	//rhi::Queue graphicsQueue;
-	//rhi::Queue computeQueue;
-	//rhi::Queue copyQueue;
+	rhi::DevicePtr m_device;
+	rhi::Queue m_graphicsQueue;
+	rhi::Queue m_computeQueue;
+	rhi::Queue m_copyQueue;
 	bool m_meshShadersSupported = false;
 
     void CheckGPUFeatures();
@@ -60,13 +60,15 @@ inline DeviceManager& DeviceManager::GetInstance() {
 
 inline void DeviceManager::Initialize() {
 	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("framesInFlight")();
-	this->device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = true });
-
+	m_device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = true });
+	m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
+	m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
+	m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);
 	CheckGPUFeatures();
 }
 
 inline void DeviceManager::CheckGPUFeatures() {
 	D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {}; // TODO: Query interface support in RHI
-	rhi::dx12::get_device(device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
+	rhi::dx12::get_device(m_device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
 	m_meshShadersSupported = features.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
 }

@@ -462,6 +462,23 @@ namespace rhi {
                                static_cast<uint32_t>(globals.size()) };
                 return b;
             }
+            void Append(const BarrierBatch& src) {
+                if (src.textures.size) {
+                    const auto* p = src.textures.data;
+                    textures.insert(textures.end(), p, p + src.textures.size);
+                }
+                if (src.buffers.size) {
+                    const auto* p = src.buffers.data;
+                    buffers.insert(buffers.end(), p, p + src.buffers.size);
+                }
+                if (src.globals.size) {
+                    const auto* p = src.globals.data;
+                    globals.insert(globals.end(), p, p + src.globals.size);
+                }
+			}
+            bool Empty() const noexcept {
+                return textures.empty() && buffers.empty() && globals.empty();
+			}
 
             void Clear() noexcept { textures.clear(); buffers.clear(); globals.clear(); }
         };

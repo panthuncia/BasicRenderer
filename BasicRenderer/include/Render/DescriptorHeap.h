@@ -14,7 +14,7 @@ public:
     DescriptorHeap(const DescriptorHeap&) = delete;
     DescriptorHeap& operator=(const DescriptorHeap&) = delete;
 
-    rhi::DescriptorHeapHandle GetHeap() const;
+    rhi::DescriptorHeap GetHeap();
 
     UINT AllocateDescriptor();
     void ReleaseDescriptor(UINT index);

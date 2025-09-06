@@ -1,19 +1,17 @@
 #pragma once
 
-#include <wrl.h>
-#include <directx/d3d12.h>
 #include <directxmath.h>
 #include <vector>
 #include <memory>
 #include <atomic>
 #include <optional>
+#include <rhi.h>
 
 #include "Mesh/VertexFlags.h"
 #include "Import/MeshData.h"
 #include "ShaderBuffers.h"
 #include "meshoptimizer.h"
 #include "Resources/Buffers/BufferView.h"
-using namespace Microsoft::WRL;
 
 class Material;
 class MeshManager;
@@ -29,8 +27,8 @@ public:
 		uint64_t size = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
 		return size;
 	}
-    D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const;
-    D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const;
+    rhi::VertexBufferView GetVertexBufferView() const;
+    rhi::IndexBufferView GetIndexBufferView() const;
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
 	uint64_t GetGlobalID() const;
@@ -137,8 +135,8 @@ private:
 	UINT m_indexCount = 0;
     std::shared_ptr<Buffer> m_vertexBufferHandle;
 	std::shared_ptr<Buffer> m_indexBufferHandle;
-    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
+    rhi::VertexBufferView m_vertexBufferView;
+    rhi::IndexBufferView m_indexBufferView;
 
     PerMeshCB m_perMeshBufferData = { 0 };
 	unsigned int m_skinningVertexSize = 0;

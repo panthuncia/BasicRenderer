@@ -68,11 +68,11 @@ void ResourceManager::Initialize(rhi::Queue commandQueue) {
 	m_uavCounterReset->Unmap(0, 0);
 }
 
-rhi::DescriptorHeapHandle ResourceManager::GetSRVDescriptorHeap() {
+rhi::DescriptorHeap ResourceManager::GetSRVDescriptorHeap() {
 	return m_cbvSrvUavHeap->GetHeap();
 }
 
-rhi::DescriptorHeapHandle ResourceManager::GetSamplerDescriptorHeap() {
+rhi::DescriptorHeap ResourceManager::GetSamplerDescriptorHeap() {
 	return m_samplerHeap->GetHeap();
 }
 
@@ -140,7 +140,7 @@ UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) 
 	//D3D12_CPU_DESCRIPTOR_HANDLE handle = m_samplerHeap->GetCPUHandle(index);
 
 	//device->CreateSampler(&samplerDesc, handle);
-	device.CreateSampler({ m_samplerHeap->GetHeap(), index}, samplerDesc);
+	device.CreateSampler({ m_samplerHeap->GetHeap().GetHandle(), index}, samplerDesc);
 	return index;
 }
 
@@ -238,7 +238,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
 
 	device.CreateShaderResourceView(
-		{ m_cbvSrvUavHeap->GetHeap(), index }, 
+		{ m_cbvSrvUavHeap->GetHeap().GetHandle(), index},
 		{
 			.dimension = rhi::SrvDim::Buffer,
 			.resource = pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
@@ -260,7 +260,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		// Shader visible UAV
 		unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
 		device.CreateUnorderedAccessView(
-			{ m_cbvSrvUavHeap->GetHeap(), uavShaderVisibleIndex },
+			{ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex},
 			{
 				.resource = pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 				.dimension = rhi::UavDim::Buffer,
@@ -300,7 +300,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	// Create an SRV for the buffer
 	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
 	device.CreateShaderResourceView(
-		{ m_cbvSrvUavHeap->GetHeap(), index },
+		{ m_cbvSrvUavHeap->GetHeap().GetHandle(), index},
 		{
 			.dimension = rhi::SrvDim::Buffer,
 			.resource = pBuffer->GetBuffer()->GetAPIResource().GetHandle(),

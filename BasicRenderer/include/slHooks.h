@@ -1,10 +1,10 @@
 #pragma once
 
 #include <d3d12.h>
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
-#include <ThirdParty/Streamline/sl_hooks.h>
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
+#include <sl_hooks.h>
 
 // These are the exports from SL library
 typedef HRESULT(WINAPI* PFunCreateDXGIFactory)(REFIID, void**);

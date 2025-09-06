@@ -40,9 +40,9 @@ void Mesh::CreateVertexBuffer() {
 
 	m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)m_vertices->data());
 
-    m_vertexBufferView.BufferLocation = m_vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
-    m_vertexBufferView.StrideInBytes = sizeof(m_perMeshBufferData.vertexByteSize);
-    m_vertexBufferView.SizeInBytes = vertexBufferSize;
+    m_vertexBufferView.buffer = m_vertexBufferHandle->GetAPIResource().GetHandle();
+    m_vertexBufferView.stride = sizeof(m_perMeshBufferData.vertexByteSize);
+    m_vertexBufferView.sizeBytes = vertexBufferSize;
 }
 
 void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
@@ -177,16 +177,16 @@ void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
 
 	m_indexBufferHandle = ResourceManager::GetInstance().CreateBuffer(indexBufferSize, (void*)indices.data());
 
-    m_indexBufferView.BufferLocation = m_indexBufferHandle->m_buffer->GetGPUVirtualAddress();
-    m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
-    m_indexBufferView.SizeInBytes = indexBufferSize;
+    m_indexBufferView.buffer = m_indexBufferHandle->GetAPIResource().GetHandle();
+    m_indexBufferView.format = rhi::Format::R32_UInt;
+    m_indexBufferView.sizeBytes = indexBufferSize;
 }
 
-D3D12_VERTEX_BUFFER_VIEW Mesh::GetVertexBufferView() const {
+rhi::VertexBufferView Mesh::GetVertexBufferView() const {
     return m_vertexBufferView;
 }
 
-D3D12_INDEX_BUFFER_VIEW Mesh::GetIndexBufferView() const {
+rhi::IndexBufferView Mesh::GetIndexBufferView() const {
     return m_indexBufferView;
 }
 

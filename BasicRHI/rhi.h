@@ -4,6 +4,7 @@
 #include <vector>
 #include <limits>
 #include <directx/d3dcommon.h>
+#include <optional>
 
 #include "resource_states.h"
 
@@ -695,6 +696,7 @@ namespace rhi {
     };
 
     struct VertexBufferView { ResourceHandle buffer{}; uint64_t offset = 0; uint32_t sizeBytes = 0; uint32_t stride = 0; };
+    struct IndexBufferView { ResourceHandle buffer{}; uint32_t sizeBytes = 0; uint64_t offset = 0; Format format; };
 
     enum class Stage : uint32_t { Top, Draw, Pixel, Compute, Copy, Bottom }; 
 
@@ -1137,7 +1139,7 @@ namespace rhi {
         void (*bindLayout)(CommandList*, PipelineLayoutHandle) noexcept;
         void (*bindPipeline)(CommandList*, PipelineHandle) noexcept;
         void (*setVertexBuffers)(CommandList*, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept;
-        void (*setIndexBuffer)(CommandList*, ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32) noexcept;
+        void (*setIndexBuffer)(CommandList*, ResourceHandle b, const IndexBufferView& v) noexcept;
         void (*draw)(CommandList*, uint32_t vtxCount, uint32_t instCount, uint32_t firstVtx, uint32_t firstInst) noexcept;
         void (*drawIndexed)(CommandList*, uint32_t idxCount, uint32_t instCount, uint32_t firstIdx, int32_t vtxOffset, uint32_t firstInst) noexcept;
         void (*dispatch)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept;
@@ -1147,7 +1149,7 @@ namespace rhi {
             ResourceHandle argumentBuffer, uint64_t argumentOffset,
             ResourceHandle countBuffer, uint64_t countOffset,
             uint32_t   maxCommandCount) noexcept;
-        void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle sampler) noexcept;
+        void (*setDescriptorHeaps)(CommandList*, DescriptorHeapHandle cbvSrvUav, std::optional<DescriptorHeapHandle> sampler) noexcept;
         void (*clearUavUint)(CommandList*, const UavClearInfo&, const UavClearUint&) noexcept;
         void (*clearUavFloat)(CommandList*, const UavClearInfo&, const UavClearFloat&) noexcept;
         void (*copyTextureToBuffer)(CommandList*, const BufferTextureCopyFootprint&) noexcept;
@@ -1183,7 +1185,7 @@ namespace rhi {
         void BindLayout(PipelineLayoutHandle l) noexcept;
         void BindPipeline(PipelineHandle p) noexcept;
         void SetVertexBuffers(uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept;
-        void SetIndexBuffer(ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32) noexcept;
+        void SetIndexBuffer(ResourceHandle b, const IndexBufferView& v) noexcept;
         void Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept;
         void DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept;
         void Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept;
@@ -1192,7 +1194,7 @@ namespace rhi {
             ResourceHandle argBuf, uint64_t argOff,
             ResourceHandle cntBuf, uint64_t cntOff,
             uint32_t maxCount) noexcept;
-		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, DescriptorHeapHandle samp) noexcept;
+		void SetDescriptorHeaps(DescriptorHeapHandle cbvSrvUav, std::optional<DescriptorHeapHandle> sampler) noexcept;
 		void ClearUavUint(const UavClearInfo& u, const UavClearUint& v) noexcept;
         void ClearUavFloat(const UavClearInfo& u, const UavClearFloat& v) noexcept;
 		void CopyTextureToBuffer(const BufferTextureCopyFootprint& r) noexcept;
@@ -1389,7 +1391,7 @@ namespace rhi {
     inline void CommandList::BindLayout(PipelineLayoutHandle l) noexcept { vt->bindLayout(this, l); }
     inline void CommandList::BindPipeline(PipelineHandle p) noexcept { vt->bindPipeline(this, p); }
     inline void CommandList::SetVertexBuffers(uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept { vt->setVertexBuffers(this, startSlot, numViews, pBufferViews); }
-    inline void CommandList::SetIndexBuffer(ResourceHandle b, uint64_t offset, uint32_t sizeBytes, bool idx32) noexcept { vt->setIndexBuffer(this, b, offset, sizeBytes, idx32); }
+    inline void CommandList::SetIndexBuffer(ResourceHandle b, const IndexBufferView& v) noexcept { vt->setIndexBuffer(this, b, v); }
     inline void CommandList::Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept { vt->draw(this, v, i, fv, fi); }
     inline void CommandList::DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept { vt->drawIndexed(this, i, inst, firstIdx, vOff, firstI); }
     inline void CommandList::Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept { vt->dispatch(this, x, y, z); }
@@ -1397,7 +1399,7 @@ namespace rhi {
     inline void CommandList::ExecuteIndirect(CommandSignatureHandle sig, ResourceHandle argBuf, uint64_t argOff, ResourceHandle cntBuf, uint64_t cntOff, uint32_t maxCount) noexcept {
         vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount);
     }
-    inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
+    inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, std::optional<DescriptorHeapHandle> samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
     inline void CommandList::ClearUavUint(const UavClearInfo& i, const UavClearUint& v) noexcept { vt->clearUavUint(this, i, v); }
     inline void CommandList::CopyTextureToBuffer(const BufferTextureCopyFootprint& r) noexcept {
         vt->copyTextureToBuffer(this, r);

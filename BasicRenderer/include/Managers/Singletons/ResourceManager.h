@@ -32,8 +32,8 @@ public:
 
     void Initialize(rhi::Queue commandQueue);
 
-    rhi::DescriptorHeapHandle GetSRVDescriptorHeap();
-    rhi::DescriptorHeapHandle GetSamplerDescriptorHeap();
+    rhi::DescriptorHeap GetSRVDescriptorHeap();
+    rhi::DescriptorHeap GetSamplerDescriptorHeap();
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
     
     std::shared_ptr<Buffer>& GetPerFrameBuffer() {
@@ -79,7 +79,7 @@ public:
         cbvInfo.index = index;
         dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
-		device.CreateConstantBufferView({ m_cbvSrvUavHeap->GetHeap(), index }, dataBuffer->GetAPIResource().GetHandle(), cbvDesc);
+		device.CreateConstantBufferView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, dataBuffer->GetAPIResource().GetHandle(), cbvDesc);
 
         return dataBuffer;
     }
@@ -122,7 +122,7 @@ public:
 		srvDesc.buffer.structureByteStride = static_cast<UINT>(elementSize);
 		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
 
-        device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap(), index }, srvDesc);
+        device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, srvDesc);
 
         ShaderVisibleIndexInfo srvInfo;
         srvInfo.index = index;
@@ -145,7 +145,7 @@ public:
 
 			// Shader visible UAV
 			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap(), uavShaderVisibleIndex }, uavDesc);
+			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, uavDesc);
 
 			ShaderVisibleIndexInfo uavInfo;
 			uavInfo.index = uavShaderVisibleIndex;
@@ -180,7 +180,7 @@ public:
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         bufferIDDescriptorIndexMap[bufferID] = index;
-		device->CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap(), index }, srvDesc);
+		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, srvDesc);
 
         ShaderVisibleIndexInfo srvInfo;
         srvInfo.index = index;
@@ -212,7 +212,7 @@ public:
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         bufferIDDescriptorIndexMap[bufferID] = index;
-		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap(), index }, srvDesc);
+		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, srvDesc);
 
 		ShaderVisibleIndexInfo srvInfo;
 		srvInfo.index = static_cast<int>(index);
@@ -231,7 +231,7 @@ public:
 
             // Shader visible UAV
             unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap(), uavShaderVisibleIndex }, uavDesc);
+			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, uavDesc);
 
             ShaderVisibleIndexInfo uavInfo;
             uavInfo.index = static_cast<int>(uavShaderVisibleIndex);
@@ -265,7 +265,7 @@ public:
 		srvDesc.buffer.numElements = capacity;
 		srvDesc.buffer.structureByteStride = typeSize;
 
-		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap(), descriptorIndex }, srvDesc);
+		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), descriptorIndex}, srvDesc);
 
         if (UAV){
 
@@ -281,7 +281,7 @@ public:
             // Shader visible UAV
             auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).index;
 
-			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap(), static_cast<uint32_t>(uavIndex) }, uavDesc);
+			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), static_cast<uint32_t>(uavIndex)}, uavDesc);
         }
     }
 
@@ -307,7 +307,7 @@ public:
 		srvDesc.buffer.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
         srvDesc.buffer.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured;
 		
-		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap(), descriptorIndex }, srvDesc);
+		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), descriptorIndex}, srvDesc);
 
         if (UAV) {
 
@@ -323,7 +323,7 @@ public:
             // Shader visible UAV
 			auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).index;
 
-			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap(), static_cast<uint32_t>(uavIndex) }, uavDesc);
+			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), static_cast<uint32_t>(uavIndex)}, uavDesc);
         }
 
     }

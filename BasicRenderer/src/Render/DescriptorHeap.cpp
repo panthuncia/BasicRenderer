@@ -17,7 +17,7 @@ DescriptorHeap::DescriptorHeap(rhi::Device& device, rhi::DescriptorHeapType type
 DescriptorHeap::~DescriptorHeap() {
 }
 
-rhi::DescriptorHeapHandle DescriptorHeap::GetHeap() const {
+rhi::DescriptorHeap DescriptorHeap::GetHeap() {
     return m_heap.Get();
 }
 
