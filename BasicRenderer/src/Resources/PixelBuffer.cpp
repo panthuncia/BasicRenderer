@@ -28,8 +28,8 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 
     // create the raw resource
     auto [texture, placedHeap] =
-        rm.CreateTextureResource(desc, aliasTarget != nullptr ? aliasTarget->GetPlacedResourceHeap() : nullptr);
-    m_texture    = texture;
+		rm.CreateTextureResource(desc, aliasTarget != nullptr ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle());
+    m_texture    = std::move(texture);
     m_placedResourceHeap = placedHeap;
 
 	m_width  = desc.imageDimensions[0].width;
@@ -64,9 +64,9 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	const auto& rtvHeap = rm.GetRTVHeap();
 	const auto& dsvHeap = rm.GetDSVHeap();
 	auto srvInfo = CreateShaderResourceViewsPerMip(
-		device.Get(),
+		device,
 		m_texture.Get(),
-		desc.srvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.srvFormat,
+		desc.srvFormat == rhi::Format::Unknown ? desc.format : desc.srvFormat,
 		cbvSrvUavHeap.get(),
 		m_mipLevels,
 		desc.isCubemap,
@@ -91,9 +91,9 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	if (desc.isCubemap) { // Set up SRV to view this as an array
 		std::vector<std::vector<ShaderVisibleIndexInfo>> secondarySrvInfos;
 		secondarySrvInfos = CreateShaderResourceViewsPerMip(
-			device.Get(),
+			device,
 			m_texture.Get(),
-			desc.srvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.srvFormat,
+			desc.srvFormat == rhi::Format::Unknown ? desc.format : desc.srvFormat,
 			cbvSrvUavHeap.get(),
 			m_mipLevels,
 			false, // isCubemap
@@ -107,9 +107,9 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	std::vector<std::vector<ShaderVisibleIndexInfo>> uavInfo;
 	if (desc.hasUAV) {
 		uavInfo = CreateUnorderedAccessViewsPerMip(
-			device.Get(),
+			device,
 			m_texture.Get(),
-			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
+			desc.uavFormat == rhi::Format::Unknown ? desc.format : desc.uavFormat,
 			cbvSrvUavHeap.get(),
 			m_mipLevels,
 			desc.isArray,
@@ -123,9 +123,9 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	std::vector<std::vector<NonShaderVisibleIndexInfo>> nonShaderUavInfo;
 	if (desc.hasNonShaderVisibleUAV) {
 		nonShaderUavInfo = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
-			device.Get(),
+			device,
 			m_texture.Get(),
-			desc.uavFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.uavFormat,
+			desc.uavFormat == rhi::Format::Unknown ? desc.format : desc.uavFormat,
 			nonShaderVisibleHeap.get(),
 			m_mipLevels,
 			desc.isArray,
@@ -139,9 +139,9 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	std::vector<std::vector<NonShaderVisibleIndexInfo>> rtvInfos;
 	if (desc.hasRTV) {
 		rtvInfos = CreateRenderTargetViews(
-			device.Get(),
+			device,
 			m_texture.Get(),
-			desc.rtvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.rtvFormat,
+			desc.rtvFormat == rhi::Format::Unknown ? desc.format : desc.rtvFormat,
 			rtvHeap.get(),
 			desc.isCubemap,
 			desc.isArray,
@@ -155,10 +155,10 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	std::vector<std::vector<NonShaderVisibleIndexInfo>> dsvInfos;
 	if (desc.hasDSV) {
 		dsvInfos = CreateDepthStencilViews(
-			device.Get(),
+			device,
 			m_texture.Get(),
 			dsvHeap.get(),
-			desc.dsvFormat == DXGI_FORMAT_UNKNOWN ? desc.format : desc.dsvFormat,
+			desc.dsvFormat == rhi::Format::Unknown ? desc.format : desc.dsvFormat,
 			desc.isCubemap,
 			desc.isArray,
 			desc.arraySize,
@@ -169,40 +169,23 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 }
 
 
-BarrierGroups PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-#if defined(_DEBUG)
-    //if (prevAccessType) {
-    //    throw(std::runtime_error("Texture state mismatch"));
-    //}
-    //if (prevSyncState != currentSyncState) {
-    //    throw(std::runtime_error("Texture sync state mismatch"));
-    //}
-    //if (prevState == newState) {
-    //    throw(std::runtime_error("Useless transition"));
-    //}
-#endif
-    BarrierGroups barrierGroups = {};
+rhi::BarrierBatch PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
 
-    barrierGroups.textureBarrierDescs.push_back({});
-    auto& textureBarrierDesc = barrierGroups.textureBarrierDescs[0];
-    textureBarrierDesc.AccessBefore = ResourceAccessTypeToD3D12(prevAccessType);
-    textureBarrierDesc.AccessAfter = ResourceAccessTypeToD3D12(newAccessType);
-    textureBarrierDesc.SyncBefore = ResourceSyncStateToD3D12(prevSyncState);
-    textureBarrierDesc.SyncAfter = ResourceSyncStateToD3D12(newSyncState);
-    textureBarrierDesc.LayoutBefore = ResourceLayoutToD3D12(prevLayout);
-    textureBarrierDesc.LayoutAfter = ResourceLayoutToD3D12(newLayout);
-	textureBarrierDesc.Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE;
-    textureBarrierDesc.pResource = m_texture.Get();
+	rhi::BarrierBatch batch = {};
 
 	auto resolvedRange = ResolveRangeSpec(range, m_mipLevels, m_arraySize);
 
-    textureBarrierDesc.Subresources = CD3DX12_BARRIER_SUBRESOURCE_RANGE(resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount);
+	m_barrier.afterAccess = newAccessType;
+	m_barrier.beforeAccess = prevAccessType;
+	m_barrier.afterLayout = newLayout;
+	m_barrier.beforeLayout = prevLayout;
+	m_barrier.afterSync = newSyncState;
+	m_barrier.beforeSync = prevSyncState;
+	m_barrier.discard = false;
+	m_barrier.range = { resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount };
+	m_barrier.texture = m_texture->GetHandle();
 
-    D3D12_BARRIER_GROUP group;
-	group.NumBarriers = 1;
-	group.Type = D3D12_BARRIER_TYPE_TEXTURE;
-	group.pTextureBarriers = barrierGroups.textureBarrierDescs.data();
-	barrierGroups.textureBarriers.push_back(group);
+	batch.textures = { &m_barrier };
 
-    return barrierGroups;
+    return batch;
 }

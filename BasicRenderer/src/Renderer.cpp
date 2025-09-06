@@ -578,6 +578,8 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 	auto device = DeviceManager::GetInstance().GetDevice();
 	m_swapChain = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing);
 
+    UpscalingManager::GetInstance().InitializeAdapter();
+
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =
         GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.

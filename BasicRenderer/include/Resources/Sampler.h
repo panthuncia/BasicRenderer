@@ -1,5 +1,4 @@
 #pragma once
-#include <directx/d3d12.h>
 #include <memory>
 #include "Managers/Singletons/ResourceManager.h"
 

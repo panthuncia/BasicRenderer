@@ -400,7 +400,7 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 		textureResource = device.CreateCommittedResource(textureDesc);
 	}
 
-	return std::make_pair(textureResource, placedResourceHeap);
+	return std::make_pair(std::move(textureResource), placedResourceHeap);
 }
 
 void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels) {
@@ -410,13 +410,12 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 
 	if (initialData.empty()) return;
 
-	// NOTE: the original expression had a precedence bug.
-	// Correct: effective array slices = arraySize * (isCubemap ? 6 : 1)
+	// effective array slices = arraySize * (isCubemap ? 6 : 1)
 	const uint32_t faces = desc.isCubemap ? 6u : 1u;
 	const uint32_t arraySlices = faces * static_cast<uint32_t>(arraySize);
 	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
 
-	// Build a dense SubresourceData table (nullptr entries are allowed; they’ll be skipped)
+	// Build a dense SubresourceData table (nullptr entries are allowed; they'll be skipped)
 	std::vector<rhi::helpers::SubresourceData> srd(numSubres);
 	std::vector<std::vector<stbi_uc>> expandedImages;   // keep storage alive during copy
 	expandedImages.reserve(numSubres);
@@ -425,7 +424,7 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 	std::vector<const stbi_uc*> fullInitial(numSubres, nullptr);
 	std::copy(initialData.begin(), initialData.end(), fullInitial.begin());
 
-	int i = -1; // matches your original indexing over desc.imageDimensions[]
+	int i = -1;
 	for (uint32_t a = 0; a < arraySlices; ++a) {
 		for (uint32_t m = 0; m < mipLevels; ++m) {
 			++i;
@@ -439,13 +438,13 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 
 			auto& out = srd[subIdx];
 
-			// If provided pitches don't match raw (width*channels), treat as “pre-padded or compressed”
+			// If provided pitches don't match raw (width*channels), treat as "pre-padded or compressed"
 			if ((width * channels != desc.imageDimensions[i].rowPitch) ||
 				(width * channels * height != desc.imageDimensions[i].slicePitch))
 			{
 				out.pData = imageData;
 				out.rowPitch = static_cast<uint32_t>(desc.imageDimensions[i].rowPitch);
-				out.slicePitch = desc.imageDimensions[i].slicePitch;
+				out.slicePitch = static_cast<uint32_t>(desc.imageDimensions[i].slicePitch);
 			}
 			else {
 				if (imageData) {
@@ -457,7 +456,7 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 						channels = 4;
 					}
 					out.pData = ptr;
-					out.rowPitch = width * channels;     // tightly packed
+					out.rowPitch = width * channels; // tightly packed
 					out.slicePitch = out.rowPitch * height;
 				}
 				else {
@@ -469,7 +468,7 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 	}
 
 	// Record the uploads (helper creates an upload buffer, maps & packs rows, then emits the copies).
-	// depthOrLayers = 1 for 2D/cube textures. (Use actual depth for 3D volumes.)
+	// depthOrLayers = 1 for 2D/cube textures.
 	const uint32_t baseW = desc.imageDimensions[0].width;
 	const uint32_t baseH = desc.imageDimensions[0].height;
 
@@ -488,17 +487,17 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 		{ srd.data(), static_cast<uint32_t>(srd.size()) }
 	);
 
-	// Transition out of CopyDest (your original moved to COMMON)
+	// Transition out of CopyDest
 	rhi::TextureBarrier tb{};
 	tb.texture = dstTexture.GetHandle();
 	tb.range = { /*baseMip*/0, static_cast<uint32_t>(mipLevels),
 		/*baseLayer*/0, arraySlices };
 	tb.beforeSync = rhi::ResourceSyncState::Copy;
-	tb.afterSync = rhi::ResourceSyncState::All;         // generic
+	tb.afterSync = rhi::ResourceSyncState::All;
 	tb.beforeAccess = rhi::ResourceAccessType::CopyDest;
 	tb.afterAccess = rhi::ResourceAccessType::None;
 	tb.beforeLayout = rhi::ResourceLayout::CopyDest;
-	tb.afterLayout = rhi::ResourceLayout::Common;         // mirrors your D3D12 barrier
+	tb.afterLayout = rhi::ResourceLayout::Common;
 
 	rhi::BarrierBatch bb{};
 	bb.textures = { &tb, 1 };

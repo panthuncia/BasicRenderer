@@ -502,8 +502,8 @@ void RenderGraph::Setup() {
 			}
 		}
 	}
-	statisticsManager.RegisterQueue(manager.GetGraphicsQueue());
-	statisticsManager.RegisterQueue(manager.GetComputeQueue());
+	statisticsManager.RegisterQueue(manager.GetGraphicsQueue().GetKind());
+	statisticsManager.RegisterQueue(manager.GetComputeQueue().GetKind());
 	statisticsManager.SetupQueryHeap();
 
 	auto device = DeviceManager::GetInstance().GetDevice();

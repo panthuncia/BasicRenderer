@@ -1,6 +1,5 @@
 #include "Managers/Singletons/UploadManager.h"
 
-#include <ThirdParty/pix/pix3.h>
 #include <rhi_helpers.h>
 
 #include "Resources/Buffers/Buffer.h"
@@ -9,6 +8,8 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
+
+#include <ThirdParty/pix/pix3.h> // Must come after anything that includes d3d12.h
 
 void UploadManager::Initialize() {
 	auto device = DeviceManager::GetInstance().GetDevice();
@@ -130,36 +131,9 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Recycle(commandAllocator.Get());
-	DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ProcessUploads"));
-	//auto maxNumTransitions = m_resourceUpdates.size();
-	//std::vector<D3D12_RESOURCE_BARRIER> barriers;
-	//barriers.reserve(maxNumTransitions);
-	//std::vector<D3D12_RESOURCE_STATES> initialD3D12States;
-	//initialD3D12States.reserve(maxNumTransitions);
-	//std::vector<ResourceState> initialStates;
-	//initialD3D12States.reserve(maxNumTransitions);
-	//std::vector<Resource*> deduplicatedResources;
-	//deduplicatedResources.reserve(maxNumTransitions);
-	//for (auto& update : m_resourceUpdates) {
+	//DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ProcessUploads")); //TODO: Put back
 
-	//	Resource* buffer = update.resourceToUpdate;
-	//	ResourceState initialState = buffer->GetState();
-	//	if (buffer->m_uploadInProgress) {
-	//		continue;
-	//	}
-	//	auto startD3D12State = ResourceStateToD3D12(initialState);
-	//	D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-	//		buffer->GetAPIResource(),
-	//		startD3D12State,
-	//		D3D12_RESOURCE_STATE_COPY_DEST
-	//	);
-	//	barriers.push_back(barrier);
-	//	initialD3D12States.push_back(startD3D12State);
-	//	initialStates.push_back(initialState);
-	//	deduplicatedResources.push_back(buffer);
-	//	buffer->m_uploadInProgress = true;
-	//}
- //   commandList->ResourceBarrier(barriers.size(), barriers.data());
+	// TODO: Should we do any barriers here?
 	for (auto& update : m_resourceUpdates) {
 		Resource* buffer = update.resourceToUpdate;
 		commandList->CopyBufferRegion(
@@ -171,18 +145,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 		);
 	}
 
-	//int i = 0;
-	//for (auto& resource : deduplicatedResources) {
-	//	D3D12_RESOURCE_STATES temp;
-	//	temp = barriers[i].Transition.StateBefore;
-	//	barriers[i].Transition.StateBefore = barriers[i].Transition.StateAfter;
-	//	barriers[i].Transition.StateAfter = temp;
-	//	i += 1;
-	//	resource->m_uploadInProgress = false;
-
- //   }
-	//commandList->ResourceBarrier(barriers.size(), barriers.data());
-	DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
+	//DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
 	commandList->End();
 
 	queue.Submit({ &commandList.Get()});

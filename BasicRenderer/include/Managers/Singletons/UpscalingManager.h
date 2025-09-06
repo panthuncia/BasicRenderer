@@ -96,7 +96,7 @@ class RenderContext;
 class UpscalingManager {
 public:
     static UpscalingManager& GetInstance();
-    void InitializeAdapter(rhi::Device& dev);
+    void InitializeAdapter();
 	ID3D12Device10* ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device);
 	IDXGIFactory7* ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory);
     void Setup();

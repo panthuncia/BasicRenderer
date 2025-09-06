@@ -6,7 +6,6 @@
 #include "DirectX/d3dx12.h"
 #include "spdlog/spdlog.h"
 #include "Render/RenderContext.h"
-#include "Resources/ResourceStates.h"
 
 using namespace Microsoft::WRL;
 
@@ -20,16 +19,12 @@ Buffer::Buffer(
 
 	rhi::ResourceDesc desc = rhi::helpers::ResourceDesc::Buffer(bufferSize);
 	if (unorderedAccess) {
-		desc.flags |= rhi::ResourceFlags::AllowUnorderedAccess;
+		desc.flags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
 	}
 	desc.memory = accessType;
 	m_buffer = device.CreateCommittedResource(desc);
 
 	m_size = bufferSize;
-
-	m_subresourceAccessTypes.push_back(rhi::ResourceAccessType::Common);
-	m_subresourceLayouts.push_back(rhi::ResourceLayout::Common);
-	m_subresourceSyncStates.push_back(rhi::ResourceSyncState::All);
 }
 
 rhi::BarrierBatch Buffer::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {

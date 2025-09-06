@@ -88,7 +88,7 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
     );
 }
 
-void UpscalingManager::InitializeAdapter(rhi::Device& dev)
+void UpscalingManager::InitializeAdapter()
 {
     auto dev = DeviceManager::GetInstance().GetDevice();
 

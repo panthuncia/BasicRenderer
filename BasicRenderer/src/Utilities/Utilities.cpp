@@ -883,7 +883,7 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
 
     UINT descriptorIndex = srvHeap->AllocateDescriptor();
 
-    device.CreateShaderResourceView({ srvHeap->GetHeap(), descriptorIndex }, desc);
+    device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, desc);
 
     ShaderVisibleIndexInfo srvInfo;
     srvInfo.index = descriptorIndex;
@@ -951,7 +951,7 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip
             // allocate one descriptor for this (slice, mip)
             unsigned descriptorIndex = srvHeap->AllocateDescriptor();
 
-			device.CreateShaderResourceView({ srvHeap->GetHeap(), descriptorIndex }, srvDesc);
+			device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, srvDesc);
 
             ShaderVisibleIndexInfo srvInfo;
             srvInfo.index     = descriptorIndex;
@@ -993,7 +993,7 @@ ShaderVisibleIndexInfo CreateUnorderedAccessView(
     UINT descriptorIndex = uavHeap->AllocateDescriptor();
 
 	// No counter for texture UAVs
-    device.CreateUnorderedAccessView({uavHeap->GetHeap(), descriptorIndex}, uavDesc);
+    device.CreateUnorderedAccessView({uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
 
     ShaderVisibleIndexInfo uavInfo;
     uavInfo.index = descriptorIndex;
@@ -1030,7 +1030,7 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear op
     UINT descriptorIndex = uavHeap->AllocateDescriptor();
 
     // No counter for texture UAVs
-	device.CreateUnorderedAccessView({ uavHeap->GetHeap(), descriptorIndex }, uavDesc);
+	device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
 
     NonShaderVisibleIndexInfo uavInfo;
     uavInfo.index = descriptorIndex;
@@ -1074,7 +1074,7 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
 
             UINT descriptorIndex = uavHeap->AllocateDescriptor();
 
-			device.CreateUnorderedAccessView({ uavHeap->GetHeap(), descriptorIndex }, uavDesc);
+			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
             
             ShaderVisibleIndexInfo uavInfo{ static_cast<int>(descriptorIndex) };
             sliceUAVs.push_back(uavInfo);
@@ -1121,7 +1121,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
             UINT    idx = uavHeap->AllocateDescriptor();
 
             // Create the UAV (no counter for texture UAVs)
-			device.CreateUnorderedAccessView({ uavHeap->GetHeap(), idx }, uavDesc);
+			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), idx}, uavDesc);
 
             NonShaderVisibleIndexInfo info;
             info.index     = idx;
@@ -1168,7 +1168,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
             UINT idx = rtvHeap->AllocateDescriptor();
 
             // Create the RTV
-			device.CreateRenderTargetView({ rtvHeap->GetHeap(), idx }, rtvDesc);
+			device.CreateRenderTargetView({ rtvHeap->GetHeap().GetHandle(), idx}, rtvDesc);
 
             NonShaderVisibleIndexInfo info;
             info.index     = idx;
@@ -1211,7 +1211,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
             UINT idx = dsvHeap->AllocateDescriptor();
 
             // create the DSV
-			device.CreateDepthStencilView({ dsvHeap->GetHeap(), idx }, dsvDesc);
+			device.CreateDepthStencilView({ dsvHeap->GetHeap().GetHandle(), idx}, dsvDesc);
 
             NonShaderVisibleIndexInfo info;
             info.index     = idx;

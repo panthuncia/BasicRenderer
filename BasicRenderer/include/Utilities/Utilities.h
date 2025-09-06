@@ -18,6 +18,7 @@
 #include "ShaderBuffers.h"
 #include "Import/Filetypes.h"
 #include "Scene/Components.h"
+#include "Resources/TextureDescription.h"
 
 #ifndef NDEBUG
 #define DEBUG_ONLY(x)   x
@@ -112,19 +113,19 @@ std::vector<stbi_uc> ExpandImageData(const stbi_uc* image, int width, int height
 //	D3D12_BARRIER_LAYOUT initialLayout);
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT                  format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format       format,
 	DescriptorHeap* srvHeap,
-	int                          mipLevels,
-	bool                         isCubemap,
-	bool                         isArray,
-	int                          arraySize);
+	int               mipLevels,
+	bool              isCubemap,
+	bool              isArray,
+	int               arraySize);
 
 ShaderVisibleIndexInfo CreateUnorderedAccessView(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	bool isArray,
 	int arraySize,
@@ -133,9 +134,9 @@ ShaderVisibleIndexInfo CreateUnorderedAccessView(
 	int planeSlice = 0);
 
 NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	bool isArray,
 	int arraySize,
@@ -144,9 +145,9 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView(
 	int planeSlice = 0);
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMip(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT       format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	int               mipLevels,
 	bool              isArray,
@@ -154,9 +155,9 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
 	int               planeSlice);	// for planar formats
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorderedAccessViewsPerMip(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT        format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	int                mipLevels,
 	bool               isArray,
@@ -164,33 +165,26 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
 	int                planeSlice);
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
-	ID3D12Device*      device,
-	ID3D12Resource*    resource,
-	DXGI_FORMAT        format,
-	DescriptorHeap*    rtvHeap,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format        format,
+	DescriptorHeap* rtvHea,
 	bool               isCubemap,
 	bool               isArray,
 	int                arraySize = 1,
 	int                mipLevels = 1);
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
+	rhi::Device& device,
+	rhi::Resource& resource,
 	DescriptorHeap* dsvHeap,
-	DXGI_FORMAT        format,
+	rhi::Format        format,
 	bool               isCubemap = false,
 	bool               isArray = false,
 	int                arraySize = 1,
 	int                mipLevels = 1);
 
-void UploadTextureData(
-	ID3D12Device* device,
-	ID3D12GraphicsCommandList* commandList,
-	ID3D12Resource* textureResource,
-	const void* data,
-	int width,
-	int height,
-	int channels);
+void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
 
 std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(DirectX::XMFLOAT3 pos);
 

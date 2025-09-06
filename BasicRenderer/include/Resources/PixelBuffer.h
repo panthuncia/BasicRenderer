@@ -65,9 +65,7 @@ private:
     rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
 
     // Enhanced barriers
-    //D3D12_TEXTURE_BARRIER m_textureBarrier;
-    rhi::TextureBarrier m_barrierGroup = {};
-	//BarrierGroups m_barrierGroups;
+	rhi::TextureBarrier m_barrier = {};
 
 	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two
 	unsigned int m_internalHeight = 0; // Internal height, used for padding textures to power of two
