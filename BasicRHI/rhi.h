@@ -265,7 +265,14 @@ namespace rhi {
         } u{};
     };
 
-    enum class ShaderStage : uint32_t { Vertex = 1, Pixel = 2, Compute = 4, Mesh = 8, Task = 16, All = 0xFFFFFFFFu };
+    enum class ShaderStage : uint32_t { 
+        Vertex = 1, 
+        Pixel = 2, 
+        Compute = 4, 
+        Mesh = 8, 
+        Task = 16,
+		AllGraphics = Vertex | Pixel | Mesh | Task,
+        All = 0xFFFFFFFFu };
 
     struct LayoutBindingRange { uint32_t set = 0, binding = 0, count = 1; bool readOnly = true; ShaderStage visibility = ShaderStage::All; };
 
@@ -845,11 +852,12 @@ namespace rhi {
         Span<PipelineStatsFieldDesc> fields;
     };
 
-
     // Convenience conversion for timestamps (RHI exposes a uniform "ticks per second")
     struct TimestampCalibration {
         uint64_t ticksPerSecond = 0; // DX12: queue->GetTimestampFrequency(); Vulkan: round(1e9 / timestampPeriod)
     };
+
+	enum class PrimitiveTopology : uint32_t { PointList, LineList, LineStrip, TriangleList, TriangleStrip, TriangleFan };
 
     // ---------------- POD wrappers + VTables ----------------
     class Device;       class Queue;       class CommandList;        class Swapchain;       class CommandAllocator;
@@ -1189,6 +1197,11 @@ namespace rhi {
         void (*resolveQueryData)(CommandList*, QueryPoolHandle, uint32_t firstQuery, uint32_t queryCount,
             ResourceHandle dstBuffer, uint64_t dstOffsetBytes) noexcept; // Resolve to a buffer; always 64-bit results (matches both APIs)
         void (*resetQueries)(CommandList*, QueryPoolHandle, uint32_t firstQuery, uint32_t queryCount) noexcept; // Vulkan requires resets before reuse; DX12 can no-op this.
+        void (*pushConstants)(CommandList*, ShaderStage stages,
+            uint32_t set, uint32_t binding,
+            uint32_t dstOffset32, uint32_t num32,
+            const void* data) noexcept;
+		void (*setPrimitiveTopology)(CommandList*, PrimitiveTopology) noexcept;
         void (*setName)(CommandList*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
@@ -1235,6 +1248,11 @@ namespace rhi {
         void ResolveQueryData(QueryPoolHandle p, uint32_t first, uint32_t count, ResourceHandle dst, uint64_t off) noexcept;
         void ResetQueries(QueryPoolHandle p, uint32_t first, uint32_t count) noexcept;
 		void SetName(const char* n) noexcept;
+        void PushConstants(ShaderStage stages,
+            uint32_t set, uint32_t binding,
+            uint32_t dstOffset32, uint32_t num32,
+            const void* data) noexcept;
+		void SetPrimitiveTopology(PrimitiveTopology t) noexcept;
 
     private:
         CommandListHandle handle;
@@ -1449,6 +1467,14 @@ namespace rhi {
     inline void CommandList::ResetQueries(QueryPoolHandle p, uint32_t first, uint32_t count) noexcept {
         vt->resetQueries(this, p, first, count);
     }
+    inline void CommandList::PushConstants(ShaderStage stages,
+        uint32_t set, uint32_t binding,
+        uint32_t dstOffset32, uint32_t num32,
+        const void* data) noexcept
+    {
+        vt->pushConstants(this, stages, set, binding, dstOffset32, num32, data);
+    }
+	inline void CommandList::SetPrimitiveTopology(PrimitiveTopology t) noexcept { vt->setPrimitiveTopology(this, t); }
     inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
 
     struct DeviceCreateInfo { Backend backend = Backend::D3D12; uint32_t framesInFlight = 3; bool enableDebug = true; };

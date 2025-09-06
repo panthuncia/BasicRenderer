@@ -25,23 +25,19 @@ public:
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
 
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap, // The texture descriptor heap
-            context.samplerDescriptorHeap, // The sampler descriptor heap
-        };
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
 		// Set the root signature
-		commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
-		commandList->SetPipelineState(DenoiseLastPassPSO.Get());
+		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+		commandList.BindPipeline(DenoiseLastPassPSO.GetAPIPipelineState().GetHandle());
 
         unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
         gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
         gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex;
             
-        commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, gtaoConstants, 0);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, gtaoConstants);
 
-        commandList->Dispatch((context.renderResolution.x + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.renderResolution.y + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
+        commandList.Dispatch((context.renderResolution.x + (XE_GTAO_NUMTHREADS_X*2)-1) / (XE_GTAO_NUMTHREADS_X*2), (context.renderResolution.y + XE_GTAO_NUMTHREADS_Y-1) / XE_GTAO_NUMTHREADS_Y, 1 );
     
         return {};
     }
@@ -53,8 +49,8 @@ public:
 private:
     std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
 
-    ComPtr<ID3D12PipelineState> DenoisePassPSO;
-    ComPtr<ID3D12PipelineState> DenoiseLastPassPSO;
+    PipelineState DenoisePassPSO;
+    PipelineState DenoiseLastPassPSO;
 
 	unsigned int m_workingAOBufferIndex = 0;
 
@@ -62,26 +58,19 @@ private:
     {
         auto device = DeviceManager::GetInstance().GetDevice();
 
-        D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-        psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-       
-		Microsoft::WRL::ComPtr<ID3DBlob> CSDenoisePass;
-		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSDenoisePass", L"cs_6_6", {}, CSDenoisePass);
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSDenoisePass", L"cs_6_6" };
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		CSDenoisePass = compiledBundle.computeShader;
-		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSDenoisePass.Get());
-		ThrowIfFailed(device->CreateComputePipelineState(
-			&psoDesc, IID_PPV_ARGS(&DenoisePassPSO)));
-		Microsoft::WRL::ComPtr<ID3DBlob> CSDenoiseLastPass;
-		//PSOManager::GetInstance().CompileShader(L"shaders/GTAO.hlsl", L"CSDenoiseLastPass", L"cs_6_6", {}, CSDenoiseLastPass);
-		shaderInfoBundle.computeShader = { L"shaders/GTAO.hlsl", L"CSDenoiseLastPass", L"cs_6_6" };
-		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		CSDenoiseLastPass = compiledBundle.computeShader;
-		psoDesc.CS = CD3DX12_SHADER_BYTECODE(CSDenoiseLastPass.Get());
-		ThrowIfFailed(device->CreateComputePipelineState(
-			&psoDesc, IID_PPV_ARGS(&DenoiseLastPassPSO)));
+		auto& psoManager = PSOManager::GetInstance();
+        DenoisePassPSO = psoManager.MakeComputePipeline(
+            psoManager.GetRootSignature(),
+            L"shaders/GTAO.hlsl",
+            L"CSDenoisePass",
+            {},
+			"GTAO Denoise Pass");
+
+		DenoiseLastPassPSO = psoManager.MakeComputePipeline(
+			psoManager.GetRootSignature(),
+			L"shaders/GTAO.hlsl",
+			L"CSDenoiseLastPass",
+			{},
+			"GTAO Denoise Last Pass");
     }
 };

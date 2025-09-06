@@ -768,6 +768,40 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
+PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,
+    const wchar_t* shaderPath,
+    const wchar_t* entryPoint,
+    std::initializer_list<DxcDefine> defines,
+    const char* debugName)
+{
+    ShaderInfoBundle sib;
+    sib.computeShader = { shaderPath, entryPoint, L"cs_6_6" };
+    sib.defines = std::vector<DxcDefine>(defines.begin(), defines.end());
+    auto compiled = CompileShaders(sib);
+
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()) };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soCS),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso->IsValid()) {
+        throw std::runtime_error("Failed to create compute PSO (RHI)");
+    }
+    if (debugName) pso->SetName(debugName);
+
+    PipelineState out{
+        std::move(pso),
+        compiled.resourceIDsHash,
+        compiled.resourceDescriptorSlots
+    };
+    return out;
+}
+
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
     std::vector<DxcDefine> defines = {};
     if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {

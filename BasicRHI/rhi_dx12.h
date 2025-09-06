@@ -49,6 +49,13 @@ namespace rhi {
 		std::vector<PushConstantRangeDesc> pcs;
 		std::vector<StaticSamplerDesc> staticSamplers;
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> root;
+		struct RootConstParam {
+			uint32_t set;
+			uint32_t binding;
+			uint32_t num32;      // max 32-bit values in this range
+			uint32_t rootIndex;  // root parameter index in this RS
+		};
+		std::vector<RootConstParam> rcParams;
 	};
 
 	struct Dx12CommandSignature {
@@ -66,6 +73,8 @@ namespace rhi {
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
 		D3D12_COMMAND_LIST_TYPE type{}; 
 		Dx12Device* dev; 
+		PipelineLayoutHandle boundLayout{};
+		Dx12PipelineLayout* boundLayoutPtr = nullptr;
 	};
 
 	// Build D3D12_RESOURCE_DESC1 for buffers
@@ -624,8 +633,17 @@ namespace rhi {
 			return {};
 
 		Dx12PipelineLayout L{};
-		if (ld.pushConstants.size && ld.pushConstants.data)
+		if (ld.pushConstants.size && ld.pushConstants.data) {
 			L.pcs.assign(ld.pushConstants.data, ld.pushConstants.data + ld.pushConstants.size);
+			// Build rcParams in the same order as params:
+			L.rcParams.reserve(ld.pushConstants.size);
+			for (uint32_t i = 0; i < ld.pushConstants.size; ++i) {
+				const auto& pc = ld.pushConstants.data[i];
+				L.rcParams.push_back(Dx12PipelineLayout::RootConstParam{
+					pc.set, pc.binding, pc.num32BitValues, /*rootIndex=*/i
+					});
+			}
+		}
 		if (ld.staticSamplers.size && ld.staticSamplers.data)
 			L.staticSamplers.assign(ld.staticSamplers.data, ld.staticSamplers.data + ld.staticSamplers.size);
 		L.root = root;
@@ -1887,14 +1905,16 @@ namespace rhi {
 
 	static void cl_endPass(CommandList* /*cl*/) noexcept {} // nothing to do in DX12
 	static void cl_bindLayout(CommandList* cl, PipelineLayoutHandle layoutH) noexcept {
-		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		auto dev = l->dev;
-		if (auto* L = dev->pipelineLayouts.get(layoutH)) {
-			ID3D12RootSignature* rs = L->root.Get();
-			// TODO: Is this allowed?
-			l->cl->SetGraphicsRootSignature(rs);
-			l->cl->SetComputeRootSignature(rs);
-		}
+		auto* impl = static_cast<Dx12CommandList*>(cl->impl);
+		auto* dev = impl->dev;
+		auto* L = dev->pipelineLayouts.get(layoutH);
+		if (!L || !L->root) return;
+
+		impl->cl->SetGraphicsRootSignature(L->root.Get());
+		impl->cl->SetComputeRootSignature(L->root.Get());
+
+		impl->boundLayout = layoutH;
+		impl->boundLayoutPtr = L;
 	}
 	static void cl_bindPipeline(CommandList* cl, PipelineHandle psoH) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
@@ -1929,12 +1949,10 @@ namespace rhi {
 	}
 	static void cl_draw(CommandList* cl, uint32_t vc, uint32_t ic, uint32_t fv, uint32_t fi) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		l->cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		l->cl->DrawInstanced(vc, ic, fv, fi);
 	}
 	static void cl_drawIndexed(CommandList* cl, uint32_t ic, uint32_t inst, uint32_t firstIdx, int32_t vtxOff, uint32_t firstInst) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl); 
-		l->cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		l->cl->DrawIndexedInstanced(ic, inst, firstIdx, vtxOff, firstInst);
 	}
 	static void cl_dispatch(CommandList* cl, uint32_t x, uint32_t y, uint32_t z) noexcept {
@@ -2371,6 +2389,47 @@ namespace rhi {
 		// D3D12 does not require resets; Vulkan impl will fill this.
 	}
 
+	static void cl_pushConstants(CommandList* c, ShaderStage stages,
+		uint32_t set, uint32_t binding,
+		uint32_t dstOffset32, uint32_t num32,
+		const void* data) noexcept
+	{
+		auto* impl = static_cast<Dx12CommandList*>(c->impl);
+		if (!impl || !impl->boundLayoutPtr || !data || num32 == 0) return;
+
+		// Find the matching push-constant root param
+		const Dx12PipelineLayout* L = impl->boundLayoutPtr;
+		const Dx12PipelineLayout::RootConstParam* rc = nullptr;
+		for (const auto& r : L->rcParams) { // TODO: Better lookup than linear scan
+			if (r.set == set && r.binding == binding) { rc = &r; break; }
+		}
+		if (!rc) return; // not declared in layout
+
+		// Clamp for safety
+		const uint32_t maxAvail = rc->num32;
+		if (dstOffset32 >= maxAvail) return;
+		if (dstOffset32 + num32 > maxAvail) num32 = maxAvail - dstOffset32;
+
+		// Write to requested stages. On DX12, graphics/compute have distinct root constant slots.
+		const auto* p32 = static_cast<const uint32_t*>(data);
+		if ((uint32_t)stages & (uint32_t)ShaderStage::Compute) {
+			impl->cl->SetComputeRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
+		}
+		// Treat any of VS/PS/MS/AS/All as "graphics"
+		const uint32_t gfxMask =
+			(uint32_t)ShaderStage::Vertex | (uint32_t)ShaderStage::Pixel |
+			(uint32_t)ShaderStage::Mesh | (uint32_t)ShaderStage::Task |
+			(uint32_t)ShaderStage::All;
+		if (((uint32_t)stages & gfxMask) != 0) {
+			impl->cl->SetGraphicsRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
+		}
+	}
+
+	void cl_setPrimitiveTopology(CommandList* cl, PrimitiveTopology pt) noexcept {
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		if (!l) return;
+		l->cl->IASetPrimitiveTopology(ToDX(pt));
+	}
 
 	// ---------------- Swapchain vtable funcs ----------------
 	static uint32_t sc_count(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->count; }

@@ -94,6 +94,8 @@ namespace rhi {
 		&cl_endQuery,
 		&cl_resolveQueryData,
 		&cl_resetQueries,
+		&cl_pushConstants,
+		&cl_setPrimitiveTopology,
 		&cl_setName,
 		1u
     };

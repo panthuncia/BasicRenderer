@@ -71,34 +71,39 @@ public:
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
 
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap, // The texture descriptor heap
-            context.samplerDescriptorHeap, // The sampler descriptor heap
-        };
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         // Set the root signature
-        commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
-        commandList->SetPipelineState(downsamplePassPSO.Get());
+        commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+        commandList.BindPipeline(downsamplePassPSO.GetAPIPipelineState().GetHandle());
 
         // UintRootConstant0 is the index of the global atomic buffer
         // UintRootConstant1 is the index of the source image
         // UintRootConstant2 is the index of the spdConstants structured buffer
 		// UintRootConstant3 is the index of the current constants
-        unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
         auto& mapInfo = m_perViewMapInfo[context.currentScene->GetPrimaryCamera().id()];
         if (!mapInfo.pConstantsBufferView) {
 			spdlog::error("Downsample pass: No constants buffer view for primary depth map");
         }
+
+        unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
+
         downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).index;
         downsampleRootConstants[UintRootConstant1] = m_pLinearDepthBuffer->GetSRVInfo(0).index;
-		downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).index;
+        downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).index;
         downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
-        commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
+        commandList.PushConstants(
+            rhi::ShaderStage::Compute, // stages
+            0, // set
+            MiscUintRootSignatureIndex, // binding
+            /*dstOffset32*/0,
+            /*num32*/NumMiscUintRootConstants,
+            downsampleRootConstants
+        );
 
 		// Dispatch the compute shader for primary depth
-		commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 1);
+		commandList.Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 1);
 
 		// Process each shadow map
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
@@ -107,20 +112,27 @@ public:
             downsampleRootConstants[UintRootConstant1] = light.type == Components::LightType::Point ? shadowMap.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : shadowMap.linearDepthMap->GetSRVInfo(0).index;
 			downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
-			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, downsampleRootConstants, 0);
+            commandList.PushConstants(
+                rhi::ShaderStage::Compute, // stages
+                0, // set
+                MiscUintRootSignatureIndex, // binding
+                /*dstOffset32*/0,
+                /*num32*/NumMiscUintRootConstants,
+                downsampleRootConstants
+			);
 
             switch (light.type) {
 			case Components::LightType::Point:
-				commandList->SetPipelineState(downsampleArrayPSO.Get());
-				commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 6);
+				commandList.BindPipeline(downsampleArrayPSO.GetAPIPipelineState().GetHandle());
+				commandList.Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 6);
 				break;
 			case Components::LightType::Spot:
-				commandList->SetPipelineState(downsamplePassPSO.Get());
-				commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 1);
+				commandList.BindPipeline(downsamplePassPSO.GetAPIPipelineState().GetHandle());
+				commandList.Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], 1);
 				break;
 			case Components::LightType::Directional:
-				commandList->SetPipelineState(downsampleArrayPSO.Get());
-                commandList->Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], m_numDirectionalCascades);
+				commandList.BindPipeline(downsampleArrayPSO.GetAPIPipelineState().GetHandle());
+                commandList.Dispatch(mapInfo.dispatchThreadGroupCountXY[0], mapInfo.dispatchThreadGroupCountXY[1], m_numDirectionalCascades);
             }
 
             });
@@ -165,43 +177,34 @@ private:
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
     std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer = nullptr;
 
-    ComPtr<ID3D12PipelineState> downsamplePassPSO;
-	ComPtr<ID3D12PipelineState> downsampleArrayPSO;
+    PipelineState downsamplePassPSO;
+	PipelineState downsampleArrayPSO;
 
     flecs::observer addObserver;
 	flecs::observer removeObserver;
 
     void CreateDownsampleComputePSO()
     {
-        auto device = DeviceManager::GetInstance().GetDevice();
+		auto& psoManager = PSOManager::GetInstance();
+        auto& layout = psoManager.GetRootSignature();
 
-        D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-        psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+        // Plain downsample
+        downsamplePassPSO = psoManager.MakeComputePipeline(
+            layout,
+            L"shaders/downsample.hlsl",
+            L"DownsampleCSMain",
+            {},                         // no defines
+            "DownsampleCS"
+        );
 
-        Microsoft::WRL::ComPtr<ID3DBlob> downsample;
-        //PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", {}, downsample);
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6" };
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		downsample = compiledBundle.computeShader;
-        psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsample.Get());
-        ThrowIfFailed(device->CreateComputePipelineState(
-            &psoDesc, IID_PPV_ARGS(&downsamplePassPSO)));
-
-        DxcDefine define;
-		define.Name = L"DOWNSAMPLE_ARRAY";
-		define.Value = L"1";
-
-        Microsoft::WRL::ComPtr<ID3DBlob> downsampleArray;
-        //PSOManager::GetInstance().CompileShader(L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6", { define }, downsampleArray);
-		shaderInfoBundle.computeShader = { L"shaders/downsample.hlsl", L"DownsampleCSMain", L"cs_6_6" };
-		shaderInfoBundle.defines = { define };
-		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		downsampleArray = compiledBundle.computeShader;
-        psoDesc.CS = CD3DX12_SHADER_BYTECODE(downsampleArray.Get());
-        ThrowIfFailed(device->CreateComputePipelineState(
-            &psoDesc, IID_PPV_ARGS(&downsampleArrayPSO)));
+        // Array variant (DOWNSAMPLE_ARRAY=1)
+        downsampleArrayPSO = psoManager.MakeComputePipeline(
+            layout,
+            L"shaders/downsample.hlsl",
+            L"DownsampleCSMain",
+            { DxcDefine{ L"DOWNSAMPLE_ARRAY", L"1" } },
+            "DownsampleCS[Array]"
+        );
     }
 
     void AddMapInfo(flecs::entity e, const Components::DepthMap& shadowMap) {

@@ -1,10 +1,9 @@
 #pragma once
 
 #include <vector>
-#include <directx/d3d12.h>
-#include <wrl/client.h>
 #include <unordered_set>
 #include <unordered_map>
+#include <rhi.h>
 
 #include "Resources/Resource.h"
 #include "Render/RenderContext.h"
@@ -47,7 +46,7 @@ public:
 		m_resourceDescriptorIndexHelper = std::make_unique<ResourceDescriptorIndexHelper>(resourceRegistryView);
 	}
     virtual void Setup() = 0;
-	virtual void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {};
+	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 
 	virtual void Update() {};
     virtual PassReturn Execute(RenderContext& context) = 0;
@@ -60,7 +59,7 @@ protected:
 	bool invalidated = true;
 	virtual void DeclareResourceUsages(RenderPassBuilder* builder) {};
 
-	void BindResourceDescriptorIndices(ID3D12GraphicsCommandList7* commandList, const PipelineResources& resources) {
+	void BindResourceDescriptorIndices(rhi::CommandList& commandList, const PipelineResources& resources) {
 		unsigned int indices[NumResourceDescriptorIndicesRootConstants] = {};
 		int i = 0;
 		for (auto& binding : resources.mandatoryResourceDescriptorSlots) {
@@ -71,12 +70,7 @@ protected:
 			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, true, &binding.name);
 			i++;
 		}
-		commandList->SetGraphicsRoot32BitConstants(
-			ResourceDescriptorIndicesRootSignatureIndex,
-			i,
-			indices,
-			0
-		);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ResourceDescriptorIndicesRootSignatureIndex, 0, i, indices);
 	}
 
 	void RegisterSRV(SRVViewType type, ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {

@@ -416,4 +416,15 @@ namespace rhi {
 
 		return D3D12_ENCODE_BASIC_FILTER(minT, magT, mipT, red);
 	}
+	static D3D12_PRIMITIVE_TOPOLOGY ToDX(const PrimitiveTopology t) noexcept {
+		switch (t) {
+		case PrimitiveTopology::PointList:        return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+		case PrimitiveTopology::LineList:         return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
+		case PrimitiveTopology::LineStrip:        return D3D_PRIMITIVE_TOPOLOGY_LINESTRIP;
+		case PrimitiveTopology::TriangleList:     return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		case PrimitiveTopology::TriangleStrip:    return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+		case PrimitiveTopology::TriangleFan:      return D3D_PRIMITIVE_TOPOLOGY_TRIANGLEFAN;
+		default: return D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+		}
+	}
 }
