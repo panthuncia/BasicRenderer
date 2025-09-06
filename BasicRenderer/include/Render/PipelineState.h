@@ -1,7 +1,6 @@
 #pragma once
 
 #include <rhi.h>
-#include <wrl/client.h>
 #include <stdint.h>
 #include <unordered_map>
 #include <string>
@@ -22,7 +21,7 @@ public:
 		m_pso(std::move(pso)),
 		m_pipelineResources(resources){}
 	PipelineState() : m_pso({}) {};
-	const rhi::PipelineHandle& GetAPIPipelineState() const {
+	rhi::Pipeline& GetAPIPipelineState() {
 		return m_pso.Get();
 	}
 	uint64_t GetResourceIDsHash() const {

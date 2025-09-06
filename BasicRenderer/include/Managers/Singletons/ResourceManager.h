@@ -13,7 +13,6 @@
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Render/DescriptorHeap.h"
-#include "Resources/ResourceStates.h"
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
@@ -61,37 +60,26 @@ public:
     std::shared_ptr<Buffer> CreateIndexedConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto device = DeviceManager::GetInstance().GetDevice();
 
         // Calculate the size of the buffer to be 256-byte aligned
         UINT bufferSize = (sizeof(T) + 255) & ~255;
 
         // Create the buffer
-        //bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-        auto dataBuffer = Buffer::CreateShared(device, ResourceCPUAccessType::NONE, bufferSize, false, false);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, false);
 		dataBuffer->SetName(name);
-//        ResourceTransition transition;
-//		transition.resource = dataBuffer.get();
-//		transition.beforeState = ResourceState::UNKNOWN;
-//		transition.afterState = ResourceState::CONSTANT;
-//#if defined(_DEBUG)
-//		transition.name = name;
-//#endif
-//		QueueResourceTransition(transition);
-        // Create a descriptor for the buffer
-        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-        cbvDesc.BufferLocation = dataBuffer->m_buffer->GetGPUVirtualAddress();
-        cbvDesc.SizeInBytes = bufferSize;
+
+		rhi::CbvDesc cbvDesc = {};
+		cbvDesc.byteOffset = 0;
+		cbvDesc.byteSize = bufferSize;
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbvSrvUavHeap->GetCPUHandle(index);
 
         ShaderVisibleIndexInfo cbvInfo;
         cbvInfo.index = index;
-        cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
         dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
-        device.CreateConstantBufferView()
+		device.CreateConstantBufferView({ m_cbvSrvUavHeap->GetHeap(), index }, dataBuffer->GetAPIResource().GetHandle(), cbvDesc);
 
         return dataBuffer;
     }
@@ -124,12 +112,6 @@ public:
 		}
 
         auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
-        
-        //ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
-//#if defined(_DEBUG)
-//        transition.name = L"IndexedStructuredBuffer";
-//#endif
-//        QueueResourceTransition(transition);
 
         unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
 
@@ -188,22 +170,12 @@ public:
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, false);
             });
 
-        // Create an SRV for the buffer
-        //D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        //srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        //srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        //srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        //srvDesc.Buffer.NumElements = capacity;
-        //srvDesc.Buffer.StructureByteStride = sizeof(T);
-        //srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-
 		rhi::SrvDesc srvDesc = {};
-		srvDesc.formatOverride = rhi::Format::Unknown;
-		srvDesc.dim = rhi::SrvDim::Buffer;
+		srvDesc.dimension = rhi::SrvDim::Buffer;
+		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
+		srvDesc.buffer.firstElement = 0;
 		srvDesc.buffer.numElements = capacity;
 		srvDesc.buffer.structureByteStride = sizeof(T);
-		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
-
 
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
@@ -221,7 +193,7 @@ public:
     std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(uint32_t capacity = 64, std::wstring name = "", uint64_t alignment = 1, bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
@@ -233,7 +205,7 @@ public:
 
 		rhi::SrvDesc srvDesc = {};
 		srvDesc.formatOverride = rhi::Format::Unknown;
-		srvDesc.dim = rhi::SrvDim::Buffer;
+		srvDesc.dimension = rhi::SrvDim::Buffer;
 		srvDesc.buffer.numElements = capacity;
 		srvDesc.buffer.structureByteStride = sizeof(T);
 		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
@@ -263,7 +235,6 @@ public:
 
             ShaderVisibleIndexInfo uavInfo;
             uavInfo.index = static_cast<int>(uavShaderVisibleIndex);
-            uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
             pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
         }
 
@@ -312,19 +283,6 @@ public:
 
 			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap(), static_cast<uint32_t>(uavIndex) }, uavDesc);
         }
-
-        //		auto bufferState = buffer->GetState();
-//		// After resize, internal buffer state will not match the wrapper state
-//		if (bufferState != ResourceState::UNKNOWN) {
-//			ResourceTransition transition;
-//			transition.resource = buffer->m_dataBuffer.get();
-//			transition.beforeState = ResourceState::UNKNOWN;
-//			transition.afterState = buffer->GetState();
-//#if defined(_DEBUG)
-//            transition.name = buffer->GetName()+L": Resize";
-//#endif
-//			QueueResourceTransition(transition);
-//		}
     }
 
     void onDynamicBufferResized(UINT bufferID, size_t elementSize, size_t numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
@@ -374,12 +332,12 @@ public:
     std::shared_ptr<Buffer> CreateConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
-		auto& device = DeviceManager::GetInstance().GetDevice();
+		auto device = DeviceManager::GetInstance().GetDevice();
 
 		// Calculate the size of the buffer to be 256-byte aligned
 		UINT bufferSize = (sizeof(T) + 255) & ~255;
 
-        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, false);
 		dataBuffer->SetName(name);
 
 

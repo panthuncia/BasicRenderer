@@ -29,7 +29,7 @@ void Texture::SetName(const std::wstring& name) {
 	m_image->SetName(name);
 }
 
-rhi::Resource Texture::GetAPIResource() const { return m_image->GetAPIResource(); }
+rhi::Resource Texture::GetAPIResource() { return m_image->GetAPIResource(); }
 
 void Texture::SetFilepath(const std::string& filepath) {
 	m_filePath = filepath;
@@ -42,10 +42,6 @@ void Texture::SetFilepath(const std::string& filepath) {
 uint64_t Texture::GetGlobalResourceID() const { 
 	return m_image->GetGlobalResourceID(); 
 }
-
-rhi::ResourceAccessType Texture::GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_image->GetSubresourceAccessType(subresourceIndex); }
-rhi::ResourceLayout Texture::GetSubresourceLayout(unsigned int subresourceIndex) const { return m_image->GetSubresourceLayout(subresourceIndex); }
-rhi::ResourceSyncState Texture::GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_image->GetSubresourceSyncState(subresourceIndex); }
 
 SymbolicTracker* Texture::GetStateTracker() {
 	return m_image->GetStateTracker();

@@ -1,7 +1,6 @@
 #pragma once
 #include <memory>
 
-#include "Resources/ResourceStates.h"
 #include "Resources/Resource.h"
 #include "Import/Filetypes.h"
 
@@ -21,7 +20,7 @@ public:
 	void SetFilepath(const std::string& path);
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	virtual void SetName(const std::wstring& name);
-	rhi::Resource GetAPIResource() const override;
+	rhi::Resource GetAPIResource() override;
 	void SetFileType(ImageFiletype fileType) { m_fileType = fileType; }
 	ImageFiletype GetFileType() const { return m_fileType; }
 	std::string GetFilePath() const { return m_filePath; }
@@ -29,9 +28,6 @@ public:
 	bool AlphaIsAllOpaque() const { return m_alphaIsAllOpaque; }
 	void SetAlphaIsAllOpaque(bool value) { m_alphaIsAllOpaque = value; }
 	virtual uint64_t GetGlobalResourceID() const;
-	rhi::ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override;
-	rhi::ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override;
-	rhi::ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override;
 	virtual SymbolicTracker* GetStateTracker() override;
 private:
 	std::shared_ptr<PixelBuffer> m_image;

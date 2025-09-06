@@ -16,6 +16,7 @@ add_library(BasicRHI STATIC
 
 target_compile_options(BasicRHI PRIVATE /WX)
 target_compile_options(BasicRHI PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+target_link_libraries(BasicRHI PUBLIC Streamline::headers)
 
 # Public header(s)
 set_target_properties(BasicRHI PROPERTIES

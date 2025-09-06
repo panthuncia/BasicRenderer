@@ -18,7 +18,7 @@ void UploadManager::Initialize() {
 
 	m_currentCapacity = 1024 * 1024 * 4; // 4MB
 
-	m_pages.push_back({ Buffer::CreateShared(device, ResourceCPUAccessType::WRITE, kPageSize, true, false), 0});
+	m_pages.push_back({ Buffer::CreateShared(device, rhi::Memory::Upload, kPageSize, false), 0});
 
 	// ring buffer pointers
 	m_headOffset = 0;
@@ -67,7 +67,7 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 			// allocate another fresh page
 			size_t allocSize = std::max(kPageSize, size);
 			auto device = DeviceManager::GetInstance().GetDevice();
-			m_pages.push_back({ Buffer::CreateShared(device, ResourceCPUAccessType::WRITE, allocSize, true, false), 0});
+			m_pages.push_back({ Buffer::CreateShared(device, rhi::Memory::Upload, allocSize, false), 0});
 		}
 		page = &m_pages[m_activePage];
 		page->tailOffset = 0;

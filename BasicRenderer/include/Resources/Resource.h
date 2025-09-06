@@ -6,7 +6,6 @@
 #include <resource_states.h>
 #include <rhi.h>
 
-#include "Resources/ResourceStates.h"
 #include "Resources/ResourceStateTracker.h"
 
 class RenderContext;
@@ -21,11 +20,8 @@ public:
 
     const std::wstring& GetName() const { return name; }
     virtual void SetName(const std::wstring& newName) { this->name = newName; OnSetName(); }
-	virtual rhi::Resource GetAPIResource() const = 0;
+	virtual rhi::Resource GetAPIResource() = 0;
     virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
-	virtual rhi::ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_subresourceAccessTypes[subresourceIndex] ; }
-	virtual rhi::ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const { return m_subresourceLayouts[subresourceIndex]; }
-	virtual rhi::ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_subresourceSyncStates[subresourceIndex]; }
     virtual rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) = 0;
 	bool HasLayout() const { return m_hasLayout; }
 	void AddAliasedResource(Resource* resource) {

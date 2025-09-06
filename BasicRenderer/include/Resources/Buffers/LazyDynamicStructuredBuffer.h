@@ -89,7 +89,7 @@ public:
 		return m_elementSize;
 	}
 
-	rhi::Resource GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
 
 protected:

@@ -8,10 +8,10 @@
 #include <DirectXMath.h>
 #include <functional>
 
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
-#include <ThirdParty/Streamline/sl_matrix_helpers.h>
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
+#include <sl_matrix_helpers.h>
 
 #include <rhi.h>
 

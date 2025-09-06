@@ -12,7 +12,6 @@
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/Base/ComputePass.h"
-#include "Resources/ResourceStates.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Interfaces/IResourceProvider.h"
 #include "Render/ResourceRegistry.h"

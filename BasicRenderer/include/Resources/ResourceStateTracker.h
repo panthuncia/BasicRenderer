@@ -4,9 +4,7 @@
 #include <vector>
 #include <optional>
 #include <algorithm>
-#include "resource_states.h"
-
-#include "Resources/ResourceStates.h"
+#include <resource_states.h>
 
 class Resource;
 

@@ -45,13 +45,10 @@ public:
 		return m_mappedData;
 	}
 
-	rhi::Resource GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
 protected:
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
-        m_subresourceAccessTypes[0] = newAccessType;
-        m_subresourceLayouts[0] = newLayout;
-        m_subresourceSyncStates[0] = newSyncState;
         return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
     }
 
@@ -60,9 +57,6 @@ private:
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(size);
         SetName(name);
-		m_subresourceAccessTypes.push_back(rhi::ResourceAccessType::Common);
-		m_subresourceLayouts.push_back(rhi::ResourceLayout::Common);
-		m_subresourceSyncStates.push_back(rhi::ResourceSyncState::All);
     }
 
     void OnSetName() override {

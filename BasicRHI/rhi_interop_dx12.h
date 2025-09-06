@@ -4,7 +4,7 @@
 #include "rhi_interop.h"
 #include <d3d12.h>
 #include <dxgi1_6.h>
-#include "ThirdParty/sl_result.h"
+#include "sl_result.h"
 
 namespace rhi::dx12 {
 

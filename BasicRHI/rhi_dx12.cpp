@@ -85,6 +85,7 @@ namespace rhi {
 		&cl_setDescriptorHeaps,
 		&cl_clearUavUint,
 		&cl_clearUavFloat,
+		&cl_copyTextureToBuffer,
 		&cl_copyBufferToTexture,
 		&cl_copyTextureRegion,
 		&cl_copyBufferRegion,

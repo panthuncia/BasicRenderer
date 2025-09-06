@@ -535,6 +535,7 @@ PRIVATE
     flecs::flecs 
     flecs::flecs_static 
     unofficial::tree-sitter::tree-sitter
+    Streamline::headers
     usd
     sdf
     tf

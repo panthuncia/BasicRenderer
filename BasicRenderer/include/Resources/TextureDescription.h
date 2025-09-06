@@ -1,6 +1,5 @@
 #pragma once
 #include <directx/d3d12.h>
-#include "Resources/ResourceStates.h"
 
 struct ImageDimensions {
     uint32_t width = 0;

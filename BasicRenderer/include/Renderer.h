@@ -16,9 +16,9 @@
 
 #include <rhi.h>
 
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
 
 #include "Mesh/Mesh.h"
 #include "ShaderBuffers.h"

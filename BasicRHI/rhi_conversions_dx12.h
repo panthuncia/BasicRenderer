@@ -351,4 +351,69 @@ namespace rhi {
 		if (test(HeapFlags::AllowAllBuffersAndTextures))  out |= D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
 		return out;
 	}
+	static D3D12_FILTER_TYPE ToDX(Filter f) noexcept {
+		return (f == Filter::Linear) ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT;
+	}
+	static D3D12_FILTER_REDUCTION_TYPE ToDX(rhi::ReductionMode r, bool compareEnable) noexcept {
+		if (compareEnable) return D3D12_FILTER_REDUCTION_TYPE_COMPARISON;
+		switch (r) {
+		case rhi::ReductionMode::Standard: return D3D12_FILTER_REDUCTION_TYPE_STANDARD;
+		case rhi::ReductionMode::Min:      return D3D12_FILTER_REDUCTION_TYPE_MINIMUM;
+		case rhi::ReductionMode::Max:      return D3D12_FILTER_REDUCTION_TYPE_MAXIMUM;
+		case rhi::ReductionMode::Comparison: return D3D12_FILTER_REDUCTION_TYPE_COMPARISON;
+		}
+		return D3D12_FILTER_REDUCTION_TYPE_STANDARD;
+	}
+	static D3D12_TEXTURE_ADDRESS_MODE ToDX(AddressMode m) noexcept {
+		switch (m) {
+		case AddressMode::Wrap:       return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+		case AddressMode::Mirror:     return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+		case AddressMode::Clamp:      return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+		case AddressMode::Border:     return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		case AddressMode::MirrorOnce: return D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE;
+		}
+		return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	}
+	static D3D12_COMPARISON_FUNC ToDX(CompareOp op) noexcept {
+		switch (op) {
+		case CompareOp::Never:        return D3D12_COMPARISON_FUNC_NEVER;
+		case CompareOp::Less:         return D3D12_COMPARISON_FUNC_LESS;
+		case CompareOp::Equal:        return D3D12_COMPARISON_FUNC_EQUAL;
+		case CompareOp::LessEqual:    return D3D12_COMPARISON_FUNC_LESS_EQUAL;
+		case CompareOp::Greater:      return D3D12_COMPARISON_FUNC_GREATER;
+		case CompareOp::NotEqual:     return D3D12_COMPARISON_FUNC_NOT_EQUAL;
+		case CompareOp::GreaterEqual: return D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+		case CompareOp::Always:       return D3D12_COMPARISON_FUNC_ALWAYS;
+		}
+		return D3D12_COMPARISON_FUNC_ALWAYS;
+	}
+	static void FillDxBorderColor(const SamplerDesc& sd, float out[4]) noexcept {
+		switch (sd.borderPreset) {
+		case BorderPreset::TransparentBlack: out[0] = out[1] = out[2] = 0.f; out[3] = 0.f; break;
+		case BorderPreset::OpaqueBlack:      out[0] = out[1] = out[2] = 0.f; out[3] = 1.f; break;
+		case BorderPreset::OpaqueWhite:      out[0] = out[1] = out[2] = 1.f; out[3] = 1.f; break;
+		case BorderPreset::Custom:           out[0] = sd.borderColor[0]; out[1] = sd.borderColor[1];
+			out[2] = sd.borderColor[2]; out[3] = sd.borderColor[3]; break;
+		}
+	}
+	static D3D12_FILTER BuildDxFilter(const SamplerDesc& sd) noexcept {
+		const auto red = ToDX(sd.reduction, sd.compareEnable);
+
+		// Anisotropy dominates when >1
+		if (sd.maxAnisotropy > 1) {
+			switch (red) {
+			default:
+			case D3D12_FILTER_REDUCTION_TYPE_STANDARD:   return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_STANDARD);
+			case D3D12_FILTER_REDUCTION_TYPE_COMPARISON: return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_COMPARISON);
+			case D3D12_FILTER_REDUCTION_TYPE_MINIMUM:    return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_MINIMUM);
+			case D3D12_FILTER_REDUCTION_TYPE_MAXIMUM:    return D3D12_ENCODE_ANISOTROPIC_FILTER(D3D12_FILTER_REDUCTION_TYPE_MAXIMUM);
+			}
+		}
+
+		const auto minT = ToDX(sd.minFilter);
+		const auto magT = ToDX(sd.magFilter);
+		const auto mipT = (sd.mipFilter == MipFilter::Linear) ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT;
+
+		return D3D12_ENCODE_BASIC_FILTER(minT, magT, mipT, red);
+	}
 }

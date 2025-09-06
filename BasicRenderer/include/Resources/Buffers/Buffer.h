@@ -39,7 +39,7 @@ public:
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	size_t GetSize() const { return m_size; }
 
-	rhi::Resource GetAPIResource() const override { return m_buffer.Get(); }
+	rhi::Resource GetAPIResource() override { return m_buffer.Get(); }
 protected:
 	void OnSetName() override { m_buffer->SetName(ws2s(name).c_str()); }
 private:

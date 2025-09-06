@@ -11,12 +11,12 @@ class CommandSignatureManager {
 public:
 	static CommandSignatureManager& GetInstance();
 	void Initialize();
-	rhi::CommandSignatureHandle& GetDispatchMeshCommandSignature();
-	rhi::CommandSignatureHandle& GetDispatchCommandSignature() { return m_dispatchCommandSignature; }
+	rhi::CommandSignature& GetDispatchMeshCommandSignature();
+	rhi::CommandSignature& GetDispatchCommandSignature();
 
 private:
-	rhi::CommandSignatureHandle m_dispatchMeshCommandSignature;
-	rhi::CommandSignatureHandle m_dispatchCommandSignature;
+	rhi::CommandSignaturePtr m_dispatchMeshCommandSignature;
+	rhi::CommandSignaturePtr m_dispatchCommandSignature;
 };
 
 inline CommandSignatureManager& CommandSignatureManager::GetInstance() {

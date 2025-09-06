@@ -6,9 +6,9 @@
 #include "ThirdParty/stb/stb_image.h"
 #include <array>
 
-#include "Resources/ResourceStates.h"
 #include "Resources/GloballyIndexedResource.h"
 #include "Resources/TextureDescription.h"
+#include "Utilities/Utilities.h"
 using Microsoft::WRL::ComPtr;
 
 class PixelBuffer : public GloballyIndexedResource {
@@ -21,14 +21,14 @@ public:
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
-    rhi::Resource GetTexture() const {
+    rhi::Resource GetTexture() {
 		return m_texture.Get();
     }
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
     virtual void SetName(const std::wstring& newName) { name = newName; m_texture->SetName(ws2s(newName).c_str()); }
 
-	rhi::Resource GetAPIResource() const override { return m_texture.Get(); }
+	rhi::Resource GetAPIResource() override { return m_texture.Get(); }
 
 	rhi::HeapHandle GetPlacedResourceHeap() const {
 		return m_placedResourceHeap;

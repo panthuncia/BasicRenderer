@@ -94,17 +94,17 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 
 void ResourceManager::WaitForCopyQueue() {
 	auto device = DeviceManager::GetInstance().GetDevice();
-	copyCommandQueue.Signal({ copyFence.Get(), ++copyFenceValue});
-	if (device.TimelineCompletedValue(copyFence.Get()) < copyFenceValue) {
-		device.TimelineHostWait({ copyFence.Get(), copyFenceValue});
+	copyCommandQueue.Signal({ copyFence->GetHandle(), ++copyFenceValue});
+	if (copyFence->GetCompletedValue() < copyFenceValue) {
+		copyFence->HostWait(copyFenceValue);
 	}
 }
 
 void ResourceManager::WaitForTransitionQueue() {
 	auto device = DeviceManager::GetInstance().GetDevice();
-	transitionCommandQueue.Signal({ transitionFence.Get(), ++transitionFenceValue});
-	if (device.TimelineCompletedValue(transitionFence.Get()) < transitionFenceValue) {
-		device.TimelineHostWait({ transitionFence.Get(), transitionFenceValue});
+	transitionCommandQueue.Signal({ transitionFence->GetHandle(), ++transitionFenceValue});
+	if (transitionFence->GetCompletedValue() < transitionFenceValue) {
+		transitionFence->HostWait(transitionFenceValue);
 	}
 }
 
@@ -183,11 +183,11 @@ void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandL
 
 	// Increment the fence value and signal the fence
 	++copyFenceValue;
-	copyCommandQueue.Signal({ copyFence.Get(), copyFenceValue});
+	copyCommandQueue.Signal({ copyFence->GetHandle(), copyFenceValue});
 
 	// Wait until the fence is completed
-	if (device.TimelineCompletedValue(copyFence.Get()) < copyFenceValue) {
-		device.TimelineHostWait({ copyFence.Get(), copyFenceValue});
+	if (copyFence->GetCompletedValue() < copyFenceValue) {
+		copyFence->HostWait(copyFenceValue);
 	}
 
 	commandAllocator->Recycle();
@@ -373,7 +373,7 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 			.format = desc.format,
 			.width = static_cast<uint32_t>(width),
 			.height = static_cast<uint32_t>(height),
-			.depthOrLayers = desc.isCubemap ? 6 * arraySize : arraySize,
+			.depthOrLayers = static_cast<uint16_t>(desc.isCubemap ? 6 * arraySize : arraySize),
 			.mipLevels = mipLevels,
 			.sampleCount = 1,
 			.initialLayout = rhi::ResourceLayout::Common,

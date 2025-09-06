@@ -102,8 +102,8 @@ public:
 
     const PipelineState& GetDeferredPSO(UINT psoFlags);
 
-    rhi::PipelineLayoutHandle& GetRootSignature();
-    rhi::PipelineLayoutHandle& GetComputeRootSignature();
+    rhi::PipelineLayout& GetRootSignature();
+    rhi::PipelineLayout& GetComputeRootSignature();
     void ReloadShaders();
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
 	ShaderBundle CompileShaders(const ShaderInfoBundle& shaderInfoBundle);
@@ -130,10 +130,10 @@ private:
     };
 
     PSOManager() = default;
-    rhi::PipelineLayoutHandle m_rootSignature;
-    rhi::PipelineLayoutHandle m_computeRootSignature;
-    rhi::PipelineLayoutHandle m_debugRootSignature;
-    rhi::PipelineLayoutHandle m_environmentConversionRootSignature;
+    rhi::PipelineLayoutPtr m_rootSignature;
+    rhi::PipelineLayoutPtr m_computeRootSignature;
+    rhi::PipelineLayoutPtr m_debugRootSignature;
+    rhi::PipelineLayoutPtr m_environmentConversionRootSignature;
 
     std::unordered_map<PSOKey, PipelineState> m_psoCache;
     std::unordered_map<PSOKey, PipelineState> m_PPLLPSOCache;

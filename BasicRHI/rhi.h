@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <limits>
 #include <directx/d3dcommon.h>
 
 #include "resource_states.h"
@@ -102,7 +103,7 @@ namespace rhi {
         explicit operator bool() const noexcept { return dev_ && static_cast<bool>(obj_); }
         bool Valid() const noexcept { return !!*this; }
         Device* DevicePtr() const noexcept { return dev_; }
-        TObject& Get() const noexcept { return obj_; } // by-ref view
+        TObject& Get() noexcept { return obj_; } // by-ref view
 
         // Release ownership to caller (returns the raw object)
         TObject Release() noexcept {
@@ -179,7 +180,52 @@ namespace rhi {
     struct TextureSubresourceRange { uint32_t baseMip = 0, mipCount = 1; uint32_t baseLayer = 0, layerCount = 1; };
     struct ViewDesc { ViewKind kind = ViewKind::SRV; ResourceHandle texture{}; TextureSubresourceRange range{}; Format formatOverride = Format::Unknown; };
 
-    struct SamplerDesc { uint32_t maxAniso = 1; };
+    enum class Filter : uint8_t { Nearest, Linear };
+    enum class MipFilter : uint8_t { Nearest, Linear };
+    enum class AddressMode : uint8_t { Wrap, Mirror, Clamp, Border, MirrorOnce };
+    enum class CompareOp : uint8_t {
+        Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always
+    };
+    enum class ReductionMode : uint8_t { Standard, Comparison, Min, Max };
+
+    // Border presets are guaranteed portable across APIs.
+    // If we want arbitrary float[4] border on Vulkan, we'll
+    // need VK_EXT_custom_border_color
+    enum class BorderPreset : uint8_t {
+        TransparentBlack, OpaqueBlack, OpaqueWhite, Custom // 'Custom' uses borderColor[]
+    };
+
+    struct SamplerDesc {
+        // Filtering
+        Filter   minFilter{ Filter::Linear };
+        Filter   magFilter{ Filter::Linear };
+        MipFilter mipFilter{ MipFilter::Linear };
+
+        // Addressing
+        AddressMode addressU{ AddressMode::Clamp };
+        AddressMode addressV{ AddressMode::Clamp };
+        AddressMode addressW{ AddressMode::Clamp };
+
+        // Mip LODs
+        float mipLodBias{ 0.f };
+        float minLod{ 0.f };
+        float maxLod{ (std::numeric_limits<float>::max)() };
+
+        // Anisotropy
+        uint32_t maxAnisotropy{ 1 }; // >1 enables anisotropy (clamped to device limit)
+
+        // Comparison / reduction
+        bool       compareEnable{ false };
+        CompareOp  compareOp{ CompareOp::Always };
+        ReductionMode reduction{ ReductionMode::Standard }; // Min/Max map to min/max reduction filters
+
+        // Border color
+        BorderPreset borderPreset{ BorderPreset::TransparentBlack };
+        float borderColor[4]{ 0.f, 0.f, 0.f, 0.f }; // used when preset==Custom
+
+        // Vulkan-only; DX12 always uses normalized coords
+        bool unnormalizedCoordinates{ false };
+    };
 
     enum class IndirectArgKind : uint32_t {
         Draw,           // D3D12_INDIRECT_ARGUMENT_TYPE_DRAW
@@ -453,7 +499,6 @@ namespace rhi {
 
     enum class FillMode : uint32_t { Solid, Wireframe };
     enum class CullMode : uint32_t { None, Front, Back };
-    enum class CompareOp : uint32_t { Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always };
     enum class BlendFactor : uint32_t { One, Zero, SrcColor, InvSrcColor, SrcAlpha, InvSrcAlpha, DstColor, InvDstColor, DstAlpha, InvDstAlpha };
     enum class BlendOp : uint32_t { Add, Sub, RevSub, Min, Max };
 	enum ColorWriteEnable : uint8_t { R = 1, G = 2, B = 4, A = 8, All = 0x0F };
@@ -947,7 +992,7 @@ namespace rhi {
 
     struct TimelineVTable {
         uint64_t(*getCompletedValue)(Timeline*) noexcept;
-        Result(*hostWait)(Timeline*, const TimelinePoint&) noexcept; // blocks until reached
+        Result(*hostWait)(Timeline*, const uint64_t) noexcept; // blocks until reached
 		void (*setName)(Timeline*, const char*) noexcept;
 		uint32_t abi_version = 1;
 	};
@@ -963,7 +1008,7 @@ namespace rhi {
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
 		TimelineHandle GetHandle() const noexcept { return handle; }
 		uint64_t GetCompletedValue() noexcept { return vt->getCompletedValue(this); }
-		Result HostWait(const TimelinePoint& p) noexcept { return vt->hostWait(this, p); }
+		Result HostWait(const uint64_t p) noexcept { return vt->hostWait(this, p); }
         void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		TimelineHandle handle;
@@ -1354,10 +1399,10 @@ namespace rhi {
     }
     inline void CommandList::SetDescriptorHeaps(DescriptorHeapHandle csu, DescriptorHeapHandle samp) noexcept { vt->setDescriptorHeaps(this, csu, samp); }
     inline void CommandList::ClearUavUint(const UavClearInfo& i, const UavClearUint& v) noexcept { vt->clearUavUint(this, i, v); }
-    inline void CommandList::CopyTextureToBuffer(const BufferTextureCopyRegion& r) noexcept {
+    inline void CommandList::CopyTextureToBuffer(const BufferTextureCopyFootprint& r) noexcept {
         vt->copyTextureToBuffer(this, r);
     }
-    inline void CommandList::CopyBufferToTexture(const BufferTextureCopyRegion& r) noexcept {
+    inline void CommandList::CopyBufferToTexture(const BufferTextureCopyFootprint& r) noexcept {
         vt->copyBufferToTexture(this, r);
     }    inline void CommandList::ClearUavFloat(const UavClearInfo& i, const UavClearFloat& v) noexcept { vt->clearUavFloat(this, i, v); }
     inline void CommandList::CopyTextureRegion(const TextureCopyRegion& dst, const TextureCopyRegion& src) noexcept { vt->copyTextureRegion(this, dst, src); }

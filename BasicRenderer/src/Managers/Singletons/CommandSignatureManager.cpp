@@ -6,7 +6,7 @@
 
 void CommandSignatureManager::Initialize() {
 
-    auto& device = DeviceManager::GetInstance().GetDevice();
+    auto device = DeviceManager::GetInstance().GetDevice();
 
     rhi::IndirectArg args[] = {
         { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 0, 0, 1 } } },
@@ -14,20 +14,25 @@ void CommandSignatureManager::Initialize() {
         { .kind = rhi::IndirectArgKind::DispatchMesh }
     };
 	auto& layout = PSOManager::GetInstance().GetRootSignature();
-    rhi::CommandSignatureHandle sig = device.CreateCommandSignature(
+    m_dispatchMeshCommandSignature = device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 3), sizeof(DispatchMeshIndirectCommand) },
-        layout);
+        layout.GetHandle());
 
     rhi::IndirectArg args2[] = {
         { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 0, 0, 1 } } },
         { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 1, 0, 2 } } },
         { .kind = rhi::IndirectArgKind::Dispatch }
 	};
-    rhi::CommandSignatureHandle sig2 = device.CreateCommandSignature(
+    m_dispatchCommandSignature = device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args2, 3), sizeof(DispatchIndirectCommand) },
-		layout);
+		layout.GetHandle());
 }
 
-rhi::CommandSignatureHandle& CommandSignatureManager::GetDispatchMeshCommandSignature() {
-	return m_dispatchMeshCommandSignature;
+rhi::CommandSignature& CommandSignatureManager::GetDispatchMeshCommandSignature() {
+	return m_dispatchMeshCommandSignature.Get();
 }
+
+rhi::CommandSignature& CommandSignatureManager::GetDispatchCommandSignature() {
+    return m_dispatchCommandSignature.Get();
+}
+

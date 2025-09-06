@@ -2,6 +2,7 @@
 
 #include <type_traits>
 #include <memory>
+#include <rhi.h>
 
 #include "RenderGraph.h"
 #include "ResourceRequirements.h"
@@ -715,7 +716,7 @@ private:
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
-        std::vector<std::pair<ResourceAndRange,ResourceAccessType>> entries;
+        std::vector<std::pair<ResourceAndRange, rhi::ResourceAccessType>> entries;
         entries.reserve(
             params.shaderResources.size()
             + params.constantBuffers.size()
@@ -728,29 +729,29 @@ private:
             + params.indirectArgumentBuffers.size()
         );
 
-        auto accumulate = [&](auto const& list, ResourceAccessType flag){
+        auto accumulate = [&](auto const& list, rhi::ResourceAccessType flag){
             for(auto const& rr : list){
                 if(!rr.resource) continue;
                 entries.emplace_back(rr, flag);
             }
             };
 
-        accumulate(params.shaderResources,         ResourceAccessType::SHADER_RESOURCE);
-        accumulate(params.constantBuffers,         ResourceAccessType::CONSTANT_BUFFER);
-        accumulate(params.renderTargets,           ResourceAccessType::RENDER_TARGET);
-        accumulate(params.depthReadResources,      ResourceAccessType::DEPTH_READ);
-        accumulate(params.depthReadWriteResources, ResourceAccessType::DEPTH_READ_WRITE);
-        accumulate(params.unorderedAccessViews,    ResourceAccessType::UNORDERED_ACCESS);
-        accumulate(params.copySources,             ResourceAccessType::COPY_SOURCE);
-        accumulate(params.copyTargets,             ResourceAccessType::COPY_DEST);
-        accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
-        accumulate(params.legacyInteropResources,  ResourceAccessType::COMMON);
+        accumulate(params.shaderResources, rhi::ResourceAccessType::ShaderResource);
+        accumulate(params.constantBuffers, rhi::ResourceAccessType::ConstantBuffer);
+        accumulate(params.renderTargets, rhi::ResourceAccessType::RenderTarget);
+        accumulate(params.depthReadResources, rhi::ResourceAccessType::DepthRead);
+        accumulate(params.depthReadWriteResources, rhi::ResourceAccessType::DepthReadWrite);
+        accumulate(params.unorderedAccessViews, rhi::ResourceAccessType::UnorderedAccess);
+        accumulate(params.copySources, rhi::ResourceAccessType::CopySource);
+        accumulate(params.copyTargets, rhi::ResourceAccessType::CopyDest);
+        accumulate(params.indirectArgumentBuffers, rhi::ResourceAccessType::IndirectArgument);
+        accumulate(params.legacyInteropResources, rhi::ResourceAccessType::Common);
 
         // Build a tracker for each resource, applying each (range->state)
         constexpr ResourceState initialState{
-            ResourceAccessType::COMMON,
-            ResourceLayout   ::LAYOUT_COMMON,
-            ResourceSyncState::ALL
+            rhi::ResourceAccessType::Common,
+            rhi::ResourceLayout::Common,
+            rhi::ResourceSyncState::All
         };
 
         std::unordered_map<uint64_t,SymbolicTracker> trackers;
@@ -787,7 +788,7 @@ private:
         for(auto& [id, tracker] : trackers) {
             auto pRes = ptrMap[id];
             for(auto const& seg : tracker.GetSegments()) {
-                if (seg.state.access == ResourceAccessType::COMMON && seg.state.layout == ResourceLayout::LAYOUT_COMMON) {
+                if (seg.state.access == rhi::ResourceAccessType::Common && seg.state.layout == rhi::ResourceLayout::Common) {
                     //continue; // TODO: Will we ever need explicit transitions to common for declared resources?
                 }
                 // build a ResourceAndRange for this segment
@@ -1014,7 +1015,7 @@ private:
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
-        std::vector<std::pair<ResourceAndRange,ResourceAccessType>> entries;
+        std::vector<std::pair<ResourceAndRange, rhi::ResourceAccessType>> entries;
         entries.reserve(
             params.shaderResources.size()
             + params.constantBuffers.size()
@@ -1022,24 +1023,24 @@ private:
             + params.indirectArgumentBuffers.size()
         );
 
-        auto accumulate = [&](auto const& list, ResourceAccessType flag){
+        auto accumulate = [&](auto const& list, rhi::ResourceAccessType flag){
             for(auto const& rr : list){
                 if(!rr.resource) continue;
                 entries.emplace_back(rr, flag);
             }
             };
 
-        accumulate(params.shaderResources,         ResourceAccessType::SHADER_RESOURCE);
-        accumulate(params.constantBuffers,         ResourceAccessType::CONSTANT_BUFFER);
-        accumulate(params.unorderedAccessViews,    ResourceAccessType::UNORDERED_ACCESS);
-        accumulate(params.indirectArgumentBuffers, ResourceAccessType::INDIRECT_ARGUMENT);
-        accumulate(params.legacyInteropResources,  ResourceAccessType::COMMON);
+        accumulate(params.shaderResources, rhi::ResourceAccessType::ShaderResource);
+        accumulate(params.constantBuffers, rhi::ResourceAccessType::ConstantBuffer);
+        accumulate(params.unorderedAccessViews, rhi::ResourceAccessType::UnorderedAccess);
+        accumulate(params.indirectArgumentBuffers, rhi::ResourceAccessType::IndirectArgument);
+        accumulate(params.legacyInteropResources, rhi::ResourceAccessType::Common);
 
         // Build a tracker for each resource, applying each (range->state)
         constexpr ResourceState initialState{
-            ResourceAccessType::COMMON,
-            ResourceLayout   ::LAYOUT_COMMON,
-            ResourceSyncState::ALL
+            rhi::ResourceAccessType::Common,
+            rhi::ResourceLayout::Common,
+            rhi::ResourceSyncState::All
         };
 
         std::unordered_map<uint64_t,SymbolicTracker> trackers;
@@ -1076,7 +1077,7 @@ private:
         for(auto& [id, tracker] : trackers) {
             auto pRes = ptrMap[id];
             for(auto const& seg : tracker.GetSegments()) {
-                if (seg.state.access == ResourceAccessType::COMMON && seg.state.layout == ResourceLayout::LAYOUT_COMMON) {
+                if (seg.state.access == rhi::ResourceAccessType::Common && seg.state.layout == rhi::ResourceLayout::Common) {
                     //continue; // TODO: Will we ever need explicit transitions to common for declared resources?
                 }
                 // build a ResourceAndRange for this segment

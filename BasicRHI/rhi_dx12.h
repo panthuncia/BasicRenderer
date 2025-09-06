@@ -580,13 +580,13 @@ namespace rhi {
 			const auto& ss = ld.staticSamplers.data[i];
 			D3D12_STATIC_SAMPLER_DESC s{};
 			// Map SamplerDesc -> D3D12 fields TODO: complete
-			s.Filter = (ss.sampler.maxAniso > 1) ? D3D12_FILTER_ANISOTROPIC
+			s.Filter = (ss.sampler.maxAnisotropy > 1) ? D3D12_FILTER_ANISOTROPIC
 				: D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 			s.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
 			s.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
 			s.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
 			s.MipLODBias = 0.0f;
-			s.MaxAnisotropy = ss.sampler.maxAniso;
+			s.MaxAnisotropy = ss.sampler.maxAnisotropy;
 			s.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
 			s.MinLOD = 0.0f;
 			s.MaxLOD = D3D12_FLOAT32_MAX;
@@ -1074,17 +1074,30 @@ namespace rhi {
 		return Result::Ok;
 	}
 
-	static Result d_createSampler(Device* d, DescriptorSlot s, const SamplerDesc& sd) noexcept {
+	static Result d_createSampler(Device* d, DescriptorSlot s, const SamplerDesc& sd) noexcept
+	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
 		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)) return Result::InvalidArg;
 
 		D3D12_SAMPLER_DESC desc{};
-		desc.Filter = (sd.maxAniso > 1) ? D3D12_FILTER_ANISOTROPIC : D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-		desc.AddressU = desc.AddressV = desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-		desc.MaxAnisotropy = sd.maxAniso;
-		desc.MinLOD = 0.0f; desc.MaxLOD = D3D12_FLOAT32_MAX;
-		desc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+		desc.Filter = BuildDxFilter(sd);
+		desc.AddressU = ToDX(sd.addressU);
+		desc.AddressV = ToDX(sd.addressV);
+		desc.AddressW = ToDX(sd.addressW);
+
+		// DX12 ignores unnormalizedCoordinates (always normalized)
+
+		// Clamp anisotropy to device limit (DX12 spec says 1->16)
+		desc.MaxAnisotropy = (sd.maxAnisotropy > 1) ? (std::min<uint32_t>(sd.maxAnisotropy, 16u)) : 1u;
+
+		desc.MipLODBias = sd.mipLodBias;
+		desc.MinLOD = sd.minLod;
+		desc.MaxLOD = sd.maxLod;
+
+		desc.ComparisonFunc = sd.compareEnable ? ToDX(sd.compareOp) : D3D12_COMPARISON_FUNC_ALWAYS;
+
+		FillDxBorderColor(sd, desc.BorderColor);
 
 		impl->dev->CreateSampler(&desc, dst);
 		return Result::Ok;
@@ -2124,7 +2137,7 @@ namespace rhi {
 	static UINT Align256(UINT x) { return (x + 255u) & ~255u; }
 
 	// texture -> buffer
-	static void cl_copyTextureToBufferFp(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
+	static void cl_copyTextureToBuffer(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
 		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) return;
@@ -2154,7 +2167,7 @@ namespace rhi {
 	}
 
 	// buffer -> texture (symmetric)
-	static void cl_copyBufferToTextureFp(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
+	static void cl_copyBufferToTexture(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
 		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) return;
@@ -2642,11 +2655,11 @@ namespace rhi {
 		return impl->fence ? impl->fence->GetCompletedValue() : 0;
 	}
 
-	static Result tl_timelineHostWait(Timeline* tl, const TimelinePoint& p) noexcept {
+	static Result tl_timelineHostWait(Timeline* tl, const uint64_t p) noexcept {
 		auto* TL = static_cast<Dx12Timeline*>(tl->impl);
 		HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 		if (!e) return Result::Failed;
-		HRESULT hr = TL->fence->SetEventOnCompletion(p.value, e);
+		HRESULT hr = TL->fence->SetEventOnCompletion(p, e);
 		if (FAILED(hr)) { CloseHandle(e); return Result::Failed; }
 		WaitForSingleObject(e, INFINITE);
 		CloseHandle(e);

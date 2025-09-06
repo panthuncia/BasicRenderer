@@ -5,6 +5,8 @@
 #pragma once
 #include <utility>     // std::move
 #include <type_traits> // std::is_trivially_copyable_v
+#include <dxgi1_6.h>
+#include <string>
 
 namespace rhi {
     namespace helpers {
@@ -207,30 +209,30 @@ namespace rhi {
             constexpr ResourceDesc&& DebugName(const char* n) && noexcept { this->debugName = n; return std::move(*this); }
 
             // Texture-specific tweaks
-            constexpr ResourceDesc& InitialLayout(ResourceLayout l) & noexcept
+            const ResourceDesc& InitialLayout(ResourceLayout l) & noexcept
             {
                 if (IsTextureResourceType(type)) texture.initialLayout = l;
                 return *this;
             }
-            constexpr ResourceDesc&& InitialLayout(ResourceLayout l) && noexcept
+            const ResourceDesc&& InitialLayout(ResourceLayout l) && noexcept
             {
                 if (IsTextureResourceType(type)) texture.initialLayout = l;
                 return std::move(*this);
             }
-            constexpr ResourceDesc& OptimizedClear(const ClearValue* cv) & noexcept
+            const ResourceDesc& OptimizedClear(const ClearValue* cv) & noexcept
             {
                 if (IsTextureResourceType(type)) texture.optimizedClear = cv;
                 return *this;
             }
-            constexpr ResourceDesc&& OptimizedClear(const ClearValue* cv) && noexcept
+            const ResourceDesc&& OptimizedClear(const ClearValue* cv) && noexcept
             {
                 if (IsTextureResourceType(type)) texture.optimizedClear = cv;
                 return std::move(*this);
             }
 
             // Helpers
-            constexpr bool IsBuffer()  const noexcept { return type == ResourceType::Buffer; }
-            constexpr bool IsTexture() const noexcept { return IsTextureResourceType(type); }
+            const bool IsBuffer()  const noexcept { return type == ResourceType::Buffer; }
+            const bool IsTexture() const noexcept { return IsTextureResourceType(type); }
         };
 
         static_assert(std::is_trivially_copyable_v<rhi::ResourceDesc>, "Keep ResourceDesc trivially copyable for constexpr friendliness.");
@@ -426,22 +428,20 @@ namespace rhi {
             // Record GPU copies: one per subresource (or Z slice)
             for (const auto& fp : fps) {
                 if (!fp.valid) continue;
-                BufferTextureCopy srcBT{};
-                srcBT.buffer = upload->GetHandle();
-                srcBT.offset = fp.offset;
-                srcBT.rowPitch = fp.rowPitch;
-                srcBT.slicePitch = fp.slicePitch;
 
-                TextureCopyRegion dstReg{};
-                dstReg.texture = dstTexture.GetHandle();
-                dstReg.mip = fp.mip;
-                dstReg.arraySlice = fp.arraySlice;
-                dstReg.x = 0; dstReg.y = 0; dstReg.z = fp.zSlice;
-                dstReg.width = fp.width;
-                dstReg.height = fp.height;
-                dstReg.depth = 1;
+				rhi::BufferTextureCopyFootprint f{};
+				f.arraySlice = fp.arraySlice;
+				f.buffer = upload->GetHandle();
+				f.footprint.depth = 1;
+				f.footprint.height = fp.height;
+				f.footprint.offset = fp.offset;
+                f.footprint.rowPitch = fp.rowPitch;
+				f.footprint.width = fp.width;
+				f.mip = fp.mip;
+				f.texture = dstTexture.GetHandle();
+				f.x = 0; f.y = 0; f.z = fp.zSlice;
 
-                cl.CopyBufferToTexture(dstReg, srcBT);
+                cl.CopyBufferToTexture(f);
             }
 
             return upload; // keep alive until GPU finishes (caller can fence/wait)
@@ -515,6 +515,108 @@ namespace rhi {
             Span<const BarrierBatch> s{ c.data(), static_cast<uint32_t>(c.size()) };
             return CombineBarrierBatches(s);
         }
+        inline const char* ResourceLayoutToString(rhi::ResourceLayout layout)
+        {
+            switch (layout)
+            {
+            case ResourceLayout::Undefined:               return "UNDEFINED";
+            case ResourceLayout::Common:                  return "COMMON";
+            case ResourceLayout::Present:                 return "PRESENT";
+            case ResourceLayout::GenericRead:             return "GENERIC_READ";
+            case ResourceLayout::RenderTarget:            return "RENDER_TARGET";
+            case ResourceLayout::UnorderedAccess:         return "UNORDERED_ACCESS";
+            case ResourceLayout::DepthReadWrite:          return "DEPTH_STENCIL_WRITE";
+            case ResourceLayout::DepthRead:               return "DEPTH_STENCIL_READ";
+            case ResourceLayout::ShaderResource:          return "SHADER_RESOURCE";
+            case ResourceLayout::CopySource:              return "COPY_SOURCE";
+            case ResourceLayout::CopyDest:                return "COPY_DEST";
+            case ResourceLayout::ResolveSource:           return "RESOLVE_SOURCE";
+            case ResourceLayout::ResolveDest:             return "RESOLVE_DEST";
+            case ResourceLayout::ShadingRateSource:       return "SHADING_RATE_SOURCE";
 
+            case ResourceLayout::DirectCommon:            return "DIRECT_QUEUE_COMMON";
+            case ResourceLayout::DirectGenericRead:       return "DIRECT_QUEUE_GENERIC_READ";
+            case ResourceLayout::DirectUnorderedAccess:   return "DIRECT_QUEUE_UNORDERED_ACCESS";
+            case ResourceLayout::DirectShaderResource:    return "DIRECT_QUEUE_SHADER_RESOURCE";
+            case ResourceLayout::DirectCopySource:        return "DIRECT_QUEUE_COPY_SOURCE";
+            case ResourceLayout::DirectCopyDest:          return "DIRECT_QUEUE_COPY_DEST";
+
+            case ResourceLayout::ComputeCommon:           return "COMPUTE_QUEUE_COMMON";
+            case ResourceLayout::ComputeGenericRead:      return "COMPUTE_QUEUE_GENERIC_READ";
+            case ResourceLayout::ComputeUnorderedAccess:  return "COMPUTE_QUEUE_UNORDERED_ACCESS";
+            case ResourceLayout::ComputeShaderResource:   return "COMPUTE_QUEUE_SHADER_RESOURCE";
+            case ResourceLayout::ComputeCopySource:       return "COMPUTE_QUEUE_COPY_SOURCE";
+            case ResourceLayout::ComputeCopyDest:         return "COMPUTE_QUEUE_COPY_DEST";
+            default:                                      return "UNKNOWN";
+            }
+        }
+
+        inline std::string ResourceAccessMaskToString(ResourceAccessType mask)
+        {
+            using U = unsigned int;
+            U v = static_cast<U>(mask);
+            if (v == 0) return "NONE";
+
+            std::string out;
+            auto add = [&](const char* s) {
+                if (!out.empty()) out += '|';
+                out += s;
+                };
+
+            if (v & static_cast<U>(ResourceAccessType::Common))                              add("COMMON");
+            if (v & static_cast<U>(ResourceAccessType::VertexBuffer))                        add("VERTEX_BUFFER");
+            if (v & static_cast<U>(ResourceAccessType::ConstantBuffer))                      add("CONSTANT_BUFFER");
+            if (v & static_cast<U>(ResourceAccessType::IndexBuffer))                         add("INDEX_BUFFER");
+            if (v & static_cast<U>(ResourceAccessType::RenderTarget))                        add("RENDER_TARGET");
+            if (v & static_cast<U>(ResourceAccessType::UnorderedAccess))                     add("UNORDERED_ACCESS");
+            if (v & static_cast<U>(ResourceAccessType::DepthReadWrite))                      add("DEPTH_STENCIL_WRITE");
+            if (v & static_cast<U>(ResourceAccessType::DepthRead))                           add("DEPTH_STENCIL_READ");
+            if (v & static_cast<U>(ResourceAccessType::ShaderResource))                      add("SHADER_RESOURCE");
+            if (v & static_cast<U>(ResourceAccessType::IndirectArgument))                    add("INDIRECT_ARGUMENT");
+            if (v & static_cast<U>(ResourceAccessType::CopyDest))                            add("COPY_DEST");
+            if (v & static_cast<U>(ResourceAccessType::CopySource))                          add("COPY_SOURCE");
+            if (v & static_cast<U>(ResourceAccessType::RaytracingAccelerationStructureRead)) add("RT_AS_READ");
+            if (v & static_cast<U>(ResourceAccessType::RaytracingAccelerationStructureWrite))add("RT_AS_WRITE");
+
+            // Any unknown bits?
+            if (out.empty()) out = "UNKNOWN";
+            return out;
+        }
+
+        inline const char* ResourceSyncToString(ResourceSyncState sync)
+        {
+            switch (sync)
+            {
+            case ResourceSyncState::None:          return "NONE";
+            case ResourceSyncState::All:           return "ALL";
+            case ResourceSyncState::Draw:          return "DRAW";
+            case ResourceSyncState::IndexInput:    return "INDEX_INPUT";
+            case ResourceSyncState::VertexShading: return "VERTEX_SHADING";
+            case ResourceSyncState::PixelShading:  return "PIXEL_SHADING";
+            case ResourceSyncState::DepthStencil:  return "DEPTH_STENCIL";
+            case ResourceSyncState::RenderTarget:  return "RENDER_TARGET";
+            case ResourceSyncState::ComputeShading:return "COMPUTE_SHADING";
+            case ResourceSyncState::Raytracing:    return "RAYTRACING";
+            case ResourceSyncState::Copy:          return "COPY";
+            case ResourceSyncState::Resolve:       return "RESOLVE";
+            case ResourceSyncState::ExecuteIndirect:return "EXECUTE_INDIRECT";
+            case ResourceSyncState::Predication:   return "PREDICATION";
+            case ResourceSyncState::AllShading:    return "ALL_SHADING";
+            case ResourceSyncState::NonPixelShading:return "NON_PIXEL_SHADING";
+            case ResourceSyncState::EmitRaytracingAccelerationStructurePostbuildInfo:
+                return "EMIT_RTAS_POSTBUILD_INFO";
+            case ResourceSyncState::ClearUnorderedAccessView:
+                return "CLEAR_UNORDERED_ACCESS_VIEW";
+            case ResourceSyncState::VideoDecode:   return "VIDEO_DECODE";
+            case ResourceSyncState::VideoProcess:  return "VIDEO_PROCESS";
+            case ResourceSyncState::VideoEncode:   return "VIDEO_ENCODE";
+            case ResourceSyncState::BuildRaytracingAccelerationStructure:
+                return "BUILD_RAYTRACING_ACCELERATION_STRUCTURE";
+            case ResourceSyncState::CopyRatracingAccelerationStructure:
+                return "COPY_RAYTRACING_ACCELERATION_STRUCTURE";
+            case ResourceSyncState::SyncSplit:     return "SPLIT";
+            default:                               return "UNKNOWN";
+            }
+        }
     } // namespace helpers
 } // namespace rhi

@@ -7,7 +7,6 @@
 
 #include "Resources/Resource.h"
 #include "Render/RenderContext.h"
-#include "Resources/ResourceStates.h"
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
 #include "Resources/ResourceStateTracker.h"

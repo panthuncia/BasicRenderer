@@ -4,7 +4,6 @@
 #include <flecs.h>
 #include <rhi.h>
 
-#include "ThirdParty/Streamline/sl.h"
 #include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
 #include "slHooks.h"
 #include "Managers/Singletons/SettingsManager.h"
@@ -15,10 +14,10 @@
 #include "Utilities/MathUtils.h"
 #include "Utilities/Utilities.h"
 
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
-#include <ThirdParty/Streamline/sl_security.h>
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
+#include <sl_security.h>
 #include <slHooks.h>
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;

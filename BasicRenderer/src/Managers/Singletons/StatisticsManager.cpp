@@ -70,8 +70,8 @@ void StatisticsManager::SetupQueryHeap() {
 
 
     // Allocate readback buffers for each queue
-    auto tsInfo = device.GetQueryResultInfo(m_timestampPool.Get());
-    auto psInfo = device.GetQueryResultInfo(m_pipelineStatsPool.Get());
+    auto tsInfo = m_timestampPool->GetQueryResultInfo();
+    auto psInfo = m_pipelineStatsPool->GetQueryResultInfo();
 
     rhi::ResourceDesc tsRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(tsInfo.elementSize) * tsInfo.count, rhi::Memory::Readback);
     rhi::ResourceDesc psRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(psInfo.elementSize) * psInfo.count, rhi::Memory::Readback);
@@ -83,12 +83,12 @@ void StatisticsManager::SetupQueryHeap() {
         mb = std::move(device.CreateCommittedResource(psRb));
 	}
 
-    m_timestampQueryInfo = device.GetQueryResultInfo(m_timestampPool.Get());
-    m_pipelineStatsQueryInfo = device.GetQueryResultInfo(m_pipelineStatsPool.Get());
+    m_timestampQueryInfo = m_timestampPool->GetQueryResultInfo();
+    m_pipelineStatsQueryInfo = m_pipelineStatsPool->GetQueryResultInfo();
 	m_pipelineStatsFields.resize(2);
     m_pipelineStatsFields[0].field = rhi::PipelineStatTypes::MeshInvocations;
     m_pipelineStatsFields[1].field = rhi::PipelineStatTypes::MeshPrimitives;
-	m_pipelineStatsLayout = device.GetPipelineStatsLayout(m_pipelineStatsPool.Get(), m_pipelineStatsFields.data(), m_pipelineStatsFields.size());
+    m_pipelineStatsLayout = m_pipelineStatsPool->GetPipelineStatsLayout(m_pipelineStatsFields.data(), m_pipelineStatsFields.size());
 }
 
 void StatisticsManager::BeginQuery(
@@ -101,12 +101,12 @@ void StatisticsManager::BeginQuery(
 
     // Timestamp "begin" marker = write a timestamp at index 2*N
     const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u;
-    cmd.WriteTimestamp(m_timestampPool.Get(), tsIdx, rhi::Stage::Top); // RHI: EndQuery on a Timestamp pool writes a timestamp
+    cmd.WriteTimestamp(m_timestampPool->GetHandle(), tsIdx, rhi::Stage::Top); // RHI: EndQuery on a Timestamp pool writes a timestamp
 
     // Begin pipeline stats for geometry passes
     if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
         const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
-        cmd.BeginQuery(m_pipelineStatsPool.Get(), psIdx);
+        cmd.BeginQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
 
     m_recordedQueries[queue][frameIndex].push_back(tsIdx);
@@ -122,12 +122,12 @@ void StatisticsManager::EndQuery(
 
     // Timestamp "end" marker = write a timestamp at index 2*N + 1
     const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u + 1u;
-    cmd.EndQuery(m_timestampPool.Get(), tsIdx);
+    cmd.EndQuery(m_timestampPool->GetHandle(), tsIdx);
 
     // End pipeline stats for geometry passes
     if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
         const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
-        cmd.EndQuery(m_pipelineStatsPool.Get(), psIdx);
+        cmd.EndQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
 
     m_recordedQueries[queue][frameIndex].push_back(tsIdx);
@@ -167,7 +167,7 @@ void StatisticsManager::ResolveQueries(
     for (auto& r : ranges) {
         // Write timestamp results starting at byte offset = stride * firstIndex
         cmd.ResolveQueryData(
-            m_timestampPool.Get(),
+            m_timestampPool->GetHandle(),
             r.first, r.second,
             tsBuf->GetHandle(),
             tsStride * uint64_t(r.first)
@@ -186,7 +186,7 @@ void StatisticsManager::ResolveQueries(
             const uint32_t psIdx = frameIndex * m_numPasses + pi;
 
             cmd.ResolveQueryData(
-                m_pipelineStatsPool.Get(),
+                m_pipelineStatsPool->GetHandle(),
                 psIdx, 1,
                 psBuf->GetHandle(),
                 psStride * uint64_t(psIdx)

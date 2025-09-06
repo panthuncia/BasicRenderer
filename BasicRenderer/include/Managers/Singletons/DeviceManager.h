@@ -9,6 +9,8 @@
 #include <rhi.h>
 #include <rhi_interop_dx12.h>
 
+#include "Managers/Singletons/SettingsManager.h"
+
 using Microsoft::WRL::ComPtr;
 
 class DeviceManager {
@@ -57,8 +59,8 @@ inline DeviceManager& DeviceManager::GetInstance() {
 }
 
 inline void DeviceManager::Initialize() {
-	auto framesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("framesInFlight")();
-	this->device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = framesInFlight, .enableDebug = true });
+	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("framesInFlight")();
+	this->device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = true });
 
 	CheckGPUFeatures();
 }

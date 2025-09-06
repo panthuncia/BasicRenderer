@@ -39,11 +39,11 @@ public:
         }
     }
 
-    rhi::Resource GetAPIResource() const override {
-		if (resource) {
-			return resource->GetAPIResource();
-		}
-        return {};
+    rhi::Resource GetAPIResource() override {
+		return resource->GetAPIResource();
+	}
+    bool HasResource() const {
+        return resource != nullptr;
 	}
 
 protected:
@@ -89,11 +89,11 @@ public:
         return {};
     }
 
-    rhi::Resource GetAPIResource() const override {
-        if (m_resource) {
-            return m_resource->GetAPIResource();
-        }
-        return {};
+    rhi::Resource GetAPIResource() override {
+        return m_resource->GetAPIResource();
+    }
+    bool HasResource() const {
+        return m_resource != nullptr;
     }
 
 protected:

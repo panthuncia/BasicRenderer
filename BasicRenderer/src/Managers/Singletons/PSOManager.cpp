@@ -122,7 +122,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool w
     psBlob = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature();
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle()};
 
     rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
     rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
@@ -170,7 +170,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool w
 
     auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create PSO (RHI)");
     }
 
@@ -194,7 +194,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, 
     psBlob = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature();
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle()};
 
     rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
     rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
@@ -233,7 +233,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, 
 
     auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create Shadow PSO (RHI)");
     }
 
@@ -258,7 +258,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState,
     psBlob = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature(); // PipelineLayoutHandle
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle()};
 
     rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
     rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
@@ -310,7 +310,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState,
 
     auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create PrePass PSO");
     }
 
@@ -334,7 +334,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bo
     psBlob = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature(); // PipelineLayoutHandle
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
     rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
     rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
@@ -377,7 +377,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bo
 
     auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create PPLL PSO");
     }
 
@@ -405,7 +405,7 @@ PipelineState PSOManager::CreateMeshPSO(
     psBlob = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature(); // your PipelineLayoutHandle
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
     rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()) };
     rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()) };
@@ -454,7 +454,7 @@ PipelineState PSOManager::CreateMeshPSO(
 
     auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create Mesh PSO");
     }
 
@@ -482,7 +482,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
     psBlob = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature();
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
     rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()) };
     rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()) };
@@ -525,7 +525,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
 
     auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create Shadow Mesh PSO");
     }
 
@@ -552,7 +552,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     psBlob = compiledBundle.pixelShader;
 
 	auto& layout = GetRootSignature();
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
     rhi::SubobjShader soTask{ rhi::ShaderStage::Task, rhi::DXIL(asBlob.Get()) };
     rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()) };
     rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
@@ -605,7 +605,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
 
 	auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
@@ -633,7 +633,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
 	pixelShader = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature();
-    rhi::SubobjLayout    soLayout{ layout };
+    rhi::SubobjLayout    soLayout{ layout.GetHandle() };
 
     rhi::SubobjShader    soAS{ rhi::ShaderStage::Task, { amplificationShader->GetBufferPointer(), (uint32_t)amplificationShader->GetBufferSize() } };
     rhi::SubobjShader    soMS{ rhi::ShaderStage::Mesh, { meshShader->GetBufferPointer(),          (uint32_t)meshShader->GetBufferSize() } };
@@ -704,7 +704,7 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
     psBlob = compiledBundle.pixelShader;
 
     auto& layout = GetRootSignature(); // PipelineLayoutHandle
-    rhi::SubobjLayout soLayout{ layout };
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
     rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
     rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
@@ -761,7 +761,7 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
 
     auto dev = DeviceManager::GetInstance().GetDevice();
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso.Get().valid()) {
+    if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create Deferred PSO (RHI)");
     }
 
@@ -1765,9 +1765,29 @@ void PSOManager::createRootSignature() {
     { rhi::ShaderStage::All, NumMiscFloatRootConstants,         0, 9 },
     { rhi::ShaderStage::All, NumResourceDescriptorIndicesRootConstants, 0, 10 },
     };
+
+    rhi::SamplerDesc pointClamp = {
+        .minFilter = rhi::Filter::Nearest,
+        .magFilter = rhi::Filter::Nearest,
+        .mipFilter = rhi::MipFilter::Nearest,
+        .addressU = rhi::AddressMode::Clamp,
+        .addressV = rhi::AddressMode::Clamp,
+        .addressW = rhi::AddressMode::Clamp,
+    };
+
+    rhi::SamplerDesc linearClamp = {
+        .minFilter = rhi::Filter::Linear,
+        .magFilter = rhi::Filter::Linear,
+        .mipFilter = rhi::MipFilter::Linear,
+        .addressU = rhi::AddressMode::Clamp,
+        .addressV = rhi::AddressMode::Clamp,
+        .addressW = rhi::AddressMode::Clamp,
+	};
+
+
     rhi::StaticSamplerDesc staticSamplers[] = {
-    { .sampler = rhi::SamplerDesc{/*maxAniso=*/1}, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 0, .arrayCount = 1 },
-    {.sampler = rhi::SamplerDesc{/*maxAniso=*/1}, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 1, .arrayCount = 1 }, // fill filter to linear in DX12 map
+    { .sampler = pointClamp, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 0, .arrayCount = 1 },
+    {.sampler = linearClamp, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 1, .arrayCount = 1 }, // fill filter to linear in DX12 map
     };
 
     m_rootSignature = device.CreatePipelineLayout(
@@ -1787,12 +1807,12 @@ void PSOManager::createRootSignature() {
         });
 }
 
-rhi::PipelineLayoutHandle& PSOManager::GetRootSignature() {
-    return m_rootSignature;
+rhi::PipelineLayout& PSOManager::GetRootSignature() {
+    return m_rootSignature.Get();
 }
 
-rhi::PipelineLayoutHandle& PSOManager::GetComputeRootSignature() {
-	return m_computeRootSignature;
+rhi::PipelineLayout& PSOManager::GetComputeRootSignature() {
+	return m_computeRootSignature.Get();
 }
 
 void PSOManager::ReloadShaders() {

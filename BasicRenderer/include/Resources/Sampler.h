@@ -49,7 +49,7 @@ struct SamplerDescComparator {
 
 class Sampler {
 public:
-    static std::shared_ptr<Sampler> CreateSampler(D3D12_SAMPLER_DESC samplerDesc) {
+    static std::shared_ptr<Sampler> CreateSampler(rhi::SamplerDesc samplerDesc) {
 		auto it = m_samplerCache.find(samplerDesc);
 		if (it != m_samplerCache.end()) {
 			return it->second;
@@ -73,13 +73,13 @@ public:
 
 private:
     UINT m_index; // Index of the sampler in the descriptor heap
-    D3D12_SAMPLER_DESC m_samplerDesc; // Descriptor of the sampler
-    Sampler(D3D12_SAMPLER_DESC samplerDesc)
+    rhi::SamplerDesc m_samplerDesc; // Descriptor of the sampler
+    Sampler(rhi::SamplerDesc samplerDesc)
         : m_index(0), m_samplerDesc(samplerDesc) {
         m_index = ResourceManager::GetInstance().CreateIndexedSampler(m_samplerDesc);
     }
 
     static std::shared_ptr<Sampler> m_defaultSampler;
 	static std::shared_ptr<Sampler> m_defaultShadowSampler;
-	static std::unordered_map<D3D12_SAMPLER_DESC, std::shared_ptr<Sampler>, SamplerDescHasher, SamplerDescComparator> m_samplerCache;
+	static std::unordered_map<rhi::SamplerDesc, std::shared_ptr<Sampler>, SamplerDescHasher, SamplerDescComparator> m_samplerCache;
 };

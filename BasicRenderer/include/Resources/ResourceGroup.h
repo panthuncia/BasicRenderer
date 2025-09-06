@@ -36,9 +36,9 @@ public:
 		resourcesByID.clear();
 	}
 
-	rhi::Resource GetAPIResource() const override {
+	rhi::Resource GetAPIResource() override {
 		spdlog::error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
-		return {};
+		throw std::runtime_error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
 	}
 
 protected:
