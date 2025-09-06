@@ -42,11 +42,11 @@ void StatisticsManager::MarkGeometryPass(const std::string& passName) {
     }
 }
 
-void StatisticsManager::RegisterQueue(rhi::Queue queue) {
-    m_timestampBuffers[queue];
-    m_meshStatsBuffers[queue];
-    m_recordedQueries[queue];
-    m_pendingResolves[queue];
+void StatisticsManager::RegisterQueue(rhi::QueueKind queueKind) {
+    m_timestampBuffers[queueKind];
+    m_meshStatsBuffers[queueKind];
+    m_recordedQueries[queueKind];
+    m_pendingResolves[queueKind];
 }
 
 void StatisticsManager::SetupQueryHeap() {
@@ -108,8 +108,8 @@ void StatisticsManager::BeginQuery(
         const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
         cmd.BeginQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
-
-    m_recordedQueries[queue][frameIndex].push_back(tsIdx);
+	auto queueKind = queue.GetKind();
+    m_recordedQueries[queueKind][frameIndex].push_back(tsIdx);
 }
 
 void StatisticsManager::EndQuery(
@@ -129,8 +129,8 @@ void StatisticsManager::EndQuery(
         const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
         cmd.EndQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
-
-    m_recordedQueries[queue][frameIndex].push_back(tsIdx);
+	auto queueKind = queue.GetKind();
+    m_recordedQueries[queueKind][frameIndex].push_back(tsIdx);
 }
 
 void StatisticsManager::ResolveQueries(
@@ -138,7 +138,8 @@ void StatisticsManager::ResolveQueries(
     rhi::Queue& queue,
     rhi::CommandList& cmd)
 {
-    auto& rec = m_recordedQueries[queue][frameIndex];
+    auto queueKind = queue.GetKind();
+    auto& rec = m_recordedQueries[queueKind][frameIndex];
     if (rec.empty()) return;
 
     // Collapse timestamp indices into contiguous ranges
@@ -160,8 +161,8 @@ void StatisticsManager::ResolveQueries(
     const uint64_t tsStride = m_timestampQueryInfo.elementSize; // usually 8
     const uint64_t psStride = m_pipelineStatsQueryInfo.elementSize; // backend-dependent
 
-    auto& tsBuf = m_timestampBuffers[queue];   // rhi::ResourcePtr
-    auto& psBuf = m_meshStatsBuffers[queue];   // rhi::ResourcePtr
+    auto& tsBuf = m_timestampBuffers[queueKind];   // rhi::ResourcePtr
+    auto& psBuf = m_meshStatsBuffers[queueKind];   // rhi::ResourcePtr
 
     // Resolve timestamp data and remember what to read on frame complete
     for (auto& r : ranges) {
@@ -173,7 +174,7 @@ void StatisticsManager::ResolveQueries(
             tsStride * uint64_t(r.first)
         );
 
-        m_pendingResolves[queue][frameIndex].push_back(r);
+        m_pendingResolves[queueKind][frameIndex].push_back(r);
 
         if (!m_collectPipelineStatistics) continue;
 
@@ -202,10 +203,10 @@ void StatisticsManager::OnFrameComplete(
     rhi::Queue& queue)
 {
     m_collectPipelineStatistics = m_getCollectPipelineStatistics();
-
-    auto& tsBuf = m_timestampBuffers[queue];
-    auto& psBuf = m_meshStatsBuffers[queue];
-    auto& pending = m_pendingResolves[queue][frameIndex];
+	auto queueKind = queue.GetKind();
+    auto& tsBuf = m_timestampBuffers[queueKind];
+    auto& psBuf = m_meshStatsBuffers[queueKind];
+    auto& pending = m_pendingResolves[queueKind][frameIndex];
     if (pending.empty()) return;
 
     const uint64_t tsStride = m_timestampQueryInfo.elementSize; // usually 8
@@ -279,7 +280,7 @@ void StatisticsManager::OnFrameComplete(
     }
 
     pending.clear();
-    m_pendingResolves[queue].erase(frameIndex);
+    m_pendingResolves[queueKind].erase(frameIndex);
 }
 
 

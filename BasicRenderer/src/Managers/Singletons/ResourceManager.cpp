@@ -444,7 +444,7 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 				(width * channels * height != desc.imageDimensions[i].slicePitch))
 			{
 				out.pData = imageData;
-				out.rowPitch = desc.imageDimensions[i].rowPitch;
+				out.rowPitch = static_cast<uint32_t>(desc.imageDimensions[i].rowPitch);
 				out.slicePitch = desc.imageDimensions[i].slicePitch;
 			}
 			else {

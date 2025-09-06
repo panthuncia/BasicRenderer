@@ -56,6 +56,19 @@ namespace rhi {
         constexpr bool valid() const noexcept { return index != 0xFFFFFFFFu; }
     };
 
+    template<class H>
+    struct HandleHash {
+        size_t operator()(const H& h) const noexcept {
+            // mix index + generation into one 64-bit value
+            uint64_t x = (uint64_t(h.index) << 32) | uint64_t(h.generation);
+            // finalizer (splitmix64-style)
+            x ^= x >> 33; x *= 0xff51afd7ed558ccdULL;
+            x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ULL;
+            x ^= x >> 33;
+            return static_cast<size_t>(x);
+        }
+    };
+
     using ResourceHandle = Handle<detail::HResource>;
     using ViewHandle = Handle<detail::HView>;
     using SamplerHandle = Handle<detail::HSampler>;
@@ -873,7 +886,8 @@ namespace rhi {
 	};
 	class QueryPool {
 	public:
-        explicit QueryPool(QueryPoolHandle h = {}) : handle(h) {}
+		QueryPool() = default;
+        explicit QueryPool(QueryPoolHandle h) : handle(h) {}
 		void* impl{};
 		const QueryPoolVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -897,7 +911,8 @@ namespace rhi {
 	};
 	class Pipeline {
 	public:
-        explicit Pipeline(PipelineHandle h = {}) : handle(h) {}
+		Pipeline() = default;
+        explicit Pipeline(PipelineHandle h) : handle(h) {}
 		void* impl{};
 		const PipelineVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -917,7 +932,8 @@ namespace rhi {
 	};
     class PipelineLayout {
 	public:
-        explicit PipelineLayout(PipelineLayoutHandle h = {}) : handle(h) {}
+		PipelineLayout() = default;
+        explicit PipelineLayout(PipelineLayoutHandle h) : handle(h) {}
 		void* impl{};
 		const PipelineLayoutVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -937,7 +953,8 @@ namespace rhi {
 	};
     class CommandSignature {
 	public:
-        explicit CommandSignature(CommandSignatureHandle h = {}) : handle(h) {}
+		CommandSignature() = default;
+        explicit CommandSignature(CommandSignatureHandle h) : handle(h) {}
 		void* impl{};
 		const CommandSignatureVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -958,7 +975,8 @@ namespace rhi {
 
     class DescriptorHeap {
 	public:
-		explicit DescriptorHeap(DescriptorHeapHandle h = {}) : handle(h) {}
+		DescriptorHeap() = default;
+		explicit DescriptorHeap(DescriptorHeapHandle h) : handle(h) {}
         void* impl{};
 		const DescriptorHeapVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -978,7 +996,8 @@ namespace rhi {
 	};
     class Sampler {
 	public:
-        explicit Sampler(SamplerHandle h = {}) : handle(h) {}
+		Sampler() = default;
+        explicit Sampler(SamplerHandle h) : handle(h) {}
 		void* impl{};
 		const SamplerVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -1000,7 +1019,8 @@ namespace rhi {
 	};
     class Timeline {
 	public:
-        explicit Timeline(TimelineHandle h = {}) : handle(h) {}
+		Timeline() = default;
+        explicit Timeline(TimelineHandle h) : handle(h) {}
 		void* impl{};
 		const TimelineVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -1022,7 +1042,8 @@ namespace rhi {
 	};
     class Heap {
 	public:
-        explicit Heap(HeapHandle h = {}) : handle(h) {}
+		Heap() = default;
+        explicit Heap(HeapHandle h) : handle(h) {}
 		void* impl{};
 		const HeapVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -1046,6 +1067,8 @@ namespace rhi {
 
     class Queue {
     public:
+		Queue() = default;
+		explicit Queue(QueueKind k) : kind(k) {}
         void* impl{}; 
         const QueueVTable* vt{}; 
         explicit constexpr operator bool() const noexcept {
@@ -1056,6 +1079,9 @@ namespace rhi {
         Result Submit(Span<CommandList> lists, const SubmitDesc& s = {}) noexcept;
         Result Signal(const TimelinePoint& p) noexcept;
         Result Wait(const TimelinePoint& p) noexcept;
+		QueueKind GetKind() const noexcept { return kind; }
+    private:
+		QueueKind kind;
     };
 
     struct ResourceVTable {
@@ -1066,7 +1092,8 @@ namespace rhi {
     };
     class Resource {
     public:
-        explicit Resource(ResourceHandle h = {}, bool isTexture = false) : handle(h) {}
+		Resource() = default;
+        explicit Resource(ResourceHandle h, bool isTexture = false) : handle(h) {}
         void* impl{}; // backend wrap (owns Handle32)
         const ResourceVTable* vt{}; // vtable
         explicit constexpr operator bool() const noexcept {
@@ -1168,7 +1195,8 @@ namespace rhi {
 
     class CommandList { 
 	public:
-        explicit CommandList(CommandListHandle h = {}) : handle(h) {}
+		CommandList() = default;
+        explicit CommandList(CommandListHandle h) : handle(h) {}
         void* impl{}; 
         const CommandListVTable* vt{}; 
         explicit constexpr operator bool() const noexcept {
@@ -1306,7 +1334,8 @@ namespace rhi {
 
     class CommandAllocator {
     public:
-        explicit CommandAllocator(CommandAllocatorHandle handle = {}) : handle(handle) {}
+		CommandAllocator() = default;
+        explicit CommandAllocator(CommandAllocatorHandle handle) : handle(handle) {}
         void* impl{}; // backend wrap (owns Handle32)
         const CommandAllocatorVTable* vt{}; // vtable
         explicit constexpr operator bool() const noexcept {

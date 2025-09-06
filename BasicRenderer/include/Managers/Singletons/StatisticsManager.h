@@ -31,7 +31,7 @@ public:
 
     void MarkGeometryPass(const std::string& passName);
 
-    void RegisterQueue(rhi::Queue queue);
+    void RegisterQueue(rhi::QueueKind queue);
 
     void SetupQueryHeap();
 
@@ -40,6 +40,7 @@ public:
         unsigned frameIndex,
         rhi::Queue& queue,
         rhi::CommandList& cmdList);
+
     void EndQuery(unsigned passIndex,
         unsigned frameIndex,
         rhi::Queue& queue,
@@ -75,8 +76,8 @@ private:
     std::vector<rhi::PipelineStatsFieldDesc> m_pipelineStatsFields;
 	rhi::PipelineStatsLayout m_pipelineStatsLayout;
 
-    std::unordered_map<rhi::Queue, rhi::ResourcePtr> m_timestampBuffers;
-    std::unordered_map<rhi::Queue, rhi::ResourcePtr> m_meshStatsBuffers;
+    std::unordered_map<rhi::QueueKind, rhi::ResourcePtr> m_timestampBuffers;
+    std::unordered_map<rhi::QueueKind, rhi::ResourcePtr> m_meshStatsBuffers;
 
     UINT64    m_gpuTimestampFreq = 0;
     unsigned  m_numPasses = 0;
@@ -89,8 +90,8 @@ private:
     std::vector<MeshPipelineStats>  m_meshStatsEma;
 
     // Recording helpers per queue/frame
-    std::unordered_map<rhi::Queue,
+    std::unordered_map<rhi::QueueKind,
         std::unordered_map<unsigned, std::vector<unsigned>>> m_recordedQueries;
-    std::unordered_map<rhi::Queue,
+    std::unordered_map<rhi::QueueKind,
         std::unordered_map<unsigned, std::vector<std::pair<unsigned,unsigned>>>> m_pendingResolves;
 };

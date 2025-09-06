@@ -438,7 +438,7 @@ namespace rhi {
 
 	static Queue d_getQueue(Device* d, QueueKind qk) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		Queue out{}; out.vt = &g_qvt;
+		Queue out{qk}; out.vt = &g_qvt;
 		Dx12QueueState* s = (qk == QueueKind::Graphics ? &impl->gfx : qk == QueueKind::Compute ? &impl->comp : &impl->copy);
 		s->owner = impl;
 		out.impl = s;
