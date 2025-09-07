@@ -508,9 +508,9 @@ void RenderGraph::Setup() {
 
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-	m_graphicsCommandListPool = std::make_unique<CommandListPool>(device, D3D12_COMMAND_LIST_TYPE_DIRECT);
-	m_computeCommandListPool = std::make_unique<CommandListPool>(device, D3D12_COMMAND_LIST_TYPE_COMPUTE);
-	m_copyCommandListPool = std::make_unique<CommandListPool>(device, D3D12_COMMAND_LIST_TYPE_COPY);
+	m_graphicsCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Graphics);
+	m_computeCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Compute);
+	m_copyCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Copy);
 
 	m_graphicsQueueFence = device.CreateTimeline();
 	m_computeQueueFence = device.CreateTimeline();
@@ -535,7 +535,7 @@ void RenderGraph::Setup() {
 	};
 	m_pCommandRecordingManager = std::make_unique<CommandRecordingManager>(init);
 
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> emptyLists;
+	std::vector<rhi::CommandList> emptyLists;
 	for (auto& pass : passes) {
 		switch (pass.type) {
 		case PassType::Render: {
@@ -699,7 +699,7 @@ namespace {
 				auto passReturn = pr.pass->Execute(context);
 				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 				PIXEndEvent(rhi::dx12::get_cmd_list(commandList));
-				if (passReturn.fence != nullptr) {
+				if (passReturn.fence) {
 					externalFences.push_back(passReturn);
 				}
 			}
@@ -713,7 +713,7 @@ namespace {
 					spdlog::warn("Pass returned an external fence without a value. This should not happen.");
 				}
 				else {
-					queue.Signal({ fr.fence.value(), fr.fenceValue });
+					queue.Signal({ fr.fence.value().GetHandle(), fr.fenceValue});
 				}
 			}
 		}

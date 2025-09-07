@@ -109,8 +109,8 @@ public:
 		// Process each shadow map
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo, Components::DepthMap shadowMap) {
 			auto& mapInfo = m_perViewMapInfo[e.id()];
-			downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).index;
-            downsampleRootConstants[UintRootConstant1] = light.type == Components::LightType::Point ? shadowMap.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : shadowMap.linearDepthMap->GetSRVInfo(0).index;
+			downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).slot.index;
+            downsampleRootConstants[UintRootConstant1] = light.type == Components::LightType::Point ? shadowMap.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : shadowMap.linearDepthMap->GetSRVInfo(0).slot.index;
 			downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
             commandList.PushConstants(
@@ -241,7 +241,7 @@ private:
         spdConstants.workGroupOffset[1] = workGroupOffset[1];
 
 		for (unsigned i = 0; i < (std::min)(11u, shadowMap.linearDepthMap->GetNumUAVMipLevels()-1); i++) {
-			spdConstants.mipUavDescriptorIndices[i] = shadowMap.linearDepthMap->GetUAVShaderVisibleInfo(i+1).index;
+			spdConstants.mipUavDescriptorIndices[i] = shadowMap.linearDepthMap->GetUAVShaderVisibleInfo(i+1).slot.index;
 		}
 
         auto view = m_pDownsampleConstants->Add();

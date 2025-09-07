@@ -130,11 +130,11 @@ public:
 		if (m_meshShaders) {
 			if (m_indirect) {
 				// Indirect drawing
-				ExecuteMeshShaderIndirect(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
+				ExecuteMeshShaderIndirect(context, commandList);
 			}
 			else {
 				// Regular mesh shader drawing
-				ExecuteMeshShader(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
+				ExecuteMeshShader(context, commandList);
 			}
 		}
 		else {
@@ -156,122 +156,148 @@ public:
 
 private:
 
-	void SetupCommonState(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			context.textureDescriptorHeap, // The texture descriptor heap
-			context.samplerDescriptorHeap, // The sampler descriptor heap
-		};
+	void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
 		uint32_t clearValues[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
-		commandList->ClearUnorderedAccessViewUint(m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo(0).gpuHandle, m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo(0).cpuHandle, m_PPLLHeadPointerTexture->GetAPIResource(), clearValues, 0, nullptr);
 
-		D3D12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_PPLLHeadPointerTexture->GetAPIResource());
-		commandList->ResourceBarrier(1, &uavBarrier);
+		rhi::UavClearInfo clearInfo = {};
+		clearInfo.cpuVisible = m_PPLLCounter->GetUAVNonShaderVisibleInfo(0).slot;
+		clearInfo.shaderVisible = m_PPLLCounter->GetUAVShaderVisibleInfo(0).slot;
+		clearInfo.resource = m_PPLLCounter->GetAPIResource();
+		commandList.ClearUavUint(clearInfo, clearValues);
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
-		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.renderResolution.x, context.renderResolution.y);
-		commandList->RSSetViewports(1, &viewport);
-		commandList->RSSetScissorRects(1, &scissorRect);
+		// UAV barrier TODO: Is this necessary with the clear above?
+		rhi::BarrierBatch barriers;
+		rhi::BufferBarrier barrier;
+		barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+		barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+		barrier.afterSync = rhi::ResourceSyncState::PixelShading;
+		barrier.beforeSync = rhi::ResourceSyncState::ClearUnorderedAccessView;
+		barrier.buffer = m_PPLLCounter->GetAPIResource().GetHandle();
+		barriers.buffers = { &barrier, 1 };
+		commandList.Barriers(barriers);
 
-		// Set the render target
-		auto dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-		commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
-		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		//CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
+		//CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.renderResolution.x, context.renderResolution.y);
+		//commandList->RSSetViewports(1, &viewport);
+		//commandList->RSSetScissorRects(1, &scissorRect);
 
-		auto& psoManager = PSOManager::GetInstance();
-		auto rootSignature = psoManager.GetRootSignature();
-		commandList->SetGraphicsRootSignature(rootSignature.Get());
+		//// Set the render target
+		//auto dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+		//commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
+
+		rhi::PassBeginInfo passInfo = {};
+		rhi::DepthAttachment depthAttachment = {};
+		depthAttachment.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
+		depthAttachment.depthLoad = rhi::LoadOp::Load;
+		depthAttachment.depthStore = rhi::StoreOp::Store;
+		depthAttachment.stencilLoad = rhi::LoadOp::DontCare;
+		depthAttachment.stencilStore = rhi::StoreOp::DontCare;
+		depthAttachment.clear = m_pPrimaryDepthBuffer->GetClearColor();
+		passInfo.depth = &depthAttachment;
+		passInfo.width = context.renderResolution.x;
+		passInfo.height = context.renderResolution.y;
+		commandList.BeginPass(passInfo);
+
+		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
+
+		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
 	}
 
-	void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
+	void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
 
 		unsigned int settings[NumSettingsRootConstants] = {}; // HLSL bools are 32 bits
 		settings[EnableShadows] = getShadowsEnabled();
 		settings[EnablePunctualLights] = getPunctualLightingEnabled();
 		settings[EnableGTAO] = m_gtaoEnabled;
-		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
 
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
 		transparencyInfo[PPLLNodePoolSize] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
-		commandList->SetGraphicsRoot32BitConstants(TransparencyInfoRootSignatureIndex, NumTransparencyInfoRootConstants, &transparencyInfo, 0);
-	
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, TransparencyInfoRootSignatureIndex, 0, NumTransparencyInfoRootConstants, &transparencyInfo);
+
 		if (m_meshShaders) {
 			unsigned int misc[NumMiscUintRootConstants] = {};
-			misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
-			commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+			misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 		}
 	}
 
-	void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+	void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
 		// Regular forward rendering using DrawIndexedInstanced
 		auto& psoManager = PSOManager::GetInstance();
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
 			auto& meshes = blendMeshes.meshInstances;
 
-			commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::Pixel, 1, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
+				auto& pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
 				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList->SetPipelineState(pso.GetAPIPipelineState());
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
 				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-				D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-				commandList->IASetIndexBuffer(&indexBufferView);
+				commandList.SetIndexBuffer(mesh.GetIndexBufferView());
 
-				commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
 			}
 			});
 	}
 
-	void ExecuteMeshShader(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+	void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
 		// Mesh shading path using DispatchMesh
 		auto& psoManager = PSOManager::GetInstance();
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
 			auto& meshes = blendMeshes.meshInstances;
 
-			commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::Pixel, 1, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
+				auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
 				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList->SetPipelineState(pso.GetAPIPipelineState());
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
 				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-				commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+				commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
 			});
 	}
 
-	void ExecuteMeshShaderIndirect(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+	void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
 		auto numBlend = context.drawStats.numBlendDraws;
 		if (numBlend == 0) {
 			return;
 		}
 		auto& psoManager = PSOManager::GetInstance();
-		auto pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST,  BLEND_STATE_BLEND, m_wireframe);
+		auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST,  BLEND_STATE_BLEND, m_wireframe);
 		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-		commandList->SetPipelineState(pso.GetAPIPipelineState());
+		commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
 		// Blended objects
 		auto indirectCommandBuffer = m_primaryCameraBlendIndirectCommandBuffer;
 		auto apiResource = indirectCommandBuffer->GetAPIResource();
-		commandList->ExecuteIndirect(commandSignature, numBlend, apiResource, 0, apiResource, indirectCommandBuffer->GetResource()->GetUAVCounterOffset());
+		commandList.ExecuteIndirect(
+			commandSignature.GetHandle(), 
+			apiResource.GetHandle(), 
+			0, 
+			apiResource.GetHandle(), 
+			indirectCommandBuffer->GetResource()->GetUAVCounterOffset(), 
+			numBlend);
 	}
 
 	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;

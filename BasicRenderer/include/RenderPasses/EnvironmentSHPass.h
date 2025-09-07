@@ -16,19 +16,18 @@
 class EnvironmentSHPass : public ComputePass {
 public:
 	EnvironmentSHPass() {
-		D3D12_SAMPLER_DESC shSamplerDesc = {};
-		shSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
-		shSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-		shSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-		shSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-		shSamplerDesc.MipLODBias = 0.0f;
-		shSamplerDesc.MaxAnisotropy = 1;
-		shSamplerDesc.BorderColor[0] = 0;
-		shSamplerDesc.BorderColor[1] = 0;
-		shSamplerDesc.BorderColor[2] = 0;
-		shSamplerDesc.BorderColor[3] = 0;
-		shSamplerDesc.MinLOD = 0.0f;
-		shSamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+		rhi::SamplerDesc shSamplerDesc = {};
+		shSamplerDesc.minFilter = rhi::Filter::Linear;
+		shSamplerDesc.magFilter = rhi::Filter::Linear;
+		shSamplerDesc.mipFilter = rhi::MipFilter::Nearest;
+		shSamplerDesc.addressU = rhi::AddressMode::Clamp;
+		shSamplerDesc.addressV = rhi::AddressMode::Clamp;
+		shSamplerDesc.addressW = rhi::AddressMode::Clamp;
+		shSamplerDesc.mipLodBias = 0.0f;
+		shSamplerDesc.maxAnisotropy = 1;
+		shSamplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
+		shSamplerDesc.minLod = 0.0f;
+		shSamplerDesc.maxLod = (std::numeric_limits<float>::max)();
 
 		m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(shSamplerDesc);
 	}

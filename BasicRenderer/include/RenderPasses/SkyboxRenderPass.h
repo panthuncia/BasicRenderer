@@ -26,46 +26,59 @@ public:
         m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-        m_environmentBufferDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).index;
+        m_environmentBufferDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).slot.index;
     }
 
     PassReturn Execute(RenderContext& context) override {
 
         auto& commandList = context.commandList;
 
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap, // The texture descriptor heap
-            context.samplerDescriptorHeap, // The sampler descriptor heap
-        };
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-        commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+        commandList.SetVertexBuffers(0, 1, &m_vertexBufferView);
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
-        CD3DX12_RECT scissorRect(0, 0, context.renderResolution.x, context.renderResolution.y);
-        commandList->RSSetViewports(1, &viewport);
-        commandList->RSSetScissorRects(1, &scissorRect);
+        //CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
+        //CD3DX12_RECT scissorRect(0, 0, context.renderResolution.x, context.renderResolution.y);
+        //commandList->RSSetViewports(1, &viewport);
+        //commandList->RSSetScissorRects(1, &scissorRect);
 
-        //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-        auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
-        auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
+        ////CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
+        //auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
+        //auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
 
-        // Clear HDR target
-        auto& clearColor = m_pHDRTarget->GetClearColor();
-        commandList->ClearRenderTargetView(rtvHandle, &clearColor[0], 0, nullptr);
+        //// Clear HDR target
+        //auto& clearColor = m_pHDRTarget->GetClearColor();
+        //commandList->ClearRenderTargetView(rtvHandle, &clearColor[0], 0, nullptr);
 
-        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+        //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-        commandList->SetPipelineState(skyboxPSO.Get());
-        commandList->SetGraphicsRootSignature(skyboxRootSignature.Get());
+		rhi::PassBeginInfo passInfo{};
+		passInfo.width = m_pHDRTarget->GetWidth();
+		passInfo.height = m_pHDRTarget->GetHeight();
+		rhi::DepthAttachment depthAttachment{};
+		depthAttachment.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
+		depthAttachment.depthLoad = rhi::LoadOp::Load;
+		depthAttachment.depthStore = rhi::StoreOp::DontCare;
+		rhi::ColorAttachment colorAttachment{};
+		colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(0).slot;
+		colorAttachment.loadOp = rhi::LoadOp::Load;
+		colorAttachment.storeOp = rhi::StoreOp::Store;
+		colorAttachment.clear = m_pHDRTarget->GetClearColor();
+		passInfo.colors = { &colorAttachment };
+		passInfo.depth = &depthAttachment;
+		commandList.BeginPass(passInfo);
+
+		commandList.BindLayout(m_skyboxRootSignature->GetHandle());
+		commandList.BindPipeline(m_skyboxPSO->GetHandle());
 
         auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>().info.view;
         viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
         auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>().info.jitteredProjection);
-        commandList->SetGraphicsRoot32BitConstants(0, 16, &viewProjectionMatrix, 0);
-        commandList->SetGraphicsRoot32BitConstant(1, m_environmentBufferDescriptorIndex, 0);
-        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        commandList->DrawInstanced(36, 1, 0, 0); // Skybox cube
+        
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 16, &viewProjectionMatrix);
+		commandList.PushConstants(rhi::ShaderStage::Pixel, 0, 1, 0, 1, &m_environmentBufferDescriptorIndex);
+        commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
+        commandList.Draw(36, 1, 0, 0); // Skybox cube
 
         return {};
     }
@@ -75,12 +88,12 @@ public:
     }
 
 private:
-    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    std::shared_ptr<Buffer> vertexBufferHandle;
+    rhi::VertexBufferView m_vertexBufferView;
+    std::shared_ptr<Buffer> m_vertexBuffer;
     //std::shared_ptr<Texture> m_texture = nullptr;
 
-    ComPtr<ID3D12RootSignature> skyboxRootSignature;
-    ComPtr<ID3D12PipelineState> skyboxPSO;
+    rhi::PipelineLayoutPtr m_skyboxRootSignature;
+    rhi::PipelinePtr m_skyboxPSO;
 
     std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
     std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
@@ -137,147 +150,128 @@ private:
 
     };
 
-    D3D12_VERTEX_BUFFER_VIEW CreateSkyboxVertexBuffer() {
-        ComPtr<ID3D12Resource> vertexBuffer;
+    rhi::VertexBufferView CreateSkyboxVertexBuffer() {
 
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
+        m_vertexBuffer = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
 
-        vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
+        UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer.get(), 0);
 
-        UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, vertexBufferHandle.get(), 0);
-
-        D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
-
-        vertexBufferView.BufferLocation = vertexBufferHandle->m_buffer->GetGPUVirtualAddress();
-        vertexBufferView.StrideInBytes = sizeof(SkyboxVertex);
-        vertexBufferView.SizeInBytes = vertexBufferSize;
+		rhi::VertexBufferView vertexBufferView = {};
+		vertexBufferView.buffer = m_vertexBuffer->GetAPIResource().GetHandle();
+		vertexBufferView.offset = 0;
+		vertexBufferView.sizeBytes = vertexBufferSize;
 
         return vertexBufferView;
     }
     void CreateSkyboxRootSignature() {
 
-        CD3DX12_ROOT_PARAMETER1 skyboxRootParameters[2] = {};
+        auto dev = DeviceManager::GetInstance().GetDevice();
 
-        skyboxRootParameters[0].InitAsConstants(16, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX); // modified view matrix
-        skyboxRootParameters[1].InitAsConstants(1, 2, 0, D3D12_SHADER_VISIBILITY_PIXEL); // Environment buffer index
+        rhi::PushConstantRangeDesc pcVS{};
+        pcVS.visibility = rhi::ShaderStage::Vertex;
+        pcVS.num32BitValues = 16; // view-projection matrix (float4x4)
+        pcVS.set = 0; // space0
+        pcVS.binding = 1; // b1
 
-        D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
+        rhi::PushConstantRangeDesc pcPS{};
+        pcPS.visibility = rhi::ShaderStage::Pixel;
+        pcPS.num32BitValues = 1; // environment SRV index in bindless heap
+        pcPS.set = 0; // space0
+        pcPS.binding = 2; // b2
 
-        // point-clamp at s0
-        auto& pointClamp = staticSamplers[0];
-        pointClamp.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        pointClamp.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClamp.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClamp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        pointClamp.MipLODBias = 0;
-        pointClamp.MaxAnisotropy = 0;
-        pointClamp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        pointClamp.MinLOD = 0;
-        pointClamp.MaxLOD = D3D12_FLOAT32_MAX;
-        pointClamp.ShaderRegister = 0;
-        pointClamp.RegisterSpace = 0;
-        pointClamp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rhi::StaticSamplerDesc s0{}; // point-clamp at s0
+        s0.visibility = rhi::ShaderStage::Pixel;
+        s0.set = 0;     // space0
+        s0.binding = 0;     // s0
+        s0.arrayCount = 1;
+        s0.sampler.minFilter = rhi::Filter::Nearest;
+        s0.sampler.magFilter = rhi::Filter::Nearest;
+        s0.sampler.mipFilter = rhi::MipFilter::Nearest;
+        s0.sampler.addressU = rhi::AddressMode::Clamp;
+        s0.sampler.addressV = rhi::AddressMode::Clamp;
+        s0.sampler.addressW = rhi::AddressMode::Clamp;
 
-        // linear-clamp at s1
-        auto& linearClamp = staticSamplers[1];
-        linearClamp = pointClamp;
-        linearClamp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        linearClamp.ShaderRegister = 1;
+        rhi::StaticSamplerDesc s1 = s0; // linear-clamp at s1
+        s1.binding = 1; // s1
+        s1.sampler.minFilter = rhi::Filter::Linear;
+        s1.sampler.magFilter = rhi::Filter::Linear;
+        s1.sampler.mipFilter = rhi::MipFilter::Linear;
 
+        rhi::PipelineLayoutDesc ld{};
+        ld.flags = rhi::PipelineLayoutFlags::PF_AllowInputAssembler;
+        const rhi::PushConstantRangeDesc pcs[] = { pcVS, pcPS };
+        const rhi::StaticSamplerDesc     sms[] = { s0, s1 };
+        ld.pushConstants = { pcs, (uint32_t)std::size(pcs) };
+        ld.staticSamplers = { sms, (uint32_t)std::size(sms) };
 
-        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init_1_1(_countof(skyboxRootParameters), skyboxRootParameters, 2, staticSamplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
-
-        ComPtr<ID3DBlob> serializedRootSig;
-        ComPtr<ID3DBlob> errorBlob;
-        HRESULT hr = D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1_1, &serializedRootSig, &errorBlob);
-        if (FAILED(hr)) {
-            if (errorBlob) {
-                OutputDebugStringA((char*)errorBlob->GetBufferPointer());
-            }
-            throw std::runtime_error("Failed to serialize root signature");
-        }
-
-        auto& device = DeviceManager::GetInstance().GetDevice();
-        hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&skyboxRootSignature));
-        if (FAILED(hr)) {
-            throw std::runtime_error("Failed to create root signature");
-        }
+        m_skyboxRootSignature = dev.CreatePipelineLayout(ld);
+        if (!m_skyboxRootSignature || !m_skyboxRootSignature->IsValid())
+            throw std::runtime_error("Skybox: CreatePipelineLayout failed");
+        m_skyboxRootSignature->SetName("Skybox.Layout");
     }
 
     void CreateSkyboxPSO() {
-        // Compile shaders
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        ShaderInfoBundle shaderInfoBundle;
-        shaderInfoBundle.vertexShader = { L"shaders/skybox.hlsl", L"VSMain", L"vs_6_6" };
-        shaderInfoBundle.pixelShader = { L"shaders/skybox.hlsl", L"PSMain", L"ps_6_6" };
-        auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-        vertexShader = compiledBundle.vertexShader;
-        pixelShader = compiledBundle.pixelShader;
+        auto dev = DeviceManager::GetInstance().GetDevice();
 
-        static D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        // Compile shaders
+        ShaderInfoBundle sib;
+        sib.vertexShader = { L"shaders/skybox.hlsl", L"VSMain", L"vs_6_6" };
+        sib.pixelShader = { L"shaders/skybox.hlsl", L"PSMain", L"ps_6_6" };
+        auto compiled = PSOManager::GetInstance().CompileShaders(sib);
+
+        // Subobjects
+        rhi::SubobjLayout  soLayout{ m_skyboxRootSignature->GetHandle() };
+        rhi::SubobjShader  soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
+        rhi::SubobjShader  soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+
+        rhi::SubobjRaster  soRaster{};
+        soRaster.rs.fill = rhi::FillMode::Solid;
+        soRaster.rs.cull = rhi::CullMode::None;
+        soRaster.rs.frontCCW = false;
+        soRaster.rs.depthBias = D3D12_DEFAULT_DEPTH_BIAS;
+        soRaster.rs.depthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+        soRaster.rs.slopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+
+        rhi::SubobjBlend   soBlend{}; // disable blending
+        soBlend.bs.alphaToCoverage = false;
+        soBlend.bs.independentBlend = false;
+        auto& rt0 = soBlend.bs.attachments[0];
+        rt0.enable = false;
+        rt0.writeMask = rhi::ColorWriteEnable::All;
+
+        rhi::SubobjDepth  soDepth{};
+        soDepth.ds.depthEnable = true;
+        soDepth.ds.depthWrite = false;
+        soDepth.ds.depthFunc = rhi::CompareOp::Less;
+
+        rhi::SubobjRTVs   soRTVs{};
+        soRTVs.rt.count = 1;
+        soRTVs.rt.formats[0] = rhi::Format::R16G16B16A16_Float;
+
+        rhi::SubobjDSV    soDSV{};
+        soDSV.dsv = rhi::Format::D32_Float;
+
+        rhi::SubobjSample soSample{};
+        soSample.sd.count = 1;
+        soSample.sd.quality = 0;
+
+        const rhi::PipelineStreamItem items[] = {
+            rhi::Make(soLayout),
+            rhi::Make(soVS),
+            rhi::Make(soPS),
+            rhi::Make(soRaster),
+            rhi::Make(soBlend),
+            rhi::Make(soDepth),
+            rhi::Make(soRTVs),
+            rhi::Make(soDSV),
+            rhi::Make(soSample),
         };
 
-        D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-        inputLayoutDesc.pInputElementDescs = inputElementDescs;
-        inputLayoutDesc.NumElements = _countof(inputElementDescs);
-
-        D3D12_RASTERIZER_DESC rasterizerDesc = {};
-        rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-        rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
-        rasterizerDesc.FrontCounterClockwise = FALSE;
-        rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-        rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-        rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-        rasterizerDesc.DepthClipEnable = TRUE;
-        rasterizerDesc.MultisampleEnable = FALSE;
-        rasterizerDesc.AntialiasedLineEnable = FALSE;
-        rasterizerDesc.ForcedSampleCount = 0;
-        rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-
-        D3D12_BLEND_DESC blendDesc = {};
-        blendDesc.RenderTarget[0].BlendEnable = FALSE;
-        blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
-        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
-        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
-        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-        depthStencilDesc.DepthEnable = TRUE;
-        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // Prevent skybox from writing to the depth buffer
-        depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-
-        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
-
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = inputLayoutDesc;
-        psoDesc.pRootSignature = skyboxRootSignature.Get();
-        psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
-        psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
-        psoDesc.RasterizerState = rasterizerDesc;
-        psoDesc.BlendState = blendDesc;
-        psoDesc.DepthStencilState = depthStencilDesc;
-        psoDesc.SampleMask = UINT_MAX;
-        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[0] = renderTargetFormat;
-        psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-        psoDesc.SampleDesc.Count = 1;
-        psoDesc.SampleDesc.Quality = 0;
-        psoDesc.InputLayout = inputLayoutDesc;
-
-        auto& device = DeviceManager::GetInstance().GetDevice();
-        auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&skyboxPSO));
-        if (FAILED(hr)) {
-            throw std::runtime_error("Failed to create skybox PSO");
-        }
+        m_skyboxPSO = dev.CreatePipeline(items, (uint32_t)std::size(items));
+        if (!m_skyboxPSO || !m_skyboxPSO->IsValid())
+            throw std::runtime_error("Skybox: CreatePipeline failed");
+        m_skyboxPSO->SetName("Skybox.GraphicsPSO");
     }
 };

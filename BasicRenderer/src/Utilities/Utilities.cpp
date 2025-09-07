@@ -1162,12 +1162,12 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
 	rtvDesc.range = { 0, 1, 0, 1 }; // Only one mip level and one array slice per RTV
 	rtvDesc.texture = resource.GetHandle();
 
-    for (unsigned int slice = 0; slice < sliceCount; ++slice) {
+    for ( int slice = 0; slice < sliceCount; ++slice) {
         auto& sliceRTVs = result[slice];
         sliceRTVs.reserve(mipLevels);
 
-        for (unsigned int mip = 0; mip < mipLevels; ++mip) {
-			rtvDesc.range = { mip, 1, slice, 1 };
+        for (int mip = 0; mip < mipLevels; ++mip) {
+			rtvDesc.range = { static_cast<uint32_t>(mip), 1, static_cast<uint32_t>(slice), 1 };
 
             // Allocate one descriptor for this (slice, mip)
             UINT idx = rtvHeap->AllocateDescriptor();
@@ -1206,12 +1206,12 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
     //dsvDesc.Texture2DArray.ArraySize = 1;
 	dsvDesc.range = { 0, 1, 0, 1 }; // One mip level, one array slice
 
-    for (unsigned int slice = 0; slice < sliceCount; ++slice) {
+    for (int slice = 0; slice < sliceCount; ++slice) {
         auto& sliceDSVs = result[slice];
         sliceDSVs.reserve(mipLevels);
 
-        for (unsigned int mip = 0; mip < mipLevels; ++mip) {
-			dsvDesc.range = { mip, 1, slice, 1 };
+        for (int mip = 0; mip < mipLevels; ++mip) {
+			dsvDesc.range = { static_cast<uint32_t>(mip), 1, static_cast<uint32_t>(slice), 1 };
 
             // allocate and get CPU handle
             UINT idx = dsvHeap->AllocateDescriptor();

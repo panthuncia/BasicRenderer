@@ -217,7 +217,7 @@ void Scene::ActivateLight(flecs::entity& entity) {
 	entity.set<Components::LightViewInfo>({ addInfo.lightViewInfo });
 	if (addInfo.shadowMap.has_value()) {
 		entity.set<Components::DepthMap>({ addInfo.shadowMap.value() });
-		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().depthMap->GetSRVInfo(0).index;
+		newInfo.lightInfo.shadowMapIndex = addInfo.shadowMap.value().depthMap->GetSRVInfo(0).slot.index;
 		newInfo.lightInfo.shadowSamplerIndex = Sampler::GetDefaultShadowSampler()->GetDescriptorIndex();
 		newInfo.lightInfo.shadowViewInfoIndex = addInfo.lightViewInfo.viewInfoBufferIndex;
 		m_managerInterface.GetLightManager()->UpdateLightBufferView(addInfo.lightViewInfo.lightBufferView.get(), newInfo.lightInfo);

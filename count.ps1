@@ -2,7 +2,7 @@
 $directory = "."
 
 # Set a list of directory names to exclude
-$excludedDirectories = @("nlohmann", "stb", "DirectX", "pix", "Intel", "FidelityFX", "ThirdParty", ".*", "models", "textures", "out")
+$excludedDirectories = @("nlohmann", "stb", "DirectX", "pix", "Intel", "FidelityFX", "ThirdParty", ".*", "models", "textures", "out", "Aftermath", "NVSL")
 
 # File extensions to include in the search (e.g., .txt, .cpp, .h)
 $includeExtensions = @("*.txt", "*.cpp", "*.h")

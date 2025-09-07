@@ -119,6 +119,7 @@ namespace rhi {
         bool Valid() const noexcept { return !!*this; }
         Device* DevicePtr() const noexcept { return dev_; }
         const TObject& Get() const noexcept { return obj_; } // by-ref view
+		TObject& Get() noexcept { return obj_; }       // by-ref view
 
         // Release ownership to caller (returns the raw object)
         TObject Release() noexcept {
