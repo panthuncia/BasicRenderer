@@ -29,6 +29,7 @@ public:
     rhi::DescriptorHeap textureDescriptorHeap;
 	rhi::DescriptorHeap samplerDescriptorHeap;
 	rhi::DescriptorHeap rtvHeap;
+	rhi::DescriptorHeap dsvHeap;
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;
     UINT frameIndex;

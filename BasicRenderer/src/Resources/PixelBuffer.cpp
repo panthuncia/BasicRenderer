@@ -52,10 +52,11 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 
     size_t subCount = m_mipLevels * m_arraySize;
 
-    m_clearColor = { desc.clearColor[0],
-        desc.clearColor[1],
-        desc.clearColor[2],
-        desc.clearColor[3] };
+	m_clearColor.type = rhi::ClearValueType::Color;
+	m_clearColor.format = desc.format;
+	for (int i = 0; i < 4; i++) {
+		m_clearColor.rgba[i] = desc.clearColor[i];
+	}
 
 	// Create SRV
 	auto device = DeviceManager::GetInstance().GetDevice();

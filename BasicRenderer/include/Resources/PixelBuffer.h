@@ -34,7 +34,7 @@ public:
 		return m_placedResourceHeap;
 	}
 
-	const std::array<float, 4>& GetClearColor() const {
+	const rhi::ClearValue& GetClearColor() const {
 		return m_clearColor;
 	}
 	rhi::Format GetFormat() const {
@@ -60,7 +60,7 @@ private:
     rhi::ResourcePtr m_texture;
     rhi::Format m_format;
 	TextureDescription m_desc;
-	std::array<float, 4> m_clearColor;
+	rhi::ClearValue m_clearColor;
 
     rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
 

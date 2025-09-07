@@ -761,8 +761,45 @@ namespace rhi {
         Span<GlobalBarrier>  globals{};
     };
 
-    struct UavClearUint { uint32_t v[4]; };
-    struct UavClearFloat { float v[4]; };
+    struct UavClearFloat {
+        float v[4];
+		UavClearFloat() noexcept : v{ 0.f, 0.f, 0.f, 0.f } {}
+        // from C array of exactly 4 floats
+        template<std::size_t N>
+        constexpr UavClearFloat(const float(&rgba)[N]) noexcept {
+            static_assert(N == 4, "UavClearFloat expects exactly 4 floats");
+            for (std::size_t i = 0; i < 4; ++i) v[i] = rgba[i];
+        }
+
+        // from std::array<float,4>
+        constexpr UavClearFloat(const std::array<float, 4>& a) noexcept
+            : v{ a[0], a[1], a[2], a[3] } {
+        }
+
+        // (C++20) from span of exactly 4
+        constexpr UavClearFloat(std::span<const float, 4> s) noexcept
+            : v{ s[0], s[1], s[2], s[3] } {
+        }
+    };
+
+    struct UavClearUint {
+		uint32_t v[4];
+        UavClearUint() noexcept : v{ 0, 0, 0, 0 } {}
+        // from C array of exactly 4 uint32_t
+        template<std::size_t N>
+        constexpr UavClearUint(const uint32_t(&rgba)[N]) noexcept {
+            static_assert(N == 4, "UavClearUint expects exactly 4 uint32_t");
+            for (std::size_t i = 0; i < 4; ++i) v[i] = rgba[i];
+        }
+        // from std::array<uint32_t,4>
+        constexpr UavClearUint(const std::array<uint32_t, 4>& a) noexcept
+            : v{ a[0], a[1], a[2], a[3] } {
+        }
+        // (C++20) from span of exactly 4
+        constexpr UavClearUint(std::span<const uint32_t, 4> s) noexcept
+            : v{ s[0], s[1], s[2], s[3] } {
+        }
+	};
 
     struct TextureCopyRegion {
         ResourceHandle texture{};
@@ -1179,6 +1216,13 @@ namespace rhi {
         void (*drawIndexed)(CommandList*, uint32_t idxCount, uint32_t instCount, uint32_t firstIdx, int32_t vtxOffset, uint32_t firstInst) noexcept;
         void (*dispatch)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept;
         void (*clearRenderTargetView)(CommandList*, ViewHandle, const ClearValue&) noexcept;
+        void (*clearRenderTargetViewBySlot)(CommandList*, DescriptorSlot, const ClearValue&) noexcept;
+        void (*clearDepthStencilView)(CommandList*, ViewHandle,
+            bool clearDepth, bool clearStencil,
+            float depth, uint8_t stencil) noexcept;
+        void (*clearDepthStencilViewBySlot)(CommandList*, DescriptorSlot,
+            bool clearDepth, bool clearStencil,
+            float depth, uint8_t stencil) noexcept;        
         void (*executeIndirect)(CommandList*,
             CommandSignatureHandle sig,
             ResourceHandle argumentBuffer, uint64_t argumentOffset,
@@ -1230,7 +1274,12 @@ namespace rhi {
         void Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept;
         void DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept;
         void Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept;
-        void ClearRenderTargetView(ViewHandle v, const ClearValue& c) noexcept;
+        inline void ClearRenderTargetView(ViewHandle v, const ClearValue& c) noexcept { vt->clearRenderTargetView(this, v, c); }
+        inline void ClearRenderTargetView(DescriptorSlot s, const ClearValue& c) noexcept { vt->clearRenderTargetViewBySlot(this, s, c); }
+        inline void ClearDepthStencilView(ViewHandle v, bool clearDepth, bool clearStencil, float depth, uint8_t stencil) noexcept {
+            vt->clearDepthStencilView(this, v, clearDepth, clearStencil, depth, stencil); }
+        inline void ClearDepthStencilView(DescriptorSlot s, bool clearDepth, bool clearStencil, float depth, uint8_t stencil) noexcept {
+            vt->clearDepthStencilViewBySlot(this, s, clearDepth, clearStencil, depth, stencil); }
         void ExecuteIndirect(CommandSignatureHandle sig,
             ResourceHandle argBuf, uint64_t argOff,
             ResourceHandle cntBuf, uint64_t cntOff,

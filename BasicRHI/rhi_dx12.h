@@ -1959,11 +1959,58 @@ namespace rhi {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		l->cl->Dispatch(x, y, z);
 	}
-	static void cl_clearView(CommandList* cl, ViewHandle v, const ClearValue& c) noexcept {
-		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dv = l->dev; 
-		auto* view = dv->views.get(v);
-		l->cl->ClearRenderTargetView(view->cpu, c.rgba, 0, nullptr);
+	static void cl_clearRTV_view(CommandList* c, ViewHandle vh, const rhi::ClearValue& cv) noexcept {
+		auto* impl = static_cast<Dx12CommandList*>(c->impl);
+		if (!impl) return;
+		auto* dev = impl->dev;
+		auto* v = dev->views.get(vh);
+		if (!v) return;
+
+		float rgba[4] = { cv.rgba[0], cv.rgba[1], cv.rgba[2], cv.rgba[3] };
+		impl->cl->ClearRenderTargetView(v->cpu, rgba, 0, nullptr);
+	}
+
+	static void cl_clearRTV_slot(CommandList* c, DescriptorSlot s, const rhi::ClearValue& cv) noexcept {
+		auto* impl = static_cast<Dx12CommandList*>(c->impl);
+		if (!impl) return;
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
+		if (!DxGetDstCpu(impl->dev, s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) return;
+
+		float rgba[4] = { cv.rgba[0], cv.rgba[1], cv.rgba[2], cv.rgba[3] };
+		impl->cl->ClearRenderTargetView(cpu, rgba, 0, nullptr);
+	}
+
+	static void cl_clearDSV_view(CommandList* c, ViewHandle vh,
+		bool clearDepth, bool clearStencil,
+		float depth, uint8_t stencil) noexcept
+	{
+		auto* impl = static_cast<Dx12CommandList*>(c->impl);
+		if (!impl) return;
+		auto* dev = impl->dev;
+		auto* v = dev->views.get(vh);
+		if (!v) return;
+
+		D3D12_CLEAR_FLAGS flags = (D3D12_CLEAR_FLAGS)0;
+		if (clearDepth)   flags |= D3D12_CLEAR_FLAG_DEPTH;
+		if (clearStencil) flags |= D3D12_CLEAR_FLAG_STENCIL;
+
+		impl->cl->ClearDepthStencilView(v->cpu, flags, depth, stencil, 0, nullptr);
+	}
+
+	static void cl_clearDSV_slot(CommandList* c, DescriptorSlot s,
+		bool clearDepth, bool clearStencil,
+		float depth, uint8_t stencil) noexcept
+	{
+		auto* impl = static_cast<Dx12CommandList*>(c->impl);
+		if (!impl) return;
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
+		if (!DxGetDstCpu(impl->dev, s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) return;
+
+		D3D12_CLEAR_FLAGS flags = (D3D12_CLEAR_FLAGS)0;
+		if (clearDepth)   flags |= D3D12_CLEAR_FLAG_DEPTH;
+		if (clearStencil) flags |= D3D12_CLEAR_FLAG_STENCIL;
+
+		impl->cl->ClearDepthStencilView(cpu, flags, depth, stencil, 0, nullptr);
 	}
 	static void cl_executeIndirect(
 		CommandList* cl,

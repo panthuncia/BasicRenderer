@@ -29,7 +29,7 @@ public:
             Builtin::BRDFLUT,
             Builtin::PostProcessing::ScreenSpaceReflections);
 
-        builder->WithInternalTransition({ Builtin::PostProcessing::ScreenSpaceReflections, {} }, {ResourceAccessType::COMMON, ResourceLayout::LAYOUT_COMMON, ResourceSyncState::ALL});
+        builder->WithInternalTransition({ Builtin::PostProcessing::ScreenSpaceReflections, {} }, {rhi::ResourceAccessType::Common, rhi::ResourceLayout::Common, rhi::ResourceSyncState::All});
     }
 
     void Setup() override {
@@ -51,35 +51,22 @@ public:
     PassReturn Execute(RenderContext& context) override {
 
 		// Clear the render target of the SSSR output
-        //context.commandList->ClearRenderTargetView(
-        //    m_pSSSROutput->GetRTVInfo(0).cpuHandle,
-        //    &m_pSSSROutput->GetClearColor()[0],
-        //    0,
-        //    nullptr
-        //);
+        context.commandList.ClearRenderTargetView({ context.textureDescriptorHeap.GetHandle(), static_cast<uint32_t>(m_pSSSROutput->GetRTVInfo(0).index) }, m_pSSSROutput->GetClearColor());
 
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap,
-            context.samplerDescriptorHeap,
-        };
-        context.commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		context.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
 		// Transition SSSR output to UAV state
-        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_pSSSROutput->GetAPIResource(),
-            D3D12_RESOURCE_STATE_COMMON,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-		);
-		context.commandList->ResourceBarrier(1, &barrier);
+  //      CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+  //          m_pSSSROutput->GetAPIResource(),
+  //          D3D12_RESOURCE_STATE_COMMON,
+  //          D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+		//);
+		//context.commandList->ResourceBarrier(1, &barrier);
 
         // Clear as UAV
-        context.commandList->ClearUnorderedAccessViewFloat(
-            m_pSSSROutput->GetUAVShaderVisibleInfo(0).gpuHandle,
-            m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).cpuHandle,
-            m_pSSSROutput->GetAPIResource(),
-            &m_pSSSROutput->GetClearColor()[0],
-            0,
-            nullptr
+        context.commandList.ClearUavFloat(
+            { context.textureDescriptorHeap.GetHandle(), static_cast<uint32_t>(m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).index) },
+			m_pSSSROutput->GetClearColor().rgba
 		);
 
         FFXManager::GetInstance().EvaluateSSSR(
@@ -96,13 +83,13 @@ public:
 
 		// All resources must exit in COMMON state for legacy interop
 
-		barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_pSSSROutput->GetAPIResource(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COMMON
-        );
+		//barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+  //          m_pSSSROutput->GetAPIResource(),
+  //          D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+  //          D3D12_RESOURCE_STATE_COMMON
+  //      );
 
-		context.commandList->ResourceBarrier(1, &barrier);
+		//context.commandList->ResourceBarrier(1, &barrier);
 
         return {};
     }

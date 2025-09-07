@@ -77,7 +77,7 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
 	sssrDesc.motionVectors = getFFXResource(pMotionVectors, L"MotionVectors", FFX_RESOURCE_STATE_COMMON);
 	sssrDesc.normal = getFFXResource(pNormals, L"Normals", FFX_RESOURCE_STATE_COMMON);
 	sssrDesc.brdfTexture = getFFXResource(pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.output = getFFXResource(pReflectionsTarget, L"Reflections", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
+	sssrDesc.output = getFFXResource(pReflectionsTarget, L"Reflections", FFX_RESOURCE_STATE_COMMON);
 
     auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
     auto invViewProjection = DirectX::XMMatrixInverse(nullptr, camera.info.viewProjection);

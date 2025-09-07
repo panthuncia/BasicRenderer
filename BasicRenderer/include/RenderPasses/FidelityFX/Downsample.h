@@ -10,6 +10,7 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
+#include "Resources/PixelBuffer.h"
 
 #define A_CPU
 #include "../shaders/FidelityFX/ffx_a.h"

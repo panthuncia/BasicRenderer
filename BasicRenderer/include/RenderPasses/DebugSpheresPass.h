@@ -141,103 +141,96 @@ public:
 private:
 
 	void CreateDebugRootSignature() {
-		CD3DX12_ROOT_PARAMETER1 debugRootParameters[1] = {};
-		debugRootParameters[0].InitAsConstants(8, 1, 0, D3D12_SHADER_VISIBILITY_MESH); 
+		auto device = DeviceManager::GetInstance().GetDevice();
 
+		rhi::PipelineLayoutDesc desc = {};
+		desc.flags = rhi::PipelineLayoutFlags::PF_AllowInputAssembler;
+		rhi::PushConstantRangeDesc pushConstant = { rhi::ShaderStage::Mesh, 8, 0, 1 };
 
-		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-		rootSignatureDesc.Init_1_1(_countof(debugRootParameters), debugRootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED);
+		rhi::LayoutBindingRange binding = {};
+		binding.set = 0;
+		binding.binding = 0;
+		binding.count = 1;
+		binding.readOnly = true;
+		binding.visibility = rhi::ShaderStage::AllGraphics;
+		desc.ranges = rhi::Span<rhi::LayoutBindingRange>{ &binding, 1 };
+		desc.pushConstants = rhi::Span<rhi::PushConstantRangeDesc>{ &pushConstant };
+		desc.staticSamplers = rhi::Span<rhi::StaticSamplerDesc>{};
+		m_debugLayout = device.CreatePipelineLayout(desc);
 
-		ComPtr<ID3DBlob> serializedRootSig;
-		ComPtr<ID3DBlob> errorBlob;
-		HRESULT hr = D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1_1, &serializedRootSig, &errorBlob);
-		if (FAILED(hr)) {
-			if (errorBlob) {
-				OutputDebugStringA((char*)errorBlob->GetBufferPointer());
-			}
-			throw std::runtime_error("Failed to serialize root signature");
-		}
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		hr = device->CreateRootSignature(0, serializedRootSig->GetBufferPointer(), serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&m_debugRootSignature));
-		if (FAILED(hr)) {
-			throw std::runtime_error("Failed to create root signature");
-		}
 	}
 
 	void CreateDebugMeshPSO() {
 
-		auto manager = PSOManager::GetInstance();
+		auto dev = DeviceManager::GetInstance().GetDevice();
+
 		// Compile shaders
-		Microsoft::WRL::ComPtr<ID3DBlob> meshShader;
-		Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+		ShaderInfoBundle sib;
+		sib.meshShader = { L"shaders/sphere.hlsl", L"MSMain",        L"ms_6_6" };
+		sib.pixelShader = { L"shaders/sphere.hlsl", L"SpherePSMain",  L"ps_6_6" };
+		auto compiled = PSOManager::GetInstance().CompileShaders(sib);
 
-		//manager.CompileShader(L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6", {}, meshShader);
-		//manager.CompileShader(L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6", {}, pixelShader);
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.meshShader = { L"shaders/sphere.hlsl", L"MSMain", L"ms_6_6" };
-		shaderInfoBundle.pixelShader = { L"shaders/sphere.hlsl", L"SpherePSMain", L"ps_6_6" };
-		auto compiledBundle = manager.CompileShaders(shaderInfoBundle);
-		meshShader = compiledBundle.meshShader;
-		pixelShader = compiledBundle.pixelShader;
+		// Subobjects
+		rhi::SubobjLayout soLayout{ m_debugLayout->GetHandle() };
 
-		CD3DX12_RASTERIZER_DESC rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-		rasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-		rasterizerState.FrontCounterClockwise = true;
-		rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		rhi::SubobjShader soMS{ rhi::ShaderStage::Mesh,  rhi::DXIL(compiled.meshShader.Get()) };
+		rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()) };
 
-		CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		rhi::RasterState rs{};
+		rs.fill = rhi::FillMode::Wireframe;
+		rs.cull = rhi::CullMode::None;
+		rs.frontCCW = true;
+		rhi::SubobjRaster soRaster{ rs };
 
-		CD3DX12_DEPTH_STENCIL_DESC depthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-		depthStencilState.DepthEnable = TRUE;
-		depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		rhi::BlendState bs{};
+		bs.alphaToCoverage = false;
+		bs.independentBlend = false;
+		bs.numAttachments = 1;
+		bs.attachments[0].enable = false;                     // no blending
+		bs.attachments[0].writeMask = rhi::ColorWriteEnable::All;
+		rhi::SubobjBlend soBlend{ bs };
 
-		DXGI_FORMAT rtvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-		DXGI_FORMAT dsvFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		rhi::DepthStencilState ds{};
+		ds.depthEnable = true;
+		ds.depthWrite = false;                                  // D3D12_DEPTH_WRITE_MASK_ZERO
+		ds.depthFunc = rhi::CompareOp::Less;                   // default in your DX path
+		rhi::SubobjDepth soDepth{ ds };
 
-		struct PipelineStateStream {
-			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-			CD3DX12_PIPELINE_STATE_STREAM_MS MS;
-			CD3DX12_PIPELINE_STATE_STREAM_PS PS;
-			CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER RasterizerState;
-			CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC BlendState;
-			CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL DepthStencilState;
-			CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
-			CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
+		rhi::RenderTargets rts{};
+		rts.count = 1;
+		rts.formats[0] = rhi::Format::R8G8B8A8_UNorm;
+		rhi::SubobjRTVs soRTVs{ rts };
+
+		// Your original used D24_UNORM_S8_UINT. If your RHI format enum doesn’t carry D24,
+		// you can either set Unknown (let backend infer) or use D32_Float consistently.
+		rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+		rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
+
+		const rhi::PipelineStreamItem items[] = {
+			rhi::Make(soLayout),
+			rhi::Make(soMS),
+			rhi::Make(soPS),
+			rhi::Make(soRaster),
+			rhi::Make(soBlend),
+			rhi::Make(soDepth),
+			rhi::Make(soRTVs),
+			rhi::Make(soDSV),
+			rhi::Make(soSmp),
 		};
 
-		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = m_debugRootSignature.Get();
-		pipelineStateStream.MS = CD3DX12_SHADER_BYTECODE(meshShader.Get());
-		pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-
-		pipelineStateStream.RasterizerState = rasterizerState;
-		pipelineStateStream.BlendState = blendDesc;
-		pipelineStateStream.DepthStencilState = depthStencilState;
-
-		D3D12_RT_FORMAT_ARRAY rtvFormats = {};
-		rtvFormats.NumRenderTargets = 1;
-		rtvFormats.RTFormats[0] = rtvFormat;
-		pipelineStateStream.RTVFormats = rtvFormats;
-
-		pipelineStateStream.DSVFormat = dsvFormat;
-
-		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		ID3D12Device2* device2 = nullptr;
-		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_pso)));
+		m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+		if (!m_pso || !m_pso->IsValid()) {
+			throw std::runtime_error("Failed to create Debug Mesh PSO (RHI)");
+		}
+		m_pso->SetName("Debug.Mesh.Wireframe");
 
 	}
 
 	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
 	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
 	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
-	ComPtr<ID3D12RootSignature> m_debugRootSignature;
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
+	rhi::PipelineLayoutPtr m_debugLayout;
+	rhi::PipelinePtr m_pso;
 	bool m_wireframe;
 
 	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;

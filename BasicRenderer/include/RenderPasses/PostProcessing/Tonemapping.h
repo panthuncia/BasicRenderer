@@ -70,26 +70,21 @@ public:
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = context.commandList;
 
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			context.textureDescriptorHeap, // The texture descriptor heap
-			context.samplerDescriptorHeap, // The sampler descriptor heap
-		};
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		rhi::PassBeginInfo passInfo{};
+		rhi::ColorAttachment colorAttachment{};
+		colorAttachment.rtv = { context.rtvHeap.GetHandle(), context.frameIndex };
+		colorAttachment.loadOp = rhi::LoadOp::Load;
+		colorAttachment.storeOp = rhi::StoreOp::Store;
+		passInfo.colors = { &colorAttachment };
+		commandList.BeginPass(passInfo);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<float>(context.outputResolution.y));
-		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.outputResolution.x, context.outputResolution.y);
-		commandList->RSSetViewports(1, &viewport);
-		commandList->RSSetScissorRects(1, &scissorRect);
+		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
+        commandList.BindPipeline(m_pso->GetHandle());
 
-		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-		commandList->SetPipelineState(m_pso.Get());
-		auto rootSignature = psoManager.GetRootSignature();
-		commandList->SetGraphicsRootSignature(rootSignature.Get());
 
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
@@ -97,9 +92,9 @@ public:
 		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).index;
 		misc[TONEMAP_TYPE] = getTonemapType();
 
-		commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, misc, 0);
+		commandList.PushConstants(rhi::ShaderStage::Pixel, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
-		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
+		commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}
 
@@ -109,7 +104,7 @@ public:
 
 private:
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
+    rhi::PipelinePtr m_pso;
     PipelineResources m_resourceDescriptorBindings;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<LPMConstants>> m_pLPMConstants;
@@ -121,81 +116,74 @@ private:
 	};
 
     void CreatePSO() {
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        //PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
-        //PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/tonemapping.hlsl", L"PSMain", L"ps_6_6", {}, pixelShader);
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
-		shaderInfoBundle.pixelShader = { L"shaders/PostProcessing/tonemapping.hlsl", L"PSMain", L"ps_6_6" };
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		vertexShader = compiledBundle.vertexShader;
-		pixelShader = compiledBundle.pixelShader;
-        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
+        auto dev = DeviceManager::GetInstance().GetDevice();
 
-        D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-        inputLayoutDesc.pInputElementDescs = nullptr;
-        inputLayoutDesc.NumElements = 0;
+        // Compile shaders
+        ShaderInfoBundle sib;
+        sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+        sib.pixelShader = { L"shaders/PostProcessing/tonemapping.hlsl", L"PSMain", L"ps_6_6" };
+        auto compiled = PSOManager::GetInstance().CompileShaders(sib);
+        m_resourceDescriptorBindings = compiled.resourceDescriptorSlots;
 
-        D3D12_RASTERIZER_DESC rasterizerDesc = {};
-        rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-        rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
-        rasterizerDesc.FrontCounterClockwise = FALSE;
-        rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-        rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-        rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-        rasterizerDesc.DepthClipEnable = TRUE;
-        rasterizerDesc.MultisampleEnable = FALSE;
-        rasterizerDesc.AntialiasedLineEnable = FALSE;
-        rasterizerDesc.ForcedSampleCount = 0;
-        rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+        // Subobjects
+        auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
+        rhi::SubobjLayout soLayout{ layout.GetHandle() };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
 
-        D3D12_BLEND_DESC blendDesc = {};
-        blendDesc.AlphaToCoverageEnable = FALSE;
-        blendDesc.IndependentBlendEnable = FALSE;
-        blendDesc.RenderTarget[0].BlendEnable = TRUE;
-        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        rhi::RasterState rs{};
+        rs.fill = rhi::FillMode::Solid;
+        rs.cull = rhi::CullMode::None;
+        rs.frontCCW = false;
+        rhi::SubobjRaster soRaster{ rs };
 
-        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-        depthStencilDesc.DepthEnable = false;
-        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
-        depthStencilDesc.StencilEnable = FALSE;
-        depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
-
-        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = inputLayoutDesc;
-        psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-        psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
-        psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
-        psoDesc.RasterizerState = rasterizerDesc;
-        psoDesc.BlendState = blendDesc;
-        psoDesc.DepthStencilState = depthStencilDesc;
-        psoDesc.SampleMask = UINT_MAX;
-        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[0] = renderTargetFormat;
-        psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-        psoDesc.SampleDesc.Count = 1;
-        psoDesc.SampleDesc.Quality = 0;
-        psoDesc.InputLayout = inputLayoutDesc;
-
-        auto& device = DeviceManager::GetInstance().GetDevice();
-        auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso));
-        if (FAILED(hr)) {
-            throw std::runtime_error("Failed to create debug PSO");
+        rhi::BlendState bs{};
+        bs.alphaToCoverage = false;
+        bs.independentBlend = false;
+        bs.numAttachments = 1;
+        {
+            auto& a0 = bs.attachments[0];
+            a0.enable = true;
+            a0.srcColor = rhi::BlendFactor::SrcAlpha;
+            a0.dstColor = rhi::BlendFactor::InvSrcAlpha;
+            a0.colorOp = rhi::BlendOp::Add;
+            a0.srcAlpha = rhi::BlendFactor::One;
+            a0.dstAlpha = rhi::BlendFactor::InvSrcAlpha;
+            a0.alphaOp = rhi::BlendOp::Add;
+            a0.writeMask = rhi::ColorWriteEnable::All;
         }
+        rhi::SubobjBlend soBlend{ bs };
+
+        rhi::DepthStencilState ds{};
+        ds.depthEnable = false;
+        ds.depthWrite = false;
+        ds.depthFunc = rhi::CompareOp::Greater;
+        rhi::SubobjDepth soDepth{ ds };
+
+        rhi::RenderTargets rts{};
+        rts.count = 1;
+        rts.formats[0] = rhi::Format::R8G8B8A8_UNorm;
+        rhi::SubobjRTVs soRTVs{ rts };
+
+        rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+        rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
+
+        const rhi::PipelineStreamItem items[] = {
+            rhi::Make(soLayout),
+            rhi::Make(soVS),
+            rhi::Make(soPS),
+            rhi::Make(soRaster),
+            rhi::Make(soBlend),
+            rhi::Make(soDepth),
+            rhi::Make(soRTVs),
+            rhi::Make(soDSV),
+            rhi::Make(soSmp),
+        };
+
+        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+        if (!m_pso || !m_pso->IsValid()) {
+            throw std::runtime_error("Failed to create tonemapping PSO (RHI)");
+        }
+        m_pso->SetName("Tonemapping.PSO");
     }
 };

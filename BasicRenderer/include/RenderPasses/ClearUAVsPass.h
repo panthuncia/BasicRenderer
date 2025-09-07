@@ -47,7 +47,7 @@ public:
 			if (!resource) continue;
 			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
-			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
 		}
 
 		// Alpha test buffer
@@ -56,7 +56,7 @@ public:
 			if (!resource) continue;
 			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
-			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
 		}
 
 		// Blend buffer
@@ -66,7 +66,7 @@ public:
 			if (!resource) continue;
 			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
-			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
 		}
 
 		return {};
@@ -112,7 +112,7 @@ public:
 			if (!resource) continue;
 			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
-			commandList->CopyBufferRegion(apiResource, counterOffset, counterReset, 0, sizeof(UINT));
+			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
 		}
 
 		return {};
