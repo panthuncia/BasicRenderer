@@ -48,27 +48,21 @@ public:
 		//RegisterSRV(Builtin::ActiveDrawSetIndices::Opaque);
 		//RegisterSRV(Builtin::ActiveDrawSetIndices::AlphaTest);
 		//RegisterSRV(Builtin::ActiveDrawSetIndices::Blend);
-		m_activeOpaqueDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::Opaque)->GetSRVInfo(0).index;
-		m_activeAlphaTestDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::AlphaTest)->GetSRVInfo(0).index;
-		m_activeBlendDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::Blend)->GetSRVInfo(0).index;
+		m_activeOpaqueDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::Opaque)->GetSRVInfo(0).slot.index;
+		m_activeAlphaTestDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::AlphaTest)->GetSRVInfo(0).slot.index;
+		m_activeBlendDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::Blend)->GetSRVInfo(0).slot.index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
 		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(),
-			ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
-		};
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-
-		auto rootSignature = PSOManager::GetInstance().GetRootSignature();
-		commandList->SetComputeRootSignature(rootSignature.Get());
+		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
 		// Set the compute pipeline state
-		commandList->SetPipelineState(m_PSO.Get());
+		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
 
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
@@ -86,21 +80,21 @@ public:
 		if (numOpaqueDraws > 0) {
 			uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numOpaqueDraws / 64.0));
 			// First, process buffer for main camera
-			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
 			drawRootConstants[MaxDrawIndex] = numOpaqueDraws-1;
-			commandList->SetComputeRoot32BitConstants(DrawInfoRootSignatureIndex, NumDrawInfoRootConstants, drawRootConstants, 0);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, DrawInfoRootSignatureIndex, 0, NumDrawInfoRootConstants, drawRootConstants);
 
-			miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = primaryDepth.linearDepthMap->GetSRVInfo(0).index;
-			miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.opaqueIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = primaryDepth.linearDepthMap->GetSRVInfo(0).slot.index;
+			miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.opaqueIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 			miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = m_activeOpaqueDrawSetIndicesBufferSRVIndex;
-			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
-			commandList->Dispatch(numThreadGroups, 1, 1);
+			commandList.Dispatch(numThreadGroups, 1, 1);
 
 			if (shadows) {
 				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
@@ -108,19 +102,19 @@ public:
 					for (auto& view : lightViewInfo.renderViews) {
 
 						uint32_t lightCameraIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
-						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
+						commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightCameraIndex);
 
-						miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
-						miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.opaqueIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : lightDepth.linearDepthMap->GetSRVInfo(0).slot.index;
+						miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.opaqueIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 						miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = m_activeOpaqueDrawSetIndicesBufferSRVIndex;
-						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+						commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
 						i++;
-						commandList->Dispatch(numThreadGroups, 1, 1);
+						commandList.Dispatch(numThreadGroups, 1, 1);
 					}
 					});
 			}
@@ -130,21 +124,21 @@ public:
 		if (numAlphaTestDraws > 0) {
 			uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numAlphaTestDraws / 64.0));
 
-			commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
 			drawRootConstants[MaxDrawIndex] = numAlphaTestDraws - 1;
-			commandList->SetComputeRoot32BitConstants(DrawInfoRootSignatureIndex, NumDrawInfoRootConstants, drawRootConstants, 0);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, DrawInfoRootSignatureIndex, 0, NumDrawInfoRootConstants, drawRootConstants);
 
-			miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = primaryDepth.linearDepthMap->GetSRVInfo(0).index;
-			miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-			miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.alphaTestIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+			miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = primaryDepth.linearDepthMap->GetSRVInfo(0).slot.index;
+			miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+			miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.alphaTestIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 			miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = m_activeAlphaTestDrawSetIndicesBufferSRVIndex;
-			commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
-		
-			commandList->Dispatch(numThreadGroups, 1, 1);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
+
+			commandList.Dispatch(numThreadGroups, 1, 1);
 
 			if (shadows) {
 				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
@@ -152,19 +146,19 @@ public:
 					for (auto& view : lightViewInfo.renderViews) {
 
 						uint32_t lightCameraIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
-						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
+						commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightCameraIndex);
 
-						miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
-						miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+						miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : lightDepth.linearDepthMap->GetSRVInfo(0).slot.index;
+						miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.alphaTestIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 						miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = m_activeAlphaTestDrawSetIndicesBufferSRVIndex;
-						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+						commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
 						i++;
-						commandList->Dispatch(numThreadGroups, 1, 1);
+						commandList.Dispatch(numThreadGroups, 1, 1);
 					}
 					});
 			}
@@ -172,26 +166,26 @@ public:
 
 		// blend buffer
 		if (!m_isOccludersPass) {
-			commandList->SetPipelineState(m_blendPSO.Get());
+			commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
 			auto numBlendDraws = context.drawStats.numBlendDraws;
 			if (numBlendDraws > 0) {
 				uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numBlendDraws / 64.0));
 
-				commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
 				drawRootConstants[MaxDrawIndex] = numBlendDraws - 1;
-				commandList->SetComputeRoot32BitConstants(DrawInfoRootSignatureIndex, NumDrawInfoRootConstants, drawRootConstants, 0);
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, DrawInfoRootSignatureIndex, 0, NumDrawInfoRootConstants, drawRootConstants);
 
-				miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-				miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-				miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = primaryDepth.linearDepthMap->GetSRVInfo(0).index;
-				miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-				miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-				miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.blendIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+				miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = primaryDepth.linearDepthMap->GetSRVInfo(0).slot.index;
+				miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = primaryView.indirectCommandBuffers.blendIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = m_activeBlendDrawSetIndicesBufferSRVIndex;
-				commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
-				commandList->Dispatch(numThreadGroups, 1, 1);
+				commandList.Dispatch(numThreadGroups, 1, 1);
 
 				if (shadows) {
 					lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
@@ -199,19 +193,19 @@ public:
 						for (auto& view : lightViewInfo.renderViews) {
 
 							unsigned int lightCameraIndex = static_cast<uint32_t>(view.cameraBufferView->GetOffset() / sizeof(CameraInfo));
-							commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &lightCameraIndex, LightViewIndex);
+							commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightCameraIndex);
 
-							miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-							miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-							miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
-							miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-							miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-							miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.blendIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
+							miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+							miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+							miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : lightDepth.linearDepthMap->GetSRVInfo(0).slot.index;
+							miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+							miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+							miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = view.indirectCommandBuffers.blendIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 							miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = m_activeBlendDrawSetIndicesBufferSRVIndex;
-							commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, miscRootConstants, 0);
+							commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
 							i++;
-							commandList->Dispatch(numThreadGroups, 1, 1);
+							commandList.Dispatch(numThreadGroups, 1, 1);
 						}
 						});
 				}
@@ -243,46 +237,27 @@ private:
 			defines.push_back({ L"OCCLUSION_CULLING", L"1" });
 		}
 
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/objectCulling.hlsl", L"ObjectCullingCSMain", L"cs_6_6" };
-		shaderInfoBundle.defines = defines;
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		computeShader = compiledBundle.computeShader;
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
-
-		struct PipelineStateStream {
-			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-			CD3DX12_PIPELINE_STATE_STREAM_CS CS;
-		};
-
-		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-
-		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		ID3D12Device2* device2 = nullptr;
-		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
+		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/objectCulling.hlsl",
+			L"ObjectCullingCSMain",
+			defines,
+			m_isOccludersPass ? "ObjectCullingPass_Occluders" : "ObjectCullingPass_NonOccluders");
 
 		defines.push_back({ L"BLEND_OBJECTS", L"1" });
 
-		shaderInfoBundle.computeShader = { L"shaders/objectCulling.hlsl", L"ObjectCullingCSMain", L"cs_6_6" };
-		shaderInfoBundle.defines = defines;
-		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		computeShader = compiledBundle.computeShader;
-
-		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_blendPSO)));
+		m_blendPSO = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/objectCulling.hlsl",
+			L"ObjectCullingCSMain",
+			defines,
+			m_isOccludersPass ? "ObjectCullingPass_Blend_Occluders" : "ObjectCullingPass_Blend_NonOccluders");
 	}
 	
 	flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
 
-	ComPtr<ID3D12PipelineState> m_PSO;
-	ComPtr<ID3D12PipelineState> m_blendPSO;
+	PipelineState m_PSO;
+	PipelineState m_blendPSO;
 
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<bool()> getShadowsEnabled;

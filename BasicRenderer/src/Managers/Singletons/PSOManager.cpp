@@ -771,7 +771,7 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
 PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,
     const wchar_t* shaderPath,
     const wchar_t* entryPoint,
-    std::initializer_list<DxcDefine> defines,
+    std::vector<DxcDefine> defines,
     const char* debugName)
 {
     ShaderInfoBundle sib;

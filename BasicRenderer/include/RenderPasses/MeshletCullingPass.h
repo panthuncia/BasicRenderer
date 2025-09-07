@@ -71,30 +71,22 @@ public:
 		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(),
-			ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
-		};
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-
-		auto rootSignature = PSOManager::GetInstance().GetRootSignature();
-		commandList->SetComputeRootSignature(rootSignature.Get());
-
-		// Set the compute pipeline state
-		commandList->SetPipelineState(m_frustrumCullingPSO.Get());
+		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
+		commandList.BindPipeline(m_frustrumCullingPSO.GetAPIPipelineState().GetHandle());
 
 
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-		miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = m_primaryCameraLinearDepthMap->GetSRVInfo(0).index;
+		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+		miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = m_primaryCameraLinearDepthMap->GetSRVInfo(0).slot.index;
 
-		commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
 
 		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>().cameraBufferIndex;
-		commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
 		// Culling for main camera
 
@@ -102,76 +94,79 @@ public:
 		auto meshletCullingBuffer = m_primaryCameraMeshletCullingIndirectCommandBuffer;
 		
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchCommandSignature();
-		commandList->ExecuteIndirect(
-			commandSignature,
-			numDraws,
-			meshletCullingBuffer->GetResource()->GetAPIResource(),
+		commandList.ExecuteIndirect(
+			commandSignature.GetHandle(),
+			meshletCullingBuffer->GetResource()->GetAPIResource().GetHandle(),
 			0,
-			meshletCullingBuffer->GetResource()->GetAPIResource(),
-			meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
+			meshletCullingBuffer->GetResource()->GetAPIResource().GetHandle(),
+			meshletCullingBuffer->GetResource()->GetUAVCounterOffset(),
+			numDraws
 		);
 
 		// Reset necessary meshlets
 		if (m_doResets) {
 			auto meshletCullingClearBuffer = m_primaryCameraMeshletCullingResetIndirectCommandBuffer;
-			commandList->SetPipelineState(m_clearPSO.Get());
+			//commandList->SetPipelineState(m_clearPSO.Get());
+			commandList.BindPipeline(m_clearPSO.GetAPIPipelineState().GetHandle());
 
-			commandList->ExecuteIndirect(
-				commandSignature,
-				numDraws,
-				meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+			commandList.ExecuteIndirect(
+				commandSignature.GetHandle(),
+				meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
 				0,
-				meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-				meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
+				meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
+				meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset(),
+				numDraws
 			);
 		}
 
 		if (getShadowsEnabled()) {
 
 			// Frustrum culling
-			commandList->SetPipelineState(m_frustrumCullingPSO.Get());
+			commandList.BindPipeline(m_frustrumCullingPSO.GetAPIPipelineState().GetHandle());
 			lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
 				for (auto& view : lightViewInfo.renderViews) {
 
 					cameraIndex = view.cameraBufferIndex;
-					commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+					commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
-					miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-					miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).index : lightDepth.linearDepthMap->GetSRVInfo(0).index;
-					commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+					miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+					miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : lightDepth.linearDepthMap->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
 					meshletCullingBuffer = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer;
-					commandList->ExecuteIndirect(
-						commandSignature,
-						numDraws,
-						meshletCullingBuffer->GetResource()->GetAPIResource(),
+
+					commandList.ExecuteIndirect(
+						commandSignature.GetHandle(),
+						meshletCullingBuffer->GetResource()->GetAPIResource().GetHandle(),
 						0,
-						meshletCullingBuffer->GetResource()->GetAPIResource(),
-						meshletCullingBuffer->GetResource()->GetUAVCounterOffset()
+						meshletCullingBuffer->GetResource()->GetAPIResource().GetHandle(),
+						meshletCullingBuffer->GetResource()->GetUAVCounterOffset(),
+						numDraws
 					);
 				}
 				});
 
 			// Reset necessary meshlets
 			if (m_doResets) {
-				commandList->SetPipelineState(m_clearPSO.Get());
+				commandList.BindPipeline(m_clearPSO.GetAPIPipelineState().GetHandle());
 				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
 					for (auto& view : lightViewInfo.renderViews) {
 
 						cameraIndex = view.cameraBufferIndex;
-						commandList->SetComputeRoot32BitConstants(ViewRootSignatureIndex, 1, &cameraIndex, LightViewIndex);
+						commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
-						miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).index;
-						commandList->SetComputeRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &miscRootConstants, 0);
+						miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
 						auto meshletCullingClearBuffer = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
-						commandList->ExecuteIndirect(
-							commandSignature,
-							numDraws,
-							meshletCullingClearBuffer->GetResource()->GetAPIResource(),
+
+						commandList.ExecuteIndirect(
+							commandSignature.GetHandle(),
+							meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
 							0,
-							meshletCullingClearBuffer->GetResource()->GetAPIResource(),
-							meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset()
+							meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
+							meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset(),
+							numDraws
 						);
 					}
 					});
@@ -188,8 +183,6 @@ public:
 private:
 
 	void CreatePSO() {
-		// Compile the compute shader
-		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
 		DxcDefine occludersDefine;
 		occludersDefine.Name = L"OCCLUDERS_PASS";
 		occludersDefine.Value = L"1";
@@ -209,48 +202,26 @@ private:
 			occlusionDefine.Value = L"1";
 			defines.push_back(occlusionDefine);
 		}
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/meshletCulling.hlsl", L"MeshletFrustrumCullingCSMain", L"cs_6_6" };
-		shaderInfoBundle.defines = defines;
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		computeShader = compiledBundle.computeShader;
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
 
-		struct PipelineStateStream {
-			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-			CD3DX12_PIPELINE_STATE_STREAM_CS CS;
-		};
+		m_frustrumCullingPSO = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/meshletCulling.hlsl",
+			L"MeshletFrustrumCullingCSMain",
+			defines,
+			"Meshlet Frustrum Culling Compute Pipeline");
 
-		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-
-		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		ID3D12Device2* device2 = nullptr;
-		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_frustrumCullingPSO)));
-
-		//PSOManager::GetInstance().CompileShader(L"shaders/culling.hlsl", L"MeshletOcclusionCullingCSMain", L"cs_6_6", {}, computeShader);
-
-		//pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-		//ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_occlusionCullingPSO)));
-
-		shaderInfoBundle.computeShader = { L"shaders/meshletCulling.hlsl", L"ClearMeshletFrustrumCullingCSMain", L"cs_6_6" };
-		compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		computeShader = compiledBundle.computeShader;
-
-		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_clearPSO)));
+		m_clearPSO = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/meshletCulling.hlsl",
+			L"ClearMeshletFrustrumCullingCSMain",
+			{},
+			"Clear Meshlet Frustrum Culling Compute Pipeline");
 	}
 
 	flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
 
-	ComPtr<ID3D12PipelineState> m_frustrumCullingPSO;
-	ComPtr<ID3D12PipelineState> m_clearPSO;
+	PipelineState m_frustrumCullingPSO;
+	PipelineState m_clearPSO;
 
 	PipelineResources m_resourceDescriptorBindings;
 
