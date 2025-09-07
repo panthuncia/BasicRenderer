@@ -1,9 +1,10 @@
 #pragma once
+#include <rhi.h>
 
 struct ShaderVisibleIndexInfo {
-    int index = -1; // Index in the descriptor heap
+	rhi::DescriptorSlot slot;
 };
 
 struct NonShaderVisibleIndexInfo {
-    int index = -1; // Index in the descriptor heap
+	rhi::DescriptorSlot slot;
 };

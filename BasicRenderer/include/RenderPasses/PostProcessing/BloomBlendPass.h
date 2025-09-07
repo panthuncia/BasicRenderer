@@ -48,8 +48,8 @@ public:
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
         unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[HDR_TARGET_UAV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetUAVShaderVisibleInfo(0).index; // HDR target index
-		misc[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetSRVInfo(1).index; // Bloom texture index
+		misc[HDR_TARGET_UAV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetUAVShaderVisibleInfo(0).slot.index; // HDR target index
+		misc[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetSRVInfo(1).slot.index; // Bloom texture index
         misc[DST_WIDTH] = m_pHDRTarget->GetWidth();
         misc[DST_HEIGHT] = m_pHDRTarget->GetHeight();
 		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);

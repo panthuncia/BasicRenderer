@@ -76,7 +76,8 @@ public:
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
 
         ShaderVisibleIndexInfo cbvInfo;
-        cbvInfo.index = index;
+        cbvInfo.slot.index = index;
+		cbvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
 		device.CreateConstantBufferView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, dataBuffer->GetAPIResource().GetHandle(), cbvDesc);
@@ -125,7 +126,8 @@ public:
         device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, srvDesc);
 
         ShaderVisibleIndexInfo srvInfo;
-        srvInfo.index = index;
+        srvInfo.slot.index = index;
+		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         dataBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
         if (UAV) {
@@ -148,7 +150,8 @@ public:
 			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, uavDesc);
 
 			ShaderVisibleIndexInfo uavInfo;
-			uavInfo.index = uavShaderVisibleIndex;
+			uavInfo.slot.index = uavShaderVisibleIndex;
+			uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
             dataBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, counterOffset);
 
         }
@@ -183,7 +186,8 @@ public:
 		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, srvDesc);
 
         ShaderVisibleIndexInfo srvInfo;
-        srvInfo.index = index;
+        srvInfo.slot.index = index;
+		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
         return pDynamicBuffer;
@@ -215,7 +219,8 @@ public:
 		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, srvDesc);
 
 		ShaderVisibleIndexInfo srvInfo;
-		srvInfo.index = static_cast<int>(index);
+		srvInfo.slot.index = static_cast<int>(index);
+		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
         if (UAV) {
@@ -234,7 +239,8 @@ public:
 			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, uavDesc);
 
             ShaderVisibleIndexInfo uavInfo;
-            uavInfo.index = static_cast<int>(uavShaderVisibleIndex);
+            uavInfo.slot.index = static_cast<int>(uavShaderVisibleIndex);
+			uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
             pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
         }
 
@@ -279,7 +285,7 @@ public:
 			uavDesc.buffer.counterOffsetInBytes = 0;
 
             // Shader visible UAV
-            auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).index;
+            auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).slot.index;
 
 			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), static_cast<uint32_t>(uavIndex)}, uavDesc);
         }
@@ -321,7 +327,7 @@ public:
 			uavDesc.buffer.counterOffsetInBytes = 0;
 
             // Shader visible UAV
-			auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).index;
+			auto uavIndex = buffer->GetUAVShaderVisibleInfo(0).slot.index;
 
 			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), static_cast<uint32_t>(uavIndex)}, uavDesc);
         }

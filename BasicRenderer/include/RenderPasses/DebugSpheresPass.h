@@ -35,40 +35,25 @@ public:
 	
 		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-		m_cameraBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).index;
-		m_objectBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).index;
+		m_cameraBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
+		m_objectBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
 		auto& commandList = context.commandList;
 
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			context.textureDescriptorHeap, // The texture descriptor heap
-			context.samplerDescriptorHeap, // The sampler descriptor heap
-		};
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		rhi::PassBeginInfo passInfo{};
+		rhi::DepthAttachment depthAttachment{};
+		depthAttachment.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<float>(context.outputResolution.y));
-		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.outputResolution.x, context.outputResolution.y);
-		commandList->RSSetViewports(1, &viewport);
-		commandList->RSSetScissorRects(1, &scissorRect);
+		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
 
-		// Set the render target
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-		auto rootSignature = m_debugRootSignature;
-		commandList->SetGraphicsRootSignature(rootSignature.Get());
-
-
-		auto pso = m_pso;
-		commandList->SetPipelineState(pso.Get());
+		commandList.BindLayout(m_debugLayout->GetHandle());
+		commandList.BindPipeline(m_pso->GetHandle());
 		
-		struct Constants {
+		struct Constants { // TODO: Rework how constants are passed here
 			float center[3];
 			float padding;
 			float radius;
@@ -85,7 +70,7 @@ public:
 		constants.cameraBufferIndex = m_cameraBufferSRVIndex;
 		constants.objectBufferIndex = m_objectBufferSRVIndex;
 
-		commandList->SetGraphicsRoot32BitConstants(0, 8, &constants, 0);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 8, &constants);
 
 		m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
 			auto& meshes = opaqueMeshes.meshInstances;
@@ -97,8 +82,8 @@ public:
 				constants.center[2] = meshData.boundingSphere.sphere.z;
 				constants.radius = meshData.boundingSphere.sphere.w;
 				constants.perObjectIndex = drawInfo.perObjectCBIndex;
-				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
-				commandList->DispatchMesh(1, 1, 1);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, &constants);
+				commandList.DispatchMesh(1, 1, 1);
 			}
 			});
 
@@ -112,8 +97,8 @@ public:
 				constants.center[2] = meshData.boundingSphere.sphere.z;
 				constants.radius = meshData.boundingSphere.sphere.w;
 				constants.perObjectIndex = drawInfo.perObjectCBIndex;
-				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
-				commandList->DispatchMesh(1, 1, 1);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, &constants);
+				commandList.DispatchMesh(1, 1, 1);
 			}
 			});
 
@@ -127,8 +112,8 @@ public:
 				constants.center[2] = meshData.boundingSphere.sphere.z;
 				constants.radius = meshData.boundingSphere.sphere.w;
 				constants.perObjectIndex = drawInfo.perObjectCBIndex;
-				commandList->SetGraphicsRoot32BitConstants(0, 6, &constants, 0);
-				commandList->DispatchMesh(1, 1, 1);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, &constants);
+				commandList.DispatchMesh(1, 1, 1);
 			}
 			});
 		return {};

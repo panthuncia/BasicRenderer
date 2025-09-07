@@ -112,13 +112,13 @@ private:
 		switch (accessor.type) {
 		case DescriptorType::SRV:
 			if (accessor.hasSRVViewType) {
-				return resource->GetSRVInfo(accessor.SRVType, accessor.mip, accessor.slice).index;
+				return resource->GetSRVInfo(accessor.SRVType, accessor.mip, accessor.slice).slot.index;
 			}
 			else {
-				return resource->GetSRVInfo(accessor.mip, accessor.slice).index;
+				return resource->GetSRVInfo(accessor.mip, accessor.slice).slot.index;
 			}
 		case DescriptorType::UAV:
-			return resource->GetUAVShaderVisibleInfo(accessor.mip, accessor.slice).index;
+			return resource->GetUAVShaderVisibleInfo(accessor.mip, accessor.slice).slot.index;
 		default:
 			throw std::runtime_error("Unsupported descriptor type");
 		}

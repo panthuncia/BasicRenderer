@@ -42,7 +42,6 @@ public:
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
 
-
 		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		auto clusterSize = getClusterSize();

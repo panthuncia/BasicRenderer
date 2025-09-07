@@ -5,6 +5,7 @@
 #include <limits>
 #include <directx/d3dcommon.h>
 #include <optional>
+#include <array>
 
 #include "resource_states.h"
 
@@ -117,7 +118,7 @@ namespace rhi {
         explicit operator bool() const noexcept { return dev_ && static_cast<bool>(obj_); }
         bool Valid() const noexcept { return !!*this; }
         Device* DevicePtr() const noexcept { return dev_; }
-        TObject& Get() noexcept { return obj_; } // by-ref view
+        const TObject& Get() const noexcept { return obj_; } // by-ref view
 
         // Release ownership to caller (returns the raw object)
         TObject Release() noexcept {
@@ -314,7 +315,12 @@ namespace rhi {
         const char* debugName{ nullptr };
     };
 
-    struct DescriptorSlot { DescriptorHeapHandle heap{}; uint32_t index{}; };
+    struct DescriptorSlot {
+		DescriptorSlot() = default;
+		DescriptorSlot(DescriptorHeapHandle h, uint32_t i) : heap(h), index(i) {}
+        DescriptorHeapHandle heap{}; 
+        uint32_t index{}; 
+    };
 
     enum class UavDim : uint32_t {
         Undefined,
@@ -775,11 +781,6 @@ namespace rhi {
         constexpr UavClearFloat(const std::array<float, 4>& a) noexcept
             : v{ a[0], a[1], a[2], a[3] } {
         }
-
-        // (C++20) from span of exactly 4
-        constexpr UavClearFloat(std::span<const float, 4> s) noexcept
-            : v{ s[0], s[1], s[2], s[3] } {
-        }
     };
 
     struct UavClearUint {
@@ -794,10 +795,6 @@ namespace rhi {
         // from std::array<uint32_t,4>
         constexpr UavClearUint(const std::array<uint32_t, 4>& a) noexcept
             : v{ a[0], a[1], a[2], a[3] } {
-        }
-        // (C++20) from span of exactly 4
-        constexpr UavClearUint(std::span<const uint32_t, 4> s) noexcept
-            : v{ s[0], s[1], s[2], s[3] } {
         }
 	};
 
@@ -940,7 +937,7 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-        QueryPoolHandle GetHandle() const noexcept { return handle; }
+        const QueryPoolHandle& GetHandle() const noexcept { return handle; }
 		QueryResultInfo GetQueryResultInfo() noexcept { return vt->getQueryResultInfo(this); }
 		PipelineStatsLayout GetPipelineStatsLayout(PipelineStatsFieldDesc* outBuf, uint32_t outCap) noexcept {
 			return vt->getPipelineStatsLayout(this, outBuf, outCap);
@@ -965,7 +962,7 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-		PipelineHandle GetHandle() const noexcept { return handle; }
+		const PipelineHandle& GetHandle() const noexcept { return handle; }
 		void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		PipelineHandle handle;
@@ -986,7 +983,7 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-		PipelineLayoutHandle GetHandle() const noexcept { return handle; }
+		const PipelineLayoutHandle& GetHandle() const noexcept { return handle; }
         void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		PipelineLayoutHandle handle;
@@ -1007,7 +1004,7 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-		CommandSignatureHandle GetHandle() const noexcept { return handle; }
+		const CommandSignatureHandle& GetHandle() const noexcept { return handle; }
         void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		CommandSignatureHandle handle;
@@ -1050,7 +1047,7 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-		SamplerHandle GetHandle() const noexcept { return handle; }
+		const SamplerHandle& GetHandle() const noexcept { return handle; }
         void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		SamplerHandle handle;
@@ -1073,7 +1070,7 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-		TimelineHandle GetHandle() const noexcept { return handle; }
+		const TimelineHandle& GetHandle() const noexcept { return handle; }
 		uint64_t GetCompletedValue() noexcept { return vt->getCompletedValue(this); }
 		Result HostWait(const uint64_t p) noexcept { return vt->hostWait(this, p); }
         void SetName(const char* n) noexcept { vt->setName(this, n); }
@@ -1096,7 +1093,7 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-		HeapHandle GetHandle() const noexcept { return handle; }
+		const HeapHandle& GetHandle() const noexcept { return handle; }
         void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		HeapHandle handle;
@@ -1145,7 +1142,7 @@ namespace rhi {
             return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_RESOURCE_ABI_MIN;
         }
         bool IsTexture() const noexcept { return isTexture; }
-        ResourceHandle GetHandle() const noexcept { return handle; }
+        const ResourceHandle& GetHandle() const noexcept { return handle; }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; } // Naming
         inline void Map(void** data, uint64_t offset = 0, uint64_t size = ~0ull) noexcept { vt->map(this, data, offset, size); }
@@ -1211,7 +1208,7 @@ namespace rhi {
         void (*bindLayout)(CommandList*, PipelineLayoutHandle) noexcept;
         void (*bindPipeline)(CommandList*, PipelineHandle) noexcept;
         void (*setVertexBuffers)(CommandList*, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept;
-        void (*setIndexBuffer)(CommandList*, ResourceHandle b, const IndexBufferView& v) noexcept;
+        void (*setIndexBuffer)(CommandList*, const IndexBufferView& v) noexcept;
         void (*draw)(CommandList*, uint32_t vtxCount, uint32_t instCount, uint32_t firstVtx, uint32_t firstInst) noexcept;
         void (*drawIndexed)(CommandList*, uint32_t idxCount, uint32_t instCount, uint32_t firstIdx, int32_t vtxOffset, uint32_t firstInst) noexcept;
         void (*dispatch)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept;
@@ -1246,6 +1243,7 @@ namespace rhi {
             uint32_t dstOffset32, uint32_t num32,
             const void* data) noexcept;
 		void (*setPrimitiveTopology)(CommandList*, PrimitiveTopology) noexcept;
+		void (*dispatchMesh)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept; // if supported by the backend
         void (*setName)(CommandList*, const char*) noexcept;
         uint32_t abi_version = 1;
     };
@@ -1259,7 +1257,7 @@ namespace rhi {
         explicit constexpr operator bool() const noexcept {
             return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_CL_ABI_MIN;
         }
-		CommandListHandle GetHandle() const noexcept { return handle; }
+		const CommandListHandle& GetHandle() const noexcept { return handle; }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
         void End() noexcept;
@@ -1270,7 +1268,7 @@ namespace rhi {
         void BindLayout(PipelineLayoutHandle l) noexcept;
         void BindPipeline(PipelineHandle p) noexcept;
         void SetVertexBuffers(uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept;
-        void SetIndexBuffer(ResourceHandle b, const IndexBufferView& v) noexcept;
+        void SetIndexBuffer(const IndexBufferView& v) noexcept;
         void Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept;
         void DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept;
         void Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept;
@@ -1302,6 +1300,7 @@ namespace rhi {
             uint32_t dstOffset32, uint32_t num32,
             const void* data) noexcept;
 		void SetPrimitiveTopology(PrimitiveTopology t) noexcept;
+		void DispatchMesh(uint32_t x, uint32_t y, uint32_t z) noexcept;
 
     private:
         CommandListHandle handle;
@@ -1411,7 +1410,7 @@ namespace rhi {
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; } // Naming conflict with vt->reset
         inline void Recycle() noexcept { vt->reset(this); } // GPU-side reset (allocator->Reset)
-		CommandAllocatorHandle GetHandle() const noexcept { return handle; }
+		const CommandAllocatorHandle& GetHandle() const noexcept { return handle; }
 
     private:
         CommandAllocatorHandle handle;
@@ -1487,11 +1486,10 @@ namespace rhi {
     inline void CommandList::BindLayout(PipelineLayoutHandle l) noexcept { vt->bindLayout(this, l); }
     inline void CommandList::BindPipeline(PipelineHandle p) noexcept { vt->bindPipeline(this, p); }
     inline void CommandList::SetVertexBuffers(uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept { vt->setVertexBuffers(this, startSlot, numViews, pBufferViews); }
-    inline void CommandList::SetIndexBuffer(ResourceHandle b, const IndexBufferView& v) noexcept { vt->setIndexBuffer(this, b, v); }
+    inline void CommandList::SetIndexBuffer(const IndexBufferView& v) noexcept { vt->setIndexBuffer(this, v); }
     inline void CommandList::Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept { vt->draw(this, v, i, fv, fi); }
     inline void CommandList::DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept { vt->drawIndexed(this, i, inst, firstIdx, vOff, firstI); }
     inline void CommandList::Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept { vt->dispatch(this, x, y, z); }
-    inline void CommandList::ClearRenderTargetView(ViewHandle v, const ClearValue& c) noexcept { vt->clearRenderTargetView(this, v, c); }
     inline void CommandList::ExecuteIndirect(CommandSignatureHandle sig, ResourceHandle argBuf, uint64_t argOff, ResourceHandle cntBuf, uint64_t cntOff, uint32_t maxCount) noexcept {
         vt->executeIndirect(this, sig, argBuf, argOff, cntBuf, cntOff, maxCount);
     }
@@ -1519,12 +1517,14 @@ namespace rhi {
     inline void CommandList::PushConstants(ShaderStage stages,
         uint32_t set, uint32_t binding,
         uint32_t dstOffset32, uint32_t num32,
-        const void* data) noexcept
-    {
+        const void* data) noexcept {
         vt->pushConstants(this, stages, set, binding, dstOffset32, num32, data);
     }
 	inline void CommandList::SetPrimitiveTopology(PrimitiveTopology t) noexcept { vt->setPrimitiveTopology(this, t); }
     inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
+	inline void CommandList::DispatchMesh(uint32_t x, uint32_t y, uint32_t z) noexcept {
+		if (vt->dispatchMesh) vt->dispatchMesh(this, x, y, z);
+	}
 
     struct DeviceCreateInfo { Backend backend = Backend::D3D12; uint32_t framesInFlight = 3; bool enableDebug = true; };
 

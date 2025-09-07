@@ -252,7 +252,8 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		});
 
 	ShaderVisibleIndexInfo srvInfo;
-	srvInfo.index = index;
+	srvInfo.slot.index = index;
+	srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
 	pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
@@ -273,7 +274,8 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 			});
 
 		ShaderVisibleIndexInfo uavInfo;
-		uavInfo.index = uavShaderVisibleIndex;
+		uavInfo.slot.index = uavShaderVisibleIndex;
+		uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 		pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
 	}
 
@@ -314,7 +316,8 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 		});
 
 	ShaderVisibleIndexInfo srvInfo;
-	srvInfo.index = index;
+	srvInfo.slot.index = index;
+	srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
 	pBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 

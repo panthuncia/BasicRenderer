@@ -26,7 +26,7 @@ public:
 
 		rhi::PassBeginInfo passInfo{};
 		rhi::ColorAttachment colorAttachment{};
-		colorAttachment.rtv = { context.textureDescriptorHeap.GetHandle(), static_cast<uint32_t>(m_lutTexture->GetRTVInfo(0).index) };
+		colorAttachment.rtv = m_lutTexture->GetRTVInfo(0).slot;
 		colorAttachment.loadOp = rhi::LoadOp::Clear;
 		colorAttachment.storeOp = rhi::StoreOp::Store;
 		colorAttachment.clear = m_lutTexture->GetClearColor();

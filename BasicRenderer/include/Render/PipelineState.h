@@ -21,13 +21,13 @@ public:
 		m_pso(std::move(pso)),
 		m_pipelineResources(resources){}
 	PipelineState() : m_pso({}) {};
-	rhi::Pipeline& GetAPIPipelineState() {
+	const rhi::Pipeline& GetAPIPipelineState() const {
 		return m_pso.Get();
 	}
 	uint64_t GetResourceIDsHash() const {
 		return m_resourceIDsHash;
 	}
-	const PipelineResources& GetResourceDescriptorSlots() {
+	const PipelineResources& GetResourceDescriptorSlots() const {
 		return m_pipelineResources;
 	}
 private:

@@ -99,6 +99,7 @@ namespace rhi {
 		&cl_resetQueries,
 		&cl_pushConstants,
 		&cl_setPrimitiveTopology,
+		&cl_dispatchMesh,
 		&cl_setName,
 		1u
     };

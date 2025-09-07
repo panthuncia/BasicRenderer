@@ -11,8 +11,8 @@ class CommandSignatureManager {
 public:
 	static CommandSignatureManager& GetInstance();
 	void Initialize();
-	rhi::CommandSignature& GetDispatchMeshCommandSignature();
-	rhi::CommandSignature& GetDispatchCommandSignature();
+	const rhi::CommandSignature& GetDispatchMeshCommandSignature();
+	const rhi::CommandSignature& GetDispatchCommandSignature();
 
 private:
 	rhi::CommandSignaturePtr m_dispatchMeshCommandSignature;

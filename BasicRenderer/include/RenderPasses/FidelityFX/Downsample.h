@@ -89,9 +89,9 @@ public:
 
         unsigned int downsampleRootConstants[NumMiscUintRootConstants] = {};
 
-        downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).index;
-        downsampleRootConstants[UintRootConstant1] = m_pLinearDepthBuffer->GetSRVInfo(0).index;
-        downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).index;
+        downsampleRootConstants[UintRootConstant0] = mapInfo.pCounterResource->GetUAVShaderVisibleInfo(0).slot.index;
+        downsampleRootConstants[UintRootConstant1] = m_pLinearDepthBuffer->GetSRVInfo(0).slot.index;
+        downsampleRootConstants[UintRootConstant2] = m_pDownsampleConstants->GetSRVInfo(0).slot.index;
         downsampleRootConstants[UintRootConstant3] = mapInfo.constantsIndex;
 
         commandList.PushConstants(

@@ -28,11 +28,11 @@ void CommandSignatureManager::Initialize() {
 		layout.GetHandle());
 }
 
-rhi::CommandSignature& CommandSignatureManager::GetDispatchMeshCommandSignature() {
+const rhi::CommandSignature& CommandSignatureManager::GetDispatchMeshCommandSignature() {
 	return m_dispatchMeshCommandSignature.Get();
 }
 
-rhi::CommandSignature& CommandSignatureManager::GetDispatchCommandSignature() {
+const rhi::CommandSignature& CommandSignatureManager::GetDispatchCommandSignature() {
     return m_dispatchCommandSignature.Get();
 }
 

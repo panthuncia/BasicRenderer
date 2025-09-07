@@ -886,7 +886,8 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
     device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, desc);
 
     ShaderVisibleIndexInfo srvInfo;
-    srvInfo.index = descriptorIndex;
+    srvInfo.slot.index = descriptorIndex;
+	srvInfo.slot.heap = srvHeap->GetHeap().GetHandle();
 
     return srvInfo;
 }
@@ -954,7 +955,8 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip
 			device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, srvDesc);
 
             ShaderVisibleIndexInfo srvInfo;
-            srvInfo.index     = descriptorIndex;
+            srvInfo.slot.index = descriptorIndex;
+			srvInfo.slot.heap = srvHeap->GetHeap().GetHandle();
 
             sliceSRVs.push_back(srvInfo);
         }
@@ -996,7 +998,8 @@ ShaderVisibleIndexInfo CreateUnorderedAccessView(
     device.CreateUnorderedAccessView({uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
 
     ShaderVisibleIndexInfo uavInfo;
-    uavInfo.index = descriptorIndex;
+    uavInfo.slot.index = descriptorIndex;
+	uavInfo.slot.heap = uavHeap->GetHeap().GetHandle();
 
     return uavInfo;
 }
@@ -1033,7 +1036,8 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear op
 	device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
 
     NonShaderVisibleIndexInfo uavInfo;
-    uavInfo.index = descriptorIndex;
+    uavInfo.slot.index = descriptorIndex;
+	uavInfo.slot.heap = uavHeap->GetHeap().GetHandle();
 
     return uavInfo;
 }
@@ -1076,7 +1080,7 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
 
 			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
             
-            ShaderVisibleIndexInfo uavInfo{ static_cast<int>(descriptorIndex) };
+            ShaderVisibleIndexInfo uavInfo{ {uavHeap->GetHeap().GetHandle(), descriptorIndex} };
             sliceUAVs.push_back(uavInfo);
         }
     }
@@ -1124,7 +1128,8 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
 			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), idx}, uavDesc);
 
             NonShaderVisibleIndexInfo info;
-            info.index     = idx;
+            info.slot.index = idx;
+			info.slot.heap = uavHeap->GetHeap().GetHandle();
             sliceUAVs.push_back(info);
         }
     }
@@ -1171,7 +1176,8 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
 			device.CreateRenderTargetView({ rtvHeap->GetHeap().GetHandle(), idx}, rtvDesc);
 
             NonShaderVisibleIndexInfo info;
-            info.index     = idx;
+            info.slot.index = idx;
+			info.slot.heap = rtvHeap->GetHeap().GetHandle();
             sliceRTVs.push_back(info);
         }
     }
@@ -1214,7 +1220,8 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
 			device.CreateDepthStencilView({ dsvHeap->GetHeap().GetHandle(), idx}, dsvDesc);
 
             NonShaderVisibleIndexInfo info;
-            info.index     = idx;
+            info.slot.index = idx;
+			info.slot.heap = dsvHeap->GetHeap().GetHandle();
             sliceDSVs.push_back(info);
         }
     }

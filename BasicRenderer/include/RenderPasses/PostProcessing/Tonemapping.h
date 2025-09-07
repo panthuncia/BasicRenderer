@@ -89,7 +89,7 @@ public:
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
 		unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).index;
+		misc[LPM_CONSTANTS_BUFFER_SRV_DESCRIPTOR_INDEX] = m_pLPMConstants->GetSRVInfo(0).slot.index;
 		misc[TONEMAP_TYPE] = getTonemapType();
 
 		commandList.PushConstants(rhi::ShaderStage::Pixel, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);

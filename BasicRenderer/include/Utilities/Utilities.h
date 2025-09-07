@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <directx/d3dx12.h>
 #include <DirectXTex.h>
+#include <cstdint>
+#include <cstring>
 
 #include "Import/MeshData.h"
 #include "Render/DescriptorHeap.h"
@@ -64,6 +66,26 @@ std::shared_ptr<Texture> LoadTextureFromMemory(
 	bool preferSRGB = false);
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
 std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
+
+#if __has_include(<bit>) && (__cpp_lib_bit_cast >= 201806L)
+#include <bit>
+inline uint32_t as_uint(float f) noexcept { return std::bit_cast<uint32_t>(f); }
+inline float    as_float(uint32_t u) noexcept { return std::bit_cast<float>(u); }
+#else
+inline uint32_t as_uint(float f) noexcept {
+	static_assert(sizeof(uint32_t) == sizeof(float), "sizes must match");
+	uint32_t u;
+	std::memcpy(&u, &f, sizeof(u));  // strict-aliasing safe
+	return u;
+}
+inline float as_float(uint32_t u) noexcept {
+	static_assert(sizeof(uint32_t) == sizeof(float), "sizes must match");
+	float f;
+	std::memcpy(&f, &u, sizeof(f));  // strict-aliasing safe
+	return f;
+}
+#endif
+
 template <typename T1, typename T2>
 bool mapHasKeyNotAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
 	return map.contains(key) && map[key] != val;

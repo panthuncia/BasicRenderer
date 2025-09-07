@@ -37,7 +37,7 @@ public:
         BindResourceDescriptorIndices(commandList, GTAOHighPSO.GetResourceDescriptorSlots());
 
         unsigned int passConstants[NumMiscUintRootConstants] = {};
-        passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
+        passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().slot.index;
 		passConstants[1] = frameIndex % 64; // For spatiotemporal denoising
 
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);

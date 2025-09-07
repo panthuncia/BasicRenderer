@@ -108,8 +108,8 @@ public:
         std::initializer_list<DxcDefine> defines = {},
         const char* debugName = nullptr);
 
-    rhi::PipelineLayout& GetRootSignature();
-    rhi::PipelineLayout& GetComputeRootSignature();
+    const rhi::PipelineLayout& GetRootSignature();
+    const rhi::PipelineLayout& GetComputeRootSignature();
     void ReloadShaders();
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
 	ShaderBundle CompileShaders(const ShaderInfoBundle& shaderInfoBundle);

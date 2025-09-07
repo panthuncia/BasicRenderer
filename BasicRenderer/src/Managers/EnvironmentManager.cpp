@@ -96,8 +96,8 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		}
 		skyboxDesc.channels = 3;
 		skyboxDesc.isCubemap = true;
-		skyboxDesc.hasRTV = true;
 		skyboxDesc.format = rhi::Format::R8G8B8A8_UNorm;
+		skyboxDesc.hasUAV = true;
 
 		auto envCubemap = PixelBuffer::Create(skyboxDesc);
 		auto sampler = Sampler::GetDefaultSampler();
@@ -130,9 +130,9 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	}
 	prefilteredDesc.channels = 3;
 	prefilteredDesc.isCubemap = true;
-	prefilteredDesc.hasRTV = true;
 	prefilteredDesc.format = rhi::Format::R8G8B8A8_UNorm;
 	prefilteredDesc.generateMipMaps = true;
+	prefilteredDesc.hasUAV = true;
 
 	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
 	auto sampler = Sampler::GetDefaultSampler();

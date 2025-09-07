@@ -1936,10 +1936,10 @@ namespace rhi {
 		}
 		l->cl->IASetVertexBuffers(startSlot, (UINT)numViews, views.data());
 	}
-	static void cl_setIB(CommandList* cl, ResourceHandle b, const IndexBufferView& view) noexcept {
+	static void cl_setIB(CommandList* cl, const IndexBufferView& view) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* dev = l->dev;
-		if (auto* B = dev->buffers.get(b)) {
+		if (auto* B = dev->buffers.get(view.buffer)) {
 			D3D12_INDEX_BUFFER_VIEW ibv{};
 			ibv.BufferLocation = B->res->GetGPUVirtualAddress() + view.offset;
 			ibv.SizeInBytes = view.sizeBytes;
@@ -2476,6 +2476,12 @@ namespace rhi {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		if (!l) return;
 		l->cl->IASetPrimitiveTopology(ToDX(pt));
+	}
+
+	void cl_dispatchMesh(CommandList* cl, uint32_t x, uint32_t y, uint32_t z) noexcept {
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
+		if (!l) return;
+		l->cl->DispatchMesh(x, y, z);
 	}
 
 	// ---------------- Swapchain vtable funcs ----------------

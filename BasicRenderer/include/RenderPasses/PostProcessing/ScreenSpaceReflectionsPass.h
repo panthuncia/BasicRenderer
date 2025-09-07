@@ -51,7 +51,7 @@ public:
     PassReturn Execute(RenderContext& context) override {
 
 		// Clear the render target of the SSSR output
-        context.commandList.ClearRenderTargetView({ context.textureDescriptorHeap.GetHandle(), static_cast<uint32_t>(m_pSSSROutput->GetRTVInfo(0).index) }, m_pSSSROutput->GetClearColor());
+        context.commandList.ClearRenderTargetView( m_pSSSROutput->GetRTVInfo(0).slot, m_pSSSROutput->GetClearColor());
 
 		context.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -65,7 +65,9 @@ public:
 
         // Clear as UAV
         context.commandList.ClearUavFloat(
-            { context.textureDescriptorHeap.GetHandle(), static_cast<uint32_t>(m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).index) },
+            { m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot,
+              m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot,
+              m_pSSSROutput->GetAPIResource() },
 			m_pSSSROutput->GetClearColor().rgba
 		);
 

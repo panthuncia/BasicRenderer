@@ -127,7 +127,7 @@ public:
 				}
 				for (auto& srvInfos : m_SRVViews[i].infos) {
 					for (auto& srvInfo : srvInfos) {
-						m_pSRVHeap->ReleaseDescriptor(srvInfo.index);
+						m_pSRVHeap->ReleaseDescriptor(srvInfo.slot.index);
 					}
 				}
 			}
@@ -135,7 +135,7 @@ public:
 		if (m_pUAVShaderVisibleHeap) {
 			for (auto& uavInfos : m_UAVShaderVisibleInfos) {
 				for (auto& uavInfo : uavInfos) {
-					m_pUAVShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
+					m_pUAVShaderVisibleHeap->ReleaseDescriptor(uavInfo.slot.index);
 				}
 			}
 		}
@@ -143,19 +143,19 @@ public:
 			for (auto& uavInfos : m_UAVNonShaderVisibleInfos) {
 				for (auto& uavInfo : uavInfos) {
 					// Release the non-shader visible UAVs
-					m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
+					m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(uavInfo.slot.index);
 				}
 			}
 		}
 		if (m_pCBVHeap) {
-			m_pCBVHeap->ReleaseDescriptor(m_CBVInfo.index);
+			m_pCBVHeap->ReleaseDescriptor(m_CBVInfo.slot.index);
 		}
 
 		// Release RTVs and DSVs
 		if (m_pRTVHeap) {
 			for (auto& rtvInfos : m_RTVInfos) {
 				for (auto& rtvInfo : rtvInfos) {
-					m_pRTVHeap->ReleaseDescriptor(rtvInfo.index);
+					m_pRTVHeap->ReleaseDescriptor(rtvInfo.slot.index);
 				}
 			}
 		}
@@ -163,7 +163,7 @@ public:
 		if (m_pDSVHeap) {
 			for (auto& dsvInfos : m_DSVInfos) {
 				for (auto& dsvInfo : dsvInfos) {
-					m_pDSVHeap->ReleaseDescriptor(dsvInfo.index);
+					m_pDSVHeap->ReleaseDescriptor(dsvInfo.slot.index);
 				}
 			}
 		}

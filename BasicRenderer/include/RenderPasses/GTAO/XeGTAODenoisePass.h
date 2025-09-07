@@ -32,7 +32,7 @@ public:
 		commandList.BindPipeline(DenoiseLastPassPSO.GetAPIPipelineState().GetHandle());
 
         unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
-        gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().index;
+        gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().slot.index;
         gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex;
             
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, gtaoConstants);

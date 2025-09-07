@@ -1841,11 +1841,11 @@ void PSOManager::createRootSignature() {
         });
 }
 
-rhi::PipelineLayout& PSOManager::GetRootSignature() {
+const rhi::PipelineLayout& PSOManager::GetRootSignature() {
     return m_rootSignature.Get();
 }
 
-rhi::PipelineLayout& PSOManager::GetComputeRootSignature() {
+const rhi::PipelineLayout& PSOManager::GetComputeRootSignature() {
 	return m_computeRootSignature.Get();
 }
 

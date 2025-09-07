@@ -59,7 +59,7 @@ public:
 
 		rhi::PassBeginInfo passInfo{};
 		rhi::ColorAttachment colorAttachment{};
-		colorAttachment.rtv = { context.textureDescriptorHeap.GetHandle(), static_cast<uint32_t>(m_pHDRTarget->GetRTVInfo(0).index) };
+		colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(0).slot;
 		colorAttachment.loadOp = rhi::LoadOp::Load;
 		colorAttachment.storeOp = rhi::StoreOp::Store;
 		passInfo.colors = { &colorAttachment };
