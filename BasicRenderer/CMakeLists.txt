@@ -525,7 +525,7 @@ target_link_libraries(${PROJECT_NAME}
 PRIVATE 
     d3dcompiler.lib 
     dxgi.lib 
-    spdlog::spdlog 
+    spdlog::spdlog_header_only 
     Microsoft::DirectXTex 
     imgui::imgui 
     meshoptimizer::meshoptimizer 

@@ -160,4 +160,68 @@ namespace rhi {
 		&h_setName,
 		1u
 	};
+	DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept {
+		UINT flags = 0;
+#ifdef _DEBUG
+		if (ci.enableDebug) { ComPtr<ID3D12Debug> dbg; if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer(), flags |= DXGI_CREATE_FACTORY_DEBUG; }
+#endif
+		auto* impl = new Dx12Device();
+		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->factory));
+
+		// Select default adapter. TODO: expose adapter selection
+		ComPtr<IDXGIAdapter1> adapter;
+		impl->factory->EnumAdapters1(0, &adapter);
+
+		adapter.As(&impl->adapter);
+
+		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->dev));
+		EnableDebug(impl->dev.Get());
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+		ComPtr<ID3D12InfoQueue1> infoQueue;
+		if (SUCCEEDED(impl->dev->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
+			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+
+			DWORD callbackCookie = 0;
+			infoQueue->RegisterMessageCallback([](D3D12_MESSAGE_CATEGORY category, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID id, LPCSTR description, void* context) {
+				// Log or print the debug messages,
+				spdlog::error("D3D12 Debug Message: {}", description);
+				}, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &callbackCookie);
+		}
+#endif
+
+		// Disable unwanted warnings
+		ComPtr<ID3D12InfoQueue> warningInfoQueue;
+		if (SUCCEEDED(impl->dev->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
+		{
+			D3D12_INFO_QUEUE_FILTER filter = {};
+			D3D12_MESSAGE_ID blockedIDs[] = {
+				(D3D12_MESSAGE_ID)1356, // Barrier-only command lists
+				(D3D12_MESSAGE_ID)1328, // ps output type mismatch
+				(D3D12_MESSAGE_ID)1008 }; // RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS
+			filter.DenyList.NumIDs = _countof(blockedIDs);
+			filter.DenyList.pIDList = blockedIDs;
+
+			warningInfoQueue->AddStorageFilterEntries(&filter);
+		}
+
+		auto makeQ = [&](D3D12_COMMAND_LIST_TYPE t, Dx12QueueState& out) {
+			D3D12_COMMAND_QUEUE_DESC qd{};
+			qd.Type = t;
+			impl->dev->CreateCommandQueue(&qd, IID_PPV_ARGS(&out.q));
+			impl->dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&out.fence));
+			out.value = 0;
+			};
+		makeQ(D3D12_COMMAND_LIST_TYPE_DIRECT, impl->gfx);
+		makeQ(D3D12_COMMAND_LIST_TYPE_COMPUTE, impl->comp);
+		makeQ(D3D12_COMMAND_LIST_TYPE_COPY, impl->copy);
+
+		Device d{};
+		d.impl = impl;
+		d.vt = &g_devvt;
+		return MakeDevicePtr(d);
+	}
+
 }

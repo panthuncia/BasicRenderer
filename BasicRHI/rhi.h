@@ -1524,7 +1524,7 @@ namespace rhi {
 	inline void CommandList::SetPrimitiveTopology(PrimitiveTopology t) noexcept { vt->setPrimitiveTopology(this, t); }
     inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
 	inline void CommandList::DispatchMesh(uint32_t x, uint32_t y, uint32_t z) noexcept {
-		if (vt->dispatchMesh) vt->dispatchMesh(this, x, y, z);
+		vt->dispatchMesh(this, x, y, z);
 	}
 
     struct DeviceCreateInfo { Backend backend = Backend::D3D12; uint32_t framesInFlight = 3; bool enableDebug = true; };

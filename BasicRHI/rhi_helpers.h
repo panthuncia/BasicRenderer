@@ -94,7 +94,7 @@ namespace rhi {
             }
         }
 
-        bool IsTextureResourceType(ResourceType type) noexcept {
+        inline bool IsTextureResourceType(ResourceType type) noexcept {
             return (type == ResourceType::Texture1D ||
                 type == ResourceType::Texture2D ||
                 type == ResourceType::Texture3D);

@@ -86,7 +86,7 @@ namespace rhi {
 		}
 	}
 
-	inline D3D12_BARRIER_SYNC ToDX(const ResourceSyncState state) {
+	static inline D3D12_BARRIER_SYNC ToDX(const ResourceSyncState state) {
 		switch (state) {
 		case ResourceSyncState::None:
 			return D3D12_BARRIER_SYNC_NONE;
@@ -272,7 +272,7 @@ namespace rhi {
 	}
 
 
-	static D3D12_HEAP_TYPE ToDx(const Memory m) {
+	inline static D3D12_HEAP_TYPE ToDx(const Memory m) {
 		switch (m) {
 		case Memory::Upload:   return D3D12_HEAP_TYPE_UPLOAD;
 		case Memory::Readback: return D3D12_HEAP_TYPE_READBACK;
@@ -280,7 +280,7 @@ namespace rhi {
 		}
 	}
 
-	static D3D12_RESOURCE_FLAGS ToDX(const ResourceFlags flags) {
+	inline static D3D12_RESOURCE_FLAGS ToDX(const ResourceFlags flags) {
 		D3D12_RESOURCE_FLAGS f = D3D12_RESOURCE_FLAG_NONE;
 		if (flags & RF_AllowRenderTarget)
 			f |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
@@ -299,7 +299,7 @@ namespace rhi {
 		return f;
 	}
 
-	static D3D12_DESCRIPTOR_HEAP_TYPE ToDX(const DescriptorHeapType t) {
+	inline static D3D12_DESCRIPTOR_HEAP_TYPE ToDX(const DescriptorHeapType t) {
 		switch (t) {
 		case DescriptorHeapType::Sampler: return D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
 		case DescriptorHeapType::CbvSrvUav: return D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -311,7 +311,7 @@ namespace rhi {
 		}
 	}
 
-	static D3D12_BARRIER_SUBRESOURCE_RANGE ToDX(const TextureSubresourceRange& r) {
+	inline static D3D12_BARRIER_SUBRESOURCE_RANGE ToDX(const TextureSubresourceRange& r) {
 		D3D12_BARRIER_SUBRESOURCE_RANGE o{};
 		o.IndexOrFirstMipLevel = r.baseMip;
 		o.NumMipLevels = r.mipCount;
@@ -322,7 +322,7 @@ namespace rhi {
 		return o;
 	}
 
-	D3D12_CLEAR_VALUE ToDX(const ClearValue& cv) {
+	inline static D3D12_CLEAR_VALUE ToDX(const ClearValue& cv) {
 		D3D12_CLEAR_VALUE v{};
 		v.Format = ToDxgi(cv.format);
 		if (cv.type == ClearValueType::Color) {
@@ -335,7 +335,7 @@ namespace rhi {
 		return v;
 	}
 
-	static D3D12_HEAP_FLAGS ToDX(HeapFlags f) {
+	inline static D3D12_HEAP_FLAGS ToDX(HeapFlags f) {
 		D3D12_HEAP_FLAGS out = D3D12_HEAP_FLAG_NONE;
 		auto test = [&](HeapFlags b) { return (static_cast<uint32_t>(f) & static_cast<uint32_t>(b)) != 0; };
 		if (test(HeapFlags::AllowOnlyBuffers))            out |= D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
@@ -351,10 +351,10 @@ namespace rhi {
 		if (test(HeapFlags::AllowAllBuffersAndTextures))  out |= D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
 		return out;
 	}
-	static D3D12_FILTER_TYPE ToDX(Filter f) noexcept {
+	inline static D3D12_FILTER_TYPE ToDX(Filter f) noexcept {
 		return (f == Filter::Linear) ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT;
 	}
-	static D3D12_FILTER_REDUCTION_TYPE ToDX(rhi::ReductionMode r, bool compareEnable) noexcept {
+	inline static D3D12_FILTER_REDUCTION_TYPE ToDX(rhi::ReductionMode r, bool compareEnable) noexcept {
 		if (compareEnable) return D3D12_FILTER_REDUCTION_TYPE_COMPARISON;
 		switch (r) {
 		case rhi::ReductionMode::Standard: return D3D12_FILTER_REDUCTION_TYPE_STANDARD;
@@ -364,7 +364,7 @@ namespace rhi {
 		}
 		return D3D12_FILTER_REDUCTION_TYPE_STANDARD;
 	}
-	static D3D12_TEXTURE_ADDRESS_MODE ToDX(AddressMode m) noexcept {
+	inline static D3D12_TEXTURE_ADDRESS_MODE ToDX(AddressMode m) noexcept {
 		switch (m) {
 		case AddressMode::Wrap:       return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 		case AddressMode::Mirror:     return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
@@ -374,7 +374,7 @@ namespace rhi {
 		}
 		return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
 	}
-	static D3D12_COMPARISON_FUNC ToDX(CompareOp op) noexcept {
+	inline static D3D12_COMPARISON_FUNC ToDX(CompareOp op) noexcept {
 		switch (op) {
 		case CompareOp::Never:        return D3D12_COMPARISON_FUNC_NEVER;
 		case CompareOp::Less:         return D3D12_COMPARISON_FUNC_LESS;
@@ -387,7 +387,7 @@ namespace rhi {
 		}
 		return D3D12_COMPARISON_FUNC_ALWAYS;
 	}
-	static void FillDxBorderColor(const SamplerDesc& sd, float out[4]) noexcept {
+	inline static void FillDxBorderColor(const SamplerDesc& sd, float out[4]) noexcept {
 		switch (sd.borderPreset) {
 		case BorderPreset::TransparentBlack: out[0] = out[1] = out[2] = 0.f; out[3] = 0.f; break;
 		case BorderPreset::OpaqueBlack:      out[0] = out[1] = out[2] = 0.f; out[3] = 1.f; break;
@@ -396,7 +396,7 @@ namespace rhi {
 			out[2] = sd.borderColor[2]; out[3] = sd.borderColor[3]; break;
 		}
 	}
-	static D3D12_FILTER BuildDxFilter(const SamplerDesc& sd) noexcept {
+	inline static D3D12_FILTER BuildDxFilter(const SamplerDesc& sd) noexcept {
 		const auto red = ToDX(sd.reduction, sd.compareEnable);
 
 		// Anisotropy dominates when >1
@@ -416,7 +416,7 @@ namespace rhi {
 
 		return D3D12_ENCODE_BASIC_FILTER(minT, magT, mipT, red);
 	}
-	static D3D12_PRIMITIVE_TOPOLOGY ToDX(const PrimitiveTopology t) noexcept {
+	inline static D3D12_PRIMITIVE_TOPOLOGY ToDX(const PrimitiveTopology t) noexcept {
 		switch (t) {
 		case PrimitiveTopology::PointList:        return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
 		case PrimitiveTopology::LineList:         return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
