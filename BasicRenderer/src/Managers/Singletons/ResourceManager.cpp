@@ -144,13 +144,12 @@ void ResourceManager::GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::
 	commandAllocator->Recycle();
 
 }
-unsigned int i = 0;
 void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
 	auto device = DeviceManager::GetInstance().GetDevice();
 	static rhi::Queue copyCommandQueue;
 	static rhi::TimelinePtr copyFence;
 	static UINT64 copyFenceValue = 0;
-	bool copyFenceEventCreated = false;
+	static bool copyFenceEventCreated = false;
 
 	// Create the command queue if it hasn't been created yet
 	if (!copyCommandQueue) {
@@ -159,10 +158,6 @@ void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandL
 
 	// Create a fence for synchronization if it hasn't been created yet
 	if (!copyFenceEventCreated) {
-		i++;
-		if (i == 15) {
-			__debugbreak();
-		}
 		copyFence = device.CreateTimeline(copyFenceValue, "TempCopyFence");
 		copyFenceEventCreated = true;
 	}
@@ -403,7 +398,7 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 
 	// effective array slices = arraySize * (isCubemap ? 6 : 1)
 	const uint32_t faces = desc.isCubemap ? 6u : 1u;
-	const uint32_t arraySlices = faces * static_cast<uint32_t>(arraySize);
+	const uint32_t arraySlices = arraySize;//faces * static_cast<uint32_t>(arraySize);
 	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
 
 	// Build a dense SubresourceData table (nullptr entries are allowed; they'll be skipped)

@@ -12,6 +12,9 @@
 #include <spdlog/spdlog.h>
 #include <optional>
 #include <deque>
+#include <cstddef>  // offsetof
+#include <type_traits>
+#include <cstdint>
 
 #include "rhi_interop_dx12.h"
 #include "rhi_conversions_dx12.h"
@@ -282,6 +285,65 @@ namespace rhi {
 		return static_cast<uint8_t>(e);
 	}
 
+	template<typename T, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE KType>
+	struct alignas(void*) PsoSubobject
+	{
+		D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = KType; // Must be first
+		T Value; // Payload
+	};
+
+	using SO_RootSignature = PsoSubobject<ID3D12RootSignature*, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE>;
+	using SO_VS = PsoSubobject<D3D12_SHADER_BYTECODE, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS>;
+	using SO_PS = PsoSubobject<D3D12_SHADER_BYTECODE, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS>;
+	using SO_AS = PsoSubobject<D3D12_SHADER_BYTECODE, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS>;
+	using SO_MS = PsoSubobject<D3D12_SHADER_BYTECODE, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS>;
+	using SO_CS = PsoSubobject<D3D12_SHADER_BYTECODE, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS>;
+	using SO_Rasterizer = PsoSubobject<D3D12_RASTERIZER_DESC, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER>;
+	using SO_Blend = PsoSubobject<D3D12_BLEND_DESC, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND>;
+	using SO_DepthStencil = PsoSubobject<D3D12_DEPTH_STENCIL_DESC, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL>;
+	using SO_RtvFormats = PsoSubobject<D3D12_RT_FORMAT_ARRAY, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS>;
+	using SO_DsvFormat = PsoSubobject<DXGI_FORMAT, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT>;
+	using SO_SampleDesc = PsoSubobject<DXGI_SAMPLE_DESC, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC>;
+	using SO_PrimTopology = PsoSubobject<D3D12_PRIMITIVE_TOPOLOGY_TYPE, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY>;
+	using SO_Flags = PsoSubobject<D3D12_PIPELINE_STATE_FLAGS, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_FLAGS>;
+	using SO_NodeMask = PsoSubobject<UINT, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_NODE_MASK>;
+
+	struct PsoStreamBuilder
+	{
+		std::vector<std::byte> buf;
+
+		template<class SO>
+		void push(const SO& so)
+		{
+			static_assert(std::is_trivially_copyable_v<SO>, "SO must be trivially copyable");
+			static_assert(std::is_standard_layout_v<SO>, "SO must be standard-layout");
+
+			constexpr size_t off = offsetof(SO, Type);
+			static_assert(off == 0, "Type must be the first member");
+
+			static_assert(alignof(SO) == alignof(void*), "SO alignment must equal alignof(void*)");
+			static_assert((sizeof(SO) % alignof(void*)) == 0, "SO size must be multiple of alignof(void*)");
+
+			// Align write cursor to pointer alignment
+			constexpr size_t kAlign = alignof(void*);
+			size_t aligned = (buf.size() + (kAlign - 1)) & ~(kAlign - 1);
+			if (aligned != buf.size()) buf.resize(aligned);
+
+			// Append bytes
+			size_t offBytes = buf.size();
+			buf.resize(offBytes + sizeof(SO));
+			std::memcpy(buf.data() + offBytes, &so, sizeof(SO));
+		}
+
+		D3D12_PIPELINE_STATE_STREAM_DESC desc()
+		{
+			D3D12_PIPELINE_STATE_STREAM_DESC d{};
+			d.SizeInBytes = buf.size();
+			d.pPipelineStateSubobjectStream = buf.data();
+			return d;
+		}
+	};
+
 	static PipelinePtr d_createPipelineFromStream(Device* d,
 		const PipelineStreamItem* items,
 		uint32_t count) noexcept
@@ -299,6 +361,8 @@ namespace rhi {
 		D3D12_RT_FORMAT_ARRAY rtv{}; rtv.NumRenderTargets = 0;
 		DXGI_FORMAT dsv = DXGI_FORMAT_UNKNOWN;
 		DXGI_SAMPLE_DESC sample{ 1,0 };
+
+		bool hasRast = false, hasBlend = false, hasDepth = false, hasRTV = false, hasDSV = false, hasSample = false;
 
 		for (uint32_t i = 0; i < count; i++) {
 			switch (items[i].type) {
@@ -321,6 +385,7 @@ namespace rhi {
 				}
 			} break;
 			case PsoSubobj::Rasterizer: {
+				hasRast = true;
 				auto& R = *static_cast<const SubobjRaster*>(items[i].data);
 				rast.FillMode = ToDx(R.rs.fill);
 				rast.CullMode = ToDx(R.rs.cull);
@@ -330,6 +395,7 @@ namespace rhi {
 				rast.SlopeScaledDepthBias = R.rs.slopeScaledDepthBias;
 			} break;
 			case PsoSubobj::Blend: {
+				hasBlend = true;
 				auto& B = *static_cast<const SubobjBlend*>(items[i].data);
 				blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 				blend.AlphaToCoverageEnable = B.bs.alphaToCoverage;
@@ -348,6 +414,7 @@ namespace rhi {
 				}
 			} break;
 			case PsoSubobj::DepthStencil: {
+				hasDepth = true;
 				auto& D = *static_cast<const SubobjDepth*>(items[i].data);
 				depth = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 				depth.DepthEnable = D.ds.depthEnable;
@@ -355,15 +422,18 @@ namespace rhi {
 				depth.DepthFunc = ToDx(D.ds.depthFunc);
 			} break;
 			case PsoSubobj::RTVFormats: {
+				hasRTV = true;
 				auto& R = *static_cast<const SubobjRTVs*>(items[i].data);
 				rtv.NumRenderTargets = R.rt.count;
 				for (uint32_t k = 0; k < R.rt.count && k < 8; k++) rtv.RTFormats[k] = ToDxgi(R.rt.formats[k]);
 			} break;
 			case PsoSubobj::DSVFormat: {
+				hasDSV = true;
 				auto& Z = *static_cast<const SubobjDSV*>(items[i].data);
 				dsv = ToDxgi(Z.dsv);
 			} break;
 			case PsoSubobj::Sample: {
+				hasSample = true;
 				auto& S = *static_cast<const SubobjSample*>(items[i].data);
 				sample = { S.sd.count, S.sd.quality };
 			} break;
@@ -372,57 +442,37 @@ namespace rhi {
 		}
 
 		// Validate & decide kind
-		if (hasCS && hasGfx) return {};          // invalid mix
-		if (!hasCS && !hasGfx) return {};        // no shaders
+		if (hasCS && hasGfx) {
+			spdlog::error("DX12 pipeline creation: cannot mix compute and graphics shaders in one PSO");
+			return {};          // invalid mix
+		}
+		if (!hasCS && !hasGfx) {
+			spdlog::error("DX12 pipeline creation: no shaders specified");
+			return {};        // no shaders
+		}
 		const bool isCompute = hasCS;
+		
+		PsoStreamBuilder sb;
+		sb.push(SO_RootSignature{ .Value = root });
 
-		// Build a raw stream buffer by concatenating typed subobjects
-		// (order doesn't matter, DX12 parses headers)
-		struct AnySub { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type; }; // header matches CD3DX12 helpers
-		std::vector<uint8_t> stream; stream.reserve(1024);
+		if (hasCS)    sb.push(SO_CS{ .Value = cs });
+		if (hasGfx) {
+			if (as.pShaderBytecode) sb.push(SO_AS{ .Value = as });
+			if (ms.pShaderBytecode) sb.push(SO_MS{ .Value = ms });
+			if (vs.pShaderBytecode) sb.push(SO_VS{ .Value = vs });
+			if (ps.pShaderBytecode) sb.push(SO_PS{ .Value = ps });
 
-		auto push = [&](auto subobj) {
-			size_t before = stream.size();
-			stream.resize(before + sizeof(subobj));
-			std::memcpy(stream.data() + before, &subobj, sizeof(subobj));
-			};
-
-		// Root signature is required
-		if (!root) return {};
-		push(CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE(root));
-
-		if (isCompute) {
-			// Compute pipeline only needs CS (+ optional flags)
-			if (!(cs.pShaderBytecode && cs.BytecodeLength)) { return {}; }
-			push(CD3DX12_PIPELINE_STATE_STREAM_CS(cs));
+			if (hasRast)   sb.push(SO_Rasterizer{ .Value = rast });
+			if (hasBlend)  sb.push(SO_Blend{ .Value = blend });
+			if (hasDepth)  sb.push(SO_DepthStencil{ .Value = depth });
+			if (hasRTV)    sb.push(SO_RtvFormats{ .Value = rtv });
+			if (hasDSV)    sb.push(SO_DsvFormat{ .Value = dsv });
+			if (hasSample) sb.push(SO_SampleDesc{ .Value = sample });
+			// sb.push(SO_PrimTopology{ .Value = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE });
 		}
-		else {
-			// Graphics / Mesh pipeline
-			if (as.pShaderBytecode && as.BytecodeLength) {
-				push(CD3DX12_PIPELINE_STATE_STREAM_AS(as));
-			}
-			if (ms.pShaderBytecode && ms.BytecodeLength) {
-				push(CD3DX12_PIPELINE_STATE_STREAM_MS(ms));
-			}
-			if (vs.pShaderBytecode && vs.BytecodeLength) {
-				push(CD3DX12_PIPELINE_STATE_STREAM_VS(vs));
-			}
-			if (ps.pShaderBytecode && ps.BytecodeLength) {
-				push(CD3DX12_PIPELINE_STATE_STREAM_PS(ps));
-			}
-			push(CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER(rast));
-			push(CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC(blend));
-			push(CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL(depth));
-			push(CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS(rtv));
-			push(CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT(dsv));
-			push(CD3DX12_PIPELINE_STATE_STREAM_SAMPLE_DESC(sample));
-		}
+		auto sd = sb.desc();
 
-		D3D12_PIPELINE_STATE_STREAM_DESC sd{};
-		sd.pPipelineStateSubobjectStream = stream.data();
-		sd.SizeInBytes = (UINT)stream.size();
-
-		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+		ComPtr<ID3D12PipelineState> pso;
 		if (FAILED(dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) return {};
 
 		auto handle = dimpl->pipelines.alloc(Dx12Pipeline{ pso, isCompute });
