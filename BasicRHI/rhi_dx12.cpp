@@ -218,10 +218,8 @@ namespace rhi {
 		makeQ(D3D12_COMMAND_LIST_TYPE_COMPUTE, impl->comp);
 		makeQ(D3D12_COMMAND_LIST_TYPE_COPY, impl->copy);
 
-		Device d{};
-		d.impl = impl;
-		d.vt = &g_devvt;
-		return MakeDevicePtr(d);
+		Device d { impl, &g_devvt };
+		return MakeDevicePtr(&d);
 	}
 
 }

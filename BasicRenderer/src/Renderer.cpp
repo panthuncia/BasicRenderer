@@ -147,7 +147,7 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
     auto& settingsManager = SettingsManager::GetInstance();
-    settingsManager.registerSetting<uint8_t>("numFramesInFlight", 3);
+    settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
@@ -290,6 +290,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
 
             });
+	m_isInitialized = true;
 }
 
 void Renderer::CreateGlobalResources() {
@@ -471,7 +472,6 @@ void Renderer::SetSettings() {
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("useAsyncCompute", [this](const bool& newValue) {
         rebuildRenderGraph = true;
 		}));
-    m_numFramesInFlight = getNumFramesInFlight();
 }
 
 void Renderer::ToggleMeshShaders(bool useMeshShaders) {

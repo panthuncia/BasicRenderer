@@ -401,6 +401,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(wicHr)) throw std::runtime_error("Failed to load WIC image from memory");
 
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(wicMeta.format) : ToLinearIfSRGB(wicMeta.format);
+
         auto raw = RawFromDXT(wicImg, wicMeta, "", std::nullopt, chosen);
         return CreateTextureFromRaw(raw, sampler);
     }

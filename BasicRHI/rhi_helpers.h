@@ -84,6 +84,9 @@ namespace rhi {
             case DXGI_FORMAT_BC5_TYPELESS: return Format::BC5_Typeless;
             case DXGI_FORMAT_BC5_UNORM: return Format::BC5_UNorm;
             case DXGI_FORMAT_BC5_SNORM: return Format::BC5_SNorm;
+			case DXGI_FORMAT_B8G8R8A8_TYPELESS: return Format::B8G8R8A8_Typeless;
+			case DXGI_FORMAT_B8G8R8A8_UNORM: return Format::B8G8R8A8_UNorm;
+			case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return Format::B8G8R8A8_UNorm_sRGB;
             case DXGI_FORMAT_BC6H_TYPELESS: return Format::BC6H_Typeless;
             case DXGI_FORMAT_BC6H_UF16: return Format::BC6H_UF16;
             case DXGI_FORMAT_BC6H_SF16: return Format::BC6H_SF16;

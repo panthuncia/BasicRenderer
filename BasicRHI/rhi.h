@@ -83,73 +83,6 @@ namespace rhi {
     using HeapHandle = Handle<detail::HHeap>;
     using QueryPoolHandle = Handle<detail::HQueryPool>;
 
-    template<class TObject>
-    class ObjectPtr {
-    public:
-        // Destroy: Device*, TObject* -> void
-        using DestroyFn = void(*)(Device*, TObject*) noexcept;
-        // Optional naming hook: TObject*, const char* -> void  (usually calls o->vt->setName)
-        using NameFn = void(*)(TObject*, const char*) noexcept;
-
-        ObjectPtr() = default;
-
-        ObjectPtr(Device* d, TObject obj, DestroyFn dfn) noexcept
-            : dev_(d), obj_(obj), destroy_(dfn){
-        }
-
-        ~ObjectPtr() { Reset(); }
-
-        ObjectPtr(const ObjectPtr&) = delete;
-        ObjectPtr& operator=(const ObjectPtr&) = delete;
-
-        ObjectPtr(ObjectPtr&& o) noexcept { Swap(o); }
-        ObjectPtr& operator=(ObjectPtr&& o) noexcept {
-            if (this != &o) { Reset(); Swap(o); }
-            return *this;
-        }
-
-        // Access
-        TObject* operator->()       noexcept { return &obj_; }
-        const TObject* operator->() const noexcept { return &obj_; }
-        TObject& operator*()        noexcept { return obj_; }
-        const TObject& operator*()  const noexcept { return obj_; }
-
-        // State
-        explicit operator bool() const noexcept { return dev_ && static_cast<bool>(obj_); }
-        bool Valid() const noexcept { return !!*this; }
-        Device* DevicePtr() const noexcept { return dev_; }
-        const TObject& Get() const noexcept { return obj_; } // by-ref view
-		TObject& Get() noexcept { return obj_; }       // by-ref view
-
-        // Release ownership to caller (returns the raw object)
-        TObject Release() noexcept {
-            TObject t = obj_;
-            dev_ = nullptr; destroy_ = nullptr;
-            //obj_ = {}; // invalidate our copy
-            return t;
-        }
-
-        // Destroy if owned
-        void Reset() noexcept {
-            if (dev_ && static_cast<bool>(obj_) && destroy_) {
-                destroy_(dev_, &obj_);
-            }
-            dev_ = nullptr; destroy_ = nullptr;
-            //obj_ = {};
-        }
-
-    private:
-        void Swap(ObjectPtr& o) noexcept {
-            std::swap(dev_, o.dev_);
-            std::swap(obj_, o.obj_);
-            std::swap(destroy_, o.destroy_);
-        }
-
-        Device* dev_{};        // non-owning
-        TObject  obj_{};       // owning copy of the small POD wrapper
-        DestroyFn destroy_{};  // how to destroy it
-    };
-
 	// ---------------- Enums & structs ----------------
 
     enum class Backend : uint32_t { Null, D3D12, Vulkan };
@@ -186,6 +119,7 @@ namespace rhi {
 		BC3_Typeless, BC3_UNorm, BC3_UNorm_sRGB,
 		BC4_Typeless, BC4_UNorm, BC4_SNorm,
 		BC5_Typeless, BC5_UNorm, BC5_SNorm,
+		B8G8R8A8_Typeless, B8G8R8A8_UNorm, B8G8R8A8_UNorm_sRGB,
 		BC6H_Typeless, BC6H_UF16, BC6H_SF16,
 		BC7_Typeless, BC7_UNorm, BC7_UNorm_sRGB,
     };
@@ -907,20 +841,6 @@ namespace rhi {
     class Timeline;    struct TimelineVTable;
     class Heap;        struct HeapVTable;
 
-    using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
-    using CommandListPtr = ObjectPtr<CommandList>;
-    using SwapchainPtr = ObjectPtr<Swapchain>;
-    using DevicePtr = ObjectPtr<Device>;
-    using ResourcePtr = ObjectPtr<Resource>;
-    using QueryPoolPtr = ObjectPtr<QueryPool>;
-    using PipelinePtr = ObjectPtr<Pipeline>;
-    using PipelineLayoutPtr = ObjectPtr<PipelineLayout>;
-    using CommandSignaturePtr = ObjectPtr<CommandSignature>;
-    using DescriptorHeapPtr = ObjectPtr<DescriptorHeap>;
-    using SamplerPtr = ObjectPtr<Sampler>;
-    using TimelinePtr = ObjectPtr<Timeline>;
-    using HeapPtr = ObjectPtr<Heap>;
-
     struct QueryPoolVTable {
         QueryResultInfo(*getQueryResultInfo)(QueryPool*) noexcept;
         PipelineStatsLayout(*getPipelineStatsLayout)(QueryPool*, PipelineStatsFieldDesc* outBuf, uint32_t outCap) noexcept;
@@ -1337,6 +1257,81 @@ namespace rhi {
         }
     };
 
+    template<class TObject>
+    class ObjectPtr {
+    public:
+        using DestroyFn = void(*)(Device&, TObject&) noexcept;
+
+        ObjectPtr() = default;
+        ObjectPtr(Device dev, TObject obj, DestroyFn dfn) noexcept
+            : dev_(dev), obj_(obj), destroy_(dfn) {
+        }
+
+        ~ObjectPtr() { Reset(); }
+
+        ObjectPtr(const ObjectPtr&) = delete;
+        ObjectPtr& operator=(const ObjectPtr&) = delete;
+
+        // MOVE CTOR: steal and null out source
+        ObjectPtr(ObjectPtr&& o) noexcept
+            : dev_(o.dev_), obj_(o.obj_), destroy_(o.destroy_) {
+            o.destroy_ = nullptr;
+            o.obj_ = {};
+        }
+
+        // MOVE ASSIGN: destroy current, steal, null out source
+        ObjectPtr& operator=(ObjectPtr&& o) noexcept {
+            if (this != &o) {
+                Reset();
+                dev_ = o.dev_;
+                obj_ = o.obj_;
+                destroy_ = o.destroy_;
+                o.destroy_ = nullptr;
+                o.obj_ = {};
+            }
+            return *this;
+        }
+
+        TObject* operator->() noexcept { return &obj_; }
+        const TObject* operator->() const noexcept { return &obj_; }
+        explicit operator bool() const noexcept { return static_cast<bool>(obj_); }
+        TObject& Get() noexcept { return obj_; }
+        const TObject& Get() const noexcept { return obj_; }
+
+        void Reset() noexcept {
+            if (destroy_ && static_cast<bool>(obj_)) destroy_(dev_, obj_);
+            destroy_ = nullptr;
+            obj_ = {};
+        }
+
+        TObject Release() noexcept {
+            destroy_ = nullptr;
+            return std::exchange(obj_, {});
+        }
+
+    private:
+        Device    dev_{};
+        TObject   obj_{};
+        DestroyFn destroy_{};
+    };
+
+
+    using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
+    using CommandListPtr = ObjectPtr<CommandList>;
+    using SwapchainPtr = ObjectPtr<Swapchain>;
+    using DevicePtr = ObjectPtr<Device>;
+    using ResourcePtr = ObjectPtr<Resource>;
+    using QueryPoolPtr = ObjectPtr<QueryPool>;
+    using PipelinePtr = ObjectPtr<Pipeline>;
+    using PipelineLayoutPtr = ObjectPtr<PipelineLayout>;
+    using CommandSignaturePtr = ObjectPtr<CommandSignature>;
+    using DescriptorHeapPtr = ObjectPtr<DescriptorHeap>;
+    using SamplerPtr = ObjectPtr<Sampler>;
+    using TimelinePtr = ObjectPtr<Timeline>;
+    using HeapPtr = ObjectPtr<Heap>;
+
+	struct DeviceDeletionContext;
+
     struct DeviceVTable {
         PipelinePtr(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count) noexcept;
         PipelineLayoutPtr(*createPipelineLayout)(Device*, const PipelineLayoutDesc&) noexcept;
@@ -1358,19 +1353,19 @@ namespace rhi {
         ResourcePtr(*createPlacedResource)(Device*, HeapHandle, uint64_t offset, const ResourceDesc&) noexcept;
         QueryPoolPtr(*createQueryPool)(Device*, const QueryPoolDesc&) noexcept;
 
-        void (*destroySampler)(Device*, SamplerHandle) noexcept;
-        void (*destroyPipelineLayout)(Device*, PipelineLayoutHandle) noexcept;
-        void (*destroyPipeline)(Device*, PipelineHandle) noexcept;
-        void (*destroyCommandSignature)(Device*, CommandSignatureHandle) noexcept;
-        void (*destroyCommandAllocator)(Device*, CommandAllocator*) noexcept;
-        void (*destroyCommandList)(Device*, CommandList*) noexcept;
-        void (*destroySwapchain)(Device*, Swapchain*) noexcept;
-        void (*destroyDescriptorHeap)(Device*, DescriptorHeapHandle) noexcept;
-        void (*destroyBuffer)(Device*, ResourceHandle) noexcept;
-        void (*destroyTexture)(Device*, ResourceHandle) noexcept;
-        void (*destroyTimeline)(Device*, TimelineHandle) noexcept;
-        void (*destroyHeap)(Device*, HeapHandle) noexcept;
-        void (*destroyQueryPool)(Device*, QueryPoolHandle) noexcept;
+        void (*destroySampler)(DeviceDeletionContext*, SamplerHandle) noexcept;
+        void (*destroyPipelineLayout)(DeviceDeletionContext*, PipelineLayoutHandle) noexcept;
+        void (*destroyPipeline)(DeviceDeletionContext*, PipelineHandle) noexcept;
+        void (*destroyCommandSignature)(DeviceDeletionContext*, CommandSignatureHandle) noexcept;
+        void (*destroyCommandAllocator)(DeviceDeletionContext*, CommandAllocator*) noexcept;
+        void (*destroyCommandList)(DeviceDeletionContext*, CommandList*) noexcept;
+        void (*destroySwapchain)(DeviceDeletionContext*, Swapchain*) noexcept;
+        void (*destroyDescriptorHeap)(DeviceDeletionContext*, DescriptorHeapHandle) noexcept;
+        void (*destroyBuffer)(DeviceDeletionContext*, ResourceHandle) noexcept;
+        void (*destroyTexture)(DeviceDeletionContext*, ResourceHandle) noexcept;
+        void (*destroyTimeline)(DeviceDeletionContext*, TimelineHandle) noexcept;
+        void (*destroyHeap)(DeviceDeletionContext*, HeapHandle) noexcept;
+        void (*destroyQueryPool)(DeviceDeletionContext*, QueryPoolHandle) noexcept;
 
         Queue(*getQueue)(Device*, QueueKind) noexcept;
         Result(*deviceWaitIdle)(Device*) noexcept;
@@ -1392,6 +1387,27 @@ namespace rhi {
 
         void (*destroyDevice)(Device*) noexcept;
         uint32_t abi_version = 1;
+    };
+
+
+    struct DeviceDeletionContext {
+        void* impl{};
+        const DeviceVTable* vt{};
+        DeviceDeletionContext() = default;
+        DeviceDeletionContext(void* i, const DeviceVTable* v) : impl(i), vt(v) {}
+        inline void DestroyCommandList(CommandList* cl) noexcept { vt->destroyCommandList(this, cl); }
+        inline void DestroySwapchain(Swapchain* sc) noexcept { vt->destroySwapchain(this, sc); }
+        inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { vt->destroyPipelineLayout(this, h); }
+        inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { vt->destroyCommandSignature(this, h); }
+        inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { vt->destroyDescriptorHeap(this, h); }
+        inline void DestroyCommandAllocator(CommandAllocator* a) noexcept { vt->destroyCommandAllocator(this, a); }
+        inline void DestroySampler(SamplerHandle h) noexcept { vt->destroySampler(this, h); }
+        inline void DestroyPipeline(PipelineHandle h) noexcept { vt->destroyPipeline(this, h); }
+        inline void DestroyBuffer(ResourceHandle h) noexcept { vt->destroyBuffer(this, h); }
+        inline void DestroyTexture(ResourceHandle h) noexcept { vt->destroyTexture(this, h); }
+        inline void DestroyTimeline(TimelineHandle t) noexcept { vt->destroyTimeline(this, t); }
+        inline void DestroyHeap(HeapHandle h) noexcept { vt->destroyHeap(this, h); }
+        inline void DestroyQueryPool(QueryPoolHandle h) noexcept { vt->destroyQueryPool(this, h); }
     };
 
     struct CommandAllocatorVTable {
@@ -1419,8 +1435,11 @@ namespace rhi {
 
     class Device {
 	public:
+        DeviceDeletionContext deletionContext;
         void* impl{}; 
         const DeviceVTable* vt{};
+		Device() = default;
+		Device(void* i, const DeviceVTable* v) : impl(i), vt(v), deletionContext(i, v) {}
         explicit constexpr operator bool() const noexcept {
             return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_DEVICE_ABI_MIN;
         }
@@ -1428,18 +1447,18 @@ namespace rhi {
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
         inline PipelinePtr CreatePipeline(const PipelineStreamItem* items, uint32_t count) noexcept { return vt->createPipelineFromStream(this, items, count); }
         inline CommandListPtr CreateCommandList(QueueKind q, CommandAllocator alloc) noexcept { return vt->createCommandList(this, q, alloc); }
-        inline void DestroyCommandList(CommandList* cl) noexcept { vt->destroyCommandList(this, cl); }
+        inline void DestroyCommandList(CommandList* cl) noexcept { deletionContext.DestroyCommandList(cl); }
         inline Queue GetQueue(QueueKind q) noexcept { return vt->getQueue(this, q); }
         inline Result WaitIdle() noexcept { return vt->deviceWaitIdle(this); }
         inline void FlushDeletionQueue() noexcept { vt->flushDeletionQueue(this); }
         inline SwapchainPtr CreateSwapchain(void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t buffers, bool allowTearing) noexcept { return vt->createSwapchain(this, hwnd, w, h, fmt, buffers, allowTearing); }
-        inline void DestroySwapchain(Swapchain* sc) noexcept { vt->destroySwapchain(this, sc); }
+		inline void DestroySwapchain(Swapchain* sc) noexcept { deletionContext.DestroySwapchain(sc); }
         inline PipelineLayoutPtr CreatePipelineLayout(const PipelineLayoutDesc& d) noexcept { return vt->createPipelineLayout(this, d); }
-        inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { vt->destroyPipelineLayout(this, h); }
+		inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { deletionContext.DestroyPipelineLayout(h); }
         inline CommandSignaturePtr CreateCommandSignature(const CommandSignatureDesc& d, PipelineLayoutHandle layout) noexcept { return vt->createCommandSignature(this, d, layout); }
-        inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { vt->destroyCommandSignature(this, h); }
+		inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { deletionContext.DestroyCommandSignature(h); }
 		inline DescriptorHeapPtr CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
-		inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { vt->destroyDescriptorHeap(this, h); }
+		inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { deletionContext.DestroyDescriptorHeap(h); }
         inline Result CreateConstantBufferView(DescriptorSlot s, ResourceHandle b, const CbvDesc& d) noexcept { return vt->createConstantBufferView(this, s, b, d); }
         inline Result CreateShaderResourceView(DescriptorSlot s, const SrvDesc& d) noexcept { return vt->createShaderResourceView(this, s, d); }
         inline Result CreateUnorderedAccessView(DescriptorSlot s, const UavDesc& d) noexcept { return vt->createUnorderedAccessView(this, s, d); }
@@ -1447,27 +1466,26 @@ namespace rhi {
         inline Result CreateRenderTargetView(DescriptorSlot s, const RtvDesc& d) noexcept { return vt->createRenderTargetView(this, s, d); }
         inline Result CreateDepthStencilView(DescriptorSlot s, const DsvDesc& d) noexcept { return vt->createDepthStencilView(this, s, d); }
         inline CommandAllocatorPtr CreateCommandAllocator(QueueKind q) noexcept { return vt->createCommandAllocator(this, q); }
-		inline void DestroyCommandAllocator(CommandAllocator* a) noexcept { vt->destroyCommandAllocator(this, a); }
+		inline void DestroyCommandAllocator(CommandAllocator* a) noexcept { deletionContext.DestroyCommandAllocator(a); }
 		inline ResourcePtr CreateCommittedResource(const ResourceDesc& d) noexcept { return vt->createCommittedResource(this, d); }
-        inline void DestroySampler(SamplerHandle h) noexcept { vt->destroySampler(this, h); }
-		inline void DestroyPipeline(PipelineHandle h) noexcept { vt->destroyPipeline(this, h); }
-		inline void DestroyBuffer(ResourceHandle h) noexcept { vt->destroyBuffer(this, h); }
-		inline void DestroyTexture(ResourceHandle h) noexcept { vt->destroyTexture(this, h); }
+		inline void DestroySampler(SamplerHandle h) noexcept { deletionContext.DestroySampler(h); }
+		inline void DestroyPipeline(PipelineHandle h) noexcept { deletionContext.DestroyPipeline(h); }
+		inline void DestroyBuffer(ResourceHandle h) noexcept { deletionContext.DestroyBuffer(h); }
+		inline void DestroyTexture(ResourceHandle h) noexcept { deletionContext.DestroyTexture(h); }
 		inline uint32_t GetDescriptorHandleIncrementSize(DescriptorHeapType t) noexcept { return vt->getDescriptorHandleIncrementSize(this, t); }
         inline TimelinePtr CreateTimeline(uint64_t initial = 0, const char* name = nullptr) noexcept { return vt->createTimeline(this, initial, name); }
-        inline void DestroyTimeline(TimelineHandle t) noexcept { vt->destroyTimeline(this, t); }
+		inline void DestroyTimeline(TimelineHandle t) noexcept { deletionContext.DestroyTimeline(t); }
         inline HeapPtr CreateHeap(const HeapDesc& h) noexcept { return vt->createHeap(this, h); }
-        inline void DestroyHeap(HeapHandle h) noexcept { vt->destroyHeap(this, h); }
+		inline void DestroyHeap(HeapHandle h) noexcept { deletionContext.DestroyHeap(h); }
         inline ResourcePtr CreatePlacedResource(HeapHandle heap, uint64_t offset, const ResourceDesc& rd) noexcept { return vt->createPlacedResource(this, heap, offset, rd); }
         inline QueryPoolPtr CreateQueryPool(const QueryPoolDesc& d) noexcept { return vt->createQueryPool(this, d); }
-        inline void DestroyQueryPool(QueryPoolHandle h) noexcept { vt->destroyQueryPool(this, h); }
+		inline void DestroyQueryPool(QueryPoolHandle h) noexcept { deletionContext.DestroyQueryPool(h); }
         inline TimestampCalibration GetTimestampCalibration(QueueKind q) noexcept { return vt->getTimestampCalibration(this, q); }
         inline CopyableFootprintsInfo GetCopyableFootprints(const FootprintRangeDesc& r, CopyableFootprint* out, uint32_t outCap) noexcept {
             return vt->getCopyableFootprints(this, r, out, outCap);
 		}
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };
-
 
     inline Result Queue::Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept { return vt->submit(this, lists, s); }
     inline Result Queue::Signal(const TimelinePoint& p) noexcept { return vt->signal(this, p); }
@@ -1536,87 +1554,87 @@ namespace rhi {
 
     inline CommandAllocatorPtr MakeCommandAllocatorPtr(Device* d, CommandAllocator ca) noexcept {
         return CommandAllocatorPtr(
-            d, ca,
+            *d, ca,
             // Destroy
-            [](Device* dev, CommandAllocator* p) noexcept { if (dev && p) dev->DestroyCommandAllocator(p); }
+            [](Device& dev, CommandAllocator& p) noexcept { if (dev && p) dev.DestroyCommandAllocator(&p); }
             // TODO: Name hook for allocator
         );
     }
 
     inline CommandListPtr MakeCommandListPtr(Device* d, CommandList cl) noexcept {
         return CommandListPtr(
-            d, cl,
-            [](Device* dev, CommandList* p) noexcept { if (dev && p) dev->DestroyCommandList(p); }
+            *d, cl,
+            [](Device& dev, CommandList& p) noexcept { if (dev && p) dev.DestroyCommandList(&p); }
         );
     }
 
     inline SwapchainPtr MakeSwapchainPtr(Device* d, Swapchain sc) noexcept {
         return SwapchainPtr(
-            d, sc,
-            [](Device* dev, Swapchain* p) noexcept { if (dev && p) dev->DestroySwapchain(p); }
+            *d, sc,
+            [](Device& dev, Swapchain& p) noexcept { if (dev && p) dev.DestroySwapchain(&p); }
         );
     }
 
-    inline DevicePtr MakeDevicePtr(Device d) noexcept {
+    inline DevicePtr MakeDevicePtr(Device* d) noexcept {
         return DevicePtr(
-            &d, d,
+            *d, *d,
             // DestroyFn for Device ignores the TObject* and calls destroy on the object itself
-            [](Device* /*ignored*/, Device* self) noexcept {
-                if (self && self->IsValid()) self->Destroy();
+            [](Device& /*ignored*/, Device& self) noexcept {
+                if (self && self.IsValid()) self.Destroy();
             }
 			// TODO: Name hook for Device
         );
     }
     inline ResourcePtr MakeTexturePtr(Device* d, Resource r) noexcept {
         return ResourcePtr(
-            d, r,
-            [](Device* dev, Resource* p) noexcept { if (dev && p) dev->DestroyTexture(p->GetHandle()); }
+            *d, r,
+            [](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyTexture(p.GetHandle()); }
         );
 	}
     inline ResourcePtr MakeBufferPtr(Device* d, Resource r) noexcept {
         return ResourcePtr(
-            d, r,
-            [](Device* dev, Resource* p) noexcept { if (dev && p) dev->DestroyBuffer(p->GetHandle()); }
+            *d, r,
+            [](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyBuffer(p.GetHandle()); }
         );
 	}
     inline QueryPoolPtr MakeQueryPoolPtr(Device* d, QueryPool h) noexcept {
-        return QueryPoolPtr(d, h,
-            [](Device* dev, QueryPool* hh) noexcept { if (dev) dev->DestroyQueryPool(hh->GetHandle()); }
+        return QueryPoolPtr(*d, h,
+            [](Device& dev, QueryPool& hh) noexcept { if (dev) dev.DestroyQueryPool(hh.GetHandle()); }
 		);
 	}
     inline PipelinePtr MakePipelinePtr(Device* d, Pipeline h) noexcept {
-        return PipelinePtr(d, h,
-            [](Device* dev, Pipeline* hh) noexcept { if (dev) dev->DestroyPipeline(hh->GetHandle()); }
+        return PipelinePtr(*d, h,
+            [](Device& dev, Pipeline& hh) noexcept { if (dev) dev.DestroyPipeline(hh.GetHandle()); }
         );
 	}
     inline PipelineLayoutPtr MakePipelineLayoutPtr(Device* d, PipelineLayout h) noexcept {
-        return PipelineLayoutPtr(d, h,
-            [](Device* dev, PipelineLayout* hh) noexcept { if (dev) dev->DestroyPipelineLayout(hh->GetHandle()); }
+        return PipelineLayoutPtr(*d, h,
+            [](Device& dev, PipelineLayout& hh) noexcept { if (dev) dev.DestroyPipelineLayout(hh.GetHandle()); }
 		);
 	}
     inline CommandSignaturePtr MakeCommandSignaturePtr(Device* d, CommandSignature h) noexcept {
-        return CommandSignaturePtr(d, h,
-            [](Device* dev, CommandSignature* hh) noexcept { if (dev) dev->DestroyCommandSignature(hh->GetHandle()); }
+        return CommandSignaturePtr(*d, h,
+            [](Device& dev, CommandSignature& hh) noexcept { if (dev) dev.DestroyCommandSignature(hh.GetHandle()); }
 		);
 	}
 	inline DescriptorHeapPtr MakeDescriptorHeapPtr(Device* d, DescriptorHeap h) noexcept {
-        return DescriptorHeapPtr(d, h,
-			[](Device* dev, DescriptorHeap* hh) noexcept { if (dev) dev->DestroyDescriptorHeap(hh->GetHandle()); }
+        return DescriptorHeapPtr(*d, h,
+			[](Device& dev, DescriptorHeap& hh) noexcept { if (dev) dev.DestroyDescriptorHeap(hh.GetHandle()); }
 		);
 	}
 	inline SamplerPtr MakeSamplerPtr(Device* d, Sampler h) noexcept {
-		return SamplerPtr(d, h,
-			[](Device* dev, Sampler* hh) noexcept { if (dev) dev->DestroySampler(hh->GetHandle()); }
+		return SamplerPtr(*d, h,
+			[](Device& dev, Sampler& hh) noexcept { if (dev) dev.DestroySampler(hh.GetHandle()); }
 		);
 	}
     inline TimelinePtr MakeTimelinePtr(Device* d, Timeline h) noexcept {
-        return TimelinePtr(d, h,
-            [](Device* dev, Timeline* hh) noexcept { if (dev) dev->DestroyTimeline(hh->GetHandle()); }
+        return TimelinePtr(*d, h,
+            [](Device& dev, Timeline& hh) noexcept { if (dev) dev.DestroyTimeline(hh.GetHandle()); }
         );
 	}
     inline HeapPtr MakeHeapPtr(Device* d, Heap h) noexcept {
-        return HeapPtr(d, h,
-            [](Device* dev, Heap* hh) noexcept { if (dev) dev->DestroyHeap(hh->GetHandle()); }
+        return HeapPtr(*d, h,
+            [](Device& dev, Heap& hh) noexcept { if (dev) dev.DestroyHeap(hh.GetHandle()); }
 		);
 	}
 

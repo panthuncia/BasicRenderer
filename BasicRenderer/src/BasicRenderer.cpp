@@ -394,7 +394,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (wParam != SIZE_MINIMIZED) {
             UINT newWidth = LOWORD(lParam);
             UINT newHeight = HIWORD(lParam);
-            renderer.OnResize(newWidth, newHeight);
+            if (renderer.IsInitialized()) {
+                renderer.OnResize(newWidth, newHeight);
+            }
         }
         break;
     case WM_DESTROY:

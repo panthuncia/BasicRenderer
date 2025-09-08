@@ -414,9 +414,6 @@ private:
 
     //std::shared_ptr<DynamicStructuredBuffer<LightInfo>> lightBufferPtr;
 
-    rhi::CommandListPtr commandList;
-    rhi::CommandAllocatorPtr commandAllocator;
-
     std::vector<std::shared_ptr<Buffer>> buffersToUpdate;
     std::vector<DynamicBufferBase*> dynamicBuffersToUpdate;
 	std::vector<ViewedDynamicBufferBase*> dynamicBuffersToUpdateViews;

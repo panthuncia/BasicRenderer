@@ -78,8 +78,10 @@ public:
     void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
+	bool IsInitialized() const { return m_isInitialized; }
 
 private:
+	bool m_isInitialized = false;
     ComPtr<IDXGIAdapter1> m_currentAdapter;
     ComPtr<IDXGIFactory7> factory;
     ComPtr<IDXGIFactory7> nativeFactory;
@@ -101,7 +103,7 @@ private:
     UINT dsvDescriptorSize;
     uint8_t m_frameIndex = 0;
     uint64_t m_totalFramesRendered = 0;
-	uint8_t m_numFramesInFlight = 0;
+	uint8_t m_numFramesInFlight = 3;
     rhi::TimelinePtr m_frameFence;
     std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
     UINT64 m_currentFrameFenceValue = 0;

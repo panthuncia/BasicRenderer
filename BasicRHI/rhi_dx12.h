@@ -11,6 +11,7 @@
 #include <cassert>
 #include <spdlog/spdlog.h>
 #include <optional>
+#include <deque>
 
 #include "rhi_interop_dx12.h"
 #include "rhi_conversions_dx12.h"
@@ -190,7 +191,7 @@ namespace rhi {
 	struct Registry {
 		using HandleT = typename HandleFor<T>::type;
 
-		std::vector<Slot<T>> slots;
+		std::deque<Slot<T>> slots;
 		std::vector<uint32_t> freelist;
 
 		HandleT alloc(const T& v) {
@@ -432,13 +433,13 @@ namespace rhi {
 		return MakePipelinePtr(d, out);
 	}
 
-	static void d_destroyBuffer(Device* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->buffers.free(h); }
-	static void d_destroyTexture(Device* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->textures.free(h); }
-	static void d_destroyView(Device* d, ViewHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->views.free(h); }
-	static void d_destroySampler(Device* d, SamplerHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->samplers.free(h); }
-	static void d_destroyPipeline(Device* d, PipelineHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->pipelines.free(h); }
+	static void d_destroyBuffer(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->buffers.free(h); }
+	static void d_destroyTexture(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->textures.free(h); }
+	static void d_destroyView(DeviceDeletionContext* d, ViewHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->views.free(h); }
+	static void d_destroySampler(DeviceDeletionContext* d, SamplerHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->samplers.free(h); }
+	static void d_destroyPipeline(DeviceDeletionContext* d, PipelineHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->pipelines.free(h); }
 
-	static void d_destroyCommandList(Device* d, CommandList* p) noexcept {
+	static void d_destroyCommandList(DeviceDeletionContext* d, CommandList* p) noexcept {
 		if (!d || !p || !p->IsValid()) return;
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		impl->commandLists.free(p->GetHandle());
@@ -483,7 +484,11 @@ namespace rhi {
 		ComPtr<IDXGISwapChain1> sc1;
 		IDXGIFactory7* facForCreate = impl->upgradeFn && impl->slFactory ? impl->slFactory.Get()
 			: impl->factory.Get();
-		facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), (HWND)hwnd, &desc, nullptr, nullptr, &sc1);
+		auto hr = facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), (HWND)hwnd, &desc, nullptr, nullptr, &sc1);
+		if (FAILED(hr)) {
+			spdlog::error("DX12 CreateSwapChainForHwnd failed: {0}", std::to_string(hr));
+			return {};
+		}
 		ComPtr<IDXGISwapChain3> sc; 
 		sc1.As(&sc);
 
@@ -543,7 +548,7 @@ namespace rhi {
 		return MakeSwapchainPtr(d, out);
 	}
 
-	static void d_destroySwapchain(Device*, Swapchain* sc) noexcept {
+	static void d_destroySwapchain(DeviceDeletionContext*, Swapchain* sc) noexcept {
 		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
 		delete s; sc->impl = nullptr;
 		sc->vt = nullptr;
@@ -655,7 +660,7 @@ namespace rhi {
 	}
 
 
-	static void d_destroyPipelineLayout(Device* d, PipelineLayoutHandle h) noexcept {
+	static void d_destroyPipelineLayout(DeviceDeletionContext* d, PipelineLayoutHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->pipelineLayouts.free(h);
 	}
 
@@ -726,7 +731,7 @@ namespace rhi {
 		return MakeCommandSignaturePtr(d, out);
 	}
 
-	static void d_destroyCommandSignature(Device* d, CommandSignatureHandle h) noexcept {
+	static void d_destroyCommandSignature(DeviceDeletionContext* d, CommandSignatureHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->commandSignatures.free(h);
 	}
 
@@ -754,7 +759,7 @@ namespace rhi {
 		out.impl = impl->descHeaps.get(handle);
 		return MakeDescriptorHeapPtr(d, out);
 	}
-	static void d_destroyDescriptorHeap(Device* d, DescriptorHeapHandle h) noexcept {
+	static void d_destroyDescriptorHeap(DeviceDeletionContext* d, DescriptorHeapHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->descHeaps.free(h);
 	}
 	static bool DxGetDstCpu(Dx12Device* impl, DescriptorSlot s, D3D12_CPU_DESCRIPTOR_HANDLE& out, D3D12_DESCRIPTOR_HEAP_TYPE expect) {
@@ -1114,7 +1119,7 @@ namespace rhi {
 		desc.MinLOD = sd.minLod;
 		desc.MaxLOD = sd.maxLod;
 
-		desc.ComparisonFunc = sd.compareEnable ? ToDX(sd.compareOp) : D3D12_COMPARISON_FUNC_ALWAYS;
+		desc.ComparisonFunc = sd.compareEnable ? ToDX(sd.compareOp) : D3D12_COMPARISON_FUNC_NEVER;
 
 		FillDxBorderColor(sd, desc.BorderColor);
 
@@ -1308,7 +1313,7 @@ namespace rhi {
 		return MakeCommandAllocatorPtr(d, out);
 	}
 
-	static void d_destroyCommandAllocator(Device* d, CommandAllocator* ca) noexcept {
+	static void d_destroyCommandAllocator(DeviceDeletionContext* d, CommandAllocator* ca) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		impl->allocators.free(ca->GetHandle());
 	}
@@ -1320,7 +1325,6 @@ namespace rhi {
 
 		Dx12CommandList rec{};
 		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&rec.cl)))) return {};
-		rec.cl->Close();
 		rec.dev = impl;
 		rec.alloc = A->alloc;
 		rec.type = A->type;
@@ -1328,7 +1332,8 @@ namespace rhi {
 		auto h = impl->commandLists.alloc(std::move(rec));
 
 		CommandList out{h};
-		out.impl = impl->commandLists.get(h);
+		Dx12CommandList* implCL = impl->commandLists.get(h);
+		out.impl = implCL;
 		out.vt = &g_clvt;
 		return MakeCommandListPtr(d, out);
 	}
@@ -1405,7 +1410,10 @@ namespace rhi {
 			/*NumCastableFormats*/ 0,
 			/*pCastableFormats*/   nullptr,
 			IID_PPV_ARGS(&res));
-		if (FAILED(hr)) return {};
+		if (FAILED(hr)) {
+			spdlog::error("Failed to create committed texture: {0}", hr);
+			return {};
+		};
 
 		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
 
@@ -1468,7 +1476,7 @@ namespace rhi {
 	}
 
 
-	static void d_destroyTimeline(Device* d, TimelineHandle t) noexcept {
+	static void d_destroyTimeline(DeviceDeletionContext* d, TimelineHandle t) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		impl->timelines.free(t);
 	}
@@ -1505,7 +1513,7 @@ namespace rhi {
 		return MakeHeapPtr(d, out);
 	}
 
-	static void d_destroyHeap(Device* d, HeapHandle h) noexcept {
+	static void d_destroyHeap(DeviceDeletionContext* d, HeapHandle h) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) return;
 		impl->heaps.free(h);
@@ -1714,7 +1722,7 @@ namespace rhi {
 		return MakeQueryPoolPtr(d, out);
 	}
 
-	static void d_destroyQueryPool(Device* d, QueryPoolHandle h) noexcept {
+	static void d_destroyQueryPool(DeviceDeletionContext* d, QueryPoolHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->queryPools.free(h);
 	}
 

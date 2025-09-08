@@ -47,19 +47,7 @@ void ResourceManager::Initialize(rhi::Queue commandQueue) {
 	InitializeTransitionCommandList();
 	SetTransitionCommandQueue(commandQueue);
 
-
-
-	//auto clearDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT));
-	//auto clearHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-	//ThrowIfFailed(device->CreateCommittedResource(
-	//	&clearHeapProps,
-	//	D3D12_HEAP_FLAG_NONE,
-	//	&clearDesc,
-	//	D3D12_RESOURCE_STATE_GENERIC_READ,
-	//	nullptr,
-	//	IID_PPV_ARGS(&m_uavCounterReset)));
-
-	device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::Memory::Upload));
+	m_uavCounterReset = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::Memory::Upload));
 
 	void* pMappedCounterReset = nullptr;
 	
@@ -114,7 +102,6 @@ void ResourceManager::InitializeCopyCommandQueue() {
 	copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics); // TODO: async copy queue
 	copyCommandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
 	copyCommandList = device.CreateCommandList(rhi::QueueKind::Graphics, copyCommandAllocator.Get());
-	copyCommandList->End();
 
 	copyFence = device.CreateTimeline(copyFenceValue, "CopyFence");
 }
@@ -148,17 +135,16 @@ void ResourceManager::GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::
 	auto device = DeviceManager::GetInstance().GetDevice();
 
 	// Create a new command allocator if none is available or reuse an existing one
-	if (!commandAllocator ) {
-		commandAllocator->Recycle();
+	if (!commandAllocator || !commandList) {
 		commandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-	}
-
-	if (!commandList) {
-		commandList->Recycle(commandAllocator.Get());
 		commandList = device.CreateCommandList(rhi::QueueKind::Graphics, commandAllocator.Get());
 	}
-}
+	commandList->Recycle(commandAllocator.Get());
+	commandList->End();
+	commandAllocator->Recycle();
 
+}
+unsigned int i = 0;
 void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
 	auto device = DeviceManager::GetInstance().GetDevice();
 	static rhi::Queue copyCommandQueue;
@@ -173,6 +159,10 @@ void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandL
 
 	// Create a fence for synchronization if it hasn't been created yet
 	if (!copyFenceEventCreated) {
+		i++;
+		if (i == 15) {
+			__debugbreak();
+		}
 		copyFence = device.CreateTimeline(copyFenceValue, "TempCopyFence");
 		copyFenceEventCreated = true;
 	}
@@ -191,6 +181,7 @@ void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandL
 	}
 
 	commandAllocator->Recycle();
+	commandList->Recycle(commandAllocator.Get());
 }
 
 std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
@@ -408,9 +399,6 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 
 void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels) {
 
-	// Encure the copy command list and allocator are ready
-	GetCopyCommandList(commandList, commandAllocator);
-
 	if (initialData.empty()) return;
 
 	// effective array slices = arraySize * (isCubemap ? 6 : 1)
@@ -491,22 +479,22 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 	);
 
 	// Transition out of CopyDest
-	rhi::TextureBarrier tb{};
-	tb.texture = dstTexture.GetHandle();
-	tb.range = { /*baseMip*/0, static_cast<uint32_t>(mipLevels),
-		/*baseLayer*/0, arraySlices };
-	tb.beforeSync = rhi::ResourceSyncState::Copy;
-	tb.afterSync = rhi::ResourceSyncState::All;
-	tb.beforeAccess = rhi::ResourceAccessType::CopyDest;
-	tb.afterAccess = rhi::ResourceAccessType::None;
-	tb.beforeLayout = rhi::ResourceLayout::CopyDest;
-	tb.afterLayout = rhi::ResourceLayout::Common;
+	//rhi::TextureBarrier tb{};
+	//tb.texture = dstTexture.GetHandle();
+	//tb.range = { /*baseMip*/0, static_cast<uint32_t>(mipLevels),
+	//	/*baseLayer*/0, arraySlices };
+	//tb.beforeSync = rhi::ResourceSyncState::Copy;
+	//tb.afterSync = rhi::ResourceSyncState::All;
+	//tb.beforeAccess = rhi::ResourceAccessType::CopyDest;
+	//tb.afterAccess = rhi::ResourceAccessType::Common;
+	//tb.beforeLayout = rhi::ResourceLayout::CopyDest;
+	//tb.afterLayout = rhi::ResourceLayout::Common;
 
-	rhi::BarrierBatch bb{};
-	bb.textures = { &tb, 1 };
-	copyCommandList->Barriers(bb);
+	//rhi::BarrierBatch bb{};
+	//bb.textures = { &tb, 1 };
+	//copyCommandList->Barriers(bb);
 
 
-	ExecuteAndWaitForCommandList(commandList, commandAllocator); // TODO - Replace this by using UploadManager
+	ExecuteAndWaitForCommandList(copyCommandList, copyCommandAllocator); // TODO - Replace this by using UploadManager
 
 }
