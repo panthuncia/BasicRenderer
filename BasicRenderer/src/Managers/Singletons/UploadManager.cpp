@@ -30,6 +30,7 @@ void UploadManager::Initialize() {
 	for (int i = 0; i < m_numFramesInFlight; i++) {
 		m_commandAllocators.push_back(device.CreateCommandAllocator(rhi::QueueKind::Graphics));
 		m_commandLists.push_back(device.CreateCommandList(rhi::QueueKind::Graphics, m_commandAllocators.back().Get()));
+		m_commandLists.back()->End();
 	}
 
 	getNumFramesInFlight =
@@ -124,7 +125,7 @@ void UploadManager::ProcessDeferredReleases(uint8_t frameIndex)
 	// Now record "this frame's" new begin page for the next round:
 	m_frameStart[frameIndex] = m_activePage;
 
-	m_commandAllocators[frameIndex]->Reset();
+	m_commandAllocators[frameIndex]->Recycle();
 }
 
 void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
@@ -239,5 +240,5 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 
 void UploadManager::ResetAllocators(uint8_t frameIndex) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
-	commandAllocator->Reset();
+	commandAllocator->Recycle();
 }

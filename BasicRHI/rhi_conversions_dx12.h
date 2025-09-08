@@ -430,4 +430,29 @@ namespace rhi {
 		default: return D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
 		}
 	}
+	inline void ToDx12InputLayout(
+		const rhi::FinalizedInputLayout& il,
+		std::vector<D3D12_INPUT_ELEMENT_DESC>& out)
+	{
+		out.clear();
+		out.reserve(il.attributes.size());
+
+		for (const auto& a : il.attributes) {
+			D3D12_INPUT_ELEMENT_DESC d{};
+			// Semantic name/index are required by DX12. If user didn't provide, you can map from location.
+			d.SemanticName = a.semanticName ? a.semanticName : "TEXCOORD";
+			d.SemanticIndex = a.semanticIndex;
+			d.Format = ToDxgi(a.format);                   // your existing converter
+			d.InputSlot = a.binding;
+			d.AlignedByteOffset = a.offset;                           // we resolved APPEND_ALIGNED already
+			// Binding classification:
+			const auto& b = il.bindings[a.binding];
+			d.InputSlotClass = (b.rate == rhi::InputRate::PerInstance)
+				? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA
+				: D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+			d.InstanceDataStepRate = (b.rate == rhi::InputRate::PerInstance) ? b.instanceStepRate : 0;
+			out.push_back(d);
+		}
+	}
+
 }

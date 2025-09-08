@@ -118,7 +118,7 @@ private:
 
         // Compile compute shader
         ShaderInfoBundle sib;
-        sib.computeShader = { L"shaders/blurEnvironmentCS.hlsl", L"CSMain", L"cs_6_6" };
+        sib.computeShader = { L"shaders/blurEnvironment.hlsl", L"CSMain", L"cs_6_6" };
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
 
         // Create compute PSO

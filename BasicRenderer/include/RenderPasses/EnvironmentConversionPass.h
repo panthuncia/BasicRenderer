@@ -114,7 +114,7 @@ private:
         m_layout->SetName("EnvConvert.ComputeLayout");
 
         ShaderInfoBundle sib;
-        sib.computeShader = { L"shaders/envToCubemapCS.hlsl", L"CSMain", L"cs_6_6" };
+        sib.computeShader = { L"shaders/envToCubemap.hlsl", L"CSMain", L"cs_6_6" };
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
 
         rhi::SubobjLayout soLayout{ m_layout->GetHandle() };

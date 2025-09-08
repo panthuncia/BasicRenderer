@@ -6,6 +6,7 @@
 #include <directx/d3dcommon.h>
 #include <optional>
 #include <array>
+#include <unordered_map>
 
 #include "resource_states.h"
 
@@ -123,6 +124,99 @@ namespace rhi {
 		BC6H_Typeless, BC6H_UF16, BC6H_SF16,
 		BC7_Typeless, BC7_UNorm, BC7_UNorm_sRGB,
     };
+
+    constexpr uint32_t FormatByteSize(Format f) noexcept {
+        switch (f) {
+        // 16 bytes (4 x 32-bit)
+        case Format::R32G32B32A32_Typeless: case Format::R32G32B32A32_Float:
+        case Format::R32G32B32A32_UInt:     case Format::R32G32B32A32_SInt: return 16;
+
+        // 12 bytes (3 x 32-bit)
+        case Format::R32G32B32_Typeless: case Format::R32G32B32_Float:
+        case Format::R32G32B32_UInt:    case Format::R32G32B32_SInt:        return 12;
+
+        // 8 bytes (4 x 16-bit OR 2 x 32-bit)
+        case Format::R16G16B16A16_Typeless: case Format::R16G16B16A16_Float:
+        case Format::R16G16B16A16_UNorm:    case Format::R16G16B16A16_UInt:
+        case Format::R16G16B16A16_SNorm:    case Format::R16G16B16A16_SInt: return 8;
+
+        case Format::R32G32_Typeless: case Format::R32G32_Float:
+        case Format::R32G32_UInt:     case Format::R32G32_SInt:             return 8;
+
+        // 4 bytes (special packed 10:10:10:2, 11:11:10, 4 x 8-bit, single 32-bit)
+        case Format::R10G10B10A2_Typeless: case Format::R10G10B10A2_UNorm:
+        case Format::R10G10B10A2_UInt:                                          return 4;
+
+        case Format::R11G11B10_Float:                                           return 4;
+
+        case Format::R8G8B8A8_Typeless: case Format::R8G8B8A8_UNorm:
+        case Format::R8G8B8A8_UNorm_sRGB: case Format::R8G8B8A8_UInt:
+        case Format::R8G8B8A8_SNorm:  case Format::R8G8B8A8_SInt:               return 4;
+
+        case Format::R32_Typeless: case Format::D32_Float:
+        case Format::R32_Float:    case Format::R32_UInt:
+        case Format::R32_SInt:                                                     return 4;
+
+        case Format::B8G8R8A8_Typeless: case Format::B8G8R8A8_UNorm:
+        case Format::B8G8R8A8_UNorm_sRGB:                                          return 4;
+
+        // 2 bytes (2 x 8-bit OR single 16-bit)
+        case Format::R8G8_Typeless: case Format::R8G8_UNorm:
+        case Format::R8G8_UInt:     case Format::R8G8_SNorm:
+        case Format::R8G8_SInt:                                                     return 2;
+
+        case Format::R16_Typeless: case Format::R16_Float:
+        case Format::R16_UNorm:    case Format::R16_UInt:
+        case Format::R16_SNorm:    case Format::R16_SInt:                           return 2;
+
+        // 1 byte
+        case Format::R8_Typeless:  case Format::R8_UNorm:
+        case Format::R8_UInt:      case Format::R8_SNorm:
+        case Format::R8_SInt:                                                      return 1;
+
+        // Block-compressed formats: return 0 here (use GetBlockInfo for textures)
+        case Format::BC1_Typeless: case Format::BC1_UNorm: case Format::BC1_UNorm_sRGB:
+        case Format::BC2_Typeless: case Format::BC2_UNorm: case Format::BC2_UNorm_sRGB:
+        case Format::BC3_Typeless: case Format::BC3_UNorm: case Format::BC3_UNorm_sRGB:
+        case Format::BC4_Typeless: case Format::BC4_UNorm: case Format::BC4_SNorm:
+        case Format::BC5_Typeless: case Format::BC5_UNorm: case Format::BC5_SNorm:
+        case Format::BC6H_Typeless: case Format::BC6H_UF16: case Format::BC6H_SF16:
+        case Format::BC7_Typeless:  case Format::BC7_UNorm: case Format::BC7_UNorm_sRGB:
+            return 0;
+
+        case Format::Unknown: default: return 0;
+        }
+    }
+
+    struct BlockInfo {
+        uint32_t blockWidth;     // usually 4
+        uint32_t blockHeight;    // usually 4
+        uint32_t bytesPerBlock;  // 8 or 16
+        bool     isCompressed;
+    };
+
+    /// Returns block geometry and bytes for compressed formats.
+    /// For uncompressed, returns {1,1, FormatByteSize(f), false}.
+    constexpr BlockInfo GetBlockInfo(Format f) noexcept {
+        switch (f) {
+        // 8 bytes per 4x4
+        case Format::BC1_Typeless: case Format::BC1_UNorm: case Format::BC1_UNorm_sRGB:
+        case Format::BC4_Typeless: case Format::BC4_UNorm: case Format::BC4_SNorm:
+            return { 4, 4, 8, true };
+
+        // 16 bytes per 4x4
+        case Format::BC2_Typeless: case Format::BC2_UNorm: case Format::BC2_UNorm_sRGB:
+        case Format::BC3_Typeless: case Format::BC3_UNorm: case Format::BC3_UNorm_sRGB:
+        case Format::BC5_Typeless: case Format::BC5_UNorm: case Format::BC5_SNorm:
+        case Format::BC6H_Typeless: case Format::BC6H_UF16: case Format::BC6H_SF16:
+        case Format::BC7_Typeless:  case Format::BC7_UNorm: case Format::BC7_UNorm_sRGB:
+            return { 4, 4, 16, true };
+
+        default:
+            // Not compressed: single texel 'element size'
+            return { 1, 1, FormatByteSize(f), false };
+        }
+    }
 
     enum class Memory : uint32_t { DeviceLocal, Upload, Readback };
 
@@ -506,6 +600,92 @@ namespace rhi {
     };
     struct SampleDesc { uint32_t count = 1; uint32_t quality = 0; };
 
+    enum class InputRate : uint8_t { PerVertex, PerInstance };
+
+    // Sentinel like D3D12_APPEND_ALIGNED_ELEMENT: auto-place next at natural alignment.
+    inline constexpr uint32_t APPEND_ALIGNED = 0xFFFFFFFFu;
+
+    // One vertex buffer binding (D3D12 InputSlot / Vulkan binding).
+    struct InputBindingDesc {
+        uint32_t  binding = 0;                // 0..N-1
+        uint32_t  stride = 0;                 // bytes; 0 means "compute from attributes"
+        InputRate rate = InputRate::PerVertex;
+        uint32_t  instanceStepRate = 1;       // DX12: InstanceDataStepRate; Vulkan: divisor (needs EXT)
+    };
+
+    // One vertex attribute (D3D12 element / Vulkan attribute).
+    struct InputAttributeDesc {
+        uint32_t  binding = 0;              // which binding this attribute reads from
+        uint32_t  offset = APPEND_ALIGNED;  // byte offset within binding
+		Format    format = Format::Unknown; // data format
+        // Either provide HLSL semantics (for DX12) or GLSL/SPIR-V location (for Vulkan) or both.
+        const char* semanticName = nullptr; // e.g., "POSITION","NORMAL","TEXCOORD"
+        uint32_t    semanticIndex = 0;      // e.g., TEXCOORD1 -> 1
+        uint32_t    location = 0xFFFFFFFFu; // Vulkan location; 0xFFFFFFFFu => auto-assign
+    };
+
+    struct InputLayoutDesc {
+        const InputBindingDesc* bindings = nullptr;
+        uint32_t                  numBindings = 0;
+        const InputAttributeDesc* attributes = nullptr;
+        uint32_t                  numAttributes = 0;
+    };
+
+    // A finalized layout with concrete offsets/strides/locations resolved.
+    struct FinalizedInputLayout {
+        std::vector<InputBindingDesc>   bindings;
+        std::vector<InputAttributeDesc> attributes;
+    };
+
+    // Align v up to a multiple of a.
+    static inline uint32_t AlignUp(uint32_t v, uint32_t a) { return (v + (a - 1)) & ~(a - 1); }
+
+    // Produce concrete offsets (replacing APPEND_ALIGNED), default strides, and auto locations.
+    inline FinalizedInputLayout Finalize(const InputLayoutDesc& in)
+    {
+        FinalizedInputLayout out;
+        out.bindings.assign(in.bindings, in.bindings + in.numBindings);
+        out.attributes.assign(in.attributes, in.attributes + in.numAttributes);
+
+        // Per-binding running cursor for APPEND_ALIGNED offsets.
+        std::unordered_map<uint32_t, uint32_t> cursor;
+
+        // Ensure cursors exist.
+        for (const auto& b : out.bindings) cursor[b.binding] = 0;
+
+        // Resolve offsets.
+        for (auto& a : out.attributes) {
+            const uint32_t elemSize = FormatByteSize(a.format);
+            // Natural alignment: commonly min(elemSize, 4) is sufficient; tweak if we need 8/16 for 64/128-bit.
+            const uint32_t align = (elemSize >= 4) ? 4 : elemSize;
+            if (a.offset == APPEND_ALIGNED) {
+                uint32_t& cur = cursor[a.binding];
+                cur = AlignUp(cur, align);
+                a.offset = cur;
+                cur += elemSize;
+            }
+            else {
+                // Keep cursor at least past this attribute for stride computation
+                uint32_t& cur = cursor[a.binding];
+                cur = (std::max)(cur, AlignUp(a.offset + elemSize, align));
+            }
+        }
+
+        // Default strides if zero: use cursor (max end) per binding.
+        for (auto& b : out.bindings) {
+            if (b.stride == 0) b.stride = cursor[b.binding];
+        }
+
+        // Auto-assign locations if not provided: assign in declaration order within each binding
+        // or globally; here we do global increasing order.
+        uint32_t nextLoc = 0;
+        for (auto& a : out.attributes) {
+            if (a.location == 0xFFFFFFFFu) a.location = nextLoc++;
+        }
+
+        return out;
+    }
+
     enum class PsoSubobj : uint32_t {
         Layout,
         Shader,           // AS/MS/VS/PS -> stage inside payload
@@ -515,7 +695,8 @@ namespace rhi {
         RTVFormats,
         DSVFormat,
         Sample,
-        Flags             // optional backend-specific flags bitset
+        Flags,             // optional backend-specific flags bitset
+		InputLayout    // optional, graphics only
     };
 
     struct SubobjLayout { PipelineLayoutHandle layout{}; };
@@ -526,6 +707,7 @@ namespace rhi {
     struct SubobjRTVs { RenderTargets rt{}; };
     struct SubobjDSV { Format dsv = Format::Unknown; };
     struct SubobjSample { SampleDesc sd{}; };
+	struct SubobjInputLayout { FinalizedInputLayout il{}; }; // optional, for graphics
     // struct SubobjFlags { uint64_t mask = 0; }; // optional
 
     struct PipelineStreamItem {
@@ -543,6 +725,7 @@ namespace rhi {
     inline PipelineStreamItem Make(const SubobjRTVs& x) { return { PsoSubobj::RTVFormats, &x, sizeof(x) }; }
     inline PipelineStreamItem Make(const SubobjDSV& x) { return { PsoSubobj::DSVFormat, &x, sizeof(x) }; }
     inline PipelineStreamItem Make(const SubobjSample& x) { return { PsoSubobj::Sample, &x,  sizeof(x) }; }
+	inline PipelineStreamItem Make(const SubobjInputLayout& x) { return { PsoSubobj::InputLayout, &x, sizeof(x) }; }
 
 
     // ---------------- Pass & barriers (minimal) ----------------

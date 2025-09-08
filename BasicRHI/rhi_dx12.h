@@ -307,6 +307,7 @@ namespace rhi {
 	using SO_PrimTopology = PsoSubobject<D3D12_PRIMITIVE_TOPOLOGY_TYPE, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY>;
 	using SO_Flags = PsoSubobject<D3D12_PIPELINE_STATE_FLAGS, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_FLAGS>;
 	using SO_NodeMask = PsoSubobject<UINT, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_NODE_MASK>;
+	using SO_InputLayout = PsoSubobject<D3D12_INPUT_LAYOUT_DESC, D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT>;
 
 	struct PsoStreamBuilder
 	{
@@ -361,8 +362,10 @@ namespace rhi {
 		D3D12_RT_FORMAT_ARRAY rtv{}; rtv.NumRenderTargets = 0;
 		DXGI_FORMAT dsv = DXGI_FORMAT_UNKNOWN;
 		DXGI_SAMPLE_DESC sample{ 1,0 };
+		std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
+		D3D12_INPUT_LAYOUT_DESC inputLayoutDesc{ nullptr, 0 };
 
-		bool hasRast = false, hasBlend = false, hasDepth = false, hasRTV = false, hasDSV = false, hasSample = false;
+		bool hasRast = false, hasBlend = false, hasDepth = false, hasRTV = false, hasDSV = false, hasSample = false, hasInputLayout = false;
 
 		for (uint32_t i = 0; i < count; i++) {
 			switch (items[i].type) {
@@ -437,6 +440,11 @@ namespace rhi {
 				auto& S = *static_cast<const SubobjSample*>(items[i].data);
 				sample = { S.sd.count, S.sd.quality };
 			} break;
+			case PsoSubobj::InputLayout: {
+				hasInputLayout = true;
+				ToDx12InputLayout(static_cast<const SubobjInputLayout*>(items[i].data)->il, inputLayout);
+				inputLayoutDesc = { inputLayout.data(), (UINT)inputLayout.size() };
+			} break;
 			default: break;
 			}
 		}
@@ -468,6 +476,7 @@ namespace rhi {
 			if (hasRTV)    sb.push(SO_RtvFormats{ .Value = rtv });
 			if (hasDSV)    sb.push(SO_DsvFormat{ .Value = dsv });
 			if (hasSample) sb.push(SO_SampleDesc{ .Value = sample });
+			if (hasInputLayout) sb.push(SO_InputLayout{ .Value = inputLayoutDesc });
 			// sb.push(SO_PrimTopology{ .Value = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE });
 		}
 		auto sd = sb.desc();
@@ -1917,8 +1926,10 @@ namespace rhi {
 	static void cl_reset(CommandList* cl, const CommandAllocator& ca) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* a = static_cast<Dx12Allocator*>(ca.impl);
-		if (!l) return;
-		if (!a) return;
+#if NDEBUG
+		if (!l) spdlog::error("cl_reset: invalid command list");
+		if (!a) spdlog::error("cl_reset: invalid command allocator");
+#endif
 		l->cl->Reset(a->alloc.Get(), nullptr);
 	}
 	static void cl_beginPass(CommandList* cl, const PassBeginInfo& p) noexcept {

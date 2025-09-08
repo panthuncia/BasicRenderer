@@ -257,6 +257,28 @@ private:
         soSample.sd.count = 1;
         soSample.sd.quality = 0;
 
+        rhi::InputBindingDesc bindings[] = {
+            // binding=0, stride=0 means "compute from attributes" during Finalize
+            { /*binding*/0, /*stride*/0, rhi::InputRate::PerVertex, /*instanceStepRate*/1 }
+        };
+
+        rhi::InputAttributeDesc attrs[] = {
+            {
+                /*binding*/0,
+                /*offset*/rhi::APPEND_ALIGNED, // like D3D12_APPEND_ALIGNED_ELEMENT
+                /*format*/rhi::Format::R32G32B32_Float,
+                /*semanticName*/"POSITION",
+                /*semanticIndex*/0,
+                /*location*/0xFFFFFFFFu // Vulkan location auto-assign (ignored by DX12)
+              }
+        };
+
+        rhi::InputLayoutDesc il{ bindings, 1, attrs, 1 };
+
+        // Resolve offsets (APPEND_ALIGNED) and default strides
+        rhi::FinalizedInputLayout fil = Finalize(il);
+		rhi::SubobjInputLayout soLayoutIL{ fil };
+
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
             rhi::Make(soVS),
@@ -267,6 +289,7 @@ private:
             rhi::Make(soRTVs),
             rhi::Make(soDSV),
             rhi::Make(soSample),
+			rhi::Make(soLayoutIL)
         };
 
         m_skyboxPSO = dev.CreatePipeline(items, (uint32_t)std::size(items));
