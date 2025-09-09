@@ -609,6 +609,8 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         renderTargets[n] = m_swapChain->Image(n);
     }
 
+    CreateRTVs();
+
     // Create command allocator
 
 	m_commandAllocators.resize(m_numFramesInFlight);
@@ -673,6 +675,20 @@ void Renderer::CreateTextures() {
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
 
+void Renderer::CreateRTVs() {
+    auto device = DeviceManager::GetInstance().GetDevice();
+    // Recreate the render target views
+    for (UINT n = 0; n < m_numFramesInFlight; n++) {
+        renderTargets[n] = m_swapChain->Image(n);
+        rhi::RtvDesc rtvDesc = {};
+        rtvDesc.dimension = rhi::RtvDim::Texture2D;
+        rtvDesc.formatOverride = rhi::Format::R8G8B8A8_UNorm;
+        rtvDesc.range = { 0, 1, 0, 1 };
+        rtvDesc.texture = renderTargets[n];
+        device.CreateRenderTargetView({ rtvHeap->GetHandle(), n }, rtvDesc);
+    }
+}
+
 void Renderer::OnResize(UINT newWidth, UINT newHeight) {
     // Wait for the GPU to complete all operations
 	WaitForFrame(m_frameIndex);
@@ -685,17 +701,7 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
     m_frameIndex = static_cast<uint8_t>(m_swapChain->CurrentImageIndex());
 
-	auto device = DeviceManager::GetInstance().GetDevice();
-    // Recreate the render target views
-    for (UINT n = 0; n < m_numFramesInFlight; n++) {
-        renderTargets[n] = m_swapChain->Image(n);
-		rhi::RtvDesc rtvDesc = {};
-		rtvDesc.dimension = rhi::RtvDim::Texture2D;
-		rtvDesc.formatOverride = rhi::Format::R8G8B8A8_UNorm;
-		rtvDesc.range = { 0, 1, 0, 1 };
-		rtvDesc.texture = renderTargets[n];
-		device.CreateRenderTargetView({ rtvHeap->GetHandle(), n}, rtvDesc);
-    }
+    CreateRTVs();
 
 	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("outputResolution")({ newWidth, newHeight });
 
@@ -847,10 +853,12 @@ void Renderer::Render() {
     graphicsQueue.Submit({ &commandList.Get() });
 
 	currentRenderGraph->Execute(m_context); // Main render graph execution
-
-	Menu::GetInstance().Render(m_context); // Render menu
-
     commandList->Recycle(commandAllocator.Get());
+
+	m_context.commandList = commandList.Get(); // Set the command list for the menu to use
+
+    Menu::GetInstance().Render(m_context); // Render menu
+
 
     // Indicate that the back buffer will now be used to present
 	rtvBarrier.afterAccess = rhi::ResourceAccessType::Common;

@@ -122,7 +122,7 @@ void StatisticsManager::EndQuery(
 
     // Timestamp "end" marker = write a timestamp at index 2*N + 1
     const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u + 1u;
-    cmd.EndQuery(m_timestampPool->GetHandle(), tsIdx);
+	cmd.WriteTimestamp(m_timestampPool->GetHandle(), tsIdx, rhi::Stage::Bottom); // RHI: EndQuery on a Timestamp pool writes a timestamp
 
     // End pipeline stats for geometry passes
     if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {

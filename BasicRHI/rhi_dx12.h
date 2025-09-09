@@ -153,9 +153,11 @@ namespace rhi {
 
 	struct Dx12Swapchain {
 		ComPtr<IDXGISwapChain3> sc; DXGI_FORMAT fmt{}; UINT w{}, h{}, count{}; UINT current{};
-		ComPtr<ID3D12DescriptorHeap> rtvHeap; UINT rtvInc{}; std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU;
+		//ComPtr<ID3D12DescriptorHeap> rtvHeap; UINT rtvInc{}; 
+		//std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU;
 		std::vector<ComPtr<ID3D12Resource>> images;
-		std::vector<ResourceHandle> imageHandles; std::vector<ViewHandle> rtvHandles;
+		std::vector<ResourceHandle> imageHandles; 
+		//std::vector<ViewHandle> rtvHandles;
 	};
 
 	struct Dx12Heap { Microsoft::WRL::ComPtr<ID3D12Heap> heap; uint64_t size{}; };
@@ -560,9 +562,9 @@ namespace rhi {
 		auto cpuStart = rtvHeap->GetCPUDescriptorHandleForHeapStart();
 
 		std::vector<ComPtr<ID3D12Resource>> imgs(bufferCount);
-		std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU(bufferCount);
+		//std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU(bufferCount);
 		std::vector<ResourceHandle> imgHandles(bufferCount);
-		std::vector<ViewHandle> rtvHandles(bufferCount);
+		//std::vector<ViewHandle> rtvHandles(bufferCount);
 
 		for (UINT i = 0; i < bufferCount; i++) {
 			sc->GetBuffer(i, IID_PPV_ARGS(&imgs[i]));
@@ -577,18 +579,18 @@ namespace rhi {
 			t.dim = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 			t.depth = 1;
 			imgHandles[i] = impl->textures.alloc(t);
-			// Create RTV in the heap
-			auto cpu = cpuStart;
-			cpu.ptr += SIZE_T(i) * inc; rtvCPU[i] = cpu;
-			D3D12_RENDER_TARGET_VIEW_DESC r{};
-			r.Format = desc.Format;
-			r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-			impl->dev->CreateRenderTargetView(imgs[i].Get(), &r, cpu);
-			// Also register a ViewHandle so RHI passes can reference it directly
-			Dx12View v{};
-			v.desc = ViewDesc{ ViewKind::RTV, imgHandles[i], {}, Format::Unknown };
-			v.cpu = cpu;
-			rtvHandles[i] = impl->views.alloc(v);
+			//// Create RTV in the heap
+			//auto cpu = cpuStart;
+			//cpu.ptr += SIZE_T(i) * inc; rtvCPU[i] = cpu;
+			//D3D12_RENDER_TARGET_VIEW_DESC r{};
+			//r.Format = desc.Format;
+			//r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+			//impl->dev->CreateRenderTargetView(imgs[i].Get(), &r, cpu);
+			//// Also register a ViewHandle so RHI passes can reference it directly
+			//Dx12View v{};
+			//v.desc = ViewDesc{ ViewKind::RTV, imgHandles[i], {}, Format::Unknown };
+			//v.cpu = cpu;
+			//rtvHandles[i] = impl->views.alloc(v);
 		}
 
 		auto* scWrap = new Dx12Swapchain{};
@@ -596,10 +598,10 @@ namespace rhi {
 		scWrap->w = w; scWrap->h = h;
 		scWrap->count = bufferCount;
 		scWrap->current = sc->GetCurrentBackBufferIndex();
-		scWrap->rtvHeap = rtvHeap;
-		scWrap->rtvInc = inc; scWrap->rtvCPU = rtvCPU; scWrap->images = imgs;
+		//scWrap->rtvHeap = rtvHeap;
+		//scWrap->rtvInc = inc; scWrap->rtvCPU = rtvCPU; scWrap->images = imgs;
 		scWrap->imageHandles = imgHandles;
-		scWrap->rtvHandles = rtvHandles;
+		//scWrap->rtvHandles = rtvHandles;
 
 		Swapchain out{};
 		out.impl = scWrap;
@@ -2555,7 +2557,7 @@ namespace rhi {
 	// ---------------- Swapchain vtable funcs ----------------
 	static uint32_t sc_count(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->count; }
 	static uint32_t sc_curr(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->sc->GetCurrentBackBufferIndex(); }
-	static ViewHandle sc_rtv(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->rtvHandles[i]; }
+	//static ViewHandle sc_rtv(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->rtvHandles[i]; }
 	static ResourceHandle sc_img(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->imageHandles[i]; }
 	static Result sc_present(Swapchain* sc, bool vsync) noexcept {
 		auto* s = static_cast<Dx12Swapchain*>(sc->impl);

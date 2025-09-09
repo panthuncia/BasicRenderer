@@ -73,7 +73,7 @@ public:
 		// Set the descriptor heaps
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
+		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 		commandList.BindPipeline(m_frustrumCullingPSO.GetAPIPipelineState().GetHandle());
 
 

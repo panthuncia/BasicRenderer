@@ -166,7 +166,7 @@ struct RawImage {
 };
 
 static std::shared_ptr<Texture>
-CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler)
+CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool allowRTV, bool allowUAV)
 {
     ImageDimensions dim{};
     dim.width = img.width;
@@ -179,6 +179,8 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler)
     desc.channels = static_cast<unsigned short>(img.channels);
     desc.format = img.format;
     desc.generateMipMaps = false; // TODO: Allow mipmapping
+	desc.hasRTV = allowRTV;
+	desc.hasUAV = allowUAV;
 
     auto buffer = PixelBuffer::Create(desc, { img.pixels });
 
@@ -351,7 +353,7 @@ std::shared_ptr<Texture>
 LoadTextureFromMemory(const void* bytes, size_t byteCount,
     std::shared_ptr<Sampler> sampler,
     const LoadFlags& flags,
-    bool preferSRGB)
+    bool preferSRGB, bool allowRTV, bool allowUAV)
 {
     if (!bytes || !byteCount)
         throw std::runtime_error("LoadTextureFromMemory: null/empty buffer");
@@ -372,7 +374,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(hr)) throw std::runtime_error("Failed to load DDS from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
         auto raw = RawFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::HDR: {
         hr = DirectX::LoadFromHDRMemory(
@@ -380,7 +382,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(hr)) throw std::runtime_error("Failed to load HDR from memory");
         // HDR stays in float formats; do not force sRGB
         auto raw = RawFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::TGA: {
         hr = DirectX::LoadFromTGAMemory(
@@ -388,7 +390,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(hr)) throw std::runtime_error("Failed to load TGA from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
         auto raw = RawFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::WIC: {
         // WIC: let caller preference drive sRGB/linear
@@ -403,7 +405,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(wicMeta.format) : ToLinearIfSRGB(wicMeta.format);
 
         auto raw = RawFromDXT(wicImg, wicMeta, "", std::nullopt, chosen);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     }
 
@@ -414,7 +416,8 @@ std::shared_ptr<Texture>
 LoadTextureFromFile(const std::wstring& filePath,
     std::shared_ptr<Sampler> sampler,
     bool preferSRGB,
-    const LoadFlags& flagsIn)
+    const LoadFlags& flagsIn,
+    bool allowRTV, bool allowUAV)
 {
     const std::string utf8 = ws2s(filePath);
 
@@ -423,7 +426,7 @@ LoadTextureFromFile(const std::wstring& filePath,
     localFlags.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
 
     const auto data = detail::ReadFileBytes(filePath);
-    return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB);
+    return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
 }
 
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
@@ -452,7 +455,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bo
     return std::make_shared<Texture>(buffer, sampler);
 }
 
-std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV) {
+std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV, bool allowUAV) {
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
@@ -491,6 +494,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allo
     desc.format = rhi::helpers::ToRHI(metadata.format);
 	desc.isCubemap = true;
 	desc.hasRTV = allowRTV;
+	desc.hasUAV = allowUAV;
     if (metadata.mipLevels != 1) {
 		desc.generateMipMaps = true;
     }
@@ -1044,17 +1048,18 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear op
 }
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMip(
-    rhi::Device&     device,
-    rhi::Resource&   resource,
-    rhi::Format       format,
-    DescriptorHeap*   uavHeap,
-    int               mipLevels,
-    bool              isArray,
-    int               arraySize,
-    int               planeSlice)
+    rhi::Device& device,
+    rhi::Resource& resource,
+    rhi::Format      format,
+    DescriptorHeap* uavHeap,
+    int              mipLevels,
+    bool             isArray,
+    int              arraySize,
+    int              planeSlice,
+    bool             isCubemap)
 {
     // If not an array, treat as a single slice
-    int sliceCount = isArray ? arraySize : 1;
+    const int sliceCount = isArray ? arraySize : 1;
     std::vector<std::vector<ShaderVisibleIndexInfo>> result(sliceCount);
 
     for (int slice = 0; slice < sliceCount; ++slice) {
@@ -1064,24 +1069,38 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
         for (int mip = 0; mip < mipLevels; ++mip) {
             rhi::UavDesc uavDesc = {};
             uavDesc.formatOverride = format;
-			uavDesc.resource = resource.GetHandle();
-            if (isArray) {
-                uavDesc.dimension                 = rhi::UavDim::Texture2DArray;
-                uavDesc.texture2DArray.mipSlice       = mip;
-                uavDesc.texture2DArray.firstArraySlice= slice;
-                uavDesc.texture2DArray.arraySize      = arraySize - slice;
-                uavDesc.texture2DArray.planeSlice     = planeSlice;
-            } else {
-                uavDesc.dimension = rhi::UavDim::Texture2D;
-                uavDesc.texture2D.mipSlice   = mip;
-                uavDesc.texture2D.planeSlice = planeSlice;
+            uavDesc.resource = resource.GetHandle();
+
+            if (isCubemap) {
+                // Map cube/cube-array UAVs to 2D array views:
+                // - 1 cube == 6 array slices
+                // - For a cube array, slice N starts at firstArraySlice = N*6
+                //   and (to mirror your SRV behavior) spans the remaining cubes.
+                uavDesc.dimension = rhi::UavDim::Texture2DArray;
+                uavDesc.texture2DArray.mipSlice = mip;
+                uavDesc.texture2DArray.firstArraySlice = isArray ? (slice * 6) : 0;
+                uavDesc.texture2DArray.arraySize = isArray ? ((arraySize - slice) * 6) : 6;
+                uavDesc.texture2DArray.planeSlice = 0; // planar formats: usually 0 for cubemaps
+            }
+            else {
+                if (isArray) {
+                    uavDesc.dimension = rhi::UavDim::Texture2DArray;
+                    uavDesc.texture2DArray.mipSlice = mip;
+                    uavDesc.texture2DArray.firstArraySlice = slice;
+                    uavDesc.texture2DArray.arraySize = arraySize - slice;
+                    uavDesc.texture2DArray.planeSlice = planeSlice;
+                }
+                else {
+                    uavDesc.dimension = rhi::UavDim::Texture2D;
+                    uavDesc.texture2D.mipSlice = mip;
+                    uavDesc.texture2D.planeSlice = planeSlice;
+                }
             }
 
-            UINT descriptorIndex = uavHeap->AllocateDescriptor();
+            const UINT descriptorIndex = uavHeap->AllocateDescriptor();
+            device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex }, uavDesc);
 
-			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
-            
-            ShaderVisibleIndexInfo uavInfo{ {uavHeap->GetHeap().GetHandle(), descriptorIndex} };
+            ShaderVisibleIndexInfo uavInfo{ { uavHeap->GetHeap().GetHandle(), descriptorIndex } };
             sliceUAVs.push_back(uavInfo);
         }
     }
@@ -1205,6 +1224,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
     dsvDesc.formatOverride        = format;
     dsvDesc.dimension = rhi::DsvDim::Texture2DArray;
     //dsvDesc.Texture2DArray.ArraySize = 1;
+	dsvDesc.texture = resource.GetHandle();
 	dsvDesc.range = { 0, 1, 0, 1 }; // One mip level, one array slice
 
     for (int slice = 0; slice < sliceCount; ++slice) {

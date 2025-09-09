@@ -34,7 +34,7 @@ public:
         auto dev = DeviceManager::GetInstance().GetDevice();
 
 		auto& cl = context.commandList;
-        cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), std::nullopt);
+        cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         // Bind layout + pipeline
         cl.BindLayout(m_layout->GetHandle());
@@ -54,13 +54,12 @@ public:
             const uint32_t gx = (skyboxRes + groupSize - 1) / groupSize;
             const uint32_t gy = (skyboxRes + groupSize - 1) / groupSize;
 
+            const uint32_t dstCubeUavIndex =
+                dstCubemap->GetBuffer()->GetUAVShaderVisibleInfo(0).slot.index;
             for (uint32_t face = 0; face < 6; ++face)
             {
-                const uint32_t dstFaceUavIndex =
-                    dstCubemap->GetBuffer()->GetUAVShaderVisibleInfo(face).slot.index;
-
                 // Root constants payload: [srcSrv, dstFaceUav, face, size]
-                uint32_t pc[4] = { srcSrvIndex, dstFaceUavIndex, face, (uint32_t)skyboxRes };
+                uint32_t pc[4] = { srcSrvIndex, dstCubeUavIndex, face, (uint32_t)skyboxRes };
 
                 // Push constants to CS: (set=0, binding=0) matches b0, space0 in HLSL
                 cl.PushConstants(rhi::ShaderStage::Compute,

@@ -508,6 +508,7 @@ inline void Menu::Render(RenderContext& context) {
 	context.commandList.BeginPass(beginInfo);
 
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(context.commandList));
+
 }
 
 inline int Menu::FindFileIndex(const std::vector<std::string>& inputHdrFiles, const std::string& existingFile) {

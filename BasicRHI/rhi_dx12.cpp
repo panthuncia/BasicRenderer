@@ -106,7 +106,7 @@ namespace rhi {
     const SwapchainVTable g_scvt = { 
 		&sc_count,
 		&sc_curr,
-		&sc_rtv,
+		//&sc_rtv,
 		&sc_img,
 		&sc_present,
 		&sc_resizeBuffers,

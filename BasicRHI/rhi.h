@@ -93,6 +93,13 @@ namespace rhi {
 
     template<typename T>
     struct Span {
+		constexpr Span() noexcept = default;
+        constexpr Span(const T* d, uint32_t s) noexcept
+            : data(d), size(s) {
+		}
+        constexpr Span(const T* d) noexcept
+            : data(d), size(d ? 1 : 0) {
+		}
         const T* data{};
         uint32_t size{};
         const T* begin() const noexcept { return data; }
@@ -544,7 +551,7 @@ namespace rhi {
         TextureSubresourceRange range{};
         Format formatOverride{ Format::Unknown };
         bool readOnlyDepth{ false };
-        bool readOnlyStencil{ true };
+        bool readOnlyStencil{ false };
     };
 
     // Command list binding for shader-visible heaps
@@ -1413,7 +1420,7 @@ namespace rhi {
     struct SwapchainVTable {
         uint32_t(*imageCount)(Swapchain*) noexcept;
         uint32_t(*currentImageIndex)(Swapchain*) noexcept;
-        ViewHandle(*rtv)(Swapchain*, uint32_t img) noexcept; // RTV per image
+        //ViewHandle(*rtv)(Swapchain*, uint32_t img) noexcept; // RTV per image
         ResourceHandle(*image)(Swapchain*, uint32_t img) noexcept; // texture handle per image
         Result(*present)(Swapchain*, bool vsync) noexcept; // Present
         Result(*resizeBuffers)(Swapchain*, uint32_t bufferCount, uint32_t w, uint32_t h, Format newFormat, uint32_t flags) noexcept;
@@ -1432,7 +1439,7 @@ namespace rhi {
         constexpr void reset() noexcept { impl = nullptr; vt = nullptr; }
         inline uint32_t ImageCount() noexcept;
         inline uint32_t CurrentImageIndex() noexcept;
-        inline ViewHandle RTV(uint32_t i) noexcept;
+        //inline ViewHandle RTV(uint32_t i) noexcept;
         inline ResourceHandle Image(uint32_t i) noexcept;
         inline Result Present(bool vsync) noexcept;
         inline Result ResizeBuffers(uint32_t bufferCount, uint32_t w, uint32_t h, Format newFmt, uint32_t flags) noexcept {
@@ -1676,7 +1683,7 @@ namespace rhi {
 
     inline uint32_t Swapchain::ImageCount() noexcept { return vt->imageCount(this); }
     inline uint32_t Swapchain::CurrentImageIndex() noexcept { return vt->currentImageIndex(this); }
-    inline ViewHandle Swapchain::RTV(uint32_t i) noexcept { return vt->rtv(this, i); }
+    //inline ViewHandle Swapchain::RTV(uint32_t i) noexcept { return vt->rtv(this, i); }
     inline ResourceHandle Swapchain::Image(uint32_t i) noexcept { return vt->image(this, i); }
     inline Result Swapchain::Present(bool vsync) noexcept { return vt->present(this, vsync); }
 

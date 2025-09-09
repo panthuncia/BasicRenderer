@@ -54,8 +54,14 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 
 	m_clearColor.type = rhi::ClearValueType::Color;
 	m_clearColor.format = desc.format;
-	for (int i = 0; i < 4; i++) {
-		m_clearColor.rgba[i] = desc.clearColor[i];
+	m_clearColor.depthStencil.depth = desc.depthClearValue;
+	if (desc.hasDSV) {
+		m_clearColor.type = rhi::ClearValueType::DepthStencil; // TODO: Will we ever need both on one texture?
+	}
+	else {
+		for (int i = 0; i < 4; i++) {
+			m_clearColor.rgba[i] = desc.clearColor[i];
+		}
 	}
 
 	// Create SRV
@@ -115,7 +121,8 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 			m_mipLevels,
 			desc.isArray,
 			m_arraySize,
-			0
+			0,
+			desc.isCubemap
 		);
 		SetUAVGPUDescriptors(cbvSrvUavHeap, uavInfo);
 	}

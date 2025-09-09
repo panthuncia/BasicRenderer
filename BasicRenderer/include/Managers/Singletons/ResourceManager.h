@@ -154,6 +154,15 @@ public:
 			uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
             dataBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, counterOffset);
 
+			// Non-shader visible UAV
+			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
+			device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, uavDesc);
+
+			NonShaderVisibleIndexInfo uavNonShaderInfo;
+			uavNonShaderInfo.slot.index = uavNonShaderVisibleIndex;
+            uavNonShaderInfo.slot.heap = m_nonShaderVisibleHeap->GetHeap().GetHandle();
+			dataBuffer->SetUAVCPUDescriptors(m_nonShaderVisibleHeap, { {uavNonShaderInfo} });
+
         }
 
         return dataBuffer;

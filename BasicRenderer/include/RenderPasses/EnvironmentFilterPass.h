@@ -28,7 +28,7 @@ public:
 
 		auto& cl = context.commandList;
 
-        cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), std::nullopt);
+        cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         cl.BindLayout(m_layout->GetHandle());
         cl.BindPipeline(m_pso->GetHandle());
@@ -54,11 +54,10 @@ public:
 
                 float roughness = (maxMipLevels > 1) ? (float)mip / float(maxMipLevels - 1) : 0.0f;
 
+                const uint32_t dstUavIndex =
+                    dstCubePF->GetBuffer()->GetUAVShaderVisibleInfo(mip, 0).slot.index;
                 for (uint32_t face = 0; face < 6; ++face)
                 {
-                    const uint32_t dstUavIndex =
-                        dstCubePF->GetBuffer()->GetUAVShaderVisibleInfo(mip, face).slot.index;
-
                     // Push constants: [srcSrv, dstUav, face, size, roughnessBits]
                     uint32_t pc[5] = {
                         srcSrvIndex,

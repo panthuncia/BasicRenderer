@@ -48,9 +48,10 @@ std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment(std::wstring 
 	}
 	prefilteredDesc.channels = 3;
 	prefilteredDesc.isCubemap = true;
-	prefilteredDesc.hasRTV = true;
+	//prefilteredDesc.hasRTV = true;
 	prefilteredDesc.format = rhi::Format::R8G8B8A8_UNorm;
 	prefilteredDesc.generateMipMaps = true;
+	prefilteredDesc.hasUAV = true;
 
 	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
 	auto sampler = Sampler::GetDefaultSampler();
@@ -75,7 +76,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	std::shared_ptr<Texture> skybox;
 	unsigned int res = m_reflectionCubemapResolution;
 	if (std::filesystem::exists(skyboxPath)) {
-		skybox = LoadCubemapFromFile(skyboxPath, true);
+		skybox = LoadCubemapFromFile(skyboxPath, true, true);
 		skybox->SetName(L"Skybox cubemap");
 		res = skybox->GetBuffer()->GetWidth();
 		e->SetReflectionCubemapResolution(res);

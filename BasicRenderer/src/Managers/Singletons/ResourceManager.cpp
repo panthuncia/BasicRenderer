@@ -342,12 +342,14 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 	rhi::ClearValue depthClearValue = {};
 	rhi::ClearValue colorClearValue = {};
 	if (desc.hasDSV) {
+		depthClearValue.type = rhi::ClearValueType::DepthStencil;
 		depthClearValue.format = desc.dsvFormat == rhi::Format::Unknown ? desc.format : desc.dsvFormat;
 		depthClearValue.depthStencil.depth = desc.depthClearValue;
 		depthClearValue.depthStencil.stencil = 0;
 		clearValue = &depthClearValue;
 	}
 	else if (desc.hasRTV) {
+		depthClearValue.type = rhi::ClearValueType::Color;
 		colorClearValue.format = desc.rtvFormat == rhi::Format::Unknown ? desc.format : desc.rtvFormat;
 		colorClearValue.rgba[0] = desc.clearColor[0];
 		colorClearValue.rgba[1] = desc.clearColor[1];

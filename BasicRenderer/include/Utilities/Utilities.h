@@ -56,16 +56,16 @@ std::shared_ptr<Texture> LoadTextureFromFile(
 	const std::wstring& filePath,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	bool preferSRGB = false,
-	const LoadFlags& flags = {});
+	const LoadFlags& flags = {}, bool allowRTV = false, bool allowUAV = false);
 
 std::shared_ptr<Texture> LoadTextureFromMemory(
 	const void* bytes,
 	size_t byteCount,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	const LoadFlags& flags = {},
-	bool preferSRGB = false);
+	bool preferSRGB = false, bool allowRTV = false , bool allowUAV = false);
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
-std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
+std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false, bool allowUAV = false);
 
 #if __has_include(<bit>) && (__cpp_lib_bit_cast >= 201806L)
 #include <bit>
@@ -174,7 +174,8 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
 	int               mipLevels,
 	bool              isArray,
 	int               arraySize,
-	int               planeSlice);	// for planar formats
+	int               planeSlice,
+	bool              isCubemap);
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorderedAccessViewsPerMip(
 	rhi::Device& device,

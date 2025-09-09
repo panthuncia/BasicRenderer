@@ -1,7 +1,7 @@
 cbuffer EnvToCubePC : register(b0, space0)
 {
     uint SrcEnvSrvIndex; // SRV index in bindless CBV/SRV/UAV heap
-    uint DstFaceUavIndex; // UAV index for the DEST cubemap face (arraySize=1 view)
+    uint dstCubeIndex; // UAV index for the DEST cubemap
     uint Face; // 0..5
     uint Size; // cubemap resolution (width=height)
 };
@@ -52,6 +52,6 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     Texture2D<float4> srcTex = ResourceDescriptorHeap[SrcEnvSrvIndex];
     float3 col = srcTex.Sample(gLinearClamp, equirect).xyz;
     
-    RWTexture2D<float4> dstTex = ResourceDescriptorHeap[DstFaceUavIndex];
-    dstTex[int2(tid.xy)] = float4(col, 1.0);
+    RWTexture2DArray<float4> dstTex = ResourceDescriptorHeap[dstCubeIndex];
+    dstTex[uint3(tid.x, tid.y, Face)] = float4(col, 1.0);
 }

@@ -155,6 +155,7 @@ private:
     void AdvanceFrameIndex();
     void CheckDebugMessages();
     void FlushCommandQueue();
+    void CreateRTVs();
 
     void StallPipeline();
 
