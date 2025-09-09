@@ -6,6 +6,7 @@
 #include <queue>
 
 #include <rhi.h>
+#include <rhi_helpers.h>
 
 #include "ShaderBuffers.h"
 #include "spdlog/spdlog.h"
@@ -85,7 +86,7 @@ public:
         return dataBuffer;
     }
 
-    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
+    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool UAV = false, bool UAVCounter = false) {
         auto device = DeviceManager::GetInstance().GetDevice();
         size_t bufferSize = numElements * elementSize;
         size_t counterOffset = 0;
@@ -167,6 +168,74 @@ public:
 
         return dataBuffer;
     }
+
+    std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
+        size_t        numElements,
+        rhi::Format   elementFormat,
+        bool          UAV = false)
+    {
+        auto device = DeviceManager::GetInstance().GetDevice();
+
+        const size_t elementSize = rhi::helpers::BytesPerBlock(elementFormat);
+        assert(elementFormat != rhi::Format::Unknown && "Typed buffers require a concrete format");
+        assert(elementSize > 0 && "Unsupported/invalid format for typed buffer");
+
+        const size_t bufferSize = numElements * elementSize;
+
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
+
+        unsigned int srvIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+
+        rhi::SrvDesc srvDesc = {};
+        srvDesc.resource = dataBuffer->m_buffer->GetHandle();
+        srvDesc.formatOverride = elementFormat; // required for typed views
+        srvDesc.dimension = rhi::SrvDim::Buffer;
+        srvDesc.buffer.kind = rhi::BufferViewKind::Typed;
+        srvDesc.buffer.numElements = static_cast<UINT>(numElements);
+        srvDesc.buffer.structureByteStride = 0; // ignored for typed
+
+        device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), srvIndex }, srvDesc);
+
+        ShaderVisibleIndexInfo srvInfo{};
+        srvInfo.slot.index = srvIndex;
+        srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
+        dataBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, { { srvInfo } });
+
+        if (UAV)
+        {
+            rhi::UavDesc uavDesc = {};
+            uavDesc.resource = dataBuffer->m_buffer->GetHandle();
+            uavDesc.formatOverride = elementFormat;      // required for typed UAV
+            uavDesc.dimension = rhi::UavDim::Buffer;
+            uavDesc.buffer.kind = rhi::BufferViewKind::Typed;
+            uavDesc.buffer.numElements = static_cast<UINT>(numElements);
+            uavDesc.buffer.structureByteStride = 0;                // ignored for typed
+            uavDesc.buffer.counterOffsetInBytes = 0;               // no counters for typed UAVs
+
+            // Shader-visible UAV
+            unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+            device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex }, uavDesc);
+
+            ShaderVisibleIndexInfo uavInfo{};
+            uavInfo.slot.index = uavShaderVisibleIndex;
+            uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
+            // Pass 0 as "counter offset" because typed UAVs cannot have counters
+            dataBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, /*counterOffset*/ 0);
+
+            // Non-shader-visible UAV (for clears / CPU-side ops)
+            unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
+            device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, uavDesc);
+
+            NonShaderVisibleIndexInfo uavNonShaderInfo{};
+            uavNonShaderInfo.slot.index = uavNonShaderVisibleIndex;
+            uavNonShaderInfo.slot.heap = m_nonShaderVisibleHeap->GetHeap().GetHandle();
+            dataBuffer->SetUAVCPUDescriptors(m_nonShaderVisibleHeap, { { uavNonShaderInfo } });
+        }
+
+        return dataBuffer;
+    }
+
+
 
     template<typename T>
     std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "", bool UAV = false) {

@@ -1162,9 +1162,9 @@ void Renderer::CreateRenderGraph() {
         BuildSSRPasses(newGraph.get());
     }
 
-	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), false, true, false);
+	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), true, false);
     newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
-	auto histogramBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(255, sizeof(uint32_t), false, true, false);
+	auto histogramBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(255, sizeof(uint32_t), true, false);
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
     newGraph->BuildComputePass("luminanceHistogramPass")

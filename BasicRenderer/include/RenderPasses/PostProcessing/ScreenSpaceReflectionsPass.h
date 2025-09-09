@@ -51,7 +51,7 @@ public:
     PassReturn Execute(RenderContext& context) override {
 
 		// Clear the render target of the SSSR output
-        context.commandList.ClearRenderTargetView( m_pSSSROutput->GetRTVInfo(0).slot, m_pSSSROutput->GetClearColor());
+        //context.commandList.ClearRenderTargetView( m_pSSSROutput->GetRTVInfo(0).slot, m_pSSSROutput->GetClearColor());
 
 		context.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -64,12 +64,12 @@ public:
 		//context.commandList->ResourceBarrier(1, &barrier);
 
         // Clear as UAV
-        context.commandList.ClearUavFloat(
-            { m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot,
-              m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot,
-              m_pSSSROutput->GetAPIResource() },
-			m_pSSSROutput->GetClearColor().rgba
-		);
+  //      context.commandList.ClearUavFloat(
+  //          { m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot,
+  //            m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot,
+  //            m_pSSSROutput->GetAPIResource() },
+		//	m_pSSSROutput->GetClearColor().rgba
+		//);
 
         FFXManager::GetInstance().EvaluateSSSR(
             context,

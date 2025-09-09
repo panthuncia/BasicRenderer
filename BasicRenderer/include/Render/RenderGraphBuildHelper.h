@@ -332,7 +332,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
 void BuildLightClusteringPipeline(RenderGraph* graph) {
     // light pages counter
-    auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
+    auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
     lightPagesCounter->SetName(L"Light Pages Counter");
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
@@ -415,9 +415,9 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasNonShaderVisibleUAV = true;
     auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
     PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
-    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, false, true, false);
+    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
     PPLLBuffer->SetName(L"PPLLBuffer");
-    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
+	auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
     PPLLCounter->SetName(L"PPLLCounter");
 
     graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);

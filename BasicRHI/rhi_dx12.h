@@ -1051,7 +1051,10 @@ namespace rhi {
 				break;
 
 			case BufferViewKind::Typed:
-				return Result::Unsupported; // TODO
+				desc.Format = ToDxgi(dv.formatOverride);
+				desc.Buffer.StructureByteStride = 0;
+				desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+				break;
 			}
 
 			impl->dev->CreateUnorderedAccessView(pResource, pCounterResource, &desc, dst);

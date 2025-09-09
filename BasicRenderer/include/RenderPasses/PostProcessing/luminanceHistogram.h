@@ -61,7 +61,7 @@ private:
     void CreateComputePSO()
     {
 		m_pso = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature(),
 			L"shaders/PostProcessing/LuminanceHistogram.hlsl",
 			L"CSMain",
 		    {}, 
