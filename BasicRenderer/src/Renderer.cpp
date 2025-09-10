@@ -590,7 +590,7 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_DX12_Initialize(
         GFSDK_Aftermath_Version_API,
         aftermathFlags,
-        device.Get()));
+        rhi::dx12::get_device(device)));
 #endif
 
     // Create RTV descriptor heap
@@ -684,8 +684,7 @@ void Renderer::CreateRTVs() {
         rtvDesc.dimension = rhi::RtvDim::Texture2D;
         rtvDesc.formatOverride = rhi::Format::R8G8B8A8_UNorm;
         rtvDesc.range = { 0, 1, 0, 1 };
-        rtvDesc.texture = renderTargets[n];
-        device.CreateRenderTargetView({ rtvHeap->GetHandle(), n }, rtvDesc);
+        device.CreateRenderTargetView({ rtvHeap->GetHandle(), n }, renderTargets[n], rtvDesc);
     }
 }
 
@@ -1101,49 +1100,49 @@ void Renderer::CreateRenderGraph() {
         useMeshShaders = false;
     }
 
-    BuildBRDFIntegrationPass(newGraph.get());
+ //   BuildBRDFIntegrationPass(newGraph.get());
 
-    // Skinning comes before Z prepass
-    newGraph->BuildComputePass("SkinningPass")
-        .Build<SkinningPass>();
+ //   // Skinning comes before Z prepass
+ //   newGraph->BuildComputePass("SkinningPass")
+ //       .Build<SkinningPass>();
 
 
-    bool indirect = getIndirectDrawsEnabled();
-    if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
-        indirect = false;
-    }
+ //   bool indirect = getIndirectDrawsEnabled();
+ //   if (!DeviceManager::GetInstance().GetMeshShadersSupported()) { // Indirect draws only supported with mesh shaders
+ //       indirect = false;
+ //   }
 
     CreateGBufferResources(newGraph.get());
 
-    if (indirect) {
-        if (m_occlusionCulling) {
-            BuildOcclusionCullingPipeline(newGraph.get());
-        }
-        BuildGeneralCullingPipeline(newGraph.get());
-    }
+ //   if (indirect) {
+ //       if (m_occlusionCulling) {
+ //           BuildOcclusionCullingPipeline(newGraph.get());
+ //       }
+ //       BuildGeneralCullingPipeline(newGraph.get());
+ //   }
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     BuildZPrepass(newGraph.get());
 
-    // GTAO pass
-    if (m_gtaoEnabled) {
-		RegisterGTAOResources(newGraph.get());
-        BuildGTAOPipeline(newGraph.get(), currentScene->GetPrimaryCamera().try_get<Components::Camera>());
-    }
+ //   // GTAO pass
+ //   if (m_gtaoEnabled) {
+	//	RegisterGTAOResources(newGraph.get());
+ //       BuildGTAOPipeline(newGraph.get(), currentScene->GetPrimaryCamera().try_get<Components::Camera>());
+ //   }
 
-	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
-        BuildLightClusteringPipeline(newGraph.get());
-    }
+	//if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
+ //       BuildLightClusteringPipeline(newGraph.get());
+ //   }
 
-    BuildEnvironmentPipeline(newGraph.get());
+ //   BuildEnvironmentPipeline(newGraph.get());
 
-    auto debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
+ //   auto debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
 
-    auto drawShadows = m_coreResourceProvider.m_shadowMaps != nullptr && getShadowsEnabled();
-    if (drawShadows) {
-        BuildMainShadowPass(newGraph.get());
-        debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
-    }
+ //   auto drawShadows = m_coreResourceProvider.m_shadowMaps != nullptr && getShadowsEnabled();
+ //   if (drawShadows) {
+ //       BuildMainShadowPass(newGraph.get());
+ //       debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
+ //   }
 	
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
@@ -1152,15 +1151,15 @@ void Renderer::CreateRenderGraph() {
             .Build<SkyboxRenderPass>();
     }
 
-    BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
+ //   BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
 
-    BuildPPLLPipeline(newGraph.get());
+ //   BuildPPLLPipeline(newGraph.get());
 
-	// Start of post-processing passes
+	//// Start of post-processing passes
 
-	if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
-        BuildSSRPasses(newGraph.get());
-    }
+	//if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
+ //       BuildSSRPasses(newGraph.get());
+ //   }
 
 	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), true, false);
     newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
@@ -1175,26 +1174,26 @@ void Renderer::CreateRenderGraph() {
     newGraph->BuildRenderPass("UpscalingPass")
 		.Build<UpscalingPass>();
 
-    if (m_bloom) {
-        BuildBloomPipeline(newGraph.get());
-    }
+    //if (m_bloom) {
+    //    BuildBloomPipeline(newGraph.get());
+    //}
 
     newGraph->BuildRenderPass("TonemappingPass")
         .Build<TonemappingPass>();
 
-    debugPassBuilder.Build<DebugRenderPass>();
-	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
-		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
-		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
-        if (debugPass) {
-            debugPass->SetTexture(m_coreResourceProvider.m_currentDebugTexture.get());
-        }
-	}
+ //   debugPassBuilder.Build<DebugRenderPass>();
+	//if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
+	//	auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
+	//	std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
+ //       if (debugPass) {
+ //           debugPass->SetTexture(m_coreResourceProvider.m_currentDebugTexture.get());
+ //       }
+	//}
 
-    if (getDrawBoundingSpheres()) {
-		newGraph->BuildRenderPass("DebugSpherePass")
-			.Build<DebugSpherePass>();
-    }
+ //   if (getDrawBoundingSpheres()) {
+	//	newGraph->BuildRenderPass("DebugSpherePass")
+	//		.Build<DebugSpherePass>();
+ //   }
 
     newGraph->Compile();
     newGraph->Setup();

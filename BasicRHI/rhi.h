@@ -7,6 +7,7 @@
 #include <optional>
 #include <array>
 #include <unordered_map>
+#include <memory>
 
 #include "resource_states.h"
 
@@ -410,7 +411,6 @@ namespace rhi {
 
     struct SrvDesc {
         SrvDim        dimension{ SrvDim::Undefined };
-        ResourceHandle resource{};
         Format        formatOverride{ Format::Unknown }; // textures + typed buffers
         ComponentMapping componentMapping{ 0 };          // optional, 0 = default
 
@@ -490,7 +490,6 @@ namespace rhi {
     };
 
     struct UavDesc {
-        ResourceHandle  resource{};
 		Format          formatOverride{ Format::Unknown }; // textures + typed buffers
         // Texture path
         UavDim        dimension{ UavDim::Buffer };
@@ -540,13 +539,11 @@ namespace rhi {
 
     // RTV/DSV descriptions (texture-only)
     struct RtvDesc {
-        ResourceHandle texture{};
         RtvDim dimension{ RtvDim::Texture2D };
         TextureSubresourceRange range{};
         Format formatOverride{ Format::Unknown };
     };
     struct DsvDesc {
-        ResourceHandle texture{};
         DsvDim dimension{ DsvDim::Texture2D };
         TextureSubresourceRange range{};
         Format formatOverride{ Format::Unknown };
@@ -1323,11 +1320,7 @@ namespace rhi {
         void (*draw)(CommandList*, uint32_t vtxCount, uint32_t instCount, uint32_t firstVtx, uint32_t firstInst) noexcept;
         void (*drawIndexed)(CommandList*, uint32_t idxCount, uint32_t instCount, uint32_t firstIdx, int32_t vtxOffset, uint32_t firstInst) noexcept;
         void (*dispatch)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept;
-        void (*clearRenderTargetView)(CommandList*, ViewHandle, const ClearValue&) noexcept;
         void (*clearRenderTargetViewBySlot)(CommandList*, DescriptorSlot, const ClearValue&) noexcept;
-        void (*clearDepthStencilView)(CommandList*, ViewHandle,
-            bool clearDepth, bool clearStencil,
-            float depth, uint8_t stencil) noexcept;
         void (*clearDepthStencilViewBySlot)(CommandList*, DescriptorSlot,
             bool clearDepth, bool clearStencil,
             float depth, uint8_t stencil) noexcept;        
@@ -1383,10 +1376,7 @@ namespace rhi {
         void Draw(uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) noexcept;
         void DrawIndexed(uint32_t i, uint32_t inst, uint32_t firstIdx, int32_t vOff, uint32_t firstI) noexcept;
         void Dispatch(uint32_t x, uint32_t y, uint32_t z) noexcept;
-        inline void ClearRenderTargetView(ViewHandle v, const ClearValue& c) noexcept { vt->clearRenderTargetView(this, v, c); }
         inline void ClearRenderTargetView(DescriptorSlot s, const ClearValue& c) noexcept { vt->clearRenderTargetViewBySlot(this, s, c); }
-        inline void ClearDepthStencilView(ViewHandle v, bool clearDepth, bool clearStencil, float depth, uint8_t stencil) noexcept {
-            vt->clearDepthStencilView(this, v, clearDepth, clearStencil, depth, stencil); }
         inline void ClearDepthStencilView(DescriptorSlot s, bool clearDepth, bool clearStencil, float depth, uint8_t stencil) noexcept {
             vt->clearDepthStencilViewBySlot(this, s, clearDepth, clearStencil, depth, stencil); }
         void ExecuteIndirect(CommandSignatureHandle sig,
@@ -1509,7 +1499,6 @@ namespace rhi {
     using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
     using CommandListPtr = ObjectPtr<CommandList>;
     using SwapchainPtr = ObjectPtr<Swapchain>;
-    using DevicePtr = ObjectPtr<Device>;
     using ResourcePtr = ObjectPtr<Resource>;
     using QueryPoolPtr = ObjectPtr<QueryPool>;
     using PipelinePtr = ObjectPtr<Pipeline>;
@@ -1519,6 +1508,7 @@ namespace rhi {
     using SamplerPtr = ObjectPtr<Sampler>;
     using TimelinePtr = ObjectPtr<Timeline>;
     using HeapPtr = ObjectPtr<Heap>;
+    //using DevicePtr = ObjectPtr<Device>;
 
 	struct DeviceDeletionContext;
 
@@ -1531,11 +1521,11 @@ namespace rhi {
         SwapchainPtr(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept;
         DescriptorHeapPtr(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
 
-        Result(*createConstantBufferView)(Device*, DescriptorSlot dst, ResourceHandle, const CbvDesc&) noexcept;
-        Result(*createShaderResourceView)(Device*, DescriptorSlot dst, const SrvDesc&) noexcept;
-        Result(*createUnorderedAccessView)(Device*, DescriptorSlot dst, const UavDesc&) noexcept;
-        Result(*createRenderTargetView)(Device*, DescriptorSlot dst, const RtvDesc&) noexcept;
-        Result(*createDepthStencilView)(Device*, DescriptorSlot dst, const DsvDesc&) noexcept;
+        Result(*createConstantBufferView)(Device*, DescriptorSlot dst, const ResourceHandle&, const CbvDesc&) noexcept;
+        Result(*createShaderResourceView)(Device*, DescriptorSlot dst, const ResourceHandle& resource, const SrvDesc&) noexcept;
+        Result(*createUnorderedAccessView)(Device*, DescriptorSlot dst, const ResourceHandle&, const UavDesc&) noexcept;
+        Result(*createRenderTargetView)(Device*, DescriptorSlot dst, const ResourceHandle& resource, const RtvDesc&) noexcept;
+        Result(*createDepthStencilView)(Device*, DescriptorSlot dst, const ResourceHandle&, const DsvDesc&) noexcept;
         Result(*createSampler)(Device*, DescriptorSlot dst, const SamplerDesc&) noexcept;
         ResourcePtr(*createCommittedResource)(Device*, const ResourceDesc&) noexcept;
         TimelinePtr(*createTimeline)(Device*, uint64_t initialValue, const char* debugName) noexcept;
@@ -1649,12 +1639,12 @@ namespace rhi {
 		inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { deletionContext.DestroyCommandSignature(h); }
 		inline DescriptorHeapPtr CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
 		inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { deletionContext.DestroyDescriptorHeap(h); }
-        inline Result CreateConstantBufferView(DescriptorSlot s, ResourceHandle b, const CbvDesc& d) noexcept { return vt->createConstantBufferView(this, s, b, d); }
-        inline Result CreateShaderResourceView(DescriptorSlot s, const SrvDesc& d) noexcept { return vt->createShaderResourceView(this, s, d); }
-        inline Result CreateUnorderedAccessView(DescriptorSlot s, const UavDesc& d) noexcept { return vt->createUnorderedAccessView(this, s, d); }
+        inline Result CreateConstantBufferView(DescriptorSlot s, const ResourceHandle& b, const CbvDesc& d) noexcept { return vt->createConstantBufferView(this, s, b, d); }
+        inline Result CreateShaderResourceView(DescriptorSlot s, const ResourceHandle& resource, const SrvDesc& d) noexcept { return vt->createShaderResourceView(this, s, resource, d); }
+        inline Result CreateUnorderedAccessView(DescriptorSlot s, const ResourceHandle& resource, const UavDesc& d) noexcept { return vt->createUnorderedAccessView(this, s, resource, d); }
         inline Result CreateSampler(DescriptorSlot s, const SamplerDesc& d) noexcept { return vt->createSampler(this, s, d); }
-        inline Result CreateRenderTargetView(DescriptorSlot s, const RtvDesc& d) noexcept { return vt->createRenderTargetView(this, s, d); }
-        inline Result CreateDepthStencilView(DescriptorSlot s, const DsvDesc& d) noexcept { return vt->createDepthStencilView(this, s, d); }
+        inline Result CreateRenderTargetView(DescriptorSlot s, const ResourceHandle& resource, const RtvDesc& d) noexcept { return vt->createRenderTargetView(this, s, resource, d); }
+        inline Result CreateDepthStencilView(DescriptorSlot s, const ResourceHandle& resource, const DsvDesc& d) noexcept { return vt->createDepthStencilView(this, s, resource, d); }
         inline CommandAllocatorPtr CreateCommandAllocator(QueueKind q) noexcept { return vt->createCommandAllocator(this, q); }
 		inline void DestroyCommandAllocator(CommandAllocator* a) noexcept { deletionContext.DestroyCommandAllocator(a); }
 		inline ResourcePtr CreateCommittedResource(const ResourceDesc& d) noexcept { return vt->createCommittedResource(this, d); }
@@ -1675,6 +1665,14 @@ namespace rhi {
             return vt->getCopyableFootprints(this, r, out, outCap);
 		}
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
+    };
+
+    class DevicePtr : public ObjectPtr<Device> {
+    public:
+        DevicePtr() = default;
+        explicit DevicePtr(Device d, DestroyFn fn, std::shared_ptr<void> backendLifetimeHandle) noexcept : ObjectPtr<Device>(d, d, fn), backendLifetimeHandle_(backendLifetimeHandle) {}
+    private:
+        std::shared_ptr<void> backendLifetimeHandle_; // keep backend alive while device is alive
     };
 
     inline Result Queue::Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept { return vt->submit(this, lists, s); }
@@ -1765,14 +1763,14 @@ namespace rhi {
         );
     }
 
-    inline DevicePtr MakeDevicePtr(Device* d) noexcept {
+    inline DevicePtr MakeDevicePtr(Device* d, std::shared_ptr<void> lifetimeHandle) noexcept {
         return DevicePtr(
-            *d, *d,
+            *d,
             // DestroyFn for Device ignores the TObject* and calls destroy on the object itself
             [](Device& /*ignored*/, Device& self) noexcept {
                 if (self && self.IsValid()) self.Destroy();
-            }
-			// TODO: Name hook for Device
+            }, lifetimeHandle
+			// TODO: Name hook for Device?
         );
     }
     inline ResourcePtr MakeTexturePtr(Device* d, Resource r) noexcept {

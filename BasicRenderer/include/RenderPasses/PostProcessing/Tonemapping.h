@@ -78,6 +78,8 @@ public:
 		colorAttachment.loadOp = rhi::LoadOp::Load;
 		colorAttachment.storeOp = rhi::StoreOp::Store;
 		passInfo.colors = { &colorAttachment };
+		passInfo.width = context.outputResolution.x;
+		passInfo.height = context.outputResolution.y;
 		commandList.BeginPass(passInfo);
 
 		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);

@@ -9,39 +9,39 @@ SamplerState g_pointClamp : register(s0);
 // linear-clamp at s1
 SamplerState g_linearClamp : register(s1);
 
-cbuffer PerObject : register(b1) {
+cbuffer PerObject : register(b0) {
     uint perObjectBufferIndex;
 };
 
-cbuffer PerMesh : register(b2) {
+cbuffer PerMesh : register(b1) {
     uint perMeshBufferIndex;
     uint perMeshInstanceBufferIndex;
 };
 
-cbuffer ShadowInfo : register(b3) {
+cbuffer ShadowInfo : register(b2) {
     int currentLightID; // Used for shadow mapping, global light index
     int lightViewIndex; // Used for shadow mapping, index in light type's shadow view matrix array
 };
 
-cbuffer Settings : register(b4) {
+cbuffer Settings : register(b3) {
     bool enableShadows;
     bool enablePunctualLights;
     bool enableGTAO;
 }
 
-cbuffer DrawInfo : register(b5) {
+cbuffer DrawInfo : register(b4) {
     uint maxDrawIndex;
 }
 
-cbuffer transparencyInfo : register(b6) {
+cbuffer transparencyInfo : register(b5) {
     uint PPLLNodePoolSize;
 }
 
-cbuffer LightClusterInfo : register(b7) {
+cbuffer LightClusterInfo : register(b6) {
     uint lightPagesPoolSize;
 }
 
-cbuffer MiscUintRootConstants : register(b8) { // Used for pass-specific one-off constants
+cbuffer MiscUintRootConstants : register(b7) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
     uint UintRootConstant1;
     uint UintRootConstant2;
@@ -55,7 +55,7 @@ cbuffer MiscUintRootConstants : register(b8) { // Used for pass-specific one-off
     uint UintRootConstant10;
 }
 
-cbuffer MiscFloatRootConstants : register(b9) { // Used for pass-specific one-off constants
+cbuffer MiscFloatRootConstants : register(b8) { // Used for pass-specific one-off constants
     float FloatRootConstant0;
     float FloatRootConstant1;
     float FloatRootConstant2;
@@ -64,7 +64,7 @@ cbuffer MiscFloatRootConstants : register(b9) { // Used for pass-specific one-of
     float FloatRootConstant5;
 }
 
-cbuffer ResourceDescriptorIndices : register(b10) {
+cbuffer ResourceDescriptorIndices : register(b9) {
     uint ResourceDescriptorIndex0;
     uint ResourceDescriptorIndex1;
     uint ResourceDescriptorIndex2;

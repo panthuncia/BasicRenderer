@@ -92,26 +92,26 @@ void UpscalingManager::InitializeAdapter()
 {
     auto dev = DeviceManager::GetInstance().GetDevice();
 
-    if (CheckDLSSSupport(dev)) {
-        m_upscalingMode = UpscalingMode::DLSS;
-        if (!InitSL()) {
-            m_upscalingMode = UpscalingMode::FSR3; // fallback
-        }
-    }
-    else {
-        m_upscalingMode = UpscalingMode::FSR3;
-    }
+    //if (CheckDLSSSupport(dev)) {
+    //    m_upscalingMode = UpscalingMode::DLSS;
+    //    if (!InitSL()) {
+    //        m_upscalingMode = UpscalingMode::FSR3; // fallback
+    //    }
+    //}
+    //else {
+    //    m_upscalingMode = UpscalingMode::FSR3;
+    //}
 
-    if (m_upscalingMode == UpscalingMode::DLSS) {
-        // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
-        rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface);
-        // Let SL know about the device we're using
-        slSetD3DDevice(dx12_device());
-    }
+    //if (m_upscalingMode == UpscalingMode::DLSS) {
+    //    // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
+    //    rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface);
+    //    // Let SL know about the device we're using
+    //    slSetD3DDevice(dx12_device());
+    //}
 
-    if (m_upscalingMode == UpscalingMode::FSR3) {
-        InitFFX();
-    }
+    //if (m_upscalingMode == UpscalingMode::FSR3) {
+    //    InitFFX();
+    //}
 }
 
 ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device) {

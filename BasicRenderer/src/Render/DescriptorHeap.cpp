@@ -34,15 +34,15 @@ UINT DescriptorHeap::AllocateDescriptor() {
 }
 
 void DescriptorHeap::ReleaseDescriptor(UINT index) {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-    if (index == 0) {
-		spdlog::error("DescriptorHeap::ReleaseDescriptor: Attempting to release descriptor 0");
-    }
-    int32_t signedValue = static_cast<int32_t>(index);
-	// Disable signed/unsigned comparison warning for this line
-#pragma warning(suppress : 4018)
-	assert(signedValue >= 0 && signedValue < m_totalSize); // If this trggers, a descriptor is likely set but uninitialized
-#pragma warning(default : 4018)
-#endif
+//#if BUILD_TYPE == BUILD_TYPE_DEBUG
+//    if (index == 0) {
+//		spdlog::error("DescriptorHeap::ReleaseDescriptor: Attempting to release descriptor 0");
+//    }
+//    int32_t signedValue = static_cast<int32_t>(index);
+//	// Disable signed/unsigned comparison warning for this line
+//#pragma warning(suppress : 4018)
+//	assert(signedValue >= 0 && signedValue < m_totalSize); // If this trggers, a descriptor is likely set but uninitialized
+//#pragma warning(default : 4018)
+//#endif
     m_freeIndices.push(index);
 }

@@ -155,6 +155,7 @@ private:
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
         m_vertexBuffer = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
+		m_vertexBuffer->SetName(L"Skybox VB");
 
         UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer.get(), 0);
 
@@ -162,6 +163,7 @@ private:
 		vertexBufferView.buffer = m_vertexBuffer->GetAPIResource().GetHandle();
 		vertexBufferView.offset = 0;
 		vertexBufferView.sizeBytes = vertexBufferSize;
+		vertexBufferView.stride = sizeof(SkyboxVertex);
 
         return vertexBufferView;
     }
@@ -173,13 +175,13 @@ private:
         pcVS.visibility = rhi::ShaderStage::Vertex;
         pcVS.num32BitValues = 16; // view-projection matrix (float4x4)
         pcVS.set = 0; // space0
-        pcVS.binding = 1; // b1
+        pcVS.binding = 0; // b0
 
         rhi::PushConstantRangeDesc pcPS{};
         pcPS.visibility = rhi::ShaderStage::Pixel;
         pcPS.num32BitValues = 1; // environment SRV index in bindless heap
         pcPS.set = 0; // space0
-        pcPS.binding = 2; // b2
+        pcPS.binding = 1; // b1
 
         rhi::StaticSamplerDesc s0{}; // point-clamp at s0
         s0.visibility = rhi::ShaderStage::Pixel;

@@ -80,9 +80,7 @@ namespace rhi {
 		&cl_draw,
 		&cl_drawIndexed,
 		&cl_dispatch,
-		cl_clearRTV_view,
 		cl_clearRTV_slot,
-		cl_clearDSV_view,
 		cl_clearDSV_slot,
 		&cl_executeIndirect,
 		&cl_setDescriptorHeaps,
@@ -165,7 +163,7 @@ namespace rhi {
 #ifdef _DEBUG
 		if (ci.enableDebug) { ComPtr<ID3D12Debug> dbg; if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer(), flags |= DXGI_CREATE_FACTORY_DEBUG; }
 #endif
-		auto* impl = new Dx12Device();
+		auto impl = std::make_shared<Dx12Device>();
 		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->factory));
 
 		// Select default adapter. TODO: expose adapter selection
@@ -185,10 +183,10 @@ namespace rhi {
 			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
 
 			DWORD callbackCookie = 0;
-			infoQueue->RegisterMessageCallback([](D3D12_MESSAGE_CATEGORY category, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID id, LPCSTR description, void* context) {
-				// Log or print the debug messages,
-				spdlog::error("D3D12 Debug Message: {}", description);
-				}, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &callbackCookie);
+			//infoQueue->RegisterMessageCallback([](D3D12_MESSAGE_CATEGORY category, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID id, LPCSTR description, void* context) {
+			//	// Log or print the debug messages,
+			//	spdlog::error("D3D12 Debug Message: {}", description);
+			//	}, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &callbackCookie);
 		}
 #endif
 
@@ -218,8 +216,10 @@ namespace rhi {
 		makeQ(D3D12_COMMAND_LIST_TYPE_COMPUTE, impl->comp);
 		makeQ(D3D12_COMMAND_LIST_TYPE_COPY, impl->copy);
 
-		Device d { impl, &g_devvt };
-		return MakeDevicePtr(&d);
+		impl->selfWeak = impl;
+
+		Device d { impl.get(), &g_devvt};
+		return MakeDevicePtr(&d, impl);
 	}
 
 }

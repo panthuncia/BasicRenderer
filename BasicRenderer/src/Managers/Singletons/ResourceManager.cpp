@@ -225,9 +225,9 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 
 	device.CreateShaderResourceView(
 		{ m_cbvSrvUavHeap->GetHeap().GetHandle(), index},
+		pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 		{
 			.dimension = rhi::SrvDim::Buffer,
-			.resource = pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 			.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown,
 			.buffer = {
 				.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
@@ -248,8 +248,8 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
 		device.CreateUnorderedAccessView(
 			{ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex},
+			pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 			{
-				.resource = pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 				.dimension = rhi::UavDim::Buffer,
 				.buffer = {
 					.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
@@ -289,9 +289,9 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
 	device.CreateShaderResourceView(
 		{ m_cbvSrvUavHeap->GetHeap().GetHandle(), index},
+		pBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 		{
 			.dimension = rhi::SrvDim::Buffer,
-			.resource = pBuffer->GetBuffer()->GetAPIResource().GetHandle(),
 			.formatOverride = rhi::Format::Unknown,
 			.buffer = {
 				.kind = rhi::BufferViewKind::Structured,

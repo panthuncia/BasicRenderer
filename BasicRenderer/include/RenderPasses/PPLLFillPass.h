@@ -213,16 +213,16 @@ private:
 		settings[EnableShadows] = getShadowsEnabled();
 		settings[EnablePunctualLights] = getPunctualLightingEnabled();
 		settings[EnableGTAO] = m_gtaoEnabled;
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
 
 		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
 		transparencyInfo[PPLLNodePoolSize] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, TransparencyInfoRootSignatureIndex, 0, NumTransparencyInfoRootConstants, &transparencyInfo);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, TransparencyInfoRootSignatureIndex, 0, NumTransparencyInfoRootConstants, &transparencyInfo);
 
 		if (m_meshShaders) {
 			unsigned int misc[NumMiscUintRootConstants] = {};
 			misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 		}
 	}
 
@@ -232,7 +232,7 @@ private:
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
 			auto& meshes = blendMeshes.meshInstances;
 
-			commandList.PushConstants(rhi::ShaderStage::Pixel, 1, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
+			commandList.PushConstants(rhi::ShaderStage::Pixel, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
@@ -243,7 +243,7 @@ private:
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
 				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
 				commandList.SetIndexBuffer(mesh.GetIndexBufferView());
 
@@ -258,7 +258,7 @@ private:
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
 			auto& meshes = blendMeshes.meshInstances;
 
-			commandList.PushConstants(rhi::ShaderStage::Pixel, 1, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
+			commandList.PushConstants(rhi::ShaderStage::Pixel, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
@@ -269,7 +269,7 @@ private:
 				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
 				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 1, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
 				commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}

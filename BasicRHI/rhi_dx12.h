@@ -26,6 +26,14 @@
 #define SAFE_RELEASE(p) if(p){ (p)->Release(); (p)=nullptr; }
 #endif
 
+inline void BreakIfDebugging() {
+#if NDEBUG
+	if (IsDebuggerPresent()) {
+		__debugbreak();
+	}
+#endif
+}
+
 inline std::wstring s2ws(const std::string & s) {
 	int buffSize = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
 	std::wstring ws(buffSize, 0);
@@ -33,11 +41,21 @@ inline std::wstring s2ws(const std::string & s) {
 	return ws;
 }
 
+
+
 namespace rhi {
 	using Microsoft::WRL::ComPtr;
+	struct Dx12Device;
 
-	struct Dx12Buffer { ComPtr<ID3D12Resource> res;};
+	struct Dx12Buffer { 
+		explicit Dx12Buffer(ComPtr<ID3D12Resource> r, std::shared_ptr<Dx12Device> d) : res(r), dev(d) {}
+		ComPtr<ID3D12Resource> res;
+		std::shared_ptr<Dx12Device> dev;
+	};
 	struct Dx12Texture { 
+		explicit Dx12Texture(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth, std::shared_ptr<Dx12Device> d) 
+			: res(r), fmt(f), w(width), h(height), mips(mips), arraySize(arraySize), dim(dim), depth(depth), dev(d) {
+		}
 		ComPtr<ID3D12Resource> res; 
 		DXGI_FORMAT fmt{ DXGI_FORMAT_UNKNOWN }; 
 		uint32_t w = 0, h = 0; 
@@ -45,11 +63,34 @@ namespace rhi {
 		uint16_t arraySize = 1; // for 1D/2D/cube (cube arrays should already multiply by 6)
 		D3D12_RESOURCE_DIMENSION dim = D3D12_RESOURCE_DIMENSION_UNKNOWN;
 		uint16_t depth = 1;
+		std::shared_ptr<Dx12Device> dev;
 	};
-	struct Dx12View { ViewDesc desc; D3D12_CPU_DESCRIPTOR_HANDLE cpu{}; };
-	struct Dx12Sampler { SamplerDesc desc; };
-	struct Dx12Pipeline { Microsoft::WRL::ComPtr<ID3D12PipelineState> pso; bool isCompute; };
+	struct Dx12Sampler { 
+		explicit Dx12Sampler(SamplerDesc d, std::shared_ptr<Dx12Device> device) : desc(d), dev(device) {}
+		SamplerDesc desc;
+		std::shared_ptr<Dx12Device> dev;
+	};
+	struct Dx12Pipeline { 
+		explicit Dx12Pipeline(Microsoft::WRL::ComPtr<ID3D12PipelineState> p, bool isComp, std::shared_ptr<Dx12Device> device) : pso(p), isCompute(isComp), dev(device) {}
+		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso; 
+		bool isCompute; 
+		std::shared_ptr<Dx12Device> dev;
+	};
 	struct Dx12PipelineLayout {
+		explicit Dx12PipelineLayout(const PipelineLayoutDesc& d, std::shared_ptr<Dx12Device> device)
+			: desc(d), dev(device) {
+			// build root constant param lookup
+			for (uint32_t i = 0; i < pcs.size(); ++i) {
+				const auto& p = pcs[i];
+				RootConstParam rcp;
+				rcp.set = p.set;
+				rcp.binding = p.binding;
+				rcp.num32 = p.num32BitValues;
+				rcp.rootIndex = i; // assume order is preserved
+				rcParams.push_back(rcp);
+			}
+		}
+		PipelineLayoutDesc desc;
 		std::vector<PushConstantRangeDesc> pcs;
 		std::vector<StaticSamplerDesc> staticSamplers;
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> root;
@@ -60,41 +101,37 @@ namespace rhi {
 			uint32_t rootIndex;  // root parameter index in this RS
 		};
 		std::vector<RootConstParam> rcParams;
+		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12CommandSignature {
+		explicit Dx12CommandSignature(Microsoft::WRL::ComPtr<ID3D12CommandSignature> s, uint32_t str, std::shared_ptr<Dx12Device> device) : sig(s), stride(str), dev(device) {}
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> sig;
 		uint32_t stride = 0;
+		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12Allocator {
+		explicit Dx12Allocator(Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d) : alloc(a), type(t), dev(d) {}
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc; 
 		D3D12_COMMAND_LIST_TYPE type{}; 
+		std::shared_ptr<Dx12Device> dev;
 	};
-	struct Dx12Device;
 	struct Dx12CommandList { 
+		explicit Dx12CommandList(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> c, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d)
+			: cl(c), alloc(a), type(t), dev(d) {
+		}
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl; 
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
 		D3D12_COMMAND_LIST_TYPE type{}; 
-		Dx12Device* dev; 
 		PipelineLayoutHandle boundLayout{};
 		Dx12PipelineLayout* boundLayoutPtr = nullptr;
+		std::shared_ptr<Dx12Device> dev;
 	};
 
 	// Build D3D12_RESOURCE_DESC1 for buffers
 	static D3D12_RESOURCE_DESC1 MakeBufferDesc1(uint64_t bytes, D3D12_RESOURCE_FLAGS flags) {
-		D3D12_RESOURCE_DESC1 d{};
-		d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-		d.Alignment = 0;
-		d.Width = bytes;
-		d.Height = 1;
-		d.DepthOrArraySize = 1;
-		d.MipLevels = 1;
-		d.Format = DXGI_FORMAT_UNKNOWN;
-		d.SampleDesc = { 1, 0 };
-		d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-		d.Flags = flags;
-		d.SamplerFeedbackMipRegion = {};
+		CD3DX12_RESOURCE_DESC1 d = CD3DX12_RESOURCE_DESC1::Buffer(bytes, flags);
 		return d;
 	}
 
@@ -135,40 +172,67 @@ namespace rhi {
 	}
 
 	struct Dx12DescriptorHeap {
+		explicit Dx12DescriptorHeap(Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> h, D3D12_DESCRIPTOR_HEAP_TYPE t, UINT incrementSize, bool sv, std::shared_ptr<Dx12Device> d)
+			: heap(h), type(t), inc(incrementSize), shaderVisible(sv), dev(d) {
+			cpuStart = heap->GetCPUDescriptorHandleForHeapStart();
+			if (shaderVisible) {
+				gpuStart = heap->GetGPUDescriptorHandleForHeapStart();
+			}
+		}
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
 		D3D12_DESCRIPTOR_HEAP_TYPE type{};
 		UINT inc{ 0 };
 		bool shaderVisible{ false };
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuStart{};
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
+		std::shared_ptr<Dx12Device> dev;
 	};
 
-	struct Dx12Timeline { Microsoft::WRL::ComPtr<ID3D12Fence> fence; };
+	struct Dx12Timeline { 
+		explicit Dx12Timeline(Microsoft::WRL::ComPtr<ID3D12Fence> f, std::shared_ptr<Dx12Device> d) : fence(f), dev(d) {}
+		Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+		std::shared_ptr<Dx12Device> dev;
+	};
 
 	struct Dx12QueueState {
 		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
-		Microsoft::WRL::ComPtr<ID3D12Fence> fence; UINT64 value = 0;
-		Dx12Device* owner{};
+		Microsoft::WRL::ComPtr<ID3D12Fence> fence; 
+		UINT64 value = 0;
+		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12Swapchain {
-		ComPtr<IDXGISwapChain3> sc; DXGI_FORMAT fmt{}; UINT w{}, h{}, count{}; UINT current{};
-		//ComPtr<ID3D12DescriptorHeap> rtvHeap; UINT rtvInc{}; 
-		//std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU;
+		explicit Dx12Swapchain(ComPtr<IDXGISwapChain3> s, DXGI_FORMAT f, UINT width, UINT height, UINT c,
+			std::vector<ComPtr<ID3D12Resource>> images,
+			std::vector<ResourceHandle> imageHandles, 
+			std::shared_ptr<Dx12Device> d)
+			: sc(s), fmt(f), w(width), h(height), count(c), images(images), imageHandles(imageHandles), dev(d) {
+		}
+		ComPtr<IDXGISwapChain3> sc; 
+		DXGI_FORMAT fmt{}; 
+		UINT w{}, h{}, count{}; 
+		UINT current{};
 		std::vector<ComPtr<ID3D12Resource>> images;
 		std::vector<ResourceHandle> imageHandles; 
-		//std::vector<ViewHandle> rtvHandles;
+		std::shared_ptr<Dx12Device> dev;
 	};
 
-	struct Dx12Heap { Microsoft::WRL::ComPtr<ID3D12Heap> heap; uint64_t size{}; };
+	struct Dx12Heap { 
+		explicit Dx12Heap(Microsoft::WRL::ComPtr<ID3D12Heap> h, uint64_t s, std::shared_ptr<Dx12Device> d) : heap(h), size(s), dev(d) {}
+		Microsoft::WRL::ComPtr<ID3D12Heap> heap; 
+		uint64_t size{};
+		std::shared_ptr<Dx12Device> dev;
+	};
 
 	struct Dx12QueryPool {
+		explicit Dx12QueryPool(Microsoft::WRL::ComPtr<ID3D12QueryHeap> h, D3D12_QUERY_HEAP_TYPE t, uint32_t c, std::shared_ptr<Dx12Device> d) : heap(h), type(t), count(c), dev(d) {}
 		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
 		D3D12_QUERY_HEAP_TYPE type{};
 		uint32_t count = 0;
 
 		// For pipeline stats, remember if we used *_STATISTICS1 (mesh/task) or legacy
 		bool usePSO1 = false;
+		std::shared_ptr<Dx12Device> dev;
 	};
 
 	// tiny handle registry
@@ -176,7 +240,6 @@ namespace rhi {
 
 	template<> struct HandleFor<Dx12Buffer> { using type = ResourceHandle; };
 	template<> struct HandleFor<Dx12Texture> { using type = ResourceHandle; };
-	template<> struct HandleFor<Dx12View> { using type = ViewHandle; };
 	template<> struct HandleFor<Dx12Sampler> { using type = SamplerHandle; };
 	template<> struct HandleFor<Dx12PipelineLayout> { using type = PipelineLayoutHandle; };
 	template<> struct HandleFor<Dx12Pipeline> { using type = PipelineHandle; };
@@ -239,7 +302,6 @@ namespace rhi {
 
 		Registry<Dx12Buffer> buffers;
 		Registry<Dx12Texture> textures;
-		Registry<Dx12View> views;
 		Registry<Dx12Sampler> samplers;
 		Registry<Dx12PipelineLayout> pipelineLayouts;
 		Registry<Dx12Pipeline> pipelines;
@@ -252,6 +314,9 @@ namespace rhi {
 		Registry<Dx12QueryPool> queryPools;
 
 		Dx12QueueState gfx{}, comp{}, copy{};
+
+		// lifetime anchor
+		std::weak_ptr<Dx12Device> selfWeak;
 	};
 
 	// ---------------- VTables forward ----------------
@@ -374,7 +439,10 @@ namespace rhi {
 			case PsoSubobj::Layout: {
 				auto& L = *static_cast<const SubobjLayout*>(items[i].data);
 				auto* pl = dimpl->pipelineLayouts.get(L.layout);
-				if (!pl || !pl->root) return {};
+				if (!pl || !pl->root) { 
+					BreakIfDebugging();
+					return {};
+				};
 				root = pl->root.Get();
 			} break;
 			case PsoSubobj::Shader: {
@@ -454,10 +522,12 @@ namespace rhi {
 		// Validate & decide kind
 		if (hasCS && hasGfx) {
 			spdlog::error("DX12 pipeline creation: cannot mix compute and graphics shaders in one PSO");
+			BreakIfDebugging();
 			return {};          // invalid mix
 		}
 		if (!hasCS && !hasGfx) {
 			spdlog::error("DX12 pipeline creation: no shaders specified");
+			BreakIfDebugging();
 			return {};        // no shaders
 		}
 		const bool isCompute = hasCS;
@@ -484,9 +554,12 @@ namespace rhi {
 		auto sd = sb.desc();
 
 		ComPtr<ID3D12PipelineState> pso;
-		if (FAILED(dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) return {};
+		if (FAILED(dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) {
+			BreakIfDebugging();
+			return {};
+		}
 
-		auto handle = dimpl->pipelines.alloc(Dx12Pipeline{ pso, isCompute });
+		auto handle = dimpl->pipelines.alloc(Dx12Pipeline( pso, isCompute, dimpl->selfWeak.lock() ));
 		Pipeline out(handle);
 		out.vt = &g_psovt;
 		out.impl = dimpl->pipelines.get(handle);;
@@ -496,12 +569,14 @@ namespace rhi {
 
 	static void d_destroyBuffer(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->buffers.free(h); }
 	static void d_destroyTexture(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->textures.free(h); }
-	static void d_destroyView(DeviceDeletionContext* d, ViewHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->views.free(h); }
 	static void d_destroySampler(DeviceDeletionContext* d, SamplerHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->samplers.free(h); }
 	static void d_destroyPipeline(DeviceDeletionContext* d, PipelineHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->pipelines.free(h); }
 
 	static void d_destroyCommandList(DeviceDeletionContext* d, CommandList* p) noexcept {
-		if (!d || !p || !p->IsValid()) return;
+		if (!d || !p || !p->IsValid()) { 
+			BreakIfDebugging();
+			return; 
+		}
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		impl->commandLists.free(p->GetHandle());
 		p->Reset();
@@ -511,7 +586,7 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Queue out{qk}; out.vt = &g_qvt;
 		Dx12QueueState* s = (qk == QueueKind::Graphics ? &impl->gfx : qk == QueueKind::Compute ? &impl->comp : &impl->copy);
-		s->owner = impl;
+		s->dev = impl->selfWeak.lock();
 		out.impl = s;
 		return out;
 	}
@@ -548,60 +623,28 @@ namespace rhi {
 		auto hr = facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), (HWND)hwnd, &desc, nullptr, nullptr, &sc1);
 		if (FAILED(hr)) {
 			spdlog::error("DX12 CreateSwapChainForHwnd failed: {0}", std::to_string(hr));
+			BreakIfDebugging();
 			return {};
 		}
 		ComPtr<IDXGISwapChain3> sc; 
 		sc1.As(&sc);
 
-		// RTV heap for backbuffers
-		ComPtr<ID3D12DescriptorHeap> rtvHeap;
-		D3D12_DESCRIPTOR_HEAP_DESC hd{};
-		hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-		hd.NumDescriptors = bufferCount; impl->dev->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&rtvHeap));
-		UINT inc = impl->dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-		auto cpuStart = rtvHeap->GetCPUDescriptorHandleForHeapStart();
-
 		std::vector<ComPtr<ID3D12Resource>> imgs(bufferCount);
-		//std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvCPU(bufferCount);
 		std::vector<ResourceHandle> imgHandles(bufferCount);
-		//std::vector<ViewHandle> rtvHandles(bufferCount);
 
 		for (UINT i = 0; i < bufferCount; i++) {
 			sc->GetBuffer(i, IID_PPV_ARGS(&imgs[i]));
 			// Register as a TextureHandle
-			Dx12Texture t{};
-			t.res = imgs[i];
-			t.fmt = desc.Format;
-			t.w = w;
-			t.h = h;
-			t.mips = 1;
-			t.arraySize = 1;
-			t.dim = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-			t.depth = 1;
+			Dx12Texture t(imgs[i], desc.Format, w, h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1, impl->selfWeak.lock());
 			imgHandles[i] = impl->textures.alloc(t);
-			//// Create RTV in the heap
-			//auto cpu = cpuStart;
-			//cpu.ptr += SIZE_T(i) * inc; rtvCPU[i] = cpu;
-			//D3D12_RENDER_TARGET_VIEW_DESC r{};
-			//r.Format = desc.Format;
-			//r.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-			//impl->dev->CreateRenderTargetView(imgs[i].Get(), &r, cpu);
-			//// Also register a ViewHandle so RHI passes can reference it directly
-			//Dx12View v{};
-			//v.desc = ViewDesc{ ViewKind::RTV, imgHandles[i], {}, Format::Unknown };
-			//v.cpu = cpu;
-			//rtvHandles[i] = impl->views.alloc(v);
+
 		}
 
-		auto* scWrap = new Dx12Swapchain{};
-		scWrap->sc = sc; scWrap->fmt = desc.Format;
-		scWrap->w = w; scWrap->h = h;
-		scWrap->count = bufferCount;
-		scWrap->current = sc->GetCurrentBackBufferIndex();
-		//scWrap->rtvHeap = rtvHeap;
-		//scWrap->rtvInc = inc; scWrap->rtvCPU = rtvCPU; scWrap->images = imgs;
-		scWrap->imageHandles = imgHandles;
-		//scWrap->rtvHandles = rtvHandles;
+		auto* scWrap = new Dx12Swapchain(
+			sc, desc.Format, w, h, bufferCount,
+			imgs, imgHandles,
+			impl->selfWeak.lock()
+		);
 
 		Swapchain out{};
 		out.impl = scWrap;
@@ -617,7 +660,6 @@ namespace rhi {
 
 	static void d_destroyDevice(Device* d) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		delete impl; d->impl = nullptr;
 		d->vt = nullptr;
 	}
 
@@ -691,14 +733,18 @@ namespace rhi {
 
 
 		Microsoft::WRL::ComPtr<ID3DBlob> blob, err;
-		if (FAILED(D3DX12SerializeVersionedRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1_1, &blob, &err)))
+		if (FAILED(D3DX12SerializeVersionedRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1_1, &blob, &err))) {
+			BreakIfDebugging();
 			return {};
+		}
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> root;
 		if (FAILED(impl->dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
-			IID_PPV_ARGS(&root))))
+			IID_PPV_ARGS(&root)))) {
+			BreakIfDebugging();
 			return {};
+		}
 
-		Dx12PipelineLayout L{};
+		Dx12PipelineLayout L(ld, impl->selfWeak.lock());
 		if (ld.pushConstants.size && ld.pushConstants.data) {
 			L.pcs.assign(ld.pushConstants.data, ld.pushConstants.data + ld.pushConstants.size);
 			// Build rcParams in the same order as params:
@@ -773,7 +819,10 @@ namespace rhi {
 		ID3D12RootSignature* rs = nullptr;
 		if (hasRoot) {
 			auto* L = impl->pipelineLayouts.get(layout);
-			if (!L || !L->root) return {};
+			if (!L || !L->root) {
+				BreakIfDebugging();
+				return {};
+			}
 			rs = L->root.Get();
 		}
 
@@ -783,8 +832,11 @@ namespace rhi {
 		desc.ByteStride = cd.byteStride;
 
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> cs;
-		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) return {};
-		Dx12CommandSignature S{ cs, cd.byteStride };
+		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) { 
+			BreakIfDebugging();
+			return {}; 
+		}
+		Dx12CommandSignature S(cs, cd.byteStride, impl->selfWeak.lock());
 		auto handle = impl->commandSignatures.alloc(std::move(S));
 		CommandSignature out(handle);
 		out.vt = &g_csvt;
@@ -805,14 +857,13 @@ namespace rhi {
 		desc.Flags = hd.shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
-		if (FAILED(impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
+		if (FAILED(impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)))) { 
+			BreakIfDebugging();
+			return {}; 
+		}
 
-		Dx12DescriptorHeap H{};
-		H.heap = heap; H.type = desc.Type;
-		H.inc = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
-		H.shaderVisible = (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0;
-		H.cpuStart = heap->GetCPUDescriptorHandleForHeapStart();
-		if (H.shaderVisible) H.gpuStart = heap->GetGPUDescriptorHandleForHeapStart();
+		auto descriptorSize = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
+		Dx12DescriptorHeap H(heap, desc.Type, descriptorSize, (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0, impl->selfWeak.lock());
 
 		auto handle = impl->descHeaps.alloc(std::move(H));
 		DescriptorHeap out(handle);
@@ -841,12 +892,14 @@ namespace rhi {
 		return true;
 	}
 
-	static Result d_createShaderResourceView(Device* d, DescriptorSlot s, const SrvDesc& dv) noexcept {
+	static Result d_createShaderResourceView(Device* d, DescriptorSlot s, const ResourceHandle& resource, const SrvDesc& dv) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV))
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
+			BreakIfDebugging();
 			return Result::InvalidArg;
+		}
 
 		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
 		desc.Shader4ComponentMapping = (dv.componentMapping == 0)
@@ -855,8 +908,11 @@ namespace rhi {
 
 		switch (dv.dimension) {
 		case SrvDim::Buffer: {
-			auto* B = impl->buffers.get(dv.resource);
-			if (!B || !B->res) return Result::InvalidArg;
+			auto* B = impl->buffers.get(resource);
+			if (!B || !B->res) { 
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
 
 			desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
 			switch (dv.buffer.kind) {
@@ -887,7 +943,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture1D: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D;
 			desc.Texture1D.MostDetailedMip = dv.tex1D.mostDetailedMip;
@@ -898,7 +954,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture1DArray: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1DARRAY;
 			desc.Texture1DArray.MostDetailedMip = dv.tex1DArray.mostDetailedMip;
@@ -912,7 +968,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2D: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 			desc.Texture2D.MostDetailedMip = dv.tex2D.mostDetailedMip;
@@ -924,7 +980,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DArray: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
 			desc.Texture2DArray.MostDetailedMip = dv.tex2DArray.mostDetailedMip;
@@ -938,7 +994,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DMS: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
 			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
@@ -946,7 +1002,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DMSArray: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
 			desc.Texture2DMSArray.FirstArraySlice = dv.tex2DMSArray.firstArraySlice;
@@ -956,7 +1012,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture3D: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
 			desc.Texture3D.MostDetailedMip = dv.tex3D.mostDetailedMip;
@@ -967,7 +1023,7 @@ namespace rhi {
 		}
 
 		case SrvDim::TextureCube: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
 			desc.TextureCube.MostDetailedMip = dv.cube.mostDetailedMip;
@@ -978,7 +1034,7 @@ namespace rhi {
 		}
 
 		case SrvDim::TextureCubeArray: {
-			auto* T = impl->textures.get(dv.resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
 			desc.TextureCubeArray.MostDetailedMip = dv.cubeArray.mostDetailedMip;
@@ -992,7 +1048,7 @@ namespace rhi {
 
 		case SrvDim::AccelerationStruct: {
 			// AS is stored in a buffer with ResourceFlags::RaytracingAccelerationStructure
-			auto* B = impl->buffers.get(dv.resource); if (!B || !B->res) return Result::InvalidArg;
+			auto* B = impl->buffers.get(resource); if (!B || !B->res) return Result::InvalidArg;
 			desc.Format = DXGI_FORMAT_UNKNOWN;
 			desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
 			desc.RaytracingAccelerationStructure.Location = B->res->GetGPUVirtualAddress();
@@ -1002,18 +1058,23 @@ namespace rhi {
 
 		default: break;
 		}
-
+		BreakIfDebugging();
 		return Result::InvalidArg;
 	}
 
-	static Result d_createUnorderedAccessView(Device* d, DescriptorSlot s, const UavDesc& dv) noexcept
+	static Result d_createUnorderedAccessView(Device* d, DescriptorSlot s, const ResourceHandle& resource, const UavDesc& dv) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) return Result::Failed;
+		if (!impl) { 
+			BreakIfDebugging();
+			return Result::Failed;
+		};
 
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV))
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
+			BreakIfDebugging();
 			return Result::InvalidArg;
+		}
 
 		D3D12_UNORDERED_ACCESS_VIEW_DESC desc{};
 		ID3D12Resource* pResource = nullptr;
@@ -1024,8 +1085,11 @@ namespace rhi {
 			// ========================= Buffer UAV =========================
 		case UavDim::Buffer:
 		{
-			auto* B = impl->buffers.get(dv.resource);
-			if (!B || !B->res) return Result::InvalidArg;
+			auto* B = impl->buffers.get(resource);
+			if (!B || !B->res) { 
+				BreakIfDebugging();
+				return Result::InvalidArg; 
+			}
 
 			pResource = B->res.Get();
 			desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
@@ -1064,8 +1128,11 @@ namespace rhi {
 		// ========================= Texture UAVs =========================
 		case UavDim::Texture1D:
 		{
-			auto* T = impl->textures.get(dv.resource);
-			if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource);
+			if (!T || !T->res) {
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
 			pResource = T->res.Get();
 
 			desc.Format = T->fmt;
@@ -1078,8 +1145,11 @@ namespace rhi {
 
 		case UavDim::Texture1DArray:
 		{
-			auto* T = impl->textures.get(dv.resource);
-			if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource);
+			if (!T || !T->res) { 
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
 			pResource = T->res.Get();
 
 			desc.Format = T->fmt;
@@ -1094,8 +1164,11 @@ namespace rhi {
 
 		case UavDim::Texture2D:
 		{
-			auto* T = impl->textures.get(dv.resource);
-			if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource);
+			if (!T || !T->res) { 
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
 			pResource = T->res.Get();
 
 			desc.Format = T->fmt;
@@ -1109,8 +1182,11 @@ namespace rhi {
 
 		case UavDim::Texture2DArray:
 		{
-			auto* T = impl->textures.get(dv.resource);
-			if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource);
+			if (!T || !T->res) { 
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
 			pResource = T->res.Get();
 
 			desc.Format = T->fmt;
@@ -1126,8 +1202,11 @@ namespace rhi {
 
 		case UavDim::Texture3D:
 		{
-			auto* T = impl->textures.get(dv.resource);
-			if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource);
+			if (!T || !T->res) { 
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
 			pResource = T->res.Get();
 
 			desc.Format = T->fmt;
@@ -1143,17 +1222,21 @@ namespace rhi {
 		case UavDim::Texture2DMS:
 		case UavDim::Texture2DMSArray:
 			// UAVs for MSAA textures are not supported by D3D12
+			BreakIfDebugging();
 			return Result::Unsupported;
 		}
-
+		BreakIfDebugging();
 		return Result::InvalidArg;
 	}
 
-	static Result d_createConstantBufferView(Device* d, DescriptorSlot s, ResourceHandle bh, const CbvDesc& dv) noexcept {
+	static Result d_createConstantBufferView(Device* d, DescriptorSlot s, const ResourceHandle& bh, const CbvDesc& dv) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
 		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return Result::InvalidArg;
-		auto* B = impl->buffers.get(bh); if (!B) return Result::InvalidArg;
+		auto* B = impl->buffers.get(bh); if (!B) { 
+			BreakIfDebugging();
+			return Result::InvalidArg;
+		}
 
 		D3D12_CONSTANT_BUFFER_VIEW_DESC desc{};
 		desc.BufferLocation = B->res->GetGPUVirtualAddress() + dv.byteOffset;
@@ -1166,7 +1249,10 @@ namespace rhi {
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)) return Result::InvalidArg;
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)) { 
+			BreakIfDebugging();
+			return Result::InvalidArg;
+		}
 
 		D3D12_SAMPLER_DESC desc{};
 		desc.Filter = BuildDxFilter(sd);
@@ -1191,18 +1277,26 @@ namespace rhi {
 		return Result::Ok;
 	}
 
-	static Result d_createRenderTargetView(Device* d, DescriptorSlot s, const RtvDesc& rd) noexcept
+	static Result d_createRenderTargetView(Device* d, DescriptorSlot s, const ResourceHandle& texture, const RtvDesc& rd) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) return Result::Failed;
+		if (!impl) { 
+			BreakIfDebugging();
+			return Result::Failed;
+		}
 
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_RTV))
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
+			BreakIfDebugging();
 			return Result::InvalidArg;
+		}
 
 		// For texture RTVs we expect a texture resource
-		auto* T = impl->textures.get(rd.texture);
-		if (!T && rd.dimension != RtvDim::Buffer) return Result::InvalidArg;
+		auto* T = impl->textures.get(texture);
+		if (!T && rd.dimension != RtvDim::Buffer) { 
+			BreakIfDebugging();
+			return Result::InvalidArg;
+		}
 
 		D3D12_RENDER_TARGET_VIEW_DESC r{};
 		ID3D12Resource* pRes = nullptr;
@@ -1284,10 +1378,12 @@ namespace rhi {
 		case RtvDim::Buffer:
 		{
 			// TODO: What is this?
+			BreakIfDebugging();
 			return Result::Unsupported;
 		}
 
 		default:
+			BreakIfDebugging();
 			return Result::Unsupported;
 		}
 
@@ -1295,17 +1391,25 @@ namespace rhi {
 		return Result::Ok;
 	}
 
-	static Result d_createDepthStencilView(Device* d, DescriptorSlot s, const DsvDesc& dd) noexcept
+	static Result d_createDepthStencilView(Device* d, DescriptorSlot s, const ResourceHandle& texture, const DsvDesc& dd) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) return Result::Failed;
+		if (!impl) {
+			BreakIfDebugging();
+			return Result::Failed;
+		}
 
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_DSV))
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
+			BreakIfDebugging();
 			return Result::InvalidArg;
+		}
 
-		auto* T = impl->textures.get(dd.texture);
-		if (!T) return Result::InvalidArg;
+		auto* T = impl->textures.get(texture);
+		if (!T) { 
+			BreakIfDebugging();
+			return Result::InvalidArg; 
+		}
 
 		D3D12_DEPTH_STENCIL_VIEW_DESC z{};
 		z.Format = (dd.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dd.formatOverride);
@@ -1349,6 +1453,7 @@ namespace rhi {
 			break;
 
 		default:
+			BreakIfDebugging();
 			return Result::Unsupported;
 		}
 
@@ -1356,19 +1461,15 @@ namespace rhi {
 		return Result::Ok;
 	}
 
-
-	static D3D12_COMMAND_LIST_TYPE ToDx(QueueKind q) {
-		return q == QueueKind::Graphics ? D3D12_COMMAND_LIST_TYPE_DIRECT
-			: q == QueueKind::Compute ? D3D12_COMMAND_LIST_TYPE_COMPUTE
-			: D3D12_COMMAND_LIST_TYPE_COPY;
-	}
-
 	static CommandAllocatorPtr d_createCommandAllocator(Device* d, QueueKind q) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a;
-		if (FAILED(impl->dev->CreateCommandAllocator(ToDx(q), IID_PPV_ARGS(&a)))) return {};
+		if (FAILED(impl->dev->CreateCommandAllocator(ToDX(q), IID_PPV_ARGS(&a)))) {
+			__debugbreak();
+			return {};
+		}
 
-		Dx12Allocator A{}; A.alloc = a; A.type = ToDx(q);
+		Dx12Allocator A(a, ToDX(q), impl->selfWeak.lock());
 		auto h = impl->allocators.alloc(std::move(A));
 
 		CommandAllocator out{h};
@@ -1385,14 +1486,17 @@ namespace rhi {
 	static CommandListPtr d_createCommandList(Device* d, QueueKind q, CommandAllocator ca) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		auto* A = static_cast<Dx12Allocator*>(ca.impl);
-		if (!A) return {};
+		if (!A) { 
+			BreakIfDebugging();
+			return {};
+		}
 
-		Dx12CommandList rec{};
-		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&rec.cl)))) return {};
-		rec.dev = impl;
-		rec.alloc = A->alloc;
-		rec.type = A->type;
-
+		ComPtr<ID3D12GraphicsCommandList7> cl;
+		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)))) { 
+			BreakIfDebugging();
+			return {}; 
+		}
+		Dx12CommandList rec(cl, A->alloc, A->type, impl->selfWeak.lock());
 		auto h = impl->commandLists.alloc(std::move(rec));
 
 		CommandList out{h};
@@ -1404,7 +1508,10 @@ namespace rhi {
 
 	static ResourcePtr d_createCommittedBuffer(Device* d, const ResourceDesc& bd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) return {};
+		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) { 
+			BreakIfDebugging();
+			return {}; 
+		}
 
 		D3D12_HEAP_PROPERTIES hp{};
 		hp.Type = ToDx(bd.memory);
@@ -1428,12 +1535,14 @@ namespace rhi {
 			/*NumCastableFormats*/   0,
 			/*pCastableFormats*/     nullptr,
 			IID_PPV_ARGS(&res));
-		if (FAILED(hr)) return {};
+		if (FAILED(hr)) {
+			BreakIfDebugging();
+			return {};
+		}
 
 		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
 
-		Dx12Buffer B{};
-		B.res = std::move(res);
+		Dx12Buffer B(std::move(res), impl->selfWeak.lock());
 		auto handle = impl->buffers.alloc(std::move(B));
 
 		Resource out{ handle, false };
@@ -1444,8 +1553,10 @@ namespace rhi {
 
 	static ResourcePtr d_createCommittedTexture(Device* d, const ResourceDesc& td) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown)
+		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown) {
+			BreakIfDebugging();
 			return {};
+		}
 
 		D3D12_HEAP_PROPERTIES hp{};
 		hp.Type = ToDx(td.memory);
@@ -1476,28 +1587,19 @@ namespace rhi {
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			spdlog::error("Failed to create committed texture: {0}", hr);
+			BreakIfDebugging();
 			return {};
 		};
 
 		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
 
-		Dx12Texture T{};
-		T.res = std::move(res);
-		T.fmt = desc.Format;
-		T.w = td.texture.width; T.h = td.texture.height;
-		T.mips = td.texture.mipLevels;
-		T.dim = (td.type == ResourceType::Texture3D)
+		auto arraySize = td.type == ResourceType::Texture3D ? 1 : td.texture.depthOrLayers;
+		auto depth = td.type == ResourceType::Texture3D ? td.texture.depthOrLayers : 1;
+		Dx12Texture T(std::move(res), desc.Format, td.texture.width, td.texture.height,
+			td.texture.mipLevels, arraySize, (td.type == ResourceType::Texture3D)
 			? D3D12_RESOURCE_DIMENSION_TEXTURE3D
 			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
-				: D3D12_RESOURCE_DIMENSION_TEXTURE1D);
-		if (td.type == ResourceType::Texture3D) {
-			T.depth = td.texture.depthOrLayers;
-			T.arraySize = 1;
-		}
-		else {
-			T.depth = 1;
-			T.arraySize = td.texture.depthOrLayers; // NOTE: for cube/cube array, pass 6*N here at creation time
-		}
+				: D3D12_RESOURCE_DIMENSION_TEXTURE1D), depth, impl->selfWeak.lock());
 		auto handle = impl->textures.alloc(std::move(T));
 
 		Resource out{ handle, true };
@@ -1514,8 +1616,12 @@ namespace rhi {
 		case ResourceType::Texture2D:
 		case ResourceType::Texture1D:
 			return d_createCommittedTexture(d, td);
-		case ResourceType::Unknown: return {};
+		case ResourceType::Unknown: {
+			BreakIfDebugging();
+			return {};
 		}
+		}
+		BreakIfDebugging();
 		return {};
 	}
 
@@ -1529,9 +1635,12 @@ namespace rhi {
 	static TimelinePtr d_createTimeline(Device* d, uint64_t initial, const char* dbg) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12Fence> f;
-		if (FAILED(impl->dev->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)))) return {};
+		if (FAILED(impl->dev->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)))) {
+			BreakIfDebugging();
+			return {};
+		}
 		if (dbg) { std::wstring w(dbg, dbg + ::strlen(dbg)); f->SetName(w.c_str()); }
-		Dx12Timeline T{ f };
+		Dx12Timeline T(f, impl->selfWeak.lock());
 		auto h = impl->timelines.alloc(std::move(T));
 		Timeline out{ h };
 		out.impl = impl->timelines.get(h);
@@ -1547,8 +1656,10 @@ namespace rhi {
 
 	static HeapPtr d_createHeap(Device* d, const HeapDesc& hd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || hd.sizeBytes == 0) return {};
-
+		if (!impl || !impl->dev || hd.sizeBytes == 0) {
+			BreakIfDebugging();
+			return {};
+		}
 		D3D12_HEAP_PROPERTIES props{};
 		props.Type = ToDx(hd.memory);         // same helper you already have (Upload/Readback/Default)
 		props.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
@@ -1563,13 +1674,15 @@ namespace rhi {
 		desc.Flags = ToDX(hd.flags);
 
 		Microsoft::WRL::ComPtr<ID3D12Heap> heap;
-		if (FAILED(impl->dev->CreateHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
+		if (FAILED(impl->dev->CreateHeap(&desc, IID_PPV_ARGS(&heap)))) {
+			return {};
+		}
 
 #ifdef _WIN32
 		if (hd.debugName) { std::wstring w(hd.debugName, hd.debugName + ::strlen(hd.debugName)); heap->SetName(w.c_str()); }
 #endif
 
-		Dx12Heap H{ heap, hd.sizeBytes };
+		Dx12Heap H(heap, hd.sizeBytes, impl->selfWeak.lock());
 		auto h = impl->heaps.alloc(std::move(H));
 		Heap out{ h };
 		out.impl = impl->heaps.get(h);
@@ -1579,12 +1692,18 @@ namespace rhi {
 
 	static void d_destroyHeap(DeviceDeletionContext* d, HeapHandle h) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) return;
+		if (!impl) {
+			BreakIfDebugging();
+			return;
+		}
 		impl->heaps.free(h);
 	}
 
 	static void d_setNameBuffer(Device* d, ResourceHandle b, const char* n) noexcept {
-		if (!n) return;
+		if (!n) { 
+			BreakIfDebugging();
+			return;
+		}
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (auto* B = impl->buffers.get(b)) {
 			std::wstring w(n, n + ::strlen(n));
@@ -1593,7 +1712,10 @@ namespace rhi {
 	}
 	
 	static void d_setNameTexture(Device* d, ResourceHandle t, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (auto* T = impl->textures.get(t)) {
 			std::wstring w(n, n + ::strlen(n));
@@ -1656,10 +1778,18 @@ namespace rhi {
 
 	static ResourcePtr d_createPlacedTexture(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& td) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) return {};
-		auto* H = impl->heaps.get(hh); if (!H || !H->heap) return {};
-		if (td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown)
+		if (!impl) {
+			BreakIfDebugging();
 			return {};
+		}
+		auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
+			BreakIfDebugging();
+			return {};
+		}
+		if (td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown) {
+			BreakIfDebugging();
+			return {};
+		}
 		const D3D12_RESOURCE_DESC1 desc = MakeTexDesc1(td);
 		D3D12_CLEAR_VALUE* pClear = nullptr;
 		D3D12_CLEAR_VALUE clear;
@@ -1679,12 +1809,19 @@ namespace rhi {
 			/*numCastableFormats*/ 0,
 			/*pProtectedSession*/ nullptr,
 			IID_PPV_ARGS(&res));
-		if (FAILED(hr)) return {};
+		if (FAILED(hr)) {
+			BreakIfDebugging();
+			return {};
+		}
 		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
-		Dx12Texture T{};
-		T.res = std::move(res);
-		T.fmt = desc.Format;
-		T.w = td.texture.width; T.h = td.texture.height;
+		Dx12Texture T(std::move(res), desc.Format, td.texture.width, td.texture.height,
+			td.texture.mipLevels, (td.type == ResourceType::Texture3D) ? 1 : td.texture.depthOrLayers,
+			(td.type == ResourceType::Texture3D) ? D3D12_RESOURCE_DIMENSION_TEXTURE3D
+			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
+				: D3D12_RESOURCE_DIMENSION_TEXTURE1D),
+			(td.type == ResourceType::Texture3D) ? td.texture.depthOrLayers : 1,
+			impl->selfWeak.lock());
+		
 		auto handle = impl->textures.alloc(std::move(T));
 		Resource out(handle, true);
 		out.impl = impl->textures.get(handle);
@@ -1694,9 +1831,15 @@ namespace rhi {
 
 	static ResourcePtr d_createPlacedBuffer(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& bd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) return {};
-		auto* H = impl->heaps.get(hh); if (!H || !H->heap) return {};
-		if (bd.buffer.sizeBytes == 0) return {};
+		if (!impl) {
+			return {};
+		}
+		auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
+			return {};
+		}
+		if (bd.buffer.sizeBytes == 0) {
+			return {};
+		}
 		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.flags);
 		const D3D12_RESOURCE_DESC1  desc = MakeBufferDesc1(bd.buffer.sizeBytes, flags);
 		// Buffers must use UNDEFINED layout per spec
@@ -1711,10 +1854,12 @@ namespace rhi {
 			/*numCastableFormats*/   0,
 			/*pProtectedSession*/   nullptr,
 			IID_PPV_ARGS(&res));
-		if (FAILED(hr)) return {};
+		if (FAILED(hr)) { 
+			BreakIfDebugging();
+			return {};
+		}
 		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
-		Dx12Buffer B{};
-		B.res = std::move(res);
+		Dx12Buffer B(std::move(res), impl->selfWeak.lock());
 		auto handle = impl->buffers.alloc(std::move(B));
 		Resource out{ handle, false };
 		out.impl = impl->buffers.get(handle);
@@ -1724,35 +1869,49 @@ namespace rhi {
 
 	static ResourcePtr d_createPlacedResource(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& rd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) return {};
-		auto* H = impl->heaps.get(hh); if (!H || !H->heap) return {};
+		if (!impl) { 
+			BreakIfDebugging();
+			return {};
+		}
+		auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
+			BreakIfDebugging();
+			return {};
+		}
 		switch (rd.type) {
 		case ResourceType::Buffer:  return d_createPlacedBuffer(d, hh, offset, rd);
 		case ResourceType::Texture3D:
 		case ResourceType::Texture2D:
 		case ResourceType::Texture1D:
 			return d_createPlacedTexture(d, hh, offset, rd);
-		case ResourceType::Unknown: return {};
+		case ResourceType::Unknown: {
+			BreakIfDebugging();
+			return {};
 		}
+		}
+		BreakIfDebugging();
 		return {};
 	}
 
 	static QueryPoolPtr d_createQueryPool(Device* d, const QueryPoolDesc& qd) noexcept {
 		auto* dimpl = static_cast<Dx12Device*>(d->impl);
-		if (!dimpl || qd.count == 0) return {};
-
-		Dx12QueryPool qp{};
+		if (!dimpl || qd.count == 0) {
+			BreakIfDebugging();
+			return {};
+		}
 		D3D12_QUERY_HEAP_DESC desc{};
 		desc.Count = qd.count;
+
+		D3D12_QUERY_HEAP_TYPE type;
+		bool usePSO1 = false;
 
 		switch (qd.type) {
 		case QueryType::Timestamp:
 			desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-			qp.type = desc.Type; break;
+			type = desc.Type; break;
 
 		case QueryType::Occlusion:
 			desc.Type = D3D12_QUERY_HEAP_TYPE_OCCLUSION;
-			qp.type = desc.Type; break;
+			type = desc.Type; break;
 
 		case QueryType::PipelineStatistics: {
 			// If mesh/task bits requested and supported -> use *_STATISTICS1
@@ -1762,21 +1921,25 @@ namespace rhi {
 			bool haveOpt9 = SUCCEEDED(dimpl->dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opts9, sizeof(opts9)));
 			bool canMeshStats = haveOpt9 && !!opts9.MeshShaderPipelineStatsSupported;
 
-			if (needMesh && !canMeshStats && qd.requireAllStats)
+			if (needMesh && !canMeshStats && qd.requireAllStats) {
+				BreakIfDebugging();
 				return {}; // Unsupported
+			}
 
 			desc.Type = needMesh && canMeshStats
 				? D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1
 				: D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
-			qp.type = desc.Type;
-			qp.usePSO1 = (desc.Type == D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1);
+			type = desc.Type;
+			usePSO1 = (desc.Type == D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS1);
 		} break;
 		}
 
 		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
-		if (FAILED(dimpl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)))) return {};
-		qp.heap = heap;
-		qp.count = qd.count;
+		if (FAILED(dimpl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)))) {
+			return {};
+		}
+		Dx12QueryPool qp(heap, type, qd.count, dimpl->selfWeak.lock());
+		qp.usePSO1 = usePSO1;
 
 		auto handle = dimpl->queryPools.alloc(std::move(qp));
 		QueryPool out{ handle };
@@ -1805,11 +1968,16 @@ namespace rhi {
 		uint32_t outCap) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !out || outCap == 0) return {};
+		if (!impl || !out || outCap == 0) {
+			BreakIfDebugging();
+			return {};
+		}
 
 		auto* T = impl->textures.get(in.texture);
-		if (!T || !T->res) return {};
-
+		if (!T || !T->res) {
+			BreakIfDebugging();
+			return {};
+		}
 		const D3D12_RESOURCE_DESC desc = T->res->GetDesc();
 
 		// Resource-wide properties
@@ -1827,11 +1995,16 @@ namespace rhi {
 		const UINT firstPlane = std::min<UINT>(in.firstPlane, resPlaneCount ? resPlaneCount - 1u : 0u);
 		const UINT planeCount = std::min<UINT>(in.planeCount, resPlaneCount - firstPlane);
 
-		if (mipCount == 0 || arrayCount == 0 || planeCount == 0) return {};
+		if (mipCount == 0 || arrayCount == 0 || planeCount == 0) {
+			BreakIfDebugging();
+			return {};
+		}
 
 		const UINT totalSubs = mipCount * arrayCount * planeCount;
-		if (outCap < totalSubs) return {}; // TODO: partial?
-
+		if (outCap < totalSubs) {
+			BreakIfDebugging();
+			return {}; // TODO: partial?
+		}
 		// D3D12 subresource layout: Mip + Array*NumMips + Plane*NumMips*ArraySize
 		const UINT firstSubresource =
 			firstMip + firstArray * mipLevels + firstPlane * mipLevels * arrayLayers;
@@ -1867,12 +2040,22 @@ namespace rhi {
 	// ---------------- Queue vtable funcs ----------------
 	static Result q_submit(Queue* q, Span<CommandList> lists, const SubmitDesc& s) noexcept {
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
-		auto* dev = qs->owner; if (!dev) return Result::Failed;
+		auto* dev = qs->dev.get(); 
+		if (!dev) {
+			BreakIfDebugging();
+			return Result::Failed;
+		}
 
 		// Pre-waits
 		for (auto& w : s.waits) {
-			auto* TL = dev->timelines.get(w.t); if (!TL) return Result::InvalidArg;
-			if (FAILED(qs->q->Wait(TL->fence.Get(), w.value))) return Result::Failed;
+			auto* TL = dev->timelines.get(w.t); if (!TL) {
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
+			if (FAILED(qs->q->Wait(TL->fence.Get(), w.value))) {
+				BreakIfDebugging();
+				return Result::Failed;
+			}
 		}
 
 		// Execute command lists
@@ -1885,30 +2068,55 @@ namespace rhi {
 
 		// Post-signals
 		for (auto& sgn : s.signals) {
-			auto* TL = dev->timelines.get(sgn.t); if (!TL) return Result::InvalidArg;
-			if (FAILED(qs->q->Signal(TL->fence.Get(), sgn.value))) return Result::Failed;
+			auto* TL = dev->timelines.get(sgn.t); if (!TL) {
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
+			if (FAILED(qs->q->Signal(TL->fence.Get(), sgn.value))) {
+				BreakIfDebugging();
+				return Result::Failed;
+			}
 		}
 		return Result::Ok;
 	}
 
 	static Result q_signal(Queue* q, const TimelinePoint& p) noexcept {
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
-		auto* dev = qs->owner; if (!dev) return Result::Failed;
-		auto* TL = dev->timelines.get(p.t); if (!TL) return Result::InvalidArg;
+		auto* dev = qs->dev.get(); 
+		if (!dev) {
+			BreakIfDebugging();
+			return Result::Failed;
+		}
+		auto* TL = dev->timelines.get(p.t); if (!TL) {
+			BreakIfDebugging();
+			return Result::InvalidArg;
+		}
 		return SUCCEEDED(qs->q->Signal(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
 	}
 
 	static Result q_wait(Queue* q, const TimelinePoint& p) noexcept {
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
-		auto* dev = qs->owner; if (!dev) return Result::Failed;
-		auto* TL = dev->timelines.get(p.t); if (!TL) return Result::InvalidArg;
+		auto* dev = qs->dev.get(); if (!dev) {
+			BreakIfDebugging();
+			return Result::Failed;
+		}
+		auto* TL = dev->timelines.get(p.t); if (!TL) {
+			BreakIfDebugging();
+			return Result::InvalidArg;
+		}
 		return SUCCEEDED(qs->q->Wait(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
 	}
 
 	static void q_setName(Queue* q, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
-		if (!qs || !qs->q) return;
+		if (!qs || !qs->q) {
+			BreakIfDebugging();
+			return;
+		}
 		std::wstring w(n, n + ::strlen(n));
 		qs->q->SetName(w.c_str());
 	}
@@ -1932,20 +2140,29 @@ namespace rhi {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* a = static_cast<Dx12Allocator*>(ca.impl);
 #if NDEBUG
-		if (!l) spdlog::error("cl_reset: invalid command list");
-		if (!a) spdlog::error("cl_reset: invalid command allocator");
+		if (!l) { 
+			BreakIfDebugging(); 
+			spdlog::error("cl_reset: invalid command list"); 
+		}
+		if (!a) {
+			BreakIfDebugging();
+			spdlog::error("cl_reset: invalid command allocator");
+		}
 #endif
 		l->cl->Reset(a->alloc.Get(), nullptr);
 	}
 	static void cl_beginPass(CommandList* cl, const PassBeginInfo& p) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		if (!l) return;
+		if (!l) {
+			BreakIfDebugging();
+			return;
+		}
 
 		std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvs;
 		rtvs.reserve(p.colors.size);
 		for (uint32_t i = 0; i < p.colors.size; ++i) {
 			D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
-			if (DxGetDstCpu(l->dev, p.colors.data[i].rtv, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
+			if (DxGetDstCpu(l->dev.get(), p.colors.data[i].rtv, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
 				rtvs.push_back(cpu);
 				if (p.colors.data[i].loadOp == LoadOp::Clear) {
 					l->cl->ClearRenderTargetView(cpu, p.colors.data[i].clear.rgba, 0, nullptr);
@@ -1956,7 +2173,7 @@ namespace rhi {
 		D3D12_CPU_DESCRIPTOR_HANDLE dsv{};
 		const D3D12_CPU_DESCRIPTOR_HANDLE* pDsv = nullptr;
 		if (p.depth) {
-			if (DxGetDstCpu(l->dev, p.depth->dsv, dsv, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
+			if (DxGetDstCpu(l->dev.get(), p.depth->dsv, dsv, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
 				pDsv = &dsv;
 				if (p.depth->depthLoad == LoadOp::Clear || p.depth->stencilLoad == LoadOp::Clear) {
 					const auto& c = p.depth->clear;
@@ -1979,9 +2196,12 @@ namespace rhi {
 	static void cl_endPass(CommandList* /*cl*/) noexcept {} // nothing to do in DX12
 	static void cl_bindLayout(CommandList* cl, PipelineLayoutHandle layoutH) noexcept {
 		auto* impl = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = impl->dev;
+		auto* dev = impl->dev.get();
 		auto* L = dev->pipelineLayouts.get(layoutH);
-		if (!L || !L->root) return;
+		if (!L || !L->root) {
+			BreakIfDebugging();
+			return;
+		}
 
 		impl->cl->SetGraphicsRootSignature(L->root.Get());
 		impl->cl->SetComputeRootSignature(L->root.Get());
@@ -1991,7 +2211,7 @@ namespace rhi {
 	}
 	static void cl_bindPipeline(CommandList* cl, PipelineHandle psoH) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = l->dev;
+		auto* dev = l->dev.get();
 		if (auto* P = dev->pipelines.get(psoH)) {
 			l->cl->SetPipelineState(P->pso.Get());
 		}
@@ -1999,7 +2219,7 @@ namespace rhi {
 	static void cl_setVB(CommandList* cl, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		std::vector<D3D12_VERTEX_BUFFER_VIEW> views; views.resize(numViews);
-		auto* dev = l->dev;
+		auto* dev = l->dev.get();
 		for (uint32_t i = 0; i < numViews; ++i) {
 			if (auto* B = dev->buffers.get(pBufferViews[i].buffer)) {
 				views[i].BufferLocation = B->res->GetGPUVirtualAddress() + pBufferViews[i].offset;
@@ -2011,7 +2231,7 @@ namespace rhi {
 	}
 	static void cl_setIB(CommandList* cl, const IndexBufferView& view) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = l->dev;
+		auto* dev = l->dev.get();
 		if (auto* B = dev->buffers.get(view.buffer)) {
 			D3D12_INDEX_BUFFER_VIEW ibv{};
 			ibv.BufferLocation = B->res->GetGPUVirtualAddress() + view.offset;
@@ -2032,42 +2252,21 @@ namespace rhi {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		l->cl->Dispatch(x, y, z);
 	}
-	static void cl_clearRTV_view(CommandList* c, ViewHandle vh, const rhi::ClearValue& cv) noexcept {
-		auto* impl = static_cast<Dx12CommandList*>(c->impl);
-		if (!impl) return;
-		auto* dev = impl->dev;
-		auto* v = dev->views.get(vh);
-		if (!v) return;
-
-		float rgba[4] = { cv.rgba[0], cv.rgba[1], cv.rgba[2], cv.rgba[3] };
-		impl->cl->ClearRenderTargetView(v->cpu, rgba, 0, nullptr);
-	}
 
 	static void cl_clearRTV_slot(CommandList* c, DescriptorSlot s, const rhi::ClearValue& cv) noexcept {
 		auto* impl = static_cast<Dx12CommandList*>(c->impl);
-		if (!impl) return;
+		if (!impl) {
+			BreakIfDebugging();
+			return;
+		}
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
-		if (!DxGetDstCpu(impl->dev, s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) return;
+		if (!DxGetDstCpu(impl->dev.get(), s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
+			BreakIfDebugging();
+			return;
+		}
 
 		float rgba[4] = { cv.rgba[0], cv.rgba[1], cv.rgba[2], cv.rgba[3] };
 		impl->cl->ClearRenderTargetView(cpu, rgba, 0, nullptr);
-	}
-
-	static void cl_clearDSV_view(CommandList* c, ViewHandle vh,
-		bool clearDepth, bool clearStencil,
-		float depth, uint8_t stencil) noexcept
-	{
-		auto* impl = static_cast<Dx12CommandList*>(c->impl);
-		if (!impl) return;
-		auto* dev = impl->dev;
-		auto* v = dev->views.get(vh);
-		if (!v) return;
-
-		D3D12_CLEAR_FLAGS flags = (D3D12_CLEAR_FLAGS)0;
-		if (clearDepth)   flags |= D3D12_CLEAR_FLAG_DEPTH;
-		if (clearStencil) flags |= D3D12_CLEAR_FLAG_STENCIL;
-
-		impl->cl->ClearDepthStencilView(v->cpu, flags, depth, stencil, 0, nullptr);
 	}
 
 	static void cl_clearDSV_slot(CommandList* c, DescriptorSlot s,
@@ -2075,9 +2274,15 @@ namespace rhi {
 		float depth, uint8_t stencil) noexcept
 	{
 		auto* impl = static_cast<Dx12CommandList*>(c->impl);
-		if (!impl) return;
+		if (!impl) {
+			BreakIfDebugging();
+			return;
+		}
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
-		if (!DxGetDstCpu(impl->dev, s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) return;
+		if (!DxGetDstCpu(impl->dev.get(), s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
+			BreakIfDebugging();
+			return;
+		}
 
 		D3D12_CLEAR_FLAGS flags = (D3D12_CLEAR_FLAGS)0;
 		if (clearDepth)   flags |= D3D12_CLEAR_FLAG_DEPTH;
@@ -2092,17 +2297,29 @@ namespace rhi {
 		ResourceHandle cntBufH, uint64_t cntOff,
 		uint32_t maxCount) noexcept
 	{
-		if (!cl || !cl->impl) return;
+		if (!cl || !cl->impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = l->dev;
-		if (!dev) return;
+		auto* dev = l->dev.get();
+		if (!dev) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* S = dev->commandSignatures.get(sigH);
-		if (!S || !S->sig) return;
+		if (!S || !S->sig) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* argB = dev->buffers.get(argBufH);
-		if (!argB || !argB->res) return;
+		if (!argB || !argB->res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		ID3D12Resource* cntRes = nullptr;
 		if (cntBufH.valid()) {
@@ -2118,7 +2335,7 @@ namespace rhi {
 	}
 	static void cl_setDescriptorHeaps(CommandList* cl, DescriptorHeapHandle csu, std::optional<DescriptorHeapHandle> samp) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = l->dev;
+		auto* dev = l->dev.get();
 
 		ID3D12DescriptorHeap* heaps[2]{};
 		UINT n = 0;
@@ -2136,10 +2353,16 @@ namespace rhi {
 	}
 
 	static void cl_barrier(CommandList* cl, const BarrierBatch& b) noexcept {
-		if (!cl || !cl->impl) return;
+		if (!cl || !cl->impl) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = l->dev;
-		if (!dev) return;
+		auto* dev = l->dev.get();
+		if (!dev) {
+			BreakIfDebugging();
+			return;
+		}
 
 		std::vector<D3D12_TEXTURE_BARRIER> tex;
 		std::vector<D3D12_BUFFER_BARRIER>  buf;
@@ -2230,14 +2453,23 @@ namespace rhi {
 		const UavClearUint& v) noexcept
 	{
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!rec || !impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!rec || !impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// Resolve the two matching descriptors
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
 		D3D12_GPU_DESCRIPTOR_HANDLE gpu{};
-		if (!DxGetDstCpu(impl, u.cpuVisible, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
-		if (!DxGetDstGpu(impl, u.shaderVisible, gpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
+		if (!DxGetDstCpu(impl, u.cpuVisible, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
+			BreakIfDebugging();
+			return;
+		}
+		if (!DxGetDstGpu(impl, u.shaderVisible, gpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// Resource to clear
 		
@@ -2247,7 +2479,10 @@ namespace rhi {
 		} else {
 			res = impl->buffers.get(u.resource.GetHandle())->res.Get();
 		}
-		if (!res) return;
+		if (!res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// NOTE: caller must have bound the shader-visible heap via SetDescriptorHeaps()
 		// and transitioned 'res' to UAV/UNORDERED_ACCESS with your enhanced barriers.
@@ -2259,13 +2494,22 @@ namespace rhi {
 		const UavClearFloat& v) noexcept
 	{
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!rec || !impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!rec || !impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
 		D3D12_GPU_DESCRIPTOR_HANDLE gpu{};
-		if (!DxGetDstCpu(impl, u.cpuVisible, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
-		if (!DxGetDstGpu(impl, u.shaderVisible, gpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return;
+		if (!DxGetDstCpu(impl, u.cpuVisible, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
+			BreakIfDebugging();
+			return;
+		}
+		if (!DxGetDstGpu(impl, u.shaderVisible, gpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
+			BreakIfDebugging();
+			return;
+		}
 
 		ID3D12Resource* res = nullptr;
 		if (u.resource.IsTexture()) {
@@ -2274,7 +2518,10 @@ namespace rhi {
 		else {
 			res = impl->buffers.get(u.resource.GetHandle())->res.Get();
 		}
-		if (!res) return;
+		if (!res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		rec->cl->ClearUnorderedAccessViewFloat(gpu, cpu, res, v.v, 0, nullptr);
 	}
@@ -2284,12 +2531,18 @@ namespace rhi {
 	// texture -> buffer
 	static void cl_copyTextureToBuffer(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!rec || !impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!rec || !impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* T = impl->textures.get(r.texture);
 		auto* B = impl->buffers.get(r.buffer);
-		if (!T || !B || !T->res || !B->res) return;
+		if (!T || !B || !T->res || !B->res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		D3D12_TEXTURE_COPY_LOCATION dst{};
 		dst.pResource = B->res.Get();
@@ -2314,12 +2567,18 @@ namespace rhi {
 	// buffer -> texture (symmetric)
 	static void cl_copyBufferToTexture(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!rec || !impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!rec || !impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* T = impl->textures.get(r.texture);
 		auto* B = impl->buffers.get(r.buffer);
-		if (!T || !B || !T->res || !B->res) return;
+		if (!T || !B || !T->res || !B->res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		D3D12_TEXTURE_COPY_LOCATION src{};
 		src.pResource = B->res.Get();
@@ -2346,12 +2605,18 @@ namespace rhi {
 		const TextureCopyRegion& src) noexcept
 	{
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!rec || !impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!rec || !impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* DstT = impl->textures.get(dst.texture);
 		auto* SrcT = impl->textures.get(src.texture);
-		if (!DstT || !SrcT || !DstT->res || !SrcT->res) return;
+		if (!DstT || !SrcT || !DstT->res || !SrcT->res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// Build D3D12 copy locations
 		D3D12_TEXTURE_COPY_LOCATION dxDst{};
@@ -2397,16 +2662,25 @@ namespace rhi {
 		ResourceHandle src, uint64_t srcOffset,
 		uint64_t numBytes) noexcept
 	{
-		if (!cl || !cl->IsValid() || numBytes == 0) return;
+		if (!cl || !cl->IsValid() || numBytes == 0) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* dev = rec->dev;
-		if (!rec || !dev) return;
+		auto* dev = rec->dev.get();
+		if (!rec || !dev) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// Look up buffer resources
 		auto* D = dev->buffers.get(dst);
 		auto* S = dev->buffers.get(src);
-		if (!D || !S || !D->res || !S->res) return;
+		if (!D || !S || !D->res || !S->res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// We don't validate bounds here (we don’t store sizes). DX12 will validate.
 		// Required states (caller's responsibility via barriers):
@@ -2419,30 +2693,48 @@ namespace rhi {
 	}
 
 	static void cl_setName(CommandList* cl, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		if (!l || !l->cl) return;
+		if (!l || !l->cl) {
+			BreakIfDebugging();
+			return;
+		}
 		l->cl->SetName(std::wstring(n, n + ::strlen(n)).c_str());
 	}
 
 	static void cl_writeTimestamp(CommandList* cl, QueryPoolHandle pool, uint32_t index, Stage /*ignored*/) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* P = impl->queryPools.get(pool);
-		if (!P || P->type != D3D12_QUERY_HEAP_TYPE_TIMESTAMP) return;
+		if (!P || P->type != D3D12_QUERY_HEAP_TYPE_TIMESTAMP) {
+			BreakIfDebugging();
+			return;
+		}
 
 		rec->cl->EndQuery(P->heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, index);
 	}
 
 	static void cl_beginQuery(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* P = impl->queryPools.get(pool);
-		if (!P) return;
+		if (!P) {
+			BreakIfDebugging();
+			return;
+		}
 
 		if (P->type == D3D12_QUERY_HEAP_TYPE_OCCLUSION) {
 			rec->cl->BeginQuery(P->heap.Get(), D3D12_QUERY_TYPE_OCCLUSION, index);
@@ -2457,11 +2749,17 @@ namespace rhi {
 
 	static void cl_endQuery(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* P = impl->queryPools.get(pool);
-		if (!P) return;
+		if (!P) {
+			BreakIfDebugging();
+			return;
+		}
 
 		if (P->type == D3D12_QUERY_HEAP_TYPE_OCCLUSION) {
 			rec->cl->EndQuery(P->heap.Get(), D3D12_QUERY_TYPE_OCCLUSION, index);
@@ -2483,15 +2781,24 @@ namespace rhi {
 		ResourceHandle dst, uint64_t dstOffset) noexcept
 	{
 		auto* rec = static_cast<Dx12CommandList*>(cl->impl);
-		auto* impl = rec ? rec->dev : nullptr;
-		if (!impl) return;
+		auto* impl = rec ? rec->dev.get() : nullptr;
+		if (!impl) {
+			BreakIfDebugging();
+			return;
+		}
 
 		auto* P = impl->queryPools.get(pool);
-		if (!P) return;
+		if (!P) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// Resolve to the given buffer (assumed COPY_DEST)
 		auto* B = impl->buffers.get(dst);
-		if (!B || !B->res) return;
+		if (!B || !B->res) {
+			BreakIfDebugging();
+			return;
+		}
 
 		D3D12_QUERY_TYPE type{};
 		switch (P->type) {
@@ -2515,7 +2822,10 @@ namespace rhi {
 		const void* data) noexcept
 	{
 		auto* impl = static_cast<Dx12CommandList*>(c->impl);
-		if (!impl || !impl->boundLayoutPtr || !data || num32 == 0) return;
+		if (!impl || !impl->boundLayoutPtr || !data || num32 == 0) {
+			BreakIfDebugging();
+			return;
+		}
 
 		// Find the matching push-constant root param
 		const Dx12PipelineLayout* L = impl->boundLayoutPtr;
@@ -2523,8 +2833,10 @@ namespace rhi {
 		for (const auto& r : L->rcParams) { // TODO: Better lookup than linear scan
 			if (r.set == set && r.binding == binding) { rc = &r; break; }
 		}
-		if (!rc) return; // not declared in layout
-
+		if (!rc) {
+			BreakIfDebugging();
+			return; // not declared in layout
+		}
 		// Clamp for safety
 		const uint32_t maxAvail = rc->num32;
 		if (dstOffset32 >= maxAvail) return;
@@ -2535,25 +2847,26 @@ namespace rhi {
 		if ((uint32_t)stages & (uint32_t)ShaderStage::Compute) {
 			impl->cl->SetComputeRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
-		// Treat any of VS/PS/MS/AS/All as "graphics"
-		const uint32_t gfxMask =
-			(uint32_t)ShaderStage::Vertex | (uint32_t)ShaderStage::Pixel |
-			(uint32_t)ShaderStage::Mesh | (uint32_t)ShaderStage::Task |
-			(uint32_t)ShaderStage::All;
-		if (((uint32_t)stages & gfxMask) != 0) {
+		else {
 			impl->cl->SetGraphicsRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
 	}
 
 	static void cl_setPrimitiveTopology(CommandList* cl, PrimitiveTopology pt) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		if (!l) return;
+		if (!l) {
+			BreakIfDebugging();
+			return;
+		}
 		l->cl->IASetPrimitiveTopology(ToDX(pt));
 	}
 
 	static void cl_dispatchMesh(CommandList* cl, uint32_t x, uint32_t y, uint32_t z) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
-		if (!l) return;
+		if (!l) {
+			BreakIfDebugging();
+			return;
+		}
 		l->cl->DispatchMesh(x, y, z);
 	}
 
@@ -2578,9 +2891,15 @@ namespace rhi {
 	// ---------------- Resource vtable funcs ----------------
 
 	static void buf_map(Resource* r, void** data, uint64_t offset, uint64_t size) noexcept {
-		if (!r || !data) return;
+		if (!r || !data) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* B = static_cast<Dx12Buffer*>(r->impl);
-		if (!B || !B->res) { *data = nullptr; return; }
+		if (!B || !B->res) { 
+			*data = nullptr; 
+			BreakIfDebugging(); 
+			return; }
 
 		D3D12_RANGE readRange{};
 		D3D12_RANGE* pRange = nullptr;
@@ -2597,7 +2916,10 @@ namespace rhi {
 
 	static void buf_unmap(Resource* r, uint64_t writeOffset, uint64_t writeSize) noexcept {
 		auto* B = static_cast<Dx12Buffer*>(r->impl);
-		if (!B || !B->res) return;
+		if (!B || !B->res) {
+			BreakIfDebugging();
+			return;
+		}
 		D3D12_RANGE range{};
 		if (writeSize != ~0ull) {
 			range.Begin = SIZE_T(writeOffset);
@@ -2607,16 +2929,29 @@ namespace rhi {
 	}
 
 	static void buf_setName(Resource* r, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* B = static_cast<Dx12Buffer*>(r->impl);
-		if (!B || !B->res) return;
+		if (!B || !B->res) {
+			BreakIfDebugging();
+			return;
+		}
 		B->res->SetName(s2ws(n).c_str());
 	}
 
 	static void tex_map(Resource* r, void** data, uint64_t /*offset*/, uint64_t /*size*/) noexcept {
-		if (!r || !data) return;
+		if (!r || !data) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* T = static_cast<Dx12Texture*>(r->impl);
-		if (!T || !T->res) { *data = nullptr; return; }
+		if (!T || !T->res) { 
+			*data = nullptr; 
+			BreakIfDebugging();
+			return;
+		}
 
 		// NOTE: Texture mapping is only valid on UPLOAD/READBACK heaps.
 		// This returns a pointer to subresource 0 memory. Caller must compute
@@ -2631,15 +2966,24 @@ namespace rhi {
 	}
 
 	static void tex_setName(Resource* r, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* T = static_cast<Dx12Texture*>(r->impl);
-		if (!T || !T->res) return;
+		if (!T || !T->res) {
+			BreakIfDebugging();
+			return;
+		}
 		T->res->SetName(s2ws(n).c_str());
 	}
 
 	// ------------------ Allocator vtable funcs ----------------
 	static void ca_reset(CommandAllocator* ca) noexcept {
-		if (!ca || !ca->impl) return;
+		if (!ca || !ca->impl) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* A = static_cast<Dx12Allocator*>(ca->impl);
 		A->alloc->Reset(); // ID3D12CommandAllocator::Reset()
 	}
@@ -2648,7 +2992,10 @@ namespace rhi {
 	static QueryResultInfo qp_getQueryResultInfo(QueryPool* p) noexcept {
 		auto* P = static_cast<Dx12QueryPool*>(p->impl);
 		QueryResultInfo out{};
-		if (!P) return out;
+		if (!P) {
+			BreakIfDebugging();
+			return out;
+		}
 		out.count = P->count;
 
 		switch (P->type) {
@@ -2678,7 +3025,10 @@ namespace rhi {
 	{
 		auto* P = static_cast<Dx12QueryPool*>(p->impl);
 		PipelineStatsLayout L{};
-		if (!P) return L;
+		if (!P) {
+			BreakIfDebugging();
+			return L;
+		}
 
 		L.info = qp_getQueryResultInfo(p);
 
@@ -2734,41 +3084,71 @@ namespace rhi {
 	}
 
 	static void qp_setName(QueryPool* qp, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* Q = static_cast<Dx12QueryPool*>(qp->impl);
-		if (!Q || !Q->heap) return;
+		if (!Q || !Q->heap) {
+			BreakIfDebugging();
+			return;
+		}
 		Q->heap->SetName(s2ws(n).c_str());
 	}
 
 	// ------------------ Pipeline vtable funcs ----------------
 	static void pso_setName(Pipeline* p, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* P = static_cast<Dx12Pipeline*>(p->impl);
-		if (!P || !P->pso) return;
+		if (!P || !P->pso) {
+			BreakIfDebugging();
+			return;
+		}
 		P->pso->SetName(s2ws(n).c_str());
 	}
 
 	// ------------------ PipelineLayout vtable funcs ----------------
 	static void pl_setName(PipelineLayout* pl, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* L = static_cast<Dx12PipelineLayout*>(pl->impl);
-		if (!L || !L->root) return;
+		if (!L || !L->root) {
+			BreakIfDebugging();
+			return;
+		}
 		L->root->SetName(s2ws(n).c_str());
 	}
 
 	// ------------------ CommandSignature vtable funcs ----------------
 	static void cs_setName(CommandSignature* cs, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* S = static_cast<Dx12CommandSignature*>(cs->impl);
-		if (!S || !S->sig) return;
+		if (!S || !S->sig) {
+			BreakIfDebugging();
+			return;
+		}
 		S->sig->SetName(s2ws(n).c_str());
 	}
 
 	// ------------------ DescriptorHeap vtable funcs ----------------
 	static void dh_setName(DescriptorHeap* dh, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* H = static_cast<Dx12DescriptorHeap*>(dh->impl);
-		if (!H || !H->heap) return;
+		if (!H || !H->heap) {
+			BreakIfDebugging();
+			return;
+		}
 		H->heap->SetName(s2ws(n).c_str());
 	}
 
@@ -2786,25 +3166,44 @@ namespace rhi {
 	static Result tl_timelineHostWait(Timeline* tl, const uint64_t p) noexcept {
 		auto* TL = static_cast<Dx12Timeline*>(tl->impl);
 		HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-		if (!e) return Result::Failed;
+		if (!e) {
+			BreakIfDebugging();
+			return Result::Failed;
+		}
 		HRESULT hr = TL->fence->SetEventOnCompletion(p, e);
-		if (FAILED(hr)) { CloseHandle(e); return Result::Failed; }
+		if (FAILED(hr)) { 
+			CloseHandle(e); 
+			BreakIfDebugging();
+			return Result::Failed;
+		}
 		WaitForSingleObject(e, INFINITE);
 		CloseHandle(e);
 		return Result::Ok;
 	}
 	static void tl_setName(Timeline* tl, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* T = static_cast<Dx12Timeline*>(tl->impl);
-		if (!T || !T->fence) return;
+		if (!T || !T->fence) {
+			BreakIfDebugging();
+			return;
+		}
 		T->fence->SetName(s2ws(n).c_str());
 	}
 
 	// ------------------ Heap vtable funcs ----------------
 	static void h_setName(Heap* h, const char* n) noexcept {
-		if (!n) return;
+		if (!n) {
+			BreakIfDebugging();
+			return;
+		}
 		auto* H = static_cast<Dx12Heap*>(h->impl);
-		if (!H || !H->heap) return;
+		if (!H || !H->heap) {
+			BreakIfDebugging();
+			return;
+		}
 		H->heap->SetName(s2ws(n).c_str());
 	}
 

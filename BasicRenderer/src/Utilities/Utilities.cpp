@@ -864,7 +864,6 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
 
 	rhi::SrvDesc desc = {};
 	desc.formatOverride = format;
-	desc.resource = resource.GetHandle();
     if (isCubemap) {
 		desc.dimension = isArray ? rhi::SrvDim::TextureCubeArray : rhi::SrvDim::TextureCube;
         if (isArray) {
@@ -888,7 +887,7 @@ ShaderVisibleIndexInfo CreateShaderResourceView(
 
     UINT descriptorIndex = srvHeap->AllocateDescriptor();
 
-    device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, desc);
+    device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), desc);
 
     ShaderVisibleIndexInfo srvInfo;
     srvInfo.slot.index = descriptorIndex;
@@ -921,7 +920,6 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip
         for (int mip = 0; mip < mipLevels; ++mip) {
             rhi::SrvDesc srvDesc = {};
             srvDesc.formatOverride = format;
-			srvDesc.resource = resource.GetHandle();
             if (isCubemap) {
                 if (isArray) {
                     // One cubemap per slice
@@ -957,7 +955,7 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip
             // allocate one descriptor for this (slice, mip)
             unsigned descriptorIndex = srvHeap->AllocateDescriptor();
 
-			device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, srvDesc);
+			device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), srvDesc);
 
             ShaderVisibleIndexInfo srvInfo;
             srvInfo.slot.index = descriptorIndex;
@@ -981,7 +979,6 @@ ShaderVisibleIndexInfo CreateUnorderedAccessView(
     int planeSlice) {
     rhi::UavDesc uavDesc = {};
 	uavDesc.formatOverride = format;
-	uavDesc.resource = resource.GetHandle();
     // For now, only support Texture2D or Texture2DArray.
     // TODO: consolidate other uav creation into this?
     if (isArray) {
@@ -1000,7 +997,7 @@ ShaderVisibleIndexInfo CreateUnorderedAccessView(
     UINT descriptorIndex = uavHeap->AllocateDescriptor();
 
 	// No counter for texture UAVs
-    device.CreateUnorderedAccessView({uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
+    device.CreateUnorderedAccessView({uavHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), uavDesc);
 
     ShaderVisibleIndexInfo uavInfo;
     uavInfo.slot.index = descriptorIndex;
@@ -1021,7 +1018,6 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear op
     int planeSlice) {
     rhi::UavDesc uavDesc = {};
     uavDesc.formatOverride = format;
-	uavDesc.resource = resource.GetHandle();
     if (isArray) {
         uavDesc.dimension = rhi::UavDim::Texture2DArray;
         uavDesc.texture2DArray.mipSlice = mipSlice;
@@ -1038,7 +1034,7 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear op
     UINT descriptorIndex = uavHeap->AllocateDescriptor();
 
     // No counter for texture UAVs
-	device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, uavDesc);
+	device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), uavDesc);
 
     NonShaderVisibleIndexInfo uavInfo;
     uavInfo.slot.index = descriptorIndex;
@@ -1069,7 +1065,6 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
         for (int mip = 0; mip < mipLevels; ++mip) {
             rhi::UavDesc uavDesc = {};
             uavDesc.formatOverride = format;
-            uavDesc.resource = resource.GetHandle();
 
             if (isCubemap) {
                 // Map cube/cube-array UAVs to 2D array views:
@@ -1098,7 +1093,7 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
             }
 
             const UINT descriptorIndex = uavHeap->AllocateDescriptor();
-            device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex }, uavDesc);
+            device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex }, resource.GetHandle(), uavDesc);
 
             ShaderVisibleIndexInfo uavInfo{ { uavHeap->GetHeap().GetHandle(), descriptorIndex } };
             sliceUAVs.push_back(uavInfo);
@@ -1129,7 +1124,6 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
         for (int mip = 0; mip < mipLevels; ++mip) {
             rhi::UavDesc uavDesc = {};
             uavDesc.formatOverride = format;
-			uavDesc.resource = resource.GetHandle();
             if (isArray) {
                 uavDesc.dimension               = rhi::UavDim::Texture2DArray;
                 uavDesc.texture2DArray.mipSlice     = mip;
@@ -1145,7 +1139,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
             UINT    idx = uavHeap->AllocateDescriptor();
 
             // Create the UAV (no counter for texture UAVs)
-			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), idx}, uavDesc);
+			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), idx}, resource.GetHandle(), uavDesc);
 
             NonShaderVisibleIndexInfo info;
             info.slot.index = idx;
@@ -1180,7 +1174,6 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
     rtvDesc.formatOverride        = format;
     rtvDesc.dimension = rhi::RtvDim::Texture2DArray;
 	rtvDesc.range = { 0, 1, 0, 1 }; // Only one mip level and one array slice per RTV
-	rtvDesc.texture = resource.GetHandle();
 
     for ( int slice = 0; slice < sliceCount; ++slice) {
         auto& sliceRTVs = result[slice];
@@ -1193,7 +1186,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
             UINT idx = rtvHeap->AllocateDescriptor();
 
             // Create the RTV
-			device.CreateRenderTargetView({ rtvHeap->GetHeap().GetHandle(), idx}, rtvDesc);
+			device.CreateRenderTargetView({ rtvHeap->GetHeap().GetHandle(), idx}, resource.GetHandle(), rtvDesc);
 
             NonShaderVisibleIndexInfo info;
             info.slot.index = idx;
@@ -1224,7 +1217,6 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
     dsvDesc.formatOverride        = format;
     dsvDesc.dimension = rhi::DsvDim::Texture2DArray;
     //dsvDesc.Texture2DArray.ArraySize = 1;
-	dsvDesc.texture = resource.GetHandle();
 	dsvDesc.range = { 0, 1, 0, 1 }; // One mip level, one array slice
 
     for (int slice = 0; slice < sliceCount; ++slice) {
@@ -1238,7 +1230,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
             UINT idx = dsvHeap->AllocateDescriptor();
 
             // create the DSV
-			device.CreateDepthStencilView({ dsvHeap->GetHeap().GetHandle(), idx}, dsvDesc);
+			device.CreateDepthStencilView({ dsvHeap->GetHeap().GetHandle(), idx}, resource.GetHandle(), dsvDesc);
 
             NonShaderVisibleIndexInfo info;
             info.slot.index = idx;

@@ -281,7 +281,7 @@ typedef void(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDumpCb)(const voi
 // shader debug information (line tables for mapping from the shader IL passed to the
 // driver to the shader microcode) if the shader debug information generation feature
 // is enabled: 'GFSDK_Aftermath_FeatureFlags_GenerateShaderDebugInfo' or
-// 'VK_DEVICE_DIAGNOSTICS_CONFIG_ENABLE_SHADER_ERROR_REPORTING_BIT_NV'. Also see the
+// 'VK_DEVICE_DIAGNOSTICS_CONFIG_ENABLE_SHADER_DEBUG_INFO_BIT_NV'. Also see the
 // description of 'GFSDK_Aftermath_EnableGpuCrashDumps' for more details.
 //
 // NOTE: Except for the 'pUserData' pointer, all pointer values passed to the
@@ -356,7 +356,7 @@ typedef void(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_ResolveMarkerCb)(const vo
 //      available. Shader debug information generation needs to be enabled by
 //      setting the corresponding feature flags:
 //      * For DX: 'GFSDK_Aftermath_FeatureFlags_GenerateShaderDebugInfo'
-//      * For Vulkan: 'VK_DEVICE_DIAGNOSTICS_CONFIG_ENABLE_SHADER_ERROR_REPORTING_BIT_NV'
+//      * For Vulkan: 'VK_DEVICE_DIAGNOSTICS_CONFIG_ENABLE_SHADER_DEBUG_INFO_BIT_NV'
 //
 //      NOTE: Shader debug information is only supported for DX12 (DXIL) and Vulkan
 //      (SPIR-V) shaders.

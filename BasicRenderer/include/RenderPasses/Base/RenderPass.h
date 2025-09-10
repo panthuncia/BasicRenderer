@@ -70,7 +70,9 @@ protected:
 			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, true, &binding.name);
 			i++;
 		}
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ResourceDescriptorIndicesRootSignatureIndex, 0, i, indices);
+		if (i > 0) {
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ResourceDescriptorIndicesRootSignatureIndex, 0, i, indices);
+		}
 	}
 
 	void RegisterSRV(SRVViewType type, ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {

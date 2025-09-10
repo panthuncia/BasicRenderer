@@ -454,5 +454,10 @@ namespace rhi {
 			out.push_back(d);
 		}
 	}
+	inline static D3D12_COMMAND_LIST_TYPE ToDX(QueueKind q) {
+		return q == QueueKind::Graphics ? D3D12_COMMAND_LIST_TYPE_DIRECT
+			: q == QueueKind::Compute ? D3D12_COMMAND_LIST_TYPE_COMPUTE
+			: D3D12_COMMAND_LIST_TYPE_COPY;
+	}
 
 }

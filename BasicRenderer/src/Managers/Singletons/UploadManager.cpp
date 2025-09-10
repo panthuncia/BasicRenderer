@@ -132,7 +132,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Recycle(commandAllocator.Get());
-	//DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ProcessUploads")); //TODO: Put back
+	DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ProcessUploads")); //TODO: Put back
 
 	// TODO: Should we do any barriers here?
 	for (auto& update : m_resourceUpdates) {
@@ -146,7 +146,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 		);
 	}
 
-	//DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
+	DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
 	commandList->End();
 
 	queue.Submit({ &commandList.Get()});

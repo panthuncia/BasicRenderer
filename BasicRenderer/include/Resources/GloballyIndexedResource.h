@@ -41,6 +41,7 @@ public:
 			m_primaryViewType = SRVViewType::Buffer;
 		}
 		m_SRVViews[static_cast<unsigned int>(type)] = {heap, infos};
+		m_pSRVHeap = heap;
 	}
 
 	void SetUAVGPUDescriptors(std::shared_ptr<DescriptorHeap> pUAVHeap, const std::vector<std::vector<ShaderVisibleIndexInfo>>& uavInfos, size_t counterOffset = 0) {
@@ -109,6 +110,13 @@ public:
 	NonShaderVisibleIndexInfo& GetDSVInfo(unsigned int mip, unsigned int slice = 0) { return m_DSVInfos[slice][mip]; }
 	unsigned int GetNumDSVMipLevels() { return static_cast<unsigned int>(m_DSVInfos[0].size()); }
 	unsigned int GetNumDSVSlices() { return static_cast<unsigned int>(m_DSVInfos.size()); }
+
+	const bool HasSRV() const { return m_pSRVHeap != nullptr; }
+	const bool HasUAVShaderVisible() const { return m_pUAVShaderVisibleHeap != nullptr; }
+	const bool HasUAVNonShaderVisible() const { return m_pUAVNonShaderVisibleHeap != nullptr; }
+	const bool HasCBV() const { return m_pCBVHeap != nullptr; }
+	const bool HasRTV() const { return m_pRTVHeap != nullptr; }
+	const bool HasDSV() const { return m_pDSVHeap != nullptr; }
 
 	void SetDefaultSRVViewType(SRVViewType type) {
 		if (type >= SRVViewType::NumSRVViewTypes) {
