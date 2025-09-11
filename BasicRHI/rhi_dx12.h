@@ -2198,8 +2198,19 @@ namespace rhi {
 			return;
 		}
 
-		impl->cl->SetGraphicsRootSignature(L->root.Get());
-		impl->cl->SetComputeRootSignature(L->root.Get());
+		switch(impl->type){
+			case D3D12_COMMAND_LIST_TYPE_DIRECT:
+				impl->cl->SetGraphicsRootSignature(L->root.Get());
+				impl->cl->SetComputeRootSignature(L->root.Get());
+				break;
+			case D3D12_COMMAND_LIST_TYPE_COMPUTE:
+				impl->cl->SetComputeRootSignature(L->root.Get());
+				break;
+			case D3D12_COMMAND_LIST_TYPE_COPY:
+				// no root signature for copy-only lists
+				BreakIfDebugging();
+				break;
+		}
 
 		impl->boundLayout = layoutH;
 		impl->boundLayoutPtr = L;
