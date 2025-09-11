@@ -64,7 +64,7 @@ public:
 		// Set the compute pipeline state
 		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
 
-		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+		BindResourceDescriptorIndices(commandList, m_PSO.GetResourceDescriptorSlots());
 
 		unsigned int drawRootConstants[NumDrawInfoRootConstants] = {};
 
@@ -164,6 +164,8 @@ public:
 			}
 		}
 
+		BindResourceDescriptorIndices(commandList, m_blendPSO.GetResourceDescriptorSlots());
+
 		// blend buffer
 		if (!m_isOccludersPass) {
 			commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
@@ -220,7 +222,6 @@ public:
 
 private:
 
-	PipelineResources m_resourceDescriptorBindings;
 	int m_activeOpaqueDrawSetIndicesBufferSRVIndex = -1;
 	int m_activeAlphaTestDrawSetIndicesBufferSRVIndex = -1;
 	int m_activeBlendDrawSetIndicesBufferSRVIndex = -1;

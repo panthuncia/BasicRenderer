@@ -49,7 +49,7 @@ public:
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
 
-		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+		BindResourceDescriptorIndices(commandList, m_PSO.GetResourceDescriptorSlots());
 
 		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
 		lightClusterConstants[LightPagesPoolSize] = context.lightManager->GetLightPagePoolSize();
@@ -74,8 +74,6 @@ public:
 private:
 
 	std::shared_ptr<Buffer> m_pLightPagesCounter = nullptr;
-	PipelineResources m_resourceDescriptorBindings;
-
 
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(

@@ -202,6 +202,9 @@ void BuildZPrepass(RenderGraph* graph) {
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
+    if (!useMeshShaders) {
+        indirect = false; // Mesh shader pipelines are required for indirect draws
+	}
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     bool clearRTVs = false;
@@ -397,6 +400,9 @@ void BuildPPLLPipeline(RenderGraph* graph) {
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
+    if (!useMeshShaders) {
+        indirect = false; // Mesh shader pipelines are required for indirect draws
+	}
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = resolution.x * resolution.y * aveFragsPerPixel;

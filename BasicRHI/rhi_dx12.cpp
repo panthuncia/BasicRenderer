@@ -1,4 +1,7 @@
 #include "rhi_dx12.h"
+#include <atlbase.h>
+
+#define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
 namespace rhi {
 	const DeviceVTable g_devvt = {
@@ -158,11 +161,32 @@ namespace rhi {
 		&h_setName,
 		1u
 	};
+
+	// ---------------- Helpers ----------------
+	
+	void EnableShaderBasedValidation() {
+		CComPtr<ID3D12Debug> spDebugController0;
+		CComPtr<ID3D12Debug1> spDebugController1;
+		VERIFY(D3D12GetDebugInterface(IID_PPV_ARGS(&spDebugController0)));
+		VERIFY(spDebugController0->QueryInterface(IID_PPV_ARGS(&spDebugController1)));
+		spDebugController1->SetEnableGPUBasedValidation(true);
+	}
+
+	static void EnableDebug(ID3D12Device* device) {
+		ComPtr<ID3D12Debug> debugController;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+			debugController->EnableDebugLayer();
+		}
+		//EnableShaderBasedValidation();
+		ComPtr<ID3D12InfoQueue> iq; if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&iq)))) {
+			D3D12_MESSAGE_ID blocked[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328, (D3D12_MESSAGE_ID)1008 };
+			D3D12_INFO_QUEUE_FILTER f{}; f.DenyList.NumIDs = (UINT)_countof(blocked); f.DenyList.pIDList = blocked; iq->AddStorageFilterEntries(&f);
+		}
+	}
+
 	DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept {
 		UINT flags = 0;
-#ifdef _DEBUG
 		if (ci.enableDebug) { ComPtr<ID3D12Debug> dbg; if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer(), flags |= DXGI_CREATE_FACTORY_DEBUG; }
-#endif
 		auto impl = std::make_shared<Dx12Device>();
 		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->factory));
 
@@ -173,7 +197,9 @@ namespace rhi {
 		adapter.As(&impl->adapter);
 
 		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->dev));
-		EnableDebug(impl->dev.Get());
+		if (ci.enableDebug) {
+			EnableDebug(impl->dev.Get());
+		}
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
 		ComPtr<ID3D12InfoQueue1> infoQueue;

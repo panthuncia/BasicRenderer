@@ -177,6 +177,7 @@ private:
     bool m_bloom = true;
     bool m_jitter = true;
 	bool m_screenSpaceReflections = true;
+	bool m_useMeshShaders = false;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<void(LinearShadowMaps*)> setLinearShadowMaps;

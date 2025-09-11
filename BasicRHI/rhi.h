@@ -1243,7 +1243,7 @@ namespace rhi {
     class Resource {
     public:
 		Resource() = default;
-        explicit Resource(ResourceHandle h, bool isTexture = false) : handle(h) {}
+        explicit Resource(ResourceHandle h, bool isTexture = false) : handle(h), isTexture(isTexture) {}
         void* impl{}; // backend wrap (owns Handle32)
         const ResourceVTable* vt{}; // vtable
         explicit constexpr operator bool() const noexcept {

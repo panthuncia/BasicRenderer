@@ -77,7 +77,7 @@ public:
 		commandList.BindPipeline(m_frustrumCullingPSO.GetAPIPipelineState().GetHandle());
 
 
-		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+		BindResourceDescriptorIndices(commandList, m_frustrumCullingPSO.GetResourceDescriptorSlots());
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
 		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
@@ -91,9 +91,9 @@ public:
 		// Culling for main camera
 
 		// Frustrum culling
-		auto meshletCullingBuffer = m_primaryCameraMeshletCullingIndirectCommandBuffer;
+		auto& meshletCullingBuffer = m_primaryCameraMeshletCullingIndirectCommandBuffer;
 		
-		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchCommandSignature();
+		auto& commandSignature = CommandSignatureManager::GetInstance().GetDispatchCommandSignature();
 		commandList.ExecuteIndirect(
 			commandSignature.GetHandle(),
 			meshletCullingBuffer->GetResource()->GetAPIResource().GetHandle(),
@@ -102,22 +102,6 @@ public:
 			meshletCullingBuffer->GetResource()->GetUAVCounterOffset(),
 			numDraws
 		);
-
-		// Reset necessary meshlets
-		if (m_doResets) {
-			auto meshletCullingClearBuffer = m_primaryCameraMeshletCullingResetIndirectCommandBuffer;
-			//commandList->SetPipelineState(m_clearPSO.Get());
-			commandList.BindPipeline(m_clearPSO.GetAPIPipelineState().GetHandle());
-
-			commandList.ExecuteIndirect(
-				commandSignature.GetHandle(),
-				meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
-				0,
-				meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
-				meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset(),
-				numDraws
-			);
-		}
 
 		if (getShadowsEnabled()) {
 
@@ -146,6 +130,8 @@ public:
 				}
 				});
 
+			BindResourceDescriptorIndices(commandList, m_clearPSO.GetResourceDescriptorSlots());
+
 			// Reset necessary meshlets
 			if (m_doResets) {
 				commandList.BindPipeline(m_clearPSO.GetAPIPipelineState().GetHandle());
@@ -171,6 +157,26 @@ public:
 					}
 					});
 			}
+		}
+
+		if (!getShadowsEnabled()) { // Otherwise, set in the shadow culling
+			BindResourceDescriptorIndices(commandList, m_clearPSO.GetResourceDescriptorSlots());
+		}
+
+		// Reset necessary meshlets
+		if (m_doResets) {
+			auto& meshletCullingClearBuffer = m_primaryCameraMeshletCullingResetIndirectCommandBuffer;
+			//commandList->SetPipelineState(m_clearPSO.Get());
+			commandList.BindPipeline(m_clearPSO.GetAPIPipelineState().GetHandle());
+
+			commandList.ExecuteIndirect(
+				commandSignature.GetHandle(),
+				meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
+				0,
+				meshletCullingClearBuffer->GetResource()->GetAPIResource().GetHandle(),
+				meshletCullingClearBuffer->GetResource()->GetUAVCounterOffset(),
+				numDraws
+			);
 		}
 
 		return {};
@@ -222,8 +228,6 @@ private:
 
 	PipelineState m_frustrumCullingPSO;
 	PipelineState m_clearPSO;
-
-	PipelineResources m_resourceDescriptorBindings;
 
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingIndirectCommandBuffer = nullptr;

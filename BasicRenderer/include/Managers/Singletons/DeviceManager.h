@@ -60,7 +60,11 @@ inline DeviceManager& DeviceManager::GetInstance() {
 
 inline void DeviceManager::Initialize() {
 	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-	m_device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = true });
+	bool enableDebug = false;
+#if BUILD_TYPE == BUILD_DEBUG
+	enableDebug = true;
+#endif
+	m_device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug });
 	m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
 	m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
 	m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);

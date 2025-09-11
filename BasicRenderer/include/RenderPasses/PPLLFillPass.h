@@ -160,7 +160,7 @@ private:
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		uint32_t clearValues[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
+		uint32_t clearValues[4] = { 0, 0, 0, 0 };
 
 		rhi::UavClearInfo clearInfo = {};
 		clearInfo.cpuVisible = m_PPLLCounter->GetUAVNonShaderVisibleInfo(0).slot;
@@ -168,15 +168,33 @@ private:
 		clearInfo.resource = m_PPLLCounter->GetAPIResource();
 		commandList.ClearUavUint(clearInfo, clearValues);
 
+		uint32_t clearValues1[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
+
+		clearInfo.cpuVisible = m_PPLLHeadPointerTexture->GetUAVNonShaderVisibleInfo(0).slot;
+		clearInfo.shaderVisible = m_PPLLHeadPointerTexture->GetUAVShaderVisibleInfo(0).slot;
+		clearInfo.resource = m_PPLLHeadPointerTexture->GetAPIResource();
+		commandList.ClearUavUint(clearInfo, clearValues1);
+
 		// UAV barrier TODO: Is this necessary with the clear above?
 		rhi::BarrierBatch barriers;
-		rhi::BufferBarrier barrier;
-		barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-		barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-		barrier.afterSync = rhi::ResourceSyncState::PixelShading;
-		barrier.beforeSync = rhi::ResourceSyncState::ClearUnorderedAccessView;
-		barrier.buffer = m_PPLLCounter->GetAPIResource().GetHandle();
-		barriers.buffers = { &barrier, 1 };
+		rhi::BufferBarrier counterBarrier;
+		counterBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+		counterBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+		counterBarrier.afterSync = rhi::ResourceSyncState::PixelShading;
+		counterBarrier.beforeSync = rhi::ResourceSyncState::ClearUnorderedAccessView;
+		counterBarrier.buffer = m_PPLLCounter->GetAPIResource().GetHandle();
+
+		rhi::TextureBarrier headPointerBarrier;
+		headPointerBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+		headPointerBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+		headPointerBarrier.afterLayout = rhi::ResourceLayout::UnorderedAccess;
+		headPointerBarrier.beforeLayout = rhi::ResourceLayout::UnorderedAccess;
+		headPointerBarrier.afterSync = rhi::ResourceSyncState::PixelShading;
+		headPointerBarrier.beforeSync = rhi::ResourceSyncState::ClearUnorderedAccessView;
+		headPointerBarrier.texture = m_PPLLHeadPointerTexture->GetAPIResource().GetHandle();
+
+		barriers.textures = { &headPointerBarrier };
+		barriers.buffers = { &counterBarrier };
 		commandList.Barriers(barriers);
 
 

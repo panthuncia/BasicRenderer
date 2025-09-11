@@ -336,16 +336,6 @@ namespace rhi {
 	extern const TimelineVTable g_tlvt;
 	extern const HeapVTable g_hevt;
 
-	// ---------------- Helpers ----------------
-	static void EnableDebug(ID3D12Device* device) {
-#ifdef _DEBUG
-		ComPtr<ID3D12InfoQueue> iq; if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&iq)))) {
-			D3D12_MESSAGE_ID blocked[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328, (D3D12_MESSAGE_ID)1008 };
-			D3D12_INFO_QUEUE_FILTER f{}; f.DenyList.NumIDs = (UINT)_countof(blocked); f.DenyList.pIDList = blocked; iq->AddStorageFilterEntries(&f);
-		}
-#endif
-	}
-
 	// ---------------- Device vtable funcs ----------------
 
 	static uint8_t getWriteMask(ColorWriteEnable e) {
@@ -615,7 +605,11 @@ namespace rhi {
 		desc.SampleDesc = { 1,0 };
 		desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 		desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-		desc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+		auto flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+		if (allowTearing) {
+			flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+		}
+		desc.Flags = flags;
 
 		ComPtr<IDXGISwapChain1> sc1;
 		IDXGIFactory7* facForCreate = impl->upgradeFn && impl->slFactory ? impl->slFactory.Get()
@@ -1600,8 +1594,9 @@ namespace rhi {
 			? D3D12_RESOURCE_DIMENSION_TEXTURE3D
 			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
 				: D3D12_RESOURCE_DIMENSION_TEXTURE1D), depth, impl->selfWeak.lock());
-		auto handle = impl->textures.alloc(std::move(T));
 
+		auto handle = impl->textures.alloc(std::move(T));
+		
 		Resource out{ handle, true };
 		out.impl = impl->textures.get(handle);
 		out.vt = &g_tex_rvt;
