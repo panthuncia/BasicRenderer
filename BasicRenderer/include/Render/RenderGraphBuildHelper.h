@@ -362,6 +362,8 @@ void BuildMainShadowPass(RenderGraph* graph) {
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
+	// TODO: Make a better way of evaluating dependencies between settings. Maybe a graph?
+	indirect = indirect && useMeshShaders; // Mesh shader pipelines are required for indirect draws
 
     bool clearRTVs = false;
     if (!occlusionCulling || !indirect) {

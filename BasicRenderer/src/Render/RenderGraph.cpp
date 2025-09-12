@@ -1,8 +1,8 @@
 #include "Render/RenderGraph.h"
 
 #include <span>
-#include <ThirdParty/pix/pix3.h>
 #include <rhi_helpers.h>
+#include <rhi_debug.h>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -694,11 +694,10 @@ namespace {
 		context.commandList = commandList;
 		for (auto& pr : passes) {
 			if (pr.pass->IsInvalidated()) {
-				PIXBeginEvent(rhi::dx12::get_cmd_list(commandList), 0, pr.name.c_str());
+				rhi::debug::Scope scope(commandList, rhi::colors::Mint, pr.name.c_str());
 				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 				auto passReturn = pr.pass->Execute(context);
 				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
-				PIXEndEvent(rhi::dx12::get_cmd_list(commandList));
 				if (passReturn.fence) {
 					externalFences.push_back(passReturn);
 				}

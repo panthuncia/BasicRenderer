@@ -1,6 +1,7 @@
 #include "Managers/Singletons/UploadManager.h"
 
 #include <rhi_helpers.h>
+#include <rhi_debug.h>
 
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
@@ -8,8 +9,6 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
-
-#include <ThirdParty/pix/pix3.h> // Must come after anything that includes d3d12.h
 
 void UploadManager::Initialize() {
 	auto device = DeviceManager::GetInstance().GetDevice();
@@ -132,8 +131,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Recycle(commandAllocator.Get());
-	DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ProcessUploads")); //TODO: Put back
-
+	rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "UploadManager::ProcessUploads");
 	// TODO: Should we do any barriers here?
 	for (auto& update : m_resourceUpdates) {
 		Resource* buffer = update.resourceToUpdate;
@@ -145,8 +143,8 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 			update.size
 		);
 	}
+	rhi::debug::End(commandList.Get());
 
-	DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
 	commandList->End();
 
 	queue.Submit({ &commandList.Get()});
@@ -166,7 +164,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
 	commandList->Recycle(commandAllocator.Get());
-	DEBUG_ONLY(PIXBeginEvent(rhi::dx12::get_cmd_list(commandList.Get()), 0, L"UploadManager::ExecuteResourceCopies"));
+	rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "Upload Manager - resource copies");
 	for (auto& copy : queuedResourceCopies) {
 
 		// Copy initial state of the resources
@@ -230,7 +228,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 
 		commandList->Barriers(batch.View());
 	}
-	DEBUG_ONLY(PIXEndEvent(rhi::dx12::get_cmd_list(commandList.Get())));
+	rhi::debug::End(commandList.Get());
 	commandList->End();
 
 	queue.Submit({ &commandList.Get() });

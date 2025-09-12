@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <functional>
 
+#include <rhi_debug.h>
+
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -141,6 +143,7 @@ private:
         auto drawObjects = [&]() {
 
             // Opaque objects
+            
             m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
                 auto& meshes = opaqueMeshes.meshInstances;
 
@@ -211,6 +214,7 @@ private:
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
+            rhi::debug::Scope scope(commandList, rhi::colors::Blue, e.name().c_str());
             switch (light.type) {
             case Components::LightType::Spot: {
 				rhi::PassBeginInfo passBeginInfo = {};
@@ -242,6 +246,8 @@ private:
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < 6; i++) {
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
 					rhi::PassBeginInfo passBeginInfo = {};
 					rhi::DepthAttachment depthAttachment = {};
 					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
@@ -271,6 +277,8 @@ private:
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
 					rhi::PassBeginInfo passBeginInfo = {};
 					rhi::DepthAttachment depthAttachment = {};
 					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
@@ -367,6 +375,7 @@ private:
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
+            rhi::debug::Scope scope(commandList, rhi::colors::Blue, e.name().c_str());
             float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
             switch (light.type) {
             case Components::LightType::Spot: {
@@ -403,6 +412,8 @@ private:
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < 6; i++) {
+					std::string name = "View " + std::to_string(i);
+					rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
 					rhi::PassBeginInfo passBeginInfo = {};
 					rhi::DepthAttachment depthAttachment = {};
 					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
@@ -436,13 +447,8 @@ private:
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-                    //auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
-                    //auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
-                    //commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                    //if (m_clearDepths) {
-                    //    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                    //    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                    //}
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
 					rhi::PassBeginInfo passBeginInfo = {};
 					rhi::DepthAttachment depthAttachment = {};
 					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
@@ -506,6 +512,7 @@ private:
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
+            rhi::debug::Scope scope(commandList, rhi::colors::Blue, e.name().c_str());
             float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
             switch (light.type) {
             case Components::LightType::Spot: {
@@ -546,6 +553,8 @@ private:
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < 6; i++) {
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
 					rhi::PassBeginInfo passBeginInfo = {};
 					rhi::DepthAttachment depthAttachment = {};
 					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
@@ -583,6 +592,8 @@ private:
                 uint32_t lightViewIndex = static_cast<uint32_t>(lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades());
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
 					rhi::PassBeginInfo passBeginInfo = {};
 					rhi::DepthAttachment depthAttachment = {};
 					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
