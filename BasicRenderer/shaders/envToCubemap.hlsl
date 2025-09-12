@@ -46,6 +46,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
 
     float2 uv = ((float2) tid.xy + 0.5) / float(Size); // [0,1]
     uv = uv * 2.0 - 1.0; // [-1,1]
+    uv.y = -uv.y; // Invert for DirectX
     float3 dir = FaceUVToDir(Face, uv);
 
     float2 equirect = DirToEquirect(dir);

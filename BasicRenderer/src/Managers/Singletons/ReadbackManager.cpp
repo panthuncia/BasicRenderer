@@ -66,6 +66,9 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
     //barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
     //commandList->ResourceBarrier(1, &barrier);
 
+    auto width = cubemap->GetWidth();
+    auto height = cubemap->GetHeight();
+    auto format = rhi::ToDxgi(cubemap->GetFormat());
     ReadbackRequest readbackRequest;
     readbackRequest.readbackBuffer = readbackBuffer->GetAPIResource().GetHandle();
     readbackRequest.layouts = fps;
@@ -79,8 +82,7 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
 
             // Create a ScratchImage and fill it with the cubemap and mipmap data
             DirectX::ScratchImage scratchImage;
-            auto format = rhi::ToDxgi(cubemap->GetFormat());
-            scratchImage.InitializeCube(format, cubemap->GetWidth(), cubemap->GetHeight(), 1, numMipLevels);  // Initialize with mip levels
+            scratchImage.InitializeCube(format, width, height, 1, numMipLevels);  // Initialize with mip levels
 
             for (UINT mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
                 for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex) {
