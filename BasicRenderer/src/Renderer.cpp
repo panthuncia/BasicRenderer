@@ -467,9 +467,9 @@ void Renderer::SetSettings() {
 		m_screenSpaceReflections = newValue;
 		rebuildRenderGraph = true;
 		}));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("useAsyncCompute", [this](const bool& newValue) {
-        rebuildRenderGraph = true;
-		}));
+  //  m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("useAsyncCompute", [this](const bool& newValue) {
+  //      rebuildRenderGraph = true;
+		//}));
 }
 
 void Renderer::ToggleMeshShaders(bool useMeshShaders) {

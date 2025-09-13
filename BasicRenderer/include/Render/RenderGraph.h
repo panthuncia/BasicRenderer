@@ -216,6 +216,8 @@ private:
 		return m_computeQueueFenceValue++;
 	}
 
+	std::function<bool()> m_getUseAsyncCompute;
+
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 
 	void ComputeResourceLoops();

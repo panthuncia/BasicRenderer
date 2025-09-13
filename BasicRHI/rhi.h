@@ -59,6 +59,7 @@ namespace rhi {
         constexpr bool valid() const noexcept { return index != 0xFFFFFFFFu; }
     };
 
+	// hash for handles
     template<class H>
     struct HandleHash {
         size_t operator()(const H& h) const noexcept {
@@ -71,6 +72,13 @@ namespace rhi {
             return static_cast<size_t>(x);
         }
     };
+	// equality for handles
+	template<class H>
+    struct HandleEqual {
+        bool operator()(const H& a, const H& b) const noexcept {
+            return a.index == b.index && a.generation == b.generation;
+        }
+	};
 
     using ResourceHandle = Handle<detail::HResource>;
     using ViewHandle = Handle<detail::HView>;

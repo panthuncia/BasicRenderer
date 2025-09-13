@@ -517,23 +517,7 @@ void RenderGraph::Setup() {
 	m_copyQueueFence = device.CreateTimeline();
 	m_frameStartSyncFence = device.CreateTimeline();
 
-	bool useAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute")();
-
-	CommandRecordingManager::Init init{
-		.graphicsQ = &manager.GetGraphicsQueue(),
-		.graphicsF = &m_graphicsQueueFence.Get(),
-		.graphicsPool = m_graphicsCommandListPool.get(),
-
-		.computeQ = useAsyncCompute ? &manager.GetComputeQueue() : &manager.GetGraphicsQueue(),
-		.computeF = &m_computeQueueFence.Get(),
-		.computePool = useAsyncCompute ? m_computeCommandListPool.get() : m_graphicsCommandListPool.get(),
-
-		.copyQ = &manager.GetCopyQueue(),
-		.copyF = &m_copyQueueFence.Get(),
-		.copyPool = m_copyCommandListPool.get(),
-		.computeMode = useAsyncCompute ? ComputeMode::Async : ComputeMode::AliasToGraphics
-	};
-	m_pCommandRecordingManager = std::make_unique<CommandRecordingManager>(init);
+	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
 
 	std::vector<rhi::CommandList> emptyLists;
 	for (auto& pass : passes) {
@@ -654,10 +638,7 @@ namespace {
 	void ExecuteTransitions(std::vector<ResourceTransition>& transitions,
 		CommandRecordingManager* crm,
 		QueueKind queueKind,
-		rhi::CommandList& commandList,
-		UINT64 fenceOffset,
-		bool fenceSignal,
-		UINT64 fenceValue) {
+		rhi::CommandList& commandList) {
 		rhi::helpers::OwnedBarrierBatch batch;
 		for (auto& transition : transitions) {
 			std::vector<ResourceTransition> dummy;
@@ -672,10 +653,6 @@ namespace {
 		}
 		if (!batch.Empty()) {
 			commandList.Barriers(batch.View());
-		}
-		if (fenceSignal) {
-			UINT64 signalValue = fenceOffset + fenceValue;
-			crm->Flush(queueKind, { true, signalValue });
 		}
 	}
 
@@ -704,15 +681,13 @@ namespace {
 			}
 		}
 		statisticsManager.ResolveQueries(context.frameIndex, queue, commandList);
-		if (externalFences.size() > 0 || fenceSignal) {
-			UINT64 signalValue = fenceOffset + fenceValue;
-			crm->Flush(queueKind, { fenceSignal, signalValue });
+		if (externalFences.size() > 0) {
 			for (auto& fr : externalFences) {
 				if (!fr.fence.has_value()) {
 					spdlog::warn("Pass returned an external fence without a value. This should not happen.");
 				}
 				else {
-					queue.Signal({ fr.fence.value().GetHandle(), fr.fenceValue});
+					queue.Signal({ fr.fence.value().GetHandle(), fr.fenceValue });
 				}
 			}
 		}
@@ -720,6 +695,25 @@ namespace {
 } // namespace
 
 void RenderGraph::Execute(RenderContext& context) {
+
+	bool useAsyncCompute = m_getUseAsyncCompute();
+	auto& manager = DeviceManager::GetInstance();
+	CommandRecordingManager::Init init{
+		.graphicsQ = &manager.GetGraphicsQueue(),
+		.graphicsF = &m_graphicsQueueFence.Get(),
+		.graphicsPool = m_graphicsCommandListPool.get(),
+
+		.computeQ = useAsyncCompute ? &manager.GetComputeQueue() : &manager.GetGraphicsQueue(),
+		.computeF = useAsyncCompute ? &m_computeQueueFence.Get() : &m_graphicsQueueFence.Get(),
+		.computePool = useAsyncCompute ? m_computeCommandListPool.get() : m_graphicsCommandListPool.get(),
+
+		.copyQ = &manager.GetCopyQueue(),
+		.copyF = &m_copyQueueFence.Get(),
+		.copyPool = m_copyCommandListPool.get(),
+		.computeMode = useAsyncCompute ? ComputeMode::Async : ComputeMode::AliasToGraphics
+	};
+
+	m_pCommandRecordingManager = std::make_unique<CommandRecordingManager>(init);
 	auto crm = m_pCommandRecordingManager.get();
 
 	auto graphicsQueue = crm->Queue(QueueKind::Graphics);
@@ -733,10 +727,12 @@ void RenderGraph::Execute(RenderContext& context) {
 	UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue * context.frameFenceValue;
 	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue * context.frameFenceValue;
 
-	computeQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-	graphicsQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-	graphicsQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-	computeQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+	if (!alias) {
+		computeQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		graphicsQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		graphicsQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		computeQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+	}
 
 	auto& statisticsManager = StatisticsManager::GetInstance();
 
@@ -754,15 +750,17 @@ void RenderGraph::Execute(RenderContext& context) {
 		ExecuteTransitions(batch.computeTransitions,
 			crm,
 			QueueKind::Compute,
-			computeCommandList,
-			currentComputeQueueFenceOffset, 
-			batch.computeTransitionSignal,
-			batch.computeTransitionFenceValue);
+			computeCommandList);
 
 		if (batch.computeQueueWaitOnRenderQueueBeforeExecution) {
 			WaitIfDistinct(computeQueue, m_graphicsQueueFence.Get(),
 				currentGraphicsQueueFenceOffset +
 				batch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue);
+		}
+
+		if (batch.computeTransitionSignal && !alias) {
+			UINT64 signalValue = currentComputeQueueFenceOffset + batch.computeTransitionFenceValue;
+			crm->Flush(QueueKind::Compute, { true, signalValue });
 		}
 
 		ExecutePasses(batch.computePasses, 
@@ -776,6 +774,11 @@ void RenderGraph::Execute(RenderContext& context) {
 			context, 
 			statisticsManager);
 
+		if (batch.computeCompletionSignal && !alias) {
+			UINT64 signalValue = currentComputeQueueFenceOffset + batch.computeCompletionFenceValue;
+			crm->Flush(QueueKind::Compute, { true, signalValue });
+		}
+
 		if (batch.renderQueueWaitOnComputeQueueBeforeTransition) {
 			WaitIfDistinct(graphicsQueue, m_computeQueueFence.Get(),
 				currentComputeQueueFenceOffset +
@@ -787,10 +790,12 @@ void RenderGraph::Execute(RenderContext& context) {
 		ExecuteTransitions(batch.renderTransitions,
 			crm,
 			QueueKind::Graphics,
-			graphicsCommandList,
-			currentGraphicsQueueFenceOffset, 
-			batch.renderTransitionSignal,
-			batch.renderTransitionFenceValue);
+			graphicsCommandList);
+
+		if (batch.renderTransitionSignal && !alias) {
+			UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderTransitionFenceValue;
+			crm->Flush(QueueKind::Graphics, { true, signalValue });
+		}
 
 		if (batch.renderQueueWaitOnComputeQueueBeforeExecution) {
 			WaitIfDistinct(graphicsQueue, m_computeQueueFence.Get(),
@@ -811,14 +816,21 @@ void RenderGraph::Execute(RenderContext& context) {
 			context, 
 			statisticsManager);
 
+		if (batch.renderCompletionSignal && signalNow && !alias) {
+			UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderCompletionFenceValue;
+			crm->Flush(QueueKind::Graphics, { true, signalValue });
+		}
+
 		if (batch.batchEndTransitions.size() > 0) {
 			ExecuteTransitions(batch.batchEndTransitions, 
 				crm,
 				QueueKind::Graphics,
-				graphicsCommandList,
-				currentGraphicsQueueFenceOffset,
-				true, 
-				batch.renderCompletionFenceValue);
+				graphicsCommandList);
+
+			if (!alias) {
+				UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderCompletionFenceValue;
+				crm->Flush(QueueKind::Graphics, { true, signalValue });
+			}
 		}
 		++batchIndex;
 	}

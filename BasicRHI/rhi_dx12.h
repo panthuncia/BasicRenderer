@@ -27,7 +27,7 @@
 #endif
 
 inline void BreakIfDebugging() {
-#if NDEBUG
+#if BUILD_TYPE == BUILD_DEBUG
 	if (IsDebuggerPresent()) {
 		__debugbreak();
 	}
@@ -198,6 +198,9 @@ namespace rhi {
 		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
 		Microsoft::WRL::ComPtr<ID3D12Fence> fence; 
 		UINT64 value = 0;
+#if BUILD_TYPE == BUILD_DEBUG
+		std::unordered_map<TimelineHandle, uint64_t, HandleHash<TimelineHandle>, HandleEqual<TimelineHandle>> lastSignaledValue; // track last signaled value per timeline
+#endif
 		std::shared_ptr<Dx12Device> dev;
 	};
 
@@ -2086,6 +2089,14 @@ namespace rhi {
 			BreakIfDebugging();
 			return Result::InvalidArg;
 		}
+#if BUILD_TYPE == BUILD_DEBUG
+		auto last = qs->lastSignaledValue.find(p.t);
+		if (last != qs->lastSignaledValue.end() && p.value <= last->second) {
+			BreakIfDebugging();
+			return Result::InvalidArg; // must be strictly greater
+		}
+		qs->lastSignaledValue[p.t] = p.value;
+#endif
 		return SUCCEEDED(qs->q->Signal(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
 	}
 
@@ -2134,8 +2145,8 @@ namespace rhi {
 	static void cl_reset(CommandList* cl, const CommandAllocator& ca) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* a = static_cast<Dx12Allocator*>(ca.impl);
-#if NDEBUG
-		if (!l) { 
+#if BUILD_TYPE == BUILD_DEBUG
+		if (!l) {
 			BreakIfDebugging(); 
 			spdlog::error("cl_reset: invalid command list"); 
 		}
