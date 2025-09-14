@@ -91,59 +91,44 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
 void UpscalingManager::InitializeAdapter()
 {
     auto dev = DeviceManager::GetInstance().GetDevice();
+	m_dlssSupported = CheckDLSSSupport(dev);
+    if (m_dlssSupported) {
+        if (!InitSL()) {
+            m_upscalingMode = UpscalingMode::FSR3; // fallback
+			m_dlssSupported = false;
+        }
+    }
+    else {
+        m_upscalingMode = UpscalingMode::FSR3;
+    }
 
-    //if (CheckDLSSSupport(dev)) {
-    //    m_upscalingMode = UpscalingMode::DLSS;
-    //    if (!InitSL()) {
-    //        m_upscalingMode = UpscalingMode::FSR3; // fallback
-    //    }
-    //}
-    //else {
-    //    m_upscalingMode = UpscalingMode::FSR3;
-    //}
-
-    //if (m_upscalingMode == UpscalingMode::DLSS) {
-    //    // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
-    //    rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface);
-    //    // Let SL know about the device we're using
-    //    slSetD3DDevice(dx12_device());
-    //}
+    if (m_dlssSupported) {
+		// Provide the D3D device to Streamline
+        rhi::dx12::set_streamline_d3d_device(dev, slSetD3DDevice);
+		// Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
+		rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface); // TODO: Un-enable if switching to FSR3 at runtime
+    }
 
     //if (m_upscalingMode == UpscalingMode::FSR3) {
-    //    InitFFX();
+    InitFFX();
     //}
 }
 
-ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device) {
+void UpscalingManager::ProxyDevice() {
     switch (m_upscalingMode)
     {
     case UpscalingMode::DLSS: {
-        ID3D12Device10* proxyDevice = device.Get();
-        if (SL_FAILED(result, slUpgradeInterface((void**)&proxyDevice)))
-        {
-            spdlog::error("SL device upgrade failed!");
-        }
-        slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
-		return proxyDevice;
+        // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
+		auto dev = DeviceManager::GetInstance().GetDevice();
+        rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface);
         break;
     }
     case UpscalingMode::FSR3: {
-        return device.Get();
         break;
     }
     default:
-		return device.Get();
 		break;
     }
-}
-
-IDXGIFactory7* UpscalingManager::ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory) {
-    IDXGIFactory7* proxyFactory = factory.Get();
-    if (SL_FAILED(result, slUpgradeInterface((void**)&proxyFactory)))
-    {
-        spdlog::error("SL factory upgrade failed!");
-    }
-    return proxyFactory;
 }
 
 bool UpscalingManager::InitFFX() {
@@ -245,7 +230,7 @@ bool UpscalingManager::InitSL() {
     }
 
     sl::Preferences pref{};
-    pref.showConsole = false; // for debugging, set to false in production
+    pref.showConsole = true; // for debugging, set to false in production
     pref.logLevel = sl::LogLevel::eDefault;
     auto path = GetExePath() + L"\\NVSL";
     const wchar_t* path_wchar = path.c_str();

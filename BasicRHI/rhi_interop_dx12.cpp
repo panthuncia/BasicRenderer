@@ -196,6 +196,16 @@ namespace rhi {
 
     namespace dx12 {
 
+        bool set_streamline_d3d_device(Device d, PFun_slSetD3DDevice setFunc) {
+            if (!d.IsValid() || !setFunc) return false;
+            auto* impl = static_cast<Dx12Device*>(d.impl);
+            if (!impl || !impl->dev) return false;
+			Microsoft::WRL::ComPtr<ID3D12Device> devBase; // Can SL take ID3D12Device10?
+            (void)impl->dev.As(&devBase);
+            // Call Streamline's function
+            return (setFunc(devBase.Get()) == sl::Result::eOk);
+		}
+
         bool enable_streamline_interposer(Device d, PFN_UpgradeInterface upgrade) {
             auto* impl = static_cast<Dx12Device*>(d.impl);
 
@@ -205,7 +215,7 @@ namespace rhi {
             impl->slFactory.Attach(fac); // now holds upgraded factory
 
             // upgrade device to base iface
-            IUnknown* dev = impl->dev.Get();
+            ID3D12Device10* dev = impl->dev.Get();
             if (upgrade(reinterpret_cast<void**>(&dev)) != sl::Result::eOk) {
                 Microsoft::WRL::ComPtr<ID3D12Device> base;
                 dev->QueryInterface(IID_PPV_ARGS(&base));

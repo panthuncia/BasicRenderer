@@ -97,8 +97,7 @@ class UpscalingManager {
 public:
     static UpscalingManager& GetInstance();
     void InitializeAdapter();
-	ID3D12Device10* ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device);
-	IDXGIFactory7* ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory);
+	void ProxyDevice();
     void Setup();
     void Evaluate(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void Shutdown();
@@ -124,6 +123,7 @@ private:
     std::function<DirectX::XMUINT2()> m_getRenderRes;
 	std::function<DirectX::XMUINT2()> m_getOutputRes;
     ffx::Context m_fsrUpscalingContext;
+	bool m_dlssSupported = false;
 };
 
 inline UpscalingManager& UpscalingManager::GetInstance() {

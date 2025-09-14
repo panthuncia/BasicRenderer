@@ -85,6 +85,8 @@ namespace rhi::dx12 {
 	}
 
     using PFN_UpgradeInterface = sl::Result(*)(void**); // Streamline's slUpgradeInterface-compatible
+    using PFun_slSetD3DDevice = sl::Result(void* d3dDevice);
+	bool set_streamline_d3d_device(Device, PFun_slSetD3DDevice setFunc);
     bool enable_streamline_interposer(Device, PFN_UpgradeInterface upgrade);
     void disable_streamline_interposer(Device);
 } // namespace rhi::dx12
