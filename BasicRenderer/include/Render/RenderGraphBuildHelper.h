@@ -226,8 +226,8 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingDepthsDesc.arraySize = 1;
     workingDepthsDesc.channels = 1;
     workingDepthsDesc.isCubemap = false;
-    workingDepthsDesc.hasRTV = false;
     workingDepthsDesc.hasUAV = true;
+	workingDepthsDesc.hasSRV = true;
     workingDepthsDesc.format = rhi::Format::R32_Float;
     workingDepthsDesc.generateMipMaps = true;
     ImageDimensions dims1 = { resolution.x, resolution.y, 0, 0 };
@@ -239,8 +239,8 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingEdgesDesc.arraySize = 1;
     workingEdgesDesc.channels = 1;
     workingEdgesDesc.isCubemap = false;
-    workingEdgesDesc.hasRTV = false;
     workingEdgesDesc.hasUAV = true;
+	workingEdgesDesc.hasSRV = true;
     workingEdgesDesc.format = rhi::Format::R8_UNorm;
     workingEdgesDesc.generateMipMaps = false;
     workingEdgesDesc.imageDimensions.push_back(dims1);
@@ -251,8 +251,8 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingAOTermDesc.arraySize = 1;
     workingAOTermDesc.channels = 1;
     workingAOTermDesc.isCubemap = false;
-    workingAOTermDesc.hasRTV = false;
     workingAOTermDesc.hasUAV = true;
+	workingAOTermDesc.hasSRV = true;
     workingAOTermDesc.format = rhi::Format::R8_UInt;
     workingAOTermDesc.generateMipMaps = false;
     workingAOTermDesc.imageDimensions.push_back(dims1);
@@ -284,8 +284,10 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 	samplerDesc.addressW = rhi::AddressMode::Clamp;
 	samplerDesc.mipLodBias = 0.0f;
 	samplerDesc.maxAnisotropy = 1;
-	samplerDesc.compareOp = rhi::CompareOp::Never;
-	samplerDesc.borderPreset = rhi::BorderPreset::OpaqueBlack;
+	samplerDesc.compareEnable = false;
+	samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
+	samplerDesc.minLod = 0.0f;
+    samplerDesc.maxLod = 0.0f;
 
     auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
 
