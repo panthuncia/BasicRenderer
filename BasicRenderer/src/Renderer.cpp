@@ -452,8 +452,8 @@ void Renderer::SetSettings() {
     m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscaleQualityMode>("upscalingQualityMode", [this](const UpscaleQualityMode& newValue) {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
-            UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().SetUpscalingQualityMode(newValue);
+            UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().Setup();
             FFXManager::GetInstance().Shutdown();
             FFXManager::GetInstance().InitFFX();
@@ -683,7 +683,9 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
 	SettingsManager::GetInstance().getSettingSetter<DirectX::XMUINT2>("outputResolution")({ newWidth, newHeight });
 
     UpscalingManager::GetInstance().Shutdown();
-	UpscalingManager::GetInstance().Setup();
+    UpscalingManager::GetInstance().Setup();
+    FFXManager::GetInstance().Shutdown();
+    FFXManager::GetInstance().InitFFX();
 
     CreateTextures();
 

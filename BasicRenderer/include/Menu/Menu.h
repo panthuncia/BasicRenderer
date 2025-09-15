@@ -467,6 +467,7 @@ inline void Menu::Render(RenderContext& context) {
 		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+		ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d" , context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
 		ImGui::End();
 	}
 
