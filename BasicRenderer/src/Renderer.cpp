@@ -440,8 +440,6 @@ void Renderer::SetSettings() {
             UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().SetUpscalingMode(newValue);
 
-            DeviceManager::GetInstance().Initialize(); // Re-init device manager with correct device 
-
             UpscalingManager::GetInstance().Setup();
 
             FFXManager::GetInstance().Shutdown();
@@ -554,9 +552,11 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     DeviceManager::GetInstance().Initialize();
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	m_swapChain = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing);
 
     UpscalingManager::GetInstance().InitializeAdapter();
+
+    m_swapChain = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing);
+
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
     const uint32_t aftermathFlags =

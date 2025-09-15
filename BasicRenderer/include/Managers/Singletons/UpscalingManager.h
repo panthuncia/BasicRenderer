@@ -116,7 +116,7 @@ private:
     void EvaluateDLSS(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
     void EvaluateFSR3(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void EvaluateNone(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-	UpscalingMode m_upscalingMode = UpscalingMode::None;
+	UpscalingMode m_upscalingMode = UpscalingMode::DLSS;
     UpscaleQualityMode m_upscaleQualityMode = UpscaleQualityMode::DLAA;
     std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight
     uint8_t m_numFramesInFlight;

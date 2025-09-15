@@ -196,23 +196,18 @@ namespace rhi {
 
     namespace dx12 {
 
-        bool set_streamline_d3d_device(Device d, PFun_slSetD3DDevice setFunc) {
-            if (!d.IsValid() || !setFunc) return false;
-            auto* impl = static_cast<Dx12Device*>(d.impl);
-            if (!impl || !impl->dev) return false;
-			Microsoft::WRL::ComPtr<ID3D12Device> devBase; // Can SL take ID3D12Device10?
-            (void)impl->dev.As(&devBase);
-            // Call Streamline's function
-            return (setFunc(devBase.Get()) == sl::Result::eOk);
-		}
-
-        bool enable_streamline_interposer(Device d, PFN_UpgradeInterface upgrade) {
+        bool enable_streamline_interposer(Device d, PFN_UpgradeInterface upgrade, PFun_slSetD3DDevice setDevice) {
             auto* impl = static_cast<Dx12Device*>(d.impl);
 
             // Upgrade factory
             IDXGIFactory7* fac = impl->factory.Get();
             if (!(upgrade(reinterpret_cast<void**>(&fac)) == sl::Result::eOk)) return false;
             impl->slFactory.Attach(fac); // now holds upgraded factory
+
+			// Let Streamline know about our device
+		    if (setDevice(impl->dev.Get()) != sl::Result::eOk) {
+                return false;
+			}
 
             // upgrade device to base iface
             ID3D12Device10* dev = impl->dev.Get();
@@ -227,10 +222,10 @@ namespace rhi {
         }
 
         void disable_streamline_interposer(Device d) {
-            auto* impl = static_cast<Dx12Device*>(d.impl);
-            impl->upgradeFn = nullptr;
-            impl->slFactory.Reset();
-            impl->slDeviceBase.Reset();
+            //auto* impl = static_cast<Dx12Device*>(d.impl);
+			//impl->upgradeFn = nullptr;
+   //         impl->slFactory.Reset();
+			//impl->slDeviceBase.Reset();
         }
     }
 

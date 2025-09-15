@@ -92,26 +92,18 @@ void UpscalingManager::InitializeAdapter()
 {
     auto dev = DeviceManager::GetInstance().GetDevice();
 	m_dlssSupported = CheckDLSSSupport(dev);
-    if (m_dlssSupported) {
-        if (!InitSL()) {
-            m_upscalingMode = UpscalingMode::FSR3; // fallback
-			m_dlssSupported = false;
-        }
-    }
-    else {
-        m_upscalingMode = UpscalingMode::FSR3;
-    }
+
 
     if (m_dlssSupported) {
 		// Provide the D3D device to Streamline
-        rhi::dx12::set_streamline_d3d_device(dev, slSetD3DDevice);
+        //rhi::dx12::set_streamline_d3d_device(dev, slSetD3DDevice);
 		// Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
-		rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface); // TODO: Un-enable if switching to FSR3 at runtime
+		bool success = rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface, slSetD3DDevice); // TODO: Un-enable if switching to FSR3 at runtime
+        if (!success) {
+            spdlog::error("Failed to enable Streamline interposer.");
+			m_dlssSupported = false;
+		}
     }
-
-    //if (m_upscalingMode == UpscalingMode::FSR3) {
-    InitFFX();
-    //}
 }
 
 void UpscalingManager::ProxyDevice() {
@@ -120,7 +112,7 @@ void UpscalingManager::ProxyDevice() {
     case UpscalingMode::DLSS: {
         // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
 		auto dev = DeviceManager::GetInstance().GetDevice();
-        rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface);
+        rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface, slSetD3DDevice);
         break;
     }
     case UpscalingMode::FSR3: {
@@ -136,7 +128,7 @@ bool UpscalingManager::InitFFX() {
     m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
     auto outputRes = m_getOutputRes();
     auto renderRes = m_getRenderRes();
-	auto module = LoadLibrary(L"FFX/amd_fidelityfx_dx12.dll");
+	auto module = LoadLibrary(L"amd_fidelityfx_dx12.dll");
     if (module) {
         ffxLoadFunctions(&ffxModule, module);
 
@@ -519,5 +511,8 @@ void UpscalingManager::Evaluate(RenderContext& context, PixelBuffer* pHDRTarget,
 }
 
 void UpscalingManager::Shutdown() {
-
+	auto dev = DeviceManager::GetInstance().GetDevice();
+    if (m_dlssSupported) {
+        rhi::dx12::disable_streamline_interposer(dev);
+	}
 }
