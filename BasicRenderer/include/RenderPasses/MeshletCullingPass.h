@@ -39,7 +39,7 @@ public:
 		RegisterSRV(Builtin::MeshResources::MeshletBounds);
 
 		m_primaryCameraMeshletCullingBitfieldBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
-		m_primaryCameraMeshletCullingIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling);
+		m_primaryCameraMeshletCullingIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling);
 		m_primaryCameraMeshletCullingResetIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset);
 
 		m_primaryCameraLinearDepthMap = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
@@ -56,7 +56,7 @@ public:
 			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, Builtin::PrimaryCamera::MeshletBitfield)
 			.WithIndirectArguments(
 				Builtin::IndirectCommandBuffers::MeshletCulling, 
-				Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, 
+				Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, 
 				Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset);
 	}
 
@@ -91,7 +91,7 @@ public:
 		// Culling for main camera
 
 		// Frustrum culling
-		auto& meshletCullingBuffer = m_primaryCameraMeshletCullingIndirectCommandBuffer;
+		auto meshletCullingBuffer = m_primaryCameraMeshletCullingIndirectCommandBuffer;
 		
 		auto& commandSignature = CommandSignatureManager::GetInstance().GetDispatchCommandSignature();
 		commandList.ExecuteIndirect(

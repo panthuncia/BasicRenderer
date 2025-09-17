@@ -130,7 +130,7 @@ private:
 
 		rhi::PipelineLayoutDesc desc = {};
 		desc.flags = rhi::PipelineLayoutFlags::PF_AllowInputAssembler;
-		rhi::PushConstantRangeDesc pushConstant = { rhi::ShaderStage::Mesh, 8, 0, 1 };
+		rhi::PushConstantRangeDesc pushConstant = { rhi::ShaderStage::Mesh, 8, 0, 0 };
 
 		rhi::LayoutBindingRange binding = {};
 		binding.set = 0;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <DirectX/d3dx12.h>
+#include <rhi_debug.h>
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
@@ -78,6 +78,7 @@ public:
 		// opaque buffer
 		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
+			rhi::debug::Scope(commandList, rhi::colors::Cyan, "Opaque");
 			uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numOpaqueDraws / 64.0));
 			// First, process buffer for main camera
 			commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
@@ -122,6 +123,7 @@ public:
 		// alpha test buffer
 		auto numAlphaTestDraws = context.drawStats.numAlphaTestDraws;
 		if (numAlphaTestDraws > 0) {
+			rhi::debug::Scope(commandList, rhi::colors::Cyan, "Alpha test");
 			uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numAlphaTestDraws / 64.0));
 
 			commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
@@ -168,9 +170,10 @@ public:
 
 		// blend buffer
 		if (!m_isOccludersPass) {
-			commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
+			commandList.BindPipeline(m_blendPSO.GetAPIPipelineState().GetHandle());
 			auto numBlendDraws = context.drawStats.numBlendDraws;
 			if (numBlendDraws > 0) {
+				rhi::debug::Scope(commandList, rhi::colors::Cyan, "Blend");
 				uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(numBlendDraws / 64.0));
 
 				commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);

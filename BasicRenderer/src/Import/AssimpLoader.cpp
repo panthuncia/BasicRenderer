@@ -281,8 +281,6 @@ namespace AssimpLoader {
                 if (normalTexture->GetFileType() == ImageFiletype::DDS) {
                     negateNormals = true;
                 }
-                negateNormals = false;
-
             }
             if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
                 metallicTex = materialTextures[aiTextureType_METALNESS];

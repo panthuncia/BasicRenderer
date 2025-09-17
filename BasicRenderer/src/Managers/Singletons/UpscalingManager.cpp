@@ -222,7 +222,7 @@ bool UpscalingManager::InitSL() {
     }
 
     sl::Preferences pref{};
-    pref.showConsole = true; // for debugging, set to false in production
+    pref.showConsole = false; // for debugging, set to false in production
     pref.logLevel = sl::LogLevel::eDefault;
     auto path = GetExePath() + L"\\NVSL";
     const wchar_t* path_wchar = path.c_str();

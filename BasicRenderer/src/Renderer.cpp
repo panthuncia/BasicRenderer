@@ -1071,9 +1071,9 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view.indirectCommandBuffers.opaqueIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view.indirectCommandBuffers.alphaTestIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view.indirectCommandBuffers.blendIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
-    //newGraph->AddResource(depthTexture, false);https://www.linkedin.com/in/matthew-gomes-857a4h/
+    //newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {

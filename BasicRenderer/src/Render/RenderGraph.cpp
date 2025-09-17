@@ -670,6 +670,9 @@ namespace {
 		std::vector<PassReturn> externalFences;
 		context.commandList = commandList;
 		for (auto& pr : passes) {
+			if (pr.name == "OcclusionMeshletRemaindersCullingPass") {
+				spdlog::info("0");
+			}
 			if (pr.pass->IsInvalidated()) {
 				rhi::debug::Scope scope(commandList, rhi::colors::Mint, pr.name.c_str());
 				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);

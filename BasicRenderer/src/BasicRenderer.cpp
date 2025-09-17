@@ -277,11 +277,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    //auto bistro = LoadModel("models/BistroExterior.usdz");
+    auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto wine = LoadModel("models/bistroInterior.usdz");
-    //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+    bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     auto robot = LoadModel("models/robot.usdz");
+
+	auto sphereScene = LoadModel("models/sphere.glb");
 
 
     renderer.SetCurrentScene(baseScene);
@@ -289,15 +291,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(curtains->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(carScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
-	renderer.GetCurrentScene()->AppendScene(robot->Clone());
+	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
+    //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
+
+    //for (int i = 0; i < 1; i++) {
+    //    auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
+    //    auto point = getRandomPointInVolume(-20, 20, -2, 2, -20, 20);
+    //    sphereInstance->GetRoot().set<Components::Position>({ point.x, point.y, point.z });
+    //}
 
     renderer.SetEnvironment("sky");
 
