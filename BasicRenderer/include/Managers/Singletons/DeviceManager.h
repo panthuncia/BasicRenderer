@@ -1,7 +1,6 @@
 #pragma once
 
 #include <directx/d3d12.h>
-#include <wrl.h>
 #include <memory>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -11,14 +10,11 @@
 
 #include "Managers/Singletons/SettingsManager.h"
 
-using Microsoft::WRL::ComPtr;
-
 class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
     void Initialize();
-	void DiagnoseDeviceRemoval();
 	rhi::Device GetDevice() {
         return m_device.Get();
     }
@@ -40,7 +36,6 @@ public:
 	}
 
 private:
-	ComPtr<ID3D12DeviceRemovedExtendedData> dred;
 
     DeviceManager() = default;
 	rhi::DevicePtr m_device;

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <d3d12.h>
-#include <wrl/client.h>
 #include <unordered_map>
 #include <memory>
 

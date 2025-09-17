@@ -2,8 +2,6 @@
 #include <vector>
 #include <unordered_map>
 #include <spdlog/spdlog.h>
-#include <d3d12.h>
-#include <wrl/client.h>
 
 #include "Materials/MaterialBuckets.h"
 #include "Scene/Components.h"

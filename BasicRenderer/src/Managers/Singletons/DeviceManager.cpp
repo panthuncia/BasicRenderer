@@ -123,28 +123,3 @@ void LogPageFaults(const D3D12_DRED_PAGE_FAULT_OUTPUT& pageFault) {
     LogAllocationNodes(pageFault.pHeadExistingAllocationNode, "ExistingAllocation");
     LogAllocationNodes(pageFault.pHeadRecentFreedAllocationNode, "RecentFreedAllocation");
 }
-
-void DeviceManager::DiagnoseDeviceRemoval() {
-    //HRESULT reason = device->GetDeviceRemovedReason();
-    //spdlog::error("Device removed reason: 0x{:X}", static_cast<unsigned>(reason));
-
-        D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs = {};
-        D3D12_DRED_PAGE_FAULT_OUTPUT pageFault = {};
-
-        HRESULT br = dred->GetAutoBreadcrumbsOutput(&breadcrumbs);
-        HRESULT pr = dred->GetPageFaultAllocationOutput(&pageFault);
-
-        if (SUCCEEDED(br)) {
-            LogBreadcrumbs(breadcrumbs);
-        }
-        else {
-            spdlog::warn("Failed to get breadcrumbs output.");
-        }
-
-        if (SUCCEEDED(pr)) {
-            LogPageFaults(pageFault);
-        }
-        else {
-            spdlog::warn("Failed to get page fault output.");
-        }
-}

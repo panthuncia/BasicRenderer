@@ -2,8 +2,6 @@
 #include <iostream>
 #include <Windows.h>
 #include <windowsx.h>
-#include <directx/d3d12.h>
-#include <dxgi1_6.h>
 #include <iostream>
 #include <memory>
 #include <spdlog/spdlog.h>

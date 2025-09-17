@@ -1,8 +1,6 @@
 #pragma once
 
 #include <unordered_map>
-#include <wrl/client.h>
-#include <d3d12.h>
 #include <string>
 
 #include <rhi.h>

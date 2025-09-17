@@ -6,9 +6,6 @@
 #define DX12RENDERER_H
 
 #include <windows.h>
-#include <wrl.h>
-#include <directx/d3d12.h>
-#include <dxgi1_6.h>
 #include <directxmath.h>
 #include <memory>
 #include <functional>
@@ -82,13 +79,7 @@ public:
 
 private:
 	bool m_isInitialized = false;
-    ComPtr<IDXGIAdapter1> m_currentAdapter;
-    ComPtr<IDXGIFactory7> factory;
-    ComPtr<IDXGIFactory7> nativeFactory;
-    ComPtr<IDXGIFactory7> slProxyFactory;
     rhi::Device m_device;
-    ComPtr<ID3D12Device10> nativeDevice;
-    ComPtr<ID3D12Device10> slProxyDevice;
 
     rhi::SwapchainPtr m_swapChain;
 
