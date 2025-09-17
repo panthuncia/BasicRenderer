@@ -2928,7 +2928,12 @@ namespace rhi {
 
 		void* ptr = nullptr;
 		HRESULT hr = B->res->Map(0, pRange, &ptr);
-		*data = SUCCEEDED(hr) ? ptr : nullptr;
+		if (SUCCEEDED(hr)) {
+			*data = static_cast<uint8_t*>(ptr) + size_t(offset);
+		}
+		else {
+			*data = nullptr;
+		}
 	}
 
 	static void buf_unmap(Resource* r, uint64_t writeOffset, uint64_t writeSize) noexcept {
@@ -3058,38 +3063,54 @@ namespace rhi {
 			auto push = [&](PipelineStatTypes f, size_t off) {
 				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
 				};
-			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
-			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
-			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
-			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
-			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
-			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
-			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
-			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
-			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
-			// Mesh/Task not supported here
-			tmp.push_back({ PipelineStatTypes::TaskInvocations, 0, 0, false });
-			tmp.push_back({ PipelineStatTypes::MeshInvocations, 0, 0, false });
-			tmp.push_back({ PipelineStatTypes::MeshPrimitives,  0, 0, false });
+
+			for (unsigned int i = 0; i < cap; i++) {
+				auto type = outBuf[i].field;
+				switch (type) {
+				case PipelineStatTypes::IAVertices:            push(type, offsetof(S, IAVertices)); break;
+				case PipelineStatTypes::IAPrimitives:          push(type, offsetof(S, IAPrimitives)); break;
+				case PipelineStatTypes::VSInvocations:         push(type, offsetof(S, VSInvocations)); break;
+				case PipelineStatTypes::GSInvocations:         push(type, offsetof(S, GSInvocations)); break;
+				case PipelineStatTypes::GSPrimitives:          push(type, offsetof(S, GSPrimitives)); break;
+				case PipelineStatTypes::TSControlInvocations:  push(type, offsetof(S, HSInvocations)); break;
+				case PipelineStatTypes::TSEvaluationInvocations: push(type, offsetof(S, DSInvocations)); break;
+				case PipelineStatTypes::PSInvocations:         push(type, offsetof(S, PSInvocations)); break;
+				case PipelineStatTypes::CSInvocations:         push(type, offsetof(S, CSInvocations)); break;
+				case PipelineStatTypes::TaskInvocations:       tmp.push_back({ PipelineStatTypes::TaskInvocations, 0, 0, false }); break;
+				case PipelineStatTypes::MeshInvocations:       tmp.push_back({ PipelineStatTypes::MeshInvocations, 0, 0, false }); break;
+				case PipelineStatTypes::MeshPrimitives:        tmp.push_back({ PipelineStatTypes::MeshPrimitives,  0, 0, false }); break;
+				default:
+					tmp.push_back({ type, 0, 0, false });
+					break;
+				}
+			}
 		}
 		else {
 			using S = D3D12_QUERY_DATA_PIPELINE_STATISTICS1;
 			auto push = [&](PipelineStatTypes f, size_t off) {
 				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
 				};
-			push(PipelineStatTypes::IAVertices, offsetof(S, IAVertices));
-			push(PipelineStatTypes::IAPrimitives, offsetof(S, IAPrimitives));
-			push(PipelineStatTypes::VSInvocations, offsetof(S, VSInvocations));
-			push(PipelineStatTypes::GSInvocations, offsetof(S, GSInvocations));
-			push(PipelineStatTypes::GSPrimitives, offsetof(S, GSPrimitives));
-			push(PipelineStatTypes::TSControlInvocations, offsetof(S, HSInvocations));
-			push(PipelineStatTypes::TSEvaluationInvocations, offsetof(S, DSInvocations));
-			push(PipelineStatTypes::PSInvocations, offsetof(S, PSInvocations));
-			push(PipelineStatTypes::CSInvocations, offsetof(S, CSInvocations));
-			// Mesh/Task present:
-			push(PipelineStatTypes::TaskInvocations, offsetof(S, ASInvocations));
-			push(PipelineStatTypes::MeshInvocations, offsetof(S, MSInvocations));
-			push(PipelineStatTypes::MeshPrimitives, offsetof(S, MSPrimitives));
+			
+			for (unsigned int i = 0; i < cap; i++) {
+				auto type = outBuf[i].field;
+				switch (type) {
+				case PipelineStatTypes::IAVertices:            push(type, offsetof(S, IAVertices)); break;
+				case PipelineStatTypes::IAPrimitives:          push(type, offsetof(S, IAPrimitives)); break;
+				case PipelineStatTypes::VSInvocations:         push(type, offsetof(S, VSInvocations)); break;
+				case PipelineStatTypes::GSInvocations:         push(type, offsetof(S, GSInvocations)); break;
+				case PipelineStatTypes::GSPrimitives:          push(type, offsetof(S, GSPrimitives)); break;
+				case PipelineStatTypes::TSControlInvocations:  push(type, offsetof(S, HSInvocations)); break;
+				case PipelineStatTypes::TSEvaluationInvocations: push(type, offsetof(S, DSInvocations)); break;
+				case PipelineStatTypes::PSInvocations:         push(type, offsetof(S, PSInvocations)); break;
+				case PipelineStatTypes::CSInvocations:         push(type, offsetof(S, CSInvocations)); break;
+				case PipelineStatTypes::TaskInvocations:       push(type, offsetof(S, ASInvocations)); break;
+				case PipelineStatTypes::MeshInvocations:       push(type, offsetof(S, MSInvocations)); break;
+				case PipelineStatTypes::MeshPrimitives:        push(type, offsetof(S, MSPrimitives)); break;
+				default:
+					tmp.push_back({ type, 0, 0, false });
+					break;
+				}
+			}
 		}
 
 		// Copy out

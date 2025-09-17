@@ -122,7 +122,7 @@ private:
 
         // Compile shaders
         ShaderInfoBundle sib;
-        sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+        sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
         sib.pixelShader = { L"shaders/PostProcessing/tonemapping.hlsl", L"PSMain", L"ps_6_6" };
         auto compiled = PSOManager::GetInstance().CompileShaders(sib);
         m_resourceDescriptorBindings = compiled.resourceDescriptorSlots;

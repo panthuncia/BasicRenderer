@@ -612,7 +612,7 @@ private:
 					passBeginInfo.debugName = "Shadow Pass - Directional Light";
 					commandList.BeginPass(passBeginInfo);
 
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
                     lightViewIndex += 1;
                     auto& views = lightViewInfo.renderViews;
                     auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;

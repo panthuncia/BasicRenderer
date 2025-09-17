@@ -306,7 +306,7 @@ namespace AssimpLoader {
                 emissiveTexture = materialTextures[aiTextureType_EMISSIVE];
                 materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             }
-            //emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
+            emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
 
             if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
                 if (emissiveTexture != nullptr) {
