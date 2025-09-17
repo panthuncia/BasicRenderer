@@ -21,6 +21,7 @@ Feature development is driven purely by what I'm interested in at the moment.
   
 ## Technical features
 
+- Low-level RHI (Only DX12 backend implemented, for now, but built to support Vulkan)
 - GPU-driven rendering with compute culling & ExecuteIndirect
 - Per-meshlet occlusion & frustrum culling
 - Forward+ and Deferred rendering
