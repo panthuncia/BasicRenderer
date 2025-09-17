@@ -1,18 +1,19 @@
 #pragma once
 
-#include <directx/d3d12.h>
 #include <wrl.h>
 #include <vector>
 #include <stdexcept>
 #include <queue>
-#include "DirectX/d3dx12.h"
+
+#include <rhi.h>
+#include <rhi_helpers.h>
+
 #include "ShaderBuffers.h"
 #include "spdlog/spdlog.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Render/DescriptorHeap.h"
-#include "Resources/ResourceStates.h"
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
@@ -30,12 +31,10 @@ public:
         return instance;
     }
 
-    void Initialize(ID3D12CommandQueue* commandQueue);
+    void Initialize(rhi::Queue commandQueue);
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE GetSRVCPUHandle(UINT index);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle(UINT index);
-    ComPtr<ID3D12DescriptorHeap> GetSRVDescriptorHeap();
-    ComPtr<ID3D12DescriptorHeap> GetSamplerDescriptorHeap();
+    rhi::DescriptorHeap GetSRVDescriptorHeap();
+    rhi::DescriptorHeap GetSamplerDescriptorHeap();
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
     
     std::shared_ptr<Buffer>& GetPerFrameBuffer() {
@@ -62,43 +61,33 @@ public:
     std::shared_ptr<Buffer> CreateIndexedConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto device = DeviceManager::GetInstance().GetDevice();
 
         // Calculate the size of the buffer to be 256-byte aligned
         UINT bufferSize = (sizeof(T) + 255) & ~255;
 
         // Create the buffer
-        //bufferHandle.uploadBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::WRITE, bufferSize, true, false);
-        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, false);
 		dataBuffer->SetName(name);
-//        ResourceTransition transition;
-//		transition.resource = dataBuffer.get();
-//		transition.beforeState = ResourceState::UNKNOWN;
-//		transition.afterState = ResourceState::CONSTANT;
-//#if defined(_DEBUG)
-//		transition.name = name;
-//#endif
-//		QueueResourceTransition(transition);
-        // Create a descriptor for the buffer
-        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-        cbvDesc.BufferLocation = dataBuffer->m_buffer->GetGPUVirtualAddress();
-        cbvDesc.SizeInBytes = bufferSize;
+
+		rhi::CbvDesc cbvDesc = {};
+		cbvDesc.byteOffset = 0;
+		cbvDesc.byteSize = bufferSize;
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbvSrvUavHeap->GetCPUHandle(index);
 
         ShaderVisibleIndexInfo cbvInfo;
-        cbvInfo.index = index;
-        cbvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+        cbvInfo.slot.index = index;
+		cbvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         dataBuffer->SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
 
-        device->CreateConstantBufferView(&cbvDesc, handle);
+		device.CreateConstantBufferView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, dataBuffer->GetAPIResource().GetHandle(), cbvDesc);
 
         return dataBuffer;
     }
 
-    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool hasUploadBuffer = true, bool UAV = false, bool UAVCounter = false) {
-        auto& device = DeviceManager::GetInstance().GetDevice();
+    std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool UAV = false, bool UAVCounter = false) {
+        auto device = DeviceManager::GetInstance().GetDevice();
         size_t bufferSize = numElements * elementSize;
         size_t counterOffset = 0;
 		if (UAVCounter) {
@@ -124,115 +113,156 @@ public:
             assert(counterOffset % 4096 == 0);
 		}
 
-        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, UAV);
-        
-        //ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
-//#if defined(_DEBUG)
-//        transition.name = L"IndexedStructuredBuffer";
-//#endif
-//        QueueResourceTransition(transition);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
 
         unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
 
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = static_cast<UINT>(numElements);
-        srvDesc.Buffer.StructureByteStride = static_cast<UINT>(elementSize);
-        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		rhi::SrvDesc srvDesc = {};
+		srvDesc.formatOverride = rhi::Format::Unknown;
+		srvDesc.dimension = rhi::SrvDim::Buffer;
+		srvDesc.buffer.numElements = static_cast<UINT>(numElements);
+		srvDesc.buffer.structureByteStride = static_cast<UINT>(elementSize);
+		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
 
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(dataBuffer->m_buffer.Get(), &srvDesc, srvHandle);
+        device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, dataBuffer->GetAPIResource().GetHandle(), srvDesc);
 
         ShaderVisibleIndexInfo srvInfo;
-        srvInfo.index = index;
-        srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+        srvInfo.slot.index = index;
+		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         dataBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
         if (UAV) {
-			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-			uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-			uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-			uavDesc.Buffer.NumElements = static_cast<UINT>(numElements); // We will have some wasted memory to allow the counter to be 4096-aligned
-			uavDesc.Buffer.StructureByteStride = static_cast<UINT>(elementSize);
-			uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+            rhi::UavDesc uavDesc = {};
+            uavDesc.formatOverride = rhi::Format::Unknown;
+            uavDesc.dimension = rhi::UavDim::Buffer;
+			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
+			uavDesc.buffer.numElements = static_cast<UINT>(numElements);
+			uavDesc.buffer.structureByteStride = static_cast<UINT>(elementSize);
             if (UAVCounter) {
-                uavDesc.Buffer.CounterOffsetInBytes = counterOffset;
-			}
-			else {
-				uavDesc.Buffer.CounterOffsetInBytes = 0;
+                uavDesc.buffer.counterOffsetInBytes = counterOffset;
+            }
+            else {
+                uavDesc.buffer.counterOffsetInBytes = 0;
 			}
 
 			// Shader visible UAV
 			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-			D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
-			device->CreateUnorderedAccessView(dataBuffer->m_buffer.Get(), dataBuffer->m_buffer.Get(), &uavDesc, uavShaderVisibleHandle);
-
-			// Non-shader visible UAV
-            /*D3D12_UNORDERED_ACCESS_VIEW_DESC uavUintDesc = {};
-            uavUintDesc.Format = DXGI_FORMAT_R32_UINT;
-            uavUintDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            uavUintDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-			uavUintDesc.Buffer.NumElements = (numElements*sizeof(T))/sizeof(unsigned int);
-			uavUintDesc.Buffer.CounterOffsetInBytes = 0;
-			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
-			D3D12_CPU_DESCRIPTOR_HANDLE uavNonShaderVisibleHandle = m_nonShaderVisibleHeap->GetCPUHandle(uavNonShaderVisibleIndex);
-			device->CreateUnorderedAccessView(handle.dataBuffer->m_buffer.Get(), nullptr, &uavUintDesc, uavNonShaderVisibleHandle);*/
-
+			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, dataBuffer->m_buffer->GetHandle(), uavDesc);
 
 			ShaderVisibleIndexInfo uavInfo;
-			uavInfo.index = uavShaderVisibleIndex;
-			uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
+			uavInfo.slot.index = uavShaderVisibleIndex;
+			uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
             dataBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, counterOffset);
 
-			//NonShaderVisibleIndexInfo uavNonShaderVisibleInfo;
-			//uavNonShaderVisibleInfo.index = uavNonShaderVisibleIndex;
-			//uavNonShaderVisibleInfo.cpuHandle = uavNonShaderVisibleHandle;
-			//handle.dataBuffer->SetUAVCPUDescriptor(m_nonShaderVisibleHeap, uavNonShaderVisibleInfo);
+			// Non-shader visible UAV
+			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
+			device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, dataBuffer->m_buffer->GetHandle(), uavDesc);
+
+			NonShaderVisibleIndexInfo uavNonShaderInfo;
+			uavNonShaderInfo.slot.index = uavNonShaderVisibleIndex;
+            uavNonShaderInfo.slot.heap = m_nonShaderVisibleHeap->GetHeap().GetHandle();
+			dataBuffer->SetUAVCPUDescriptors(m_nonShaderVisibleHeap, { {uavNonShaderInfo} });
+
         }
 
         return dataBuffer;
     }
 
+    std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
+        size_t        numElements,
+        rhi::Format   elementFormat,
+        bool          UAV = false)
+    {
+        auto device = DeviceManager::GetInstance().GetDevice();
+
+        const size_t elementSize = rhi::helpers::BytesPerBlock(elementFormat);
+        assert(elementFormat != rhi::Format::Unknown && "Typed buffers require a concrete format");
+        assert(elementSize > 0 && "Unsupported/invalid format for typed buffer");
+
+        const size_t bufferSize = numElements * elementSize;
+
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
+
+        unsigned int srvIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+
+        rhi::SrvDesc srvDesc = {};
+        srvDesc.formatOverride = elementFormat; // required for typed views
+        srvDesc.dimension = rhi::SrvDim::Buffer;
+        srvDesc.buffer.kind = rhi::BufferViewKind::Typed;
+        srvDesc.buffer.numElements = static_cast<UINT>(numElements);
+        srvDesc.buffer.structureByteStride = 0; // ignored for typed
+
+        device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), srvIndex }, dataBuffer->m_buffer->GetHandle(), srvDesc);
+
+        ShaderVisibleIndexInfo srvInfo{};
+        srvInfo.slot.index = srvIndex;
+        srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
+        dataBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, { { srvInfo } });
+
+        if (UAV)
+        {
+            rhi::UavDesc uavDesc = {};
+            uavDesc.formatOverride = elementFormat;      // required for typed UAV
+            uavDesc.dimension = rhi::UavDim::Buffer;
+            uavDesc.buffer.kind = rhi::BufferViewKind::Typed;
+            uavDesc.buffer.numElements = static_cast<UINT>(numElements);
+            uavDesc.buffer.structureByteStride = 0;                // ignored for typed
+            uavDesc.buffer.counterOffsetInBytes = 0;               // no counters for typed UAVs
+
+            // Shader-visible UAV
+            unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+            device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex }, dataBuffer->m_buffer->GetHandle(), uavDesc);
+
+            ShaderVisibleIndexInfo uavInfo{};
+            uavInfo.slot.index = uavShaderVisibleIndex;
+            uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
+            // Pass 0 as "counter offset" because typed UAVs cannot have counters
+            dataBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, /*counterOffset*/ 0);
+
+            // Non-shader-visible UAV (for clears / CPU-side ops)
+            unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
+            device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, dataBuffer->m_buffer->GetHandle(), uavDesc);
+
+            NonShaderVisibleIndexInfo uavNonShaderInfo{};
+            uavNonShaderInfo.slot.index = uavNonShaderVisibleIndex;
+            uavNonShaderInfo.slot.heap = m_nonShaderVisibleHeap->GetHeap().GetHandle();
+            dataBuffer->SetUAVCPUDescriptors(m_nonShaderVisibleHeap, { { uavNonShaderInfo } });
+        }
+
+        return dataBuffer;
+    }
+
+
+
     template<typename T>
     std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "", bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
         std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, UAV);
-//        ResourceTransition transition;
-//        transition.resource = pDynamicBuffer.get();
-//		transition.beforeState = ResourceState::UNKNOWN;
-//		transition.afterState = usage;
-//#if defined(_DEBUG)
-//        transition.name = name;
-//#endif
-//		QueueResourceTransition(transition);
+
         pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, false);
             });
 
-        // Create an SRV for the buffer
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = capacity;
-        srvDesc.Buffer.StructureByteStride = sizeof(T);
-        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		rhi::SrvDesc srvDesc = {};
+		srvDesc.dimension = rhi::SrvDim::Buffer;
+		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
+		srvDesc.buffer.firstElement = 0;
+		srvDesc.buffer.numElements = capacity;
+		srvDesc.buffer.structureByteStride = sizeof(T);
+
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         bufferIDDescriptorIndexMap[bufferID] = index;
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, pDynamicBuffer->GetAPIResource().GetHandle(), srvDesc);
 
         ShaderVisibleIndexInfo srvInfo;
-        srvInfo.index = index;
-        srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+        srvInfo.slot.index = index;
+		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
         return pDynamicBuffer;
@@ -242,59 +272,49 @@ public:
     std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(uint32_t capacity = 64, std::wstring name = "", uint64_t alignment = 1, bool UAV = false) {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
 
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
         UINT bufferID = GetNextResizableBufferID();
         std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, alignment, UAV);
-//        ResourceTransition transition;
-//        transition.resource = pDynamicBuffer.get();
-//        transition.beforeState = ResourceState::UNKNOWN;
-//        transition.afterState = usage;
-//#if defined(_DEBUG)
-//        transition.name = L"LazyDynamicStructuredBuffer";
-//#endif
-//        QueueResourceTransition(transition);
+
         pDynamicBuffer->SetOnResized([this](UINT bufferID, uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool uav) {
             this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, uav);
             });
 
-        // Create an SRV for the buffer
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = capacity;
-        srvDesc.Buffer.StructureByteStride = sizeof(T);
-        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		rhi::SrvDesc srvDesc = {};
+		srvDesc.formatOverride = rhi::Format::Unknown;
+		srvDesc.dimension = rhi::SrvDim::Buffer;
+		srvDesc.buffer.numElements = capacity;
+		srvDesc.buffer.structureByteStride = sizeof(T);
+		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
         bufferIDDescriptorIndexMap[bufferID] = index;
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_cbvSrvUavHeap->GetCPUHandle(index);
-        device->CreateShaderResourceView(pDynamicBuffer->GetBuffer()->m_buffer.Get(), &srvDesc, cpuHandle);
+		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, pDynamicBuffer->GetAPIResource().GetHandle(), srvDesc);
 
 		ShaderVisibleIndexInfo srvInfo;
-		srvInfo.index = static_cast<int>(index);
-		srvInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(index);
+		srvInfo.slot.index = static_cast<int>(index);
+		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
         if (UAV) {
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-            uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            uavDesc.Buffer.NumElements = capacity;
-            uavDesc.Buffer.StructureByteStride = sizeof(T);
-            uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-            uavDesc.Buffer.CounterOffsetInBytes = 0;
+
+			rhi::UavDesc uavDesc = {};
+			uavDesc.dimension = rhi::UavDim::Buffer;
+			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
+			uavDesc.formatOverride = rhi::Format::Unknown;
+			uavDesc.buffer.numElements = capacity;
+			uavDesc.buffer.structureByteStride = sizeof(T);
+			uavDesc.buffer.counterOffsetInBytes = 0;
 
             // Shader visible UAV
             unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(uavShaderVisibleIndex);
-            device->CreateUnorderedAccessView(pDynamicBuffer->GetAPIResource(), nullptr, &uavDesc, uavShaderVisibleHandle);
+			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, pDynamicBuffer->GetAPIResource().GetHandle(), uavDesc);
 
             ShaderVisibleIndexInfo uavInfo;
-            uavInfo.index = static_cast<int>(uavShaderVisibleIndex);
-            uavInfo.gpuHandle = m_cbvSrvUavHeap->GetGPUHandle(uavShaderVisibleIndex);
+            uavInfo.slot.index = static_cast<int>(uavShaderVisibleIndex);
+			uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
             pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
         }
 
@@ -311,49 +331,40 @@ public:
     }
 
     void onDynamicStructuredBufferResized(UINT bufferID, uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool UAV) {
-        UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        //UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
+        auto device = DeviceManager::GetInstance().GetDevice();
 
-        // Create a Shader Resource View for the buffer
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.FirstElement = 0;
-        srvDesc.Buffer.NumElements = capacity;
-        srvDesc.Buffer.StructureByteStride = typeSize;
-        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        if (buffer->HasSRV()) {
+            // Create a Shader Resource View for the buffer
+            rhi::SrvDesc srvDesc = {};
+            srvDesc.formatOverride = rhi::Format::Unknown;
+            srvDesc.dimension = rhi::SrvDim::Buffer;
+            srvDesc.buffer.numElements = capacity;
+            srvDesc.buffer.structureByteStride = typeSize;
+            srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
+            srvDesc.buffer.firstElement = 0;
+            srvDesc.buffer.numElements = capacity;
+            srvDesc.buffer.structureByteStride = typeSize;
 
-        device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
-
-        if (UAV){
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-            uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            uavDesc.Buffer.NumElements = capacity;
-            uavDesc.Buffer.StructureByteStride = typeSize;
-            uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-            uavDesc.Buffer.CounterOffsetInBytes = 0;
-
-            // Shader visible UAV
-            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo(0).index);
-
-            device->CreateUnorderedAccessView(buffer->GetAPIResource() , nullptr, &uavDesc, uavShaderVisibleHandle);
+            device.CreateShaderResourceView(buffer->GetSRVInfo(0).slot, buffer->GetAPIResource().GetHandle(), srvDesc); // TODO: More advanced handling for multiple views
         }
 
-        //		auto bufferState = buffer->GetState();
-//		// After resize, internal buffer state will not match the wrapper state
-//		if (bufferState != ResourceState::UNKNOWN) {
-//			ResourceTransition transition;
-//			transition.resource = buffer->m_dataBuffer.get();
-//			transition.beforeState = ResourceState::UNKNOWN;
-//			transition.afterState = buffer->GetState();
-//#if defined(_DEBUG)
-//            transition.name = buffer->GetName()+L": Resize";
-//#endif
-//			QueueResourceTransition(transition);
-//		}
+        rhi::UavDesc uavDesc = {};
+        uavDesc.formatOverride = rhi::Format::Unknown;
+        uavDesc.dimension = rhi::UavDim::Buffer;
+        uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
+        uavDesc.buffer.numElements = capacity;
+        uavDesc.buffer.structureByteStride = typeSize;
+        uavDesc.buffer.counterOffsetInBytes = 0;
+        if (buffer->HasUAVShaderVisible()){
+            // Shader visible UAV
+			device.CreateUnorderedAccessView(buffer->GetUAVShaderVisibleInfo(0).slot , buffer->GetAPIResource().GetHandle(), uavDesc);
+        }
+
+        if (buffer->HasUAVNonShaderVisible()) {
+            // Non-shader visible UAV
+            device.CreateUnorderedAccessView(buffer->GetUAVNonShaderVisibleInfo(0).slot, buffer->GetAPIResource().GetHandle(), uavDesc);
+        }
     }
 
     void onDynamicBufferResized(UINT bufferID, size_t elementSize, size_t numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
@@ -365,70 +376,53 @@ public:
 			throw std::runtime_error("Buffer size exceeds maximum limit");
 		}
 #endif
-        UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
-        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUHandle(descriptorIndex);
-        auto& device = DeviceManager::GetInstance().GetDevice();
+        auto device = DeviceManager::GetInstance().GetDevice();
 
         // Create a Shader Resource View for the buffer
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.FirstElement = 0;
-        srvDesc.Buffer.NumElements = static_cast<uint32_t>(byteAddress ? numElements / 4 : numElements);
-        srvDesc.Buffer.StructureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize);
-        srvDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
 
-        device->CreateShaderResourceView(buffer->GetAPIResource(), &srvDesc, srvHandle);
+        if (buffer->HasSRV()) {
+            rhi::SrvDesc srvDesc = {};
+            srvDesc.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown;
+            srvDesc.dimension = rhi::SrvDim::Buffer;
+            srvDesc.buffer.firstElement = 0;
+            srvDesc.buffer.numElements = static_cast<UINT>(byteAddress ? numElements / 4 : numElements);
+            srvDesc.buffer.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
+            srvDesc.buffer.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured;
 
-        if (UAV) {
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-            uavDesc.Format = byteAddress ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
-            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            uavDesc.Buffer.NumElements = static_cast<uint32_t>(byteAddress ? numElements / 4 : numElements);
-            uavDesc.Buffer.StructureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize);
-            uavDesc.Buffer.CounterOffsetInBytes = 0;
-            uavDesc.Buffer.Flags = byteAddress ? D3D12_BUFFER_UAV_FLAG_RAW : D3D12_BUFFER_UAV_FLAG_NONE;
-
-            // Shader visible UAV
-            D3D12_CPU_DESCRIPTOR_HANDLE uavShaderVisibleHandle = m_cbvSrvUavHeap->GetCPUHandle(buffer->GetUAVShaderVisibleInfo(0).index);
-
-            device->CreateUnorderedAccessView(buffer->GetAPIResource(), nullptr, &uavDesc, uavShaderVisibleHandle);
+            device.CreateShaderResourceView(buffer->GetSRVInfo(0).slot, buffer->GetAPIResource().GetHandle(), srvDesc);
         }
 
-//        auto bufferState = buffer->GetState();
-//        // After resize, internal buffer state will not match the wrapper state
-//        if (bufferState != ResourceState::UNKNOWN) {
-//            ResourceTransition transition;
-//            transition.resource = buffer->m_dataBuffer.get();
-//            transition.beforeState = ResourceState::UNKNOWN;
-//            transition.afterState = buffer->GetState();
-//#if defined(_DEBUG)
-//            transition.name = buffer->GetName()+L": Resize";
-//#endif
-//            //QueueResourceTransition(transition);
-//        }
+        rhi::UavDesc uavDesc = {};
+        uavDesc.dimension = rhi::UavDim::Buffer;
+        uavDesc.buffer.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured;
+        uavDesc.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown;
+        uavDesc.buffer.numElements = static_cast<UINT>(byteAddress ? numElements / 4 : numElements);
+        uavDesc.buffer.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
+        uavDesc.buffer.counterOffsetInBytes = 0;
+
+        if (buffer->HasUAVShaderVisible()) {
+            // Shader visible UAV
+			device.CreateUnorderedAccessView(buffer->GetUAVShaderVisibleInfo(0).slot, buffer->GetAPIResource().GetHandle(), uavDesc);
+        }
+
+        if (buffer->HasUAVNonShaderVisible()) {
+            // Non-shader visible UAV
+            device.CreateUnorderedAccessView(buffer->GetUAVNonShaderVisibleInfo(0).slot, buffer->GetAPIResource().GetHandle(), uavDesc);
+        }
+
     }
 
     template<typename T>
     std::shared_ptr<Buffer> CreateConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
 
-		auto& device = DeviceManager::GetInstance().GetDevice();
+		auto device = DeviceManager::GetInstance().GetDevice();
 
 		// Calculate the size of the buffer to be 256-byte aligned
 		UINT bufferSize = (sizeof(T) + 255) & ~255;
 
-        auto dataBuffer = Buffer::CreateShared(device.Get(), ResourceCPUAccessType::NONE, bufferSize, false, false);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, false);
 		dataBuffer->SetName(name);
-//        ResourceTransition transition;
-//        transition.resource = dataBuffer.get();
-//        transition.beforeState = ResourceState::UNKNOWN;
-//        transition.afterState = ResourceState::CONSTANT;
-//#if defined(_DEBUG)
-//        transition.name = name;
-//#endif
-//        QueueResourceTransition(transition);
 
 
         return dataBuffer;
@@ -436,14 +430,13 @@ public:
 
     std::shared_ptr<Buffer> CreateBuffer(size_t size, void* pInitialData, bool UAV = false);
 
-    std::pair<ComPtr<ID3D12Resource>,ComPtr<ID3D12Heap>> CreateTextureResource(
+    std::pair<rhi::ResourcePtr, rhi::HeapHandle> CreateTextureResource(
         const TextureDescription& desc,
-        ComPtr<ID3D12Heap> placedResourceHeap = nullptr);
+        rhi::HeapHandle placedResourceHeap = {});
 
-    void UploadTextureData(ID3D12Resource* pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
+    void UploadTextureData(rhi::Resource& pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
 
-    UINT CreateIndexedSampler(const D3D12_SAMPLER_DESC& samplerDesc);
-    D3D12_CPU_DESCRIPTOR_HANDLE getSamplerCPUHandle(UINT index) const;
+    UINT CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc);
 
 	//void QueueResourceTransition(const ResourceTransition& transition);
     //void ExecuteResourceTransitions();
@@ -451,7 +444,7 @@ public:
 	void SetActiveEnvironmentIndex(unsigned int index) { perFrameCBData.activeEnvironmentIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
 
-	ID3D12Resource* GetUAVCounterReset() { return m_uavCounterReset.Get(); }
+	rhi::Resource GetUAVCounterReset() { return m_uavCounterReset.Get(); }
 
     const std::shared_ptr<DescriptorHeap>& GetCBVSRVUAVHeap() const { return m_cbvSrvUavHeap; }
     const std::shared_ptr<DescriptorHeap>& GetSamplerHeap() const { return m_samplerHeap; }
@@ -465,10 +458,10 @@ private:
     void WaitForTransitionQueue();
     void InitializeCopyCommandQueue();
     void InitializeTransitionCommandList();
-	void SetTransitionCommandQueue(ID3D12CommandQueue* commandQueue);
-    void GetCopyCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
-    void GetDirectCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
-    void ExecuteAndWaitForCommandList(ComPtr<ID3D12GraphicsCommandList>& commandList, ComPtr<ID3D12CommandAllocator>& commandAllocator);
+	void SetTransitionCommandQueue(rhi::Queue commandQueue);
+    void GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
+    void GetDirectCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
+    void ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
 
     std::shared_ptr<DescriptorHeap> m_cbvSrvUavHeap;
     std::shared_ptr<DescriptorHeap> m_samplerHeap;
@@ -478,17 +471,17 @@ private:
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> copyCommandQueue;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> copyCommandAllocator;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> copyCommandList;
-    Microsoft::WRL::ComPtr<ID3D12Fence> copyFence;
+    rhi::Queue copyCommandQueue;
+    rhi::CommandAllocatorPtr copyCommandAllocator;
+    rhi::CommandListPtr copyCommandList;
+    rhi::TimelinePtr copyFence;
     HANDLE copyFenceEvent;
     UINT64 copyFenceValue = 0;
 
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> transitionCommandQueue;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> transitionCommandAllocator;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> transitionCommandList;
-    Microsoft::WRL::ComPtr<ID3D12Fence> transitionFence;
+    rhi::Queue transitionCommandQueue;
+    rhi::CommandAllocatorPtr transitionCommandAllocator;
+    rhi::CommandListPtr transitionCommandList;
+    rhi::TimelinePtr transitionFence;
     HANDLE transitionFenceEvent;
     UINT64 transitionFenceValue = 0;
 
@@ -499,16 +492,13 @@ private:
 
     //std::shared_ptr<DynamicStructuredBuffer<LightInfo>> lightBufferPtr;
 
-    ComPtr<ID3D12GraphicsCommandList> commandList;
-    ComPtr<ID3D12CommandAllocator> commandAllocator;
-
     std::vector<std::shared_ptr<Buffer>> buffersToUpdate;
     std::vector<DynamicBufferBase*> dynamicBuffersToUpdate;
 	std::vector<ViewedDynamicBufferBase*> dynamicBuffersToUpdateViews;
 
 	//std::vector<ResourceTransition> queuedResourceTransitions;
 
-    ComPtr<ID3D12Resource> m_uavCounterReset;
+    rhi::ResourcePtr m_uavCounterReset;
 
 	int defaultShadowSamplerIndex = -1;
 

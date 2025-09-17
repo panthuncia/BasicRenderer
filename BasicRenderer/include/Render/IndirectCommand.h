@@ -1,5 +1,7 @@
 #pragma once
 
+#include <d3d12.h>
+
 struct DispatchMeshIndirectCommand {
 	unsigned int perObjectBufferIndex;
 	unsigned int perMeshBufferIndex;

@@ -21,25 +21,26 @@ public:
 
     PassReturn Execute(RenderContext& context) override {
         auto& commandList = context.commandList;
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap, // The texture descriptor heap
-            context.samplerDescriptorHeap, // The sampler descriptor heap
-        };
+        
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, 512, 512);
-        CD3DX12_RECT scissorRect(0, 0, 512, 512);
-        commandList->RSSetViewports(1, &viewport);
-        commandList->RSSetScissorRects(1, &scissorRect);
+		rhi::PassBeginInfo passInfo{};
+		rhi::ColorAttachment colorAttachment{};
+		colorAttachment.rtv = m_lutTexture->GetRTVInfo(0).slot;
+		colorAttachment.loadOp = rhi::LoadOp::Clear;
+		colorAttachment.storeOp = rhi::StoreOp::Store;
+		colorAttachment.clear = m_lutTexture->GetClearColor();
+		passInfo.colors = { &colorAttachment, 1 };
+		passInfo.width = 512;
+		passInfo.height = 512;
+		passInfo.debugName = "BRDF Integration Pass";
+		commandList.BeginPass(passInfo);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_lutTexture->GetRTVInfo(0).cpuHandle;
-        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
+		commandList.BindPipeline(PSO->GetHandle());
 
-        commandList->SetPipelineState(PSO.Get());
-        commandList->SetGraphicsRootSignature(PSOManager::GetInstance().GetRootSignature().Get());
-
-        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-        commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
+        commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
+        commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
 
         invalidated = false;
 
@@ -53,82 +54,65 @@ public:
 private:
     std::shared_ptr<PixelBuffer> m_lutTexture = nullptr;
 
-    ComPtr<ID3D12PipelineState> PSO;
+    rhi::PipelinePtr PSO;
 
     void CreatePSO() {
+        auto dev = DeviceManager::GetInstance().GetDevice();
+
         // Compile shaders
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
-		shaderInfoBundle.pixelShader = { L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6" };
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		vertexShader = compiledBundle.vertexShader;
-		pixelShader = compiledBundle.pixelShader;
+        ShaderInfoBundle sib;
+        sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+        sib.pixelShader = { L"shaders/brdfIntegration.hlsl", L"PSMain", L"ps_6_6" };
+        auto compiled = PSOManager::GetInstance().CompileShaders(sib);
 
-        D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-        inputLayoutDesc.pInputElementDescs = nullptr;
-        inputLayoutDesc.NumElements = 0;
+        // Subobjects
+        auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
+        rhi::SubobjLayout soLayout{ layout.GetHandle() };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
 
-        D3D12_RASTERIZER_DESC rasterizerDesc = {};
-        rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-        rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
-        rasterizerDesc.FrontCounterClockwise = FALSE;
-        rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-        rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-        rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-        rasterizerDesc.DepthClipEnable = TRUE;
-        rasterizerDesc.MultisampleEnable = FALSE;
-        rasterizerDesc.AntialiasedLineEnable = FALSE;
-        rasterizerDesc.ForcedSampleCount = 0;
-        rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+        rhi::RasterState rs{};
+        rs.fill = rhi::FillMode::Solid;
+        rs.cull = rhi::CullMode::None;
+        rs.frontCCW = false;
+        rhi::SubobjRaster soRaster{ rs };
 
-        D3D12_BLEND_DESC blendDesc = {};
-        blendDesc.RenderTarget[0].BlendEnable = FALSE;
-        blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
-        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
-        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
-        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        rhi::BlendState bs{};
+        bs.alphaToCoverage = false;
+        bs.independentBlend = false;
+        bs.numAttachments = 1;
+        bs.attachments[0].enable = false;                    // no blending
+        bs.attachments[0].writeMask = rhi::ColorWriteEnable::All;
+        rhi::SubobjBlend soBlend{ bs };
 
-        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-        depthStencilDesc.DepthEnable = FALSE;
-        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-        depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-        depthStencilDesc.StencilEnable = FALSE;
-        depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
+        rhi::DepthStencilState ds{};
+        ds.depthEnable = false;      // depth disabled (write mask ignored)
+        ds.depthWrite = false;
+        ds.depthFunc = rhi::CompareOp::Less;
+        rhi::SubobjDepth soDepth{ ds };
 
-        DXGI_FORMAT renderTargetFormat = DXGI_FORMAT_R16G16_FLOAT;
+        rhi::RenderTargets rts{};
+        rts.count = 1;
+        rts.formats[0] = rhi::Format::R16G16_Float;
+        rhi::SubobjRTVs soRTVs{ rts };
 
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = inputLayoutDesc;
-        psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-        psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
-        psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
-        psoDesc.RasterizerState = rasterizerDesc;
-        psoDesc.BlendState = blendDesc;
-        psoDesc.DepthStencilState = depthStencilDesc;
-        psoDesc.SampleMask = UINT_MAX;
-        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[0] = renderTargetFormat;
-        psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        psoDesc.SampleDesc.Count = 1;
-        psoDesc.SampleDesc.Quality = 0;
-        psoDesc.InputLayout = inputLayoutDesc;
+        rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
 
-        auto& device = DeviceManager::GetInstance().GetDevice();
-        auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&PSO));
-        if (FAILED(hr)) {
-            throw std::runtime_error("Failed to create debug PSO");
+        const rhi::PipelineStreamItem items[] = {
+            rhi::Make(soLayout),
+            rhi::Make(soVS),
+            rhi::Make(soPS),
+            rhi::Make(soRaster),
+            rhi::Make(soBlend),
+            rhi::Make(soDepth),
+            rhi::Make(soRTVs),
+            rhi::Make(soSmp),
+        };
+
+        PSO = dev.CreatePipeline(items, (uint32_t)std::size(items));
+        if (!PSO || !PSO->IsValid()) {
+            throw std::runtime_error("Failed to create BRDF integration PSO (RHI)");
         }
+        PSO->SetName("BRDFIntegration.PSO");
     }
 };

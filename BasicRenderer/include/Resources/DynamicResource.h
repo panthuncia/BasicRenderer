@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <rhi.h>
 #include "Resources/Resource.h"
 #include "Resources/GloballyIndexedResource.h"
 
@@ -32,24 +33,17 @@ public:
         return resource;
     }
 
-    /*ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override { return resource->GetSubresourceAccessType(subresourceIndex); }
-    ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override { return resource->GetSubresourceLayout(subresourceIndex); }
-    ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override { return resource->GetSubresourceSyncState(subresourceIndex); }*/
-
-    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
         if (resource) {
-            //m_currentAccessType = newAccessType;
-            //m_currentLayout = newLayout;
-            //m_prevSyncState = newSyncState;
             return resource->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
         }
     }
 
-	ID3D12Resource* GetAPIResource() const override {
-		if (resource) {
-			return resource->GetAPIResource();
-		}
-		return nullptr;
+    rhi::Resource GetAPIResource() override {
+		return resource->GetAPIResource();
+	}
+    bool HasResource() const {
+        return resource != nullptr;
 	}
 
 protected:
@@ -87,7 +81,7 @@ public:
         return m_resource;
     }
 
-    virtual BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+    virtual rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
 		if (m_resource) {
 			//SetState(newState); // Keep the wrapper's state in sync
 			return m_resource->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
@@ -95,11 +89,11 @@ public:
         return {};
     }
 
-    ID3D12Resource* GetAPIResource() const override {
-        if (m_resource) {
-            return m_resource->GetAPIResource();
-        }
-        return nullptr;
+    rhi::Resource GetAPIResource() override {
+        return m_resource->GetAPIResource();
+    }
+    bool HasResource() const {
+        return m_resource != nullptr;
     }
 
 protected:
@@ -110,5 +104,5 @@ protected:
     }
 
 private:
-    std::shared_ptr<GloballyIndexedResource> m_resource; // T actual resource
+    std::shared_ptr<GloballyIndexedResource> m_resource; // actual resource
 };

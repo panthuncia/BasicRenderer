@@ -2,7 +2,8 @@
 
 
 #include <directx/d3d12.h>
-#include <wrl/client.h>
+#include <rhi.h>
+#include <rhi_interop.h>
 #include <memory>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -28,44 +29,44 @@
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-struct FrameContext {
-    ID3D12CommandAllocator* CommandAllocator;
-    UINT64                  FenceValue;
-};
+//struct FrameContext {
+//    ID3D12CommandAllocator* CommandAllocator;
+//    UINT64                  FenceValue;
+//};
 
-static UINT g_frameIndex = 0;
+//static UINT g_frameIndex = 0;
 static HANDLE g_hSwapChainWaitableObject = nullptr;
-constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 3;
-static FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {};
-static ID3D12Fence* g_fence = nullptr;
-static HANDLE g_fenceEvent = nullptr;
-static UINT64 g_fenceLastSignaledValue = 0;
+//constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 3;
+//static FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {};
+//static ID3D12Fence* g_fence = nullptr;
+//static HANDLE g_fenceEvent = nullptr;
+//static UINT64 g_fenceLastSignaledValue = 0;
 
 class Menu {
 public:
     static Menu& GetInstance();
 
-    void Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain);
-    void Render(const RenderContext& context);
+    void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
+    void Render(RenderContext& context);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(std::shared_ptr<RenderGraph> renderGraph) { m_renderGraph = renderGraph; }
 
 private:
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> g_pd3dSrvDescHeap = nullptr;
+    rhi::DescriptorHeapPtr g_pd3dSrvDescHeap;
     Menu() { 
         ImGui::CreateContext();
 		ImPlot::CreateContext();
     };
-	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swapChain = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	IDXGISwapChain3* m_pSwapChain = nullptr;
+    //Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
+    //Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
+	//Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
 
     flecs::entity selectedNode;
 
 	std::weak_ptr<RenderGraph> m_renderGraph;
 
-    FrameContext* WaitForNextFrameResources();
+    //FrameContext* WaitForNextFrameResources();
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
 
@@ -190,32 +191,23 @@ inline bool Menu::HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return static_cast<bool>(ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam));
 }
 
-inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> pDevice, Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue, Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain) {
-    this->device = pDevice;
-    this->commandQueue = queue;
-	m_swapChain = swapChain;
+inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
+	m_pSwapChain = swapChain;
+	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
 
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
-    for (UINT i = 0; i < NUM_FRAMES_IN_FLIGHT; i++)
-        ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_frameContext[i].CommandAllocator)));
-
-    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_frameContext[0].CommandAllocator, nullptr, IID_PPV_ARGS(&m_commandList)));
-    m_commandList->Close();
-
-    D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-    desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    desc.NumDescriptors = 1;
-    desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    if (device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&g_pd3dSrvDescHeap)) != S_OK)
-        throw std::runtime_error("Failed to create descriptor heap");
+	auto device = DeviceManager::GetInstance().GetDevice();
+	g_pd3dSrvDescHeap = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, 1, true });
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX12_Init(device.Get(), NUM_FRAMES_IN_FLIGHT,
-        DXGI_FORMAT_R8G8B8A8_UNORM, g_pd3dSrvDescHeap.Get(),
-        g_pd3dSrvDescHeap->GetCPUDescriptorHandleForHeapStart(),
-        g_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart());
+    ImGui_ImplDX12_Init(rhi::dx12::get_device(device), 
+        numFramesInFlight,
+        DXGI_FORMAT_R8G8B8A8_UNORM, 
+        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get()),
+        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetCPUDescriptorHandleForHeapStart(),
+        rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart());
     ImGui_ImplWin32_EnableDpiAwareness();
 
 
@@ -234,8 +226,7 @@ inline void Menu::Initialize(HWND hwnd, Microsoft::WRL::ComPtr<ID3D12Device> pDe
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
 
-
-    g_hSwapChainWaitableObject = m_swapChain->GetFrameLatencyWaitableObject();
+    g_hSwapChainWaitableObject = m_pSwapChain->GetFrameLatencyWaitableObject();
 
 	getEnvironmentName = SettingsManager::GetInstance().getSettingGetter<std::string>("environmentName");
 	setEnvironment = SettingsManager::GetInstance().getSettingSetter<std::string>("environmentName");
@@ -361,7 +352,7 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
     }
 }
 
-inline void Menu::Render(const RenderContext& context) {
+inline void Menu::Render(RenderContext& context) {
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 
@@ -476,6 +467,7 @@ inline void Menu::Render(const RenderContext& context) {
 		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+		ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d" , context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
 		ImGui::End();
 	}
 
@@ -504,55 +496,20 @@ inline void Menu::Render(const RenderContext& context) {
 	// Rendering
 	ImGui::Render();
 
-    FrameContext* frameCtx = WaitForNextFrameResources();
+    context.commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
 
-    frameCtx->CommandAllocator->Reset();
-    m_commandList->Reset(frameCtx->CommandAllocator, nullptr);
+	rhi::PassBeginInfo beginInfo{};
+	rhi::ColorAttachment attchment{};
+    attchment.loadOp = rhi::LoadOp::Load;
+	attchment.rtv = { context.rtvHeap.GetHandle() , context.frameIndex }; // Index into the swapchain RTV heap
+	beginInfo.colors = { &attchment };
+	beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
+	beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-	auto dsvHandle = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>().depthMap->GetDSVInfo(0).cpuHandle;
-    m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-	auto heap = g_pd3dSrvDescHeap.Get();
-    m_commandList->SetDescriptorHeaps(1, &heap);
+	context.commandList.BeginPass(beginInfo);
 
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(context.commandList));
 
-    // set viewport to cover the entire buffer
-    auto& io = ImGui::GetIO();
-    D3D12_VIEWPORT vp{ 0,0, io.DisplaySize.x, io.DisplaySize.y, 0.0f, 1.0f };
-    m_commandList->RSSetViewports(1, &vp);
-
-    // set scissor to the full buffer
-    D3D12_RECT rc{ 0, 0, (LONG)io.DisplaySize.x, (LONG)io.DisplaySize.y };
-    m_commandList->RSSetScissorRects(1, &rc);
-
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
-
-	m_commandList->Close();
-
-	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
-	commandQueue->ExecuteCommandLists(1, ppCommandLists);
-}
-
-inline FrameContext* Menu::WaitForNextFrameResources() {
-    UINT nextFrameIndex = g_frameIndex + 1;
-    g_frameIndex = nextFrameIndex;
-
-    HANDLE waitableObjects[] = { g_hSwapChainWaitableObject, nullptr };
-    DWORD numWaitableObjects = 1;
-
-    FrameContext* frameCtx = &g_frameContext[nextFrameIndex % NUM_FRAMES_IN_FLIGHT];
-    UINT64 fenceValue = frameCtx->FenceValue;
-    if (fenceValue != 0) // means no fence was signaled
-    {
-        frameCtx->FenceValue = 0;
-        g_fence->SetEventOnCompletion(fenceValue, g_fenceEvent);
-        waitableObjects[1] = g_fenceEvent;
-        numWaitableObjects = 2;
-    }
-
-    WaitForMultipleObjects(numWaitableObjects, waitableObjects, TRUE, INFINITE);
-
-    return frameCtx;
 }
 
 inline int Menu::FindFileIndex(const std::vector<std::string>& inputHdrFiles, const std::string& existingFile) {

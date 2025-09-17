@@ -1,6 +1,6 @@
 #include "Managers/ObjectManager.h"
 
-#include <d3d12.h>
+#include <DirectXMath.h>
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"

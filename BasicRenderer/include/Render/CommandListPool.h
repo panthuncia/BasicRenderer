@@ -1,21 +1,20 @@
 #pragma once
 
-#include <wrl/client.h>
-#include <d3d12.h>
 #include <deque>
 #include <vector>
 #include <cstdint>
+#include <rhi.h>
 
 #include "Utilities/Utilities.h"
 
 struct CommandListPair {
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> list;
+    rhi::CommandAllocatorPtr allocator;
+    rhi::CommandListPtr list;
 };
 
 class CommandListPool {
 public:
-    CommandListPool(ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type);
+    CommandListPool(rhi::Device& device, rhi::QueueKind type);
 
     // Acquire a command allocator / list pair ready for recording
     CommandListPair Request();
@@ -29,8 +28,8 @@ public:
     void RecycleCompleted(uint64_t completedFenceValue);
 
 private:
-    ID3D12Device* m_device = nullptr;
-    D3D12_COMMAND_LIST_TYPE m_type;
+    rhi::Device m_device;
+    rhi::QueueKind m_type;
 
     std::vector<CommandListPair> m_available;
     std::deque<std::pair<uint64_t, CommandListPair>> m_inFlight;

@@ -46,20 +46,12 @@ public:
 		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(),
-			ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
-		};
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
 
-		auto rootSignature = PSOManager::GetInstance().GetComputeRootSignature().Get();
-		commandList->SetComputeRootSignature(rootSignature);
-
-		// Set the compute pipeline state
-		commandList->SetPipelineState(m_PSO.Get());
-
-		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+		BindResourceDescriptorIndices(commandList, m_PSO.GetResourceDescriptorSlots());
 
 		auto meshShadersEnabled = getMeshShadersEnabled();
 
@@ -67,48 +59,48 @@ public:
 		opaqueQuery.each([&](flecs::entity e, Components::OpaqueSkinned s, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances meshInstances) {
 			auto& meshes = meshInstances.meshInstances;
 
-			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
-				
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, NumPerMeshRootConstants, &perMeshConstants);
+
 				unsigned int numGroups = static_cast<unsigned int>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
-				commandList->Dispatch(numGroups, 1, 1);
+				commandList.Dispatch(numGroups, 1, 1);
 			}
 			});
 
 		alphaTestQuery.each([&](flecs::entity e, Components::AlphaTestSkinned s, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances meshInstances) {
 			auto& meshes = meshInstances.meshInstances;
 
-			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, NumPerMeshRootConstants, &perMeshConstants);
 
 				unsigned int numGroups = static_cast<uint32_t>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
-				commandList->Dispatch(numGroups, 1, 1);
+				commandList.Dispatch(numGroups, 1, 1);
 			}
 			});
 
 		blendQuery.each([&](flecs::entity e, Components::BlendSkinned s, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances meshInstances) {
 			auto& meshes = meshInstances.meshInstances;
 
-			commandList->SetComputeRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList->SetComputeRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, &perMeshConstants, PerMeshBufferIndex);
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, NumPerMeshRootConstants, &perMeshConstants);
 
 				unsigned int numGroups = static_cast<unsigned int>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
-				commandList->Dispatch(numGroups, 1, 1);
+				commandList.Dispatch(numGroups, 1, 1);
 			}
 			});
 		return {};
@@ -120,41 +112,19 @@ public:
 
 private:
 
-	PipelineResources m_resourceDescriptorBindings;
-
 	void CreatePSO() {
-		// Compile the compute shader
-		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/skinning.brsl", L"CSMain", L"cs_6_6" };
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		computeShader = compiledBundle.computeShader;
-
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
-
-		struct PipelineStateStream {
-			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-			CD3DX12_PIPELINE_STATE_STREAM_CS CS;
-		};
-
-		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetComputeRootSignature().Get();
-		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-
-		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		ID3D12Device2* device2 = nullptr;
-		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
+		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/skinning.brsl",
+			L"CSMain",
+			{},
+			"Skinning CS");
 	}
 
 	flecs::query<Components::OpaqueSkinned, Components::ObjectDrawInfo, Components::OpaqueMeshInstances> opaqueQuery;
 	flecs::query<Components::AlphaTestSkinned, Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> alphaTestQuery;
 	flecs::query<Components::BlendSkinned, Components::ObjectDrawInfo, Components::BlendMeshInstances> blendQuery;
-	ComPtr<ID3D12PipelineState> m_PSO;
+	PipelineState m_PSO;
 
 	std::function<bool()> getMeshShadersEnabled;
 };

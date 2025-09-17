@@ -521,12 +521,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
 )
 
-# Find and link DirectX 12
 target_link_libraries(${PROJECT_NAME} 
 PRIVATE 
     d3dcompiler.lib 
     dxgi.lib 
-    spdlog::spdlog 
+    spdlog::spdlog_header_only 
     Microsoft::DirectXTex 
     imgui::imgui 
     meshoptimizer::meshoptimizer 
@@ -536,6 +535,8 @@ PRIVATE
     flecs::flecs 
     flecs::flecs_static 
     unofficial::tree-sitter::tree-sitter
+    Streamline::headers
+    Pix::headers
     usd
     sdf
     tf
@@ -546,6 +547,7 @@ PRIVATE
     usdShade
     usdSkel
     implot::implot
+    BasicRHI
     "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 

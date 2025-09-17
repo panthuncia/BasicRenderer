@@ -1,20 +1,20 @@
 #pragma once
 
 #include <unordered_map>
-#include <wrl/client.h>
-#include <d3d12.h>
 #include <string>
+
+#include <rhi.h>
 
 class CommandSignatureManager {
 public:
 	static CommandSignatureManager& GetInstance();
 	void Initialize();
-	ID3D12CommandSignature* GetDispatchMeshCommandSignature();
-	ID3D12CommandSignature* GetDispatchCommandSignature() { return m_dispatchCommandSignature.Get(); }
+	const rhi::CommandSignature& GetDispatchMeshCommandSignature();
+	const rhi::CommandSignature& GetDispatchCommandSignature();
 
 private:
-	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchMeshCommandSignature;
-	Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchCommandSignature;
+	rhi::CommandSignaturePtr m_dispatchMeshCommandSignature;
+	rhi::CommandSignaturePtr m_dispatchCommandSignature;
 };
 
 inline CommandSignatureManager& CommandSignatureManager::GetInstance() {

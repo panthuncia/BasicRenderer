@@ -6,17 +6,16 @@
 #define DX12RENDERER_H
 
 #include <windows.h>
-#include <wrl.h>
-#include <directx/d3d12.h>
-#include <dxgi1_6.h>
 #include <directxmath.h>
 #include <memory>
 #include <functional>
 #include <flecs.h>
 
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
+#include <rhi.h>
+
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
 
 #include "Mesh/Mesh.h"
 #include "ShaderBuffers.h"
@@ -59,9 +58,9 @@ private:
     std::vector<std::function<void()>> _queue;
 };
 
-class DX12Renderer {
+class Renderer {
 public:
-    DX12Renderer() : m_gpuCrashTracker(m_markerMap){
+    Renderer() : m_gpuCrashTracker(m_markerMap){
     }
 
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
@@ -69,7 +68,6 @@ public:
     void Update(float elapsedSeconds);
     void Render();
     void Cleanup();
-    ComPtr<ID3D12Device10>& GetDevice();
     std::shared_ptr<Scene>& GetCurrentScene();
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
@@ -77,38 +75,31 @@ public:
     void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
+	bool IsInitialized() const { return m_isInitialized; }
 
 private:
-    ComPtr<IDXGIAdapter1> m_currentAdapter;
-    ComPtr<IDXGIFactory7> factory;
-    ComPtr<IDXGIFactory7> nativeFactory;
-    ComPtr<IDXGIFactory7> slProxyFactory;
-    ComPtr<ID3D12Device10> device;
-    ComPtr<ID3D12Device10> nativeDevice;
-    ComPtr<ID3D12Device10> slProxyDevice;
+	bool m_isInitialized = false;
+    rhi::Device m_device;
 
-    ComPtr<IDXGISwapChain4> swapChain;
-    ComPtr<ID3D12CommandQueue> graphicsQueue;
-	ComPtr<ID3D12CommandQueue> computeQueue;
-	ComPtr<ID3D12CommandQueue> copyQueue;
-    ComPtr<ID3D12DescriptorHeap> rtvHeap;
-	std::vector<ComPtr<ID3D12Resource>> renderTargets;
+    rhi::SwapchainPtr m_swapChain;
+
+    rhi::DescriptorHeapPtr rtvHeap;
+	std::vector<rhi::ResourceHandle> renderTargets;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;
-    std::vector<ComPtr<ID3D12CommandAllocator>> m_commandAllocators;
-    std::vector<ComPtr<ID3D12GraphicsCommandList>> m_commandLists;
+    std::vector<rhi::CommandAllocatorPtr> m_commandAllocators;
+    std::vector<rhi::CommandListPtr> m_commandLists;
     UINT rtvDescriptorSize;
     UINT dsvDescriptorSize;
     uint8_t m_frameIndex = 0;
     uint64_t m_totalFramesRendered = 0;
-	uint8_t m_numFramesInFlight = 0;
-    ComPtr<ID3D12Fence> m_frameFence;
+	uint8_t m_numFramesInFlight = 3;
+    rhi::TimelinePtr m_frameFence;
     std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
-    HANDLE m_frameFenceEvent;
     UINT64 m_currentFrameFenceValue = 0;
 
-	ComPtr<ID3D12Fence> m_readbackFence;
+	rhi::TimelinePtr m_readbackFence;
 
     InputManager inputManager;
     MovementState movementState;
@@ -151,10 +142,11 @@ private:
 	void ToggleMeshShaders(bool useMeshShaders);
 
     void WaitForFrame(uint8_t frameIndex);
-    void SignalFence(ComPtr<ID3D12CommandQueue> commandQueue, uint8_t currentFrameIndex);
+    void SignalFence(rhi::Queue commandQueue, uint8_t currentFrameIndex);
     void AdvanceFrameIndex();
     void CheckDebugMessages();
     void FlushCommandQueue();
+    void CreateRTVs();
 
     void StallPipeline();
 
@@ -176,6 +168,7 @@ private:
     bool m_bloom = true;
     bool m_jitter = true;
 	bool m_screenSpaceReflections = true;
+	bool m_useMeshShaders = false;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<void(LinearShadowMaps*)> setLinearShadowMaps;

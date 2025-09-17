@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <functional>
 
+#include <rhi_debug.h>
+
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
@@ -96,11 +98,11 @@ public:
         if (m_meshShaders) {
             if (m_indirect) {
                 // Indirect drawing
-                ExecuteMeshShaderIndirect(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
+                ExecuteMeshShaderIndirect(context, commandList);
             }
             else {
                 // Regular mesh shader drawing
-                ExecuteMeshShader(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
+                ExecuteMeshShader(context, commandList);
             }
         }
         else {
@@ -115,55 +117,52 @@ public:
 
 private:
     // Common setup code that doesn't change between techniques
-    void SetupCommonState(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap, // The texture descriptor heap
-            context.samplerDescriptorHeap, // The sampler descriptor heap
-        };
+    void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
 
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         auto shadowRes = getShadowResolution();
-        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, shadowRes, shadowRes);
-        CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, shadowRes, shadowRes);
-        commandList->RSSetViewports(1, &viewport);
-        commandList->RSSetScissorRects(1, &scissorRect);
 
-        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		rhi::PassBeginInfo passBeginInfo = {};
+		passBeginInfo.width = shadowRes;
+		passBeginInfo.height = shadowRes;
+		passBeginInfo.debugName = "Shadow Pass";
+		commandList.BeginPass(passBeginInfo);
 
-        auto& psoManager = PSOManager::GetInstance();
-        commandList->SetGraphicsRootSignature(psoManager.GetRootSignature().Get());
+        commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
+
+		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
     }
 
-    void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
+    void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
 
     }
 
-    void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
 
             // Opaque objects
+            
             m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
                 auto& meshes = opaqueMeshes.meshInstances;
 
-                commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                    auto& pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                    commandList->SetPipelineState(pso.GetAPIPipelineState());
+					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                    commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                    D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-                    commandList->IASetIndexBuffer(&indexBufferView);
+					commandList.SetIndexBuffer(mesh.GetIndexBufferView());
 
-                    commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+                    commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
                 }
                 });
 
@@ -171,23 +170,22 @@ private:
             m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
                 auto& meshes = alphaTestMeshes.meshInstances;
 
-                commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                    auto& pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                    commandList->SetPipelineState(pso.GetAPIPipelineState());
+					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>((pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB)));
-                    commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                    D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-                    commandList->IASetIndexBuffer(&indexBufferView);
+					commandList.SetIndexBuffer(mesh.GetIndexBufferView());
 
-                    commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+                    commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
                 }
                 });
 
@@ -196,55 +194,79 @@ private:
                 m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
                     auto& meshes = blendMeshes.meshInstances;
 
-                    commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                     for (auto& pMesh : meshes) {
                         auto& mesh = *pMesh->GetMesh();
-                        auto pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                        auto& pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                         BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                        commandList->SetPipelineState(pso.GetAPIPipelineState());
+						commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                         auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-                        commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, 1, &perMeshIndex, PerMeshBufferIndex);
+						commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, 1, &perMeshIndex);
 
-                        D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-                        commandList->IASetIndexBuffer(&indexBufferView);
+						commandList.SetIndexBuffer(mesh.GetIndexBufferView());
 
-                        commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+                        commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
                     }
                     });
             }
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
+            rhi::debug::Scope scope(commandList, rhi::colors::Blue, e.name().c_str());
             switch (light.type) {
             case Components::LightType::Spot: {
-                auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0).cpuHandle;
-                auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0).cpuHandle;
-                commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                if (m_clearDepths) {
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                }
+				rhi::PassBeginInfo passBeginInfo = {};
+				rhi::DepthAttachment depthAttachment = {};
+                depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0).slot;
+				depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+				depthAttachment.depthStore = rhi::StoreOp::Store;
+				depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+				rhi::ColorAttachment rtvAttachment = {};
+				rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0).slot;
+				rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+				rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+				rtvAttachment.storeOp = rhi::StoreOp::Store;
+				passBeginInfo.colors = { &rtvAttachment };
+				passBeginInfo.depth = &depthAttachment;
+				passBeginInfo.width = lightViewInfo.depthResX;
+				passBeginInfo.height = lightViewInfo.depthResY;
+				passBeginInfo.debugName = "Shadow Pass - Spot Light";
+				commandList.BeginPass(passBeginInfo);
+
 
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 drawObjects();
                 break;
             }
             case Components::LightType::Point: {
                 uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < 6; i++) {
-                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
-                    auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
-                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                    if (m_clearDepths) {
-                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                    }
-                    commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
+					rhi::PassBeginInfo passBeginInfo = {};
+					rhi::DepthAttachment depthAttachment = {};
+					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
+					depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					depthAttachment.depthStore = rhi::StoreOp::Store;
+					depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+					passBeginInfo.depth = &depthAttachment;
+					rhi::ColorAttachment rtvAttachment = {};
+					rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0, i).slot;
+					rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+					rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					rtvAttachment.storeOp = rhi::StoreOp::Store;
+					passBeginInfo.colors = { &rtvAttachment };
+					passBeginInfo.width = lightViewInfo.depthResX;
+					passBeginInfo.height = lightViewInfo.depthResY;
+					passBeginInfo.debugName = "Shadow Pass - Point Light";
+					commandList.BeginPass(passBeginInfo);
+
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
                     lightViewIndex += 1;
                     drawObjects();
                 }
@@ -253,16 +275,29 @@ private:
             case Components::LightType::Directional: {
                 uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
-                    auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
-                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                    if (m_clearDepths) {
-                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                    }
-                    commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
+					rhi::PassBeginInfo passBeginInfo = {};
+					rhi::DepthAttachment depthAttachment = {};
+					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
+					depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					depthAttachment.depthStore = rhi::StoreOp::Store;
+					depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+					passBeginInfo.depth = &depthAttachment;
+					rhi::ColorAttachment rtvAttachment = {};
+					rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0, i).slot;
+					rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+					rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					rtvAttachment.storeOp = rhi::StoreOp::Store;
+					passBeginInfo.colors = { &rtvAttachment };
+					passBeginInfo.width = lightViewInfo.depthResX;
+					passBeginInfo.height = lightViewInfo.depthResY;
+					passBeginInfo.debugName = "Shadow Pass - Directional Light";
+					commandList.BeginPass(passBeginInfo);
+
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
                     lightViewIndex += 1;
                     drawObjects();
 
@@ -272,27 +307,27 @@ private:
             });
     }
 
-    void ExecuteMeshShader(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
             // Opaque objects
             m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
                 auto& meshes = opaqueMeshes.meshInstances;
 
-                commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                    auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                    commandList->SetPipelineState(pso.GetAPIPipelineState());
+					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                    commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                    commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+                    commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
                 }
                 });
 
@@ -300,20 +335,20 @@ private:
             m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
                 auto& meshes = alphaTestMeshes.meshInstances;
 
-                commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                    auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                    commandList->SetPipelineState(pso.GetAPIPipelineState());
+					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                    commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                    commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+                    commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
                 }
                 });
 
@@ -321,42 +356,53 @@ private:
             m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
                 auto& meshes = blendMeshes.meshInstances;
 
-                commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                    auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                    commandList->SetPipelineState(pso.GetAPIPipelineState());
+					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                     unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                     perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                     perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                    commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                    commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+                    commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
                 }
                 });
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
+            rhi::debug::Scope scope(commandList, rhi::colors::Blue, e.name().c_str());
             float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
             switch (light.type) {
             case Components::LightType::Spot: {
-                auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0).cpuHandle;
-                auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0).cpuHandle;
-                commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                if (m_clearDepths) {
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                }
+				rhi::PassBeginInfo passBeginInfo = {};
+				rhi::DepthAttachment depthAttachment = {};
+				depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0).slot;
+				depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+				depthAttachment.depthStore = rhi::StoreOp::Store;
+				depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+				passBeginInfo.depth = &depthAttachment;
+				rhi::ColorAttachment rtvAttachment = {};
+				rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0).slot;
+				rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+				rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+				rtvAttachment.storeOp = rhi::StoreOp::Store;
+				passBeginInfo.colors = { &rtvAttachment };
+				passBeginInfo.width = lightViewInfo.depthResX;
+				passBeginInfo.height = lightViewInfo.depthResY;
+				passBeginInfo.debugName = "Shadow Pass - Spot Light";
+				commandList.BeginPass(passBeginInfo);
 
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
 
                 unsigned int misc[NumMiscUintRootConstants] = {};
-                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
-                commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
                 drawObjects();
                 break;
@@ -364,20 +410,32 @@ private:
             case Components::LightType::Point: {
                 uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < 6; i++) {
-                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
-                    auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
-                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                    if (m_clearDepths) {
-                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                    }
-                    commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+					std::string name = "View " + std::to_string(i);
+					rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
+					rhi::PassBeginInfo passBeginInfo = {};
+					rhi::DepthAttachment depthAttachment = {};
+					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
+					depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					depthAttachment.depthStore = rhi::StoreOp::Store;
+					depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+					passBeginInfo.depth = &depthAttachment;
+					rhi::ColorAttachment rtvAttachment = {};
+					rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0, i).slot;
+					rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+					rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					rtvAttachment.storeOp = rhi::StoreOp::Store;
+					passBeginInfo.colors = { &rtvAttachment };
+					passBeginInfo.width = lightViewInfo.depthResX;
+					passBeginInfo.height = lightViewInfo.depthResY;
+					passBeginInfo.debugName = "Shadow Pass - Point Light";
+					commandList.BeginPass(passBeginInfo);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
-                    commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
                     lightViewIndex += 1;
                     drawObjects();
@@ -387,20 +445,32 @@ private:
             case Components::LightType::Directional: {
                 uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades();
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
-                    auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
-                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                    if (m_clearDepths) {
-                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                    }
-                    commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
+					rhi::PassBeginInfo passBeginInfo = {};
+					rhi::DepthAttachment depthAttachment = {};
+					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
+					depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					depthAttachment.depthStore = rhi::StoreOp::Store;
+					depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+					passBeginInfo.depth = &depthAttachment;
+					rhi::ColorAttachment rtvAttachment = {};
+					rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0, i).slot;
+					rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+					rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					rtvAttachment.storeOp = rhi::StoreOp::Store;
+					passBeginInfo.colors = { &rtvAttachment };
+					passBeginInfo.width = lightViewInfo.depthResX;
+					passBeginInfo.height = lightViewInfo.depthResY;
+					passBeginInfo.debugName = "Shadow Pass - Directional Light";
+					commandList.BeginPass(passBeginInfo);
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
-                    commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
                     lightViewIndex += 1;
                     drawObjects();
@@ -411,74 +481,99 @@ private:
             });
     }
 
-    void ExecuteMeshShaderIndirect(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+    void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
         auto& psoManager = PSOManager::GetInstance();
 
-        auto drawObjects = [&](ID3D12Resource* opaqueIndirectCommandBuffer, ID3D12Resource* alphaTestIndirectCommandBuffer, ID3D12Resource* blendIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t alphaTestCommandCounterOffset, size_t blendIndirectCommandCounterOffset) {
+        auto drawObjects = [&](const rhi::ResourceHandle& opaqueIndirectCommandBuffer, const rhi::ResourceHandle& alphaTestIndirectCommandBuffer, const rhi::ResourceHandle& blendIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t alphaTestCommandCounterOffset, size_t blendIndirectCommandCounterOffset) {
             auto numOpaque = context.drawStats.numOpaqueDraws;
             if (numOpaque != 0) {
-                auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+                auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList->SetPipelineState(pso.GetAPIPipelineState());
-                commandList->ExecuteIndirect(commandSignature, numOpaque, opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset);
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+                commandList.ExecuteIndirect(commandSignature.GetHandle(), opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset, numOpaque);
             }
 
             auto numAlphaTest = context.drawStats.numAlphaTestDraws;
             if (numAlphaTest != 0) {
-                auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST | PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_MASK, false);
+                auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST | PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_MASK, false);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList->SetPipelineState(pso.GetAPIPipelineState());
-                commandList->ExecuteIndirect(commandSignature, numAlphaTest, alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset);
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+				commandList.ExecuteIndirect(commandSignature.GetHandle(), alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset, numAlphaTest);
             }
 
             auto numBlend = context.drawStats.numBlendDraws;
             if (numBlend != 0) {
-                auto pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
+                auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList->SetPipelineState(pso.GetAPIPipelineState());
-                commandList->ExecuteIndirect(commandSignature, numBlend, blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset);
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+				commandList.ExecuteIndirect(commandSignature.GetHandle(), blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset, numBlend);
             }
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
+            rhi::debug::Scope scope(commandList, rhi::colors::Blue, e.name().c_str());
             float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
             switch (light.type) {
             case Components::LightType::Spot: {
-                auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0).cpuHandle;
-                auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0).cpuHandle;
-                commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                if (m_clearDepths) {
-                    commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                    commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                }
+				rhi::PassBeginInfo passBeginInfo = {};
+				rhi::DepthAttachment depthAttachment = {};
+				depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0).slot;
+				depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+				depthAttachment.depthStore = rhi::StoreOp::Store;
+				depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+				passBeginInfo.depth = &depthAttachment;
+				rhi::ColorAttachment rtvAttachment = {};
+				rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0).slot;
+				rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+				rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+				rtvAttachment.storeOp = rhi::StoreOp::Store;
+				passBeginInfo.colors = { &rtvAttachment };
+				passBeginInfo.width = lightViewInfo.depthResX;
+				passBeginInfo.height = lightViewInfo.depthResY;
+				passBeginInfo.debugName = "Shadow Pass - Spot Light";
+				commandList.BeginPass(passBeginInfo);
+                
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 auto& views = lightViewInfo.renderViews;
                 auto& opaque = views[0].indirectCommandBuffers.opaqueIndirectCommandBuffer;
                 auto& alphaTest = views[0].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
                 auto& blend = views[0].indirectCommandBuffers.blendIndirectCommandBuffer;
 
                 unsigned int misc[NumMiscUintRootConstants] = {};
-                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
-                commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
-                drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
+                drawObjects(opaque->GetAPIResource().GetHandle(), alphaTest->GetAPIResource().GetHandle(), blend->GetAPIResource().GetHandle(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 break;
             }
             case Components::LightType::Point: {
                 uint32_t lightViewIndex = lightViewInfo.viewInfoBufferIndex * 6;
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
-                commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, NumViewRootConstants, &lightInfo, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < 6; i++) {
-                    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
-                    auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
-                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                    if (m_clearDepths) {
-                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                    }
-                    commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
+					rhi::PassBeginInfo passBeginInfo = {};
+					rhi::DepthAttachment depthAttachment = {};
+					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
+					depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					depthAttachment.depthStore = rhi::StoreOp::Store;
+					depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+					passBeginInfo.depth = &depthAttachment;
+					rhi::ColorAttachment rtvAttachment = {};
+					rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0, i).slot;
+					rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+					rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					rtvAttachment.storeOp = rhi::StoreOp::Store;
+					passBeginInfo.colors = { &rtvAttachment };
+					passBeginInfo.width = lightViewInfo.depthResX;
+					passBeginInfo.height = lightViewInfo.depthResY;
+					passBeginInfo.debugName = "Shadow Pass - Point Light";
+					commandList.BeginPass(passBeginInfo);
+
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
                     lightViewIndex += 1;
                     auto& views = lightViewInfo.renderViews;
                     auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
@@ -486,26 +581,38 @@ private:
                     auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
-                    commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
-                    drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
+                    drawObjects(opaque->GetAPIResource().GetHandle(), alphaTest->GetAPIResource().GetHandle(), blend->GetAPIResource().GetHandle(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 }
                 break;
             }
             case Components::LightType::Directional: {
-                //int lightIndex = light->GetCurrentLightBufferIndex();
                 uint32_t lightViewIndex = static_cast<uint32_t>(lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades());
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-                    auto& dsvHandle = shadowMap.depthMap->GetDSVInfo(0, i).cpuHandle;
-                    auto& rtvHandle = shadowMap.linearDepthMap->GetRTVInfo(0, i).cpuHandle;
-                    commandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
-                    if (m_clearDepths) {
-                        commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-                        commandList->ClearRenderTargetView(rtvHandle, shadowMap.linearDepthMap->GetClearColor().data(), 0, nullptr);
-                    }
-                    commandList->SetGraphicsRoot32BitConstants(ViewRootSignatureIndex, 1, &lightViewIndex, LightViewIndex);
+                    std::string name = "View " + std::to_string(i);
+                    rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
+					rhi::PassBeginInfo passBeginInfo = {};
+					rhi::DepthAttachment depthAttachment = {};
+					depthAttachment.dsv = shadowMap.depthMap->GetDSVInfo(0, i).slot;
+					depthAttachment.depthLoad = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					depthAttachment.depthStore = rhi::StoreOp::Store;
+					depthAttachment.clear = shadowMap.depthMap->GetClearColor();
+					passBeginInfo.depth = &depthAttachment;
+					rhi::ColorAttachment rtvAttachment = {};
+					rtvAttachment.rtv = shadowMap.linearDepthMap->GetRTVInfo(0, i).slot;
+					rtvAttachment.clear = shadowMap.linearDepthMap->GetClearColor();
+					rtvAttachment.loadOp = m_clearDepths ? rhi::LoadOp::Clear : rhi::LoadOp::Load;
+					rtvAttachment.storeOp = rhi::StoreOp::Store;
+					passBeginInfo.colors = { &rtvAttachment };
+					passBeginInfo.width = lightViewInfo.depthResX;
+					passBeginInfo.height = lightViewInfo.depthResY;
+					passBeginInfo.debugName = "Shadow Pass - Directional Light";
+					commandList.BeginPass(passBeginInfo);
+
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
                     lightViewIndex += 1;
                     auto& views = lightViewInfo.renderViews;
                     auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
@@ -513,10 +620,10 @@ private:
                     auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).index;
-                    commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
-                    drawObjects(opaque->GetAPIResource(), alphaTest->GetAPIResource(), blend->GetAPIResource(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
+                    drawObjects(opaque->GetAPIResource().GetHandle(), alphaTest->GetAPIResource().GetHandle(), blend->GetAPIResource().GetHandle(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
                 }
             }
             }

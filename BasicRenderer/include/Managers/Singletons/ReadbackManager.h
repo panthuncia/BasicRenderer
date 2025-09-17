@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <vector>
+#include <rhi.h>
 #include "Managers/Singletons/SettingsManager.h"
 
 #include "RenderPasses/Base/RenderPass.h"
@@ -23,7 +24,7 @@ class ReadbackManager {
 public:
 	static ReadbackManager& GetInstance();
 
-	void Initialize(ID3D12Fence* readbackFence) {
+	void Initialize(rhi::Timeline readbackFence) {
 		m_readbackPass->Setup();
 		m_readbackFence = readbackFence;
         m_readbackPass->SetReadbackFence(readbackFence);
@@ -67,7 +68,7 @@ private:
                     readbackManager.SaveCubemapToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, m_fenceValue);
 				}
 				else {
-                    readbackManager.SaveTextureToDDS(context.device, commandList, context.commandQueue, readback.texture.get(), readback.outputFile, m_fenceValue);
+                    readbackManager.SaveTextureToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, m_fenceValue);
 				}
             }
             
@@ -81,12 +82,12 @@ private:
             // Cleanup if necessary
         }
 
-		void SetReadbackFence(ID3D12Fence* fence) {
+		void SetReadbackFence(rhi::Timeline fence) {
 			m_readbackFence = fence;
 		}
 
     private:
-        ID3D12Fence* m_readbackFence = nullptr;
+        rhi::Timeline m_readbackFence;
 		UINT64 m_fenceValue = 0;
     };
 
@@ -94,12 +95,16 @@ private:
 		m_readbackPass = std::make_shared<ReadbackPass>();
     }
 
-    void SaveCubemapToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
-    void SaveTextureToDDS(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12CommandQueue* commandQueue, PixelBuffer* texture, const std::wstring& outputFile, UINT64 fenceValue);
-
+    void SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveTextureToDDS(
+        rhi::Device& device,
+        rhi::CommandList& commandList,
+        PixelBuffer* texture,
+        const std::wstring& outputFile,
+        uint64_t fenceValue);
     std::vector<ReadbackInfo> m_queuedReadbacks;
 	std::shared_ptr<ReadbackPass> m_readbackPass;
-    Microsoft::WRL::ComPtr<ID3D12Fence> m_readbackFence;
+    rhi::Timeline m_readbackFence;
     std::mutex readbackRequestsMutex;
     std::vector<ReadbackRequest> m_readbackRequests;
 

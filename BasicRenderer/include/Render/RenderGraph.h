@@ -5,14 +5,13 @@
 #include <unordered_set>
 #include <string>
 #include <memory>
-#include <wrl/client.h>
 #include <variant>
 #include <span>
 #include <spdlog/spdlog.h>
+#include <rhi.h>
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/Base/ComputePass.h"
-#include "Resources/ResourceStates.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Interfaces/IResourceProvider.h"
 #include "Render/ResourceRegistry.h"
@@ -196,15 +195,15 @@ private:
 	std::unique_ptr<CommandListPool> m_copyCommandListPool;
 
 	//Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> initialTransitionCommandList;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> initialTransitionCommandAllocator;
-	Microsoft::WRL::ComPtr<ID3D12Fence> m_initialTransitionFence;
+	rhi::CommandAllocatorPtr initialTransitionCommandAllocator;
+	rhi::TimelinePtr m_initialTransitionFence;
 	UINT64 m_initialTransitionFenceValue = 0;
 
-	Microsoft::WRL::ComPtr<ID3D12Fence> m_frameStartSyncFence; // TODO: Is there a better way of handling waiting for pre-frame things like copying resources?
+	rhi::TimelinePtr m_frameStartSyncFence; // TODO: Is there a better way of handling waiting for pre-frame things like copying resources?
 
-	Microsoft::WRL::ComPtr<ID3D12Fence> m_graphicsQueueFence;
-	Microsoft::WRL::ComPtr<ID3D12Fence> m_computeQueueFence;
-	Microsoft::WRL::ComPtr<ID3D12Fence> m_copyQueueFence;
+	rhi::TimelinePtr m_graphicsQueueFence;
+	rhi::TimelinePtr m_computeQueueFence;
+	rhi::TimelinePtr m_copyQueueFence;
 
 	std::unique_ptr<CommandRecordingManager> m_pCommandRecordingManager;
 
@@ -216,6 +215,8 @@ private:
 	UINT64 GetNextComputeQueueFenceValue() {
 		return m_computeQueueFenceValue++;
 	}
+
+	std::function<bool()> m_getUseAsyncCompute;
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 

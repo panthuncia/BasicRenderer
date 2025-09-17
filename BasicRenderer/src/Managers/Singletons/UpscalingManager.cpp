@@ -2,8 +2,8 @@
 
 #include <spdlog/spdlog.h>
 #include <flecs.h>
+#include <rhi.h>
 
-#include "ThirdParty/Streamline/sl.h"
 #include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
 #include "slHooks.h"
 #include "Managers/Singletons/SettingsManager.h"
@@ -14,10 +14,10 @@
 #include "Utilities/MathUtils.h"
 #include "Utilities/Utilities.h"
 
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
-#include <ThirdParty/Streamline/sl_security.h>
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
+#include <sl_security.h>
 #include <slHooks.h>
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
@@ -31,41 +31,40 @@ void SlLogMessageCallback(sl::LogType level, const char* message) {
     //spdlog::info("Streamline Log: {}", message);
 }
 
+static ID3D12Device* dx12_device() { return rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice()); }
+static IDXGIFactory7* dx12_factory() { return rhi::dx12::get_factory(DeviceManager::GetInstance().GetDevice()); }
+static IDXGIAdapter4* dx12_adapter() { return rhi::dx12::get_adapter(DeviceManager::GetInstance().GetDevice()); }
+
 ffxFunctions ffxModule;
 
 FfxApiResource getFFXResource(Resource* resource, const wchar_t* name, FfxApiResourceState state) {
 	//auto desc = ffx::ApiGetResourceDescriptionDX12(resource->GetAPIResource(), FFX_API_RESOURCE_USAGE_READ_ONLY);
-	auto ffxResource = ffxApiGetResourceDX12(resource->GetAPIResource(), state);
+	auto ffxResource = ffxApiGetResourceDX12(rhi::dx12::get_resource(resource->GetAPIResource()), state);
     if (ffxResource.resource == nullptr) {
         spdlog::error("Failed to get FFX resource for resource");
 	}
     return ffxResource;
 }
 
-bool CheckDLSSSupport(IDXGIAdapter1* adapter) {
-    DXGI_ADAPTER_DESC desc{};
-    if (SUCCEEDED(adapter->GetDesc(&desc)))
-    {
-        sl::AdapterInfo adapterInfo{};
-        adapterInfo.deviceLUID = (uint8_t*)&desc.AdapterLuid;
-        adapterInfo.deviceLUIDSizeInBytes = sizeof(LUID);
-        if (SL_FAILED(result, slIsFeatureSupported(sl::kFeatureDLSS, adapterInfo)))
-        {
-            // Requested feature is not supported on the system, fallback to the default method
-            switch (result)
-            {
-            case sl::Result::eErrorOSOutOfDate:         // inform user to update OS
-            case sl::Result::eErrorDriverOutOfDate:     // inform user to update driver
-            case sl::Result::eErrorAdapterNotSupported:  // cannot use this adapter (older or non-NVDA GPU etc)
-                return false;
-            };
-        }
-        else
-        {
-            return true;
-        }
+bool CheckDLSSSupport(rhi::Device dev) {
+    IDXGIAdapter4* ad = rhi::dx12::get_adapter(dev);
+    if (!ad) {
+        return false;
     }
-	return false;
+    DXGI_ADAPTER_DESC desc{};
+    if (FAILED(ad->GetDesc(&desc))) {
+        return false;
+    }
+
+    sl::AdapterInfo ai{};
+    ai.deviceLUID = reinterpret_cast<uint8_t*>(&desc.AdapterLuid);
+    ai.deviceLUIDSizeInBytes = sizeof(LUID);
+
+    sl::Result res = sl::Result::eOk;
+    if (SL_FAILED(res, slIsFeatureSupported(sl::kFeatureDLSS, ai))) {
+        return false;
+    }
+    return true;
 }
 
 inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool transpose = false)
@@ -89,50 +88,39 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
     );
 }
 
-void UpscalingManager::InitializeAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1>& adapter)
+void UpscalingManager::InitializeAdapter()
 {
-	m_currentAdapter = adapter;
+    auto dev = DeviceManager::GetInstance().GetDevice();
+	m_dlssSupported = CheckDLSSSupport(dev);
 
-    if (CheckDLSSSupport(adapter.Get()))
-    {
-		m_upscalingMode = UpscalingMode::DLSS;
+
+    if (m_dlssSupported) {
+		// Provide the D3D device to Streamline
+        //rhi::dx12::set_streamline_d3d_device(dev, slSetD3DDevice);
+		// Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
+		bool success = rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface, slSetD3DDevice); // TODO: Un-enable if switching to FSR3 at runtime
+        if (!success) {
+            spdlog::error("Failed to enable Streamline interposer.");
+			m_dlssSupported = false;
+		}
     }
-    else
-    {
-        m_upscalingMode = UpscalingMode::FSR3;
-	}
 }
 
-ID3D12Device10* UpscalingManager::ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device) {
+void UpscalingManager::ProxyDevice() {
     switch (m_upscalingMode)
     {
     case UpscalingMode::DLSS: {
-        ID3D12Device10* proxyDevice = device.Get();
-        if (SL_FAILED(result, slUpgradeInterface((void**)&proxyDevice)))
-        {
-            spdlog::error("SL device upgrade failed!");
-        }
-        slSetD3DDevice(device.Get()); // Set the D3D device for Streamline
-		return proxyDevice;
+        // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
+		auto dev = DeviceManager::GetInstance().GetDevice();
+        rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface, slSetD3DDevice);
         break;
     }
     case UpscalingMode::FSR3: {
-        return device.Get();
         break;
     }
     default:
-		return device.Get();
 		break;
     }
-}
-
-IDXGIFactory7* UpscalingManager::ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory) {
-    IDXGIFactory7* proxyFactory = factory.Get();
-    if (SL_FAILED(result, slUpgradeInterface((void**)&proxyFactory)))
-    {
-        spdlog::error("SL factory upgrade failed!");
-    }
-    return proxyFactory;
 }
 
 bool UpscalingManager::InitFFX() {
@@ -140,12 +128,12 @@ bool UpscalingManager::InitFFX() {
     m_getOutputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution");
     auto outputRes = m_getOutputRes();
     auto renderRes = m_getRenderRes();
-	auto module = LoadLibrary(L"FFX/amd_fidelityfx_dx12.dll");
+	auto module = LoadLibrary(L"amd_fidelityfx_dx12.dll");
     if (module) {
         ffxLoadFunctions(&ffxModule, module);
 
         ffx::CreateBackendDX12Desc backendDesc{};
-        backendDesc.device = DeviceManager::GetInstance().GetDevice().Get();
+        backendDesc.device = rhi::dx12::get_device(DeviceManager::GetInstance().GetDevice());
 
         ffx::CreateContextDescUpscale createUpscaling;
         createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
@@ -337,7 +325,7 @@ void UpscalingManager::Setup() {
     }
 }
 
-void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+void UpscalingManager::EvaluateDLSS(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     auto frameToken = m_frameTokens[context.frameIndex];
     auto myViewport = sl::ViewportHandle(0); // 0 is the default viewport
     auto renderRes = m_getRenderRes();
@@ -395,10 +383,10 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
         spdlog::error("Failed to set DLSS constants");
     }
 
-    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)pHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource colorOut = { sl::ResourceType::eTex2d, pUpscaledHDRTarget->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource depth = { sl::ResourceType::eTex2d, pDepthTexture->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource mvec = { sl::ResourceType::eTex2d, pMotionVectors->GetAPIResource(), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+    sl::Resource colorOut = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pUpscaledHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
+    sl::Resource depth = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+    sl::Resource mvec = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pMotionVectors->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
     //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
 
     sl::Extent renderExtent = { 0, 0, renderRes.x, renderRes.y };
@@ -411,7 +399,7 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
 
     const sl::BaseStructure* inputs[] = { &myViewport, &depthTag, &mvecTag, &colorInTag, &colorOutTag };
 
-    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context.commandList)))
+    if (SL_FAILED(result, slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), rhi::dx12::get_cmd_list(context.commandList))))
     {
         spdlog::error("DLSS evaluation failed!");
     }
@@ -422,12 +410,12 @@ void UpscalingManager::EvaluateDLSS(const RenderContext& context, PixelBuffer* p
     }
 }
 
-void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+void UpscalingManager::EvaluateFSR3(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     ffx::DispatchDescUpscale dispatchUpscale{};
 
     auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
 
-    dispatchUpscale.commandList = context.commandList;
+    dispatchUpscale.commandList = rhi::dx12::get_cmd_list(context.commandList);
 
     dispatchUpscale.color = getFFXResource(pHDRTarget, L"UpscaleColorIn", FFX_API_RESOURCE_STATE_COMMON);
 	dispatchUpscale.depth = getFFXResource(pDepthTexture, L"UpscaleDepth", FFX_API_RESOURCE_STATE_COMMON);
@@ -475,36 +463,39 @@ void UpscalingManager::EvaluateFSR3(const RenderContext& context, PixelBuffer* p
     ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
 }
 
-void UpscalingManager::EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
-	
-    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-    srcLoc.pResource = pHDRTarget->GetAPIResource();
-    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    srcLoc.SubresourceIndex = 0;
-
+void UpscalingManager::EvaluateNone(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     UINT mipSlice = 0;
     UINT arraySlice = 0;
-    UINT dstSubresource = D3D12CalcSubresource(
+    UINT dstSubresource = CalcSubresource(
         /*MipSlice=*/mipSlice,
         /*ArraySlice=*/arraySlice,
         /*PlaneSlice=*/0,
         /*TotalMipCount=*/pUpscaledHDRTarget->GetNumSRVMipLevels(),
         /*ArraySize=*/1);
 
-    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-    dstLoc.pResource = pUpscaledHDRTarget->GetAPIResource();
-    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLoc.SubresourceIndex = dstSubresource;
+    rhi::TextureCopyRegion dst = {
+        .texture = pUpscaledHDRTarget->GetAPIResource().GetHandle(),
+        .mip = mipSlice,
+        .arraySlice = arraySlice,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .depth = 1,
+    };
+    rhi::TextureCopyRegion src = {
+        .texture = pHDRTarget->GetAPIResource().GetHandle(),
+        .mip = mipSlice,
+        .arraySlice = arraySlice,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .depth = 1,
+    };
 
-    context.commandList->CopyTextureRegion(
-        &dstLoc,
-        /*dstX=*/0, /*dstY=*/0, /*dstZ=*/0,
-        &srcLoc,
-        /*pSrcBox=*/nullptr
-    );
+    context.commandList.CopyTextureRegion(dst, src);
 }
 
-void UpscalingManager::Evaluate(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+void UpscalingManager::Evaluate(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     switch (m_upscalingMode)
     {
 	    case UpscalingMode::None:
@@ -520,5 +511,8 @@ void UpscalingManager::Evaluate(const RenderContext& context, PixelBuffer* pHDRT
 }
 
 void UpscalingManager::Shutdown() {
-
+	auto dev = DeviceManager::GetInstance().GetDevice();
+    if (m_dlssSupported) {
+        rhi::dx12::disable_streamline_interposer(dev);
+	}
 }

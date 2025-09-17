@@ -2,8 +2,6 @@
 #include <iostream>
 #include <Windows.h>
 #include <windowsx.h>
-#include <directx/d3d12.h>
-#include <dxgi1_6.h>
 #include <iostream>
 #include <memory>
 #include <spdlog/spdlog.h>
@@ -13,10 +11,10 @@
 #include <io.h>        // _pipe, _dup2, _read, _close
 #include <fcntl.h>     // _O_BINARY
 #include <thread>
-#include <ThirdParty/pix/pix3.h>
+#include <pix3.h>
 
 #include "Mesh/Mesh.h"
-#include "DX12Renderer.h"
+#include "Renderer.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Materials/Material.h"
@@ -41,7 +39,7 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D\\";
 #define USE_PIX
 #pragma comment(lib, "WinPixEventRuntime.lib")
 
-DX12Renderer renderer;
+Renderer renderer;
 UINT default_x_res = 1920;
 UINT default_y_res = 1080;
 
@@ -277,11 +275,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    //auto bistro = LoadModel("models/BistroExterior.usdz");
+    //auto bistro = LoadModel("models/BistroExterior.fbx");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     auto robot = LoadModel("models/robot.usdz");
+
+	auto sphereScene = LoadModel("models/sphere.glb");
 
 
     renderer.SetCurrentScene(baseScene);
@@ -298,6 +298,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
 	renderer.GetCurrentScene()->AppendScene(robot->Clone());
+
+    //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
+
+    //for (int i = 0; i < 1; i++) {
+    //    auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
+    //    auto point = getRandomPointInVolume(-20, 20, -2, 2, -20, 20);
+    //    sphereInstance->GetRoot().set<Components::Position>({ point.x, point.y, point.z });
+    //}
+
 
     renderer.SetEnvironment("sky");
 
@@ -394,7 +403,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (wParam != SIZE_MINIMIZED) {
             UINT newWidth = LOWORD(lParam);
             UINT newHeight = HIWORD(lParam);
-            renderer.OnResize(newWidth, newHeight);
+            if (renderer.IsInitialized()) {
+                renderer.OnResize(newWidth, newHeight);
+            }
         }
         break;
     case WM_DESTROY:

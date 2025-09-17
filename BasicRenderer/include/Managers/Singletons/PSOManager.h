@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <optional>
 
+#include <rhi.h>
+
 #pragma warning(push, 0)   // Disable all warnings for dxc header
 #include "ThirdParty/DirectX/dxcapi.h"
 #pragma warning(pop)
@@ -86,22 +88,28 @@ public:
 
     void initialize();
 
-    PipelineState GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
 
-    PipelineState GetDeferredPSO(UINT psoFlags);
+    const PipelineState& GetDeferredPSO(UINT psoFlags);
 
-    ComPtr<ID3D12RootSignature> GetRootSignature();
-	ComPtr<ID3D12RootSignature> GetComputeRootSignature();
+    PipelineState MakeComputePipeline(rhi::PipelineLayout layout,
+        const wchar_t* shaderPath,
+        const wchar_t* entryPoint,
+        std::vector<DxcDefine> defines = {},
+        const char* debugName = nullptr);
+
+    const rhi::PipelineLayout& GetRootSignature();
+    const rhi::PipelineLayout& GetComputeRootSignature();
     void ReloadShaders();
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
 	ShaderBundle CompileShaders(const ShaderInfoBundle& shaderInfoBundle);
@@ -128,10 +136,10 @@ private:
     };
 
     PSOManager() = default;
-    ComPtr<ID3D12RootSignature> rootSignature;
-	ComPtr<ID3D12RootSignature> computeRootSignature;
-    ComPtr<ID3D12RootSignature> debugRootSignature;
-    ComPtr<ID3D12RootSignature> environmentConversionRootSignature;
+    rhi::PipelineLayoutPtr m_rootSignature;
+    rhi::PipelineLayoutPtr m_computeRootSignature;
+    rhi::PipelineLayoutPtr m_debugRootSignature;
+    rhi::PipelineLayoutPtr m_environmentConversionRootSignature;
 
     std::unordered_map<PSOKey, PipelineState> m_psoCache;
     std::unordered_map<PSOKey, PipelineState> m_PPLLPSOCache;
@@ -177,7 +185,7 @@ private:
         Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
 
     void createRootSignature();
-    D3D12_BLEND_DESC GetBlendDesc(BlendState blendState);
+    rhi::BlendState GetBlendDesc(BlendState blendState);
 
     void LoadSource(const std::filesystem::path& path, PSOManager::SourceData& sd);
 

@@ -64,3 +64,5 @@ endif()
 
 add_subdirectory ("BasicRenderer")
 add_subdirectory("UsdPlugins")
+add_subdirectory("BasicRHI")
+add_subdirectory("ThirdParty")

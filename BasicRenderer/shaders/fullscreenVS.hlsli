@@ -11,12 +11,6 @@ struct FULLSCREEN_VS_OUTPUT
     float3 viewRayVS : TEXCOORD2;
 };
 
-/*static const float2 QuadCorners[4] =
-{
-    float2(-1, -1), float2(1, -1),
-    float2(-1, 1), float2(1, 1),
-};*/
-
 FULLSCREEN_VS_OUTPUT FullscreenVSMain(uint vid : SV_VertexID)
 {
     

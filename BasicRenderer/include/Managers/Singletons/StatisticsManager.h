@@ -1,12 +1,11 @@
 #pragma once
 
-#include <d3d12.h>
-#include <wrl/client.h>
 #include <vector>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <functional>
+#include <rhi.h>
 
 // per-pass exponential moving average data
 struct PassStats {
@@ -32,27 +31,28 @@ public:
 
     void MarkGeometryPass(const std::string& passName);
 
-    void RegisterQueue(ID3D12CommandQueue* queue);
+    void RegisterQueue(rhi::QueueKind queue);
 
     void SetupQueryHeap();
 
     // Timestamp + mesh-stats queries for any pass
     void BeginQuery(unsigned passIndex,
         unsigned frameIndex,
-        ID3D12CommandQueue* queue,
-        ID3D12GraphicsCommandList* cmdList);
+        rhi::Queue& queue,
+        rhi::CommandList& cmdList);
+
     void EndQuery(unsigned passIndex,
         unsigned frameIndex,
-        ID3D12CommandQueue* queue,
-        ID3D12GraphicsCommandList* cmdList);
+        rhi::Queue& queue,
+        rhi::CommandList& cmdList);
 
     // Resolve all queries for a frame before closing
     void ResolveQueries(unsigned frameIndex,
-        ID3D12CommandQueue* queue,
-        ID3D12GraphicsCommandList* cmdList);
+        rhi::Queue& queue,
+        rhi::CommandList& cmdList);
 
     void OnFrameComplete(unsigned frameIndex,
-        ID3D12CommandQueue* queue);
+        rhi::Queue& queue);
 
     void ClearAll();
 
@@ -69,11 +69,15 @@ private:
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> m_getCollectPipelineStatistics;
 
-    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timestampHeap;
-    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_pipelineStatsHeap;
+    rhi::QueryPoolPtr m_timestampPool;
+    rhi::QueryPoolPtr m_pipelineStatsPool;
+	rhi::QueryResultInfo m_timestampQueryInfo;
+	rhi::QueryResultInfo m_pipelineStatsQueryInfo;
+    std::vector<rhi::PipelineStatsFieldDesc> m_pipelineStatsFields;
+	rhi::PipelineStatsLayout m_pipelineStatsLayout;
 
-    std::unordered_map<ID3D12CommandQueue*, Microsoft::WRL::ComPtr<ID3D12Resource>> m_timestampBuffers;
-    std::unordered_map<ID3D12CommandQueue*, Microsoft::WRL::ComPtr<ID3D12Resource>> m_meshStatsBuffers;
+    std::unordered_map<rhi::QueueKind, rhi::ResourcePtr> m_timestampBuffers;
+    std::unordered_map<rhi::QueueKind, rhi::ResourcePtr> m_meshStatsBuffers;
 
     UINT64    m_gpuTimestampFreq = 0;
     unsigned  m_numPasses = 0;
@@ -86,8 +90,8 @@ private:
     std::vector<MeshPipelineStats>  m_meshStatsEma;
 
     // Recording helpers per queue/frame
-    std::unordered_map<ID3D12CommandQueue*,
+    std::unordered_map<rhi::QueueKind,
         std::unordered_map<unsigned, std::vector<unsigned>>> m_recordedQueries;
-    std::unordered_map<ID3D12CommandQueue*,
+    std::unordered_map<rhi::QueueKind,
         std::unordered_map<unsigned, std::vector<std::pair<unsigned,unsigned>>>> m_pendingResolves;
 };

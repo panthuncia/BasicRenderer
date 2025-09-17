@@ -1,8 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <directx/d3d12.h>
-#include <wrl/client.h>
 
 #include "ShaderBuffers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"

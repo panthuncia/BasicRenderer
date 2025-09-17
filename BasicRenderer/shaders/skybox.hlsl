@@ -6,12 +6,12 @@ SamplerState g_pointClamp : register(s0);
 // linear-clamp at s1
 SamplerState g_linearClamp : register(s1);
 
-cbuffer RootConstants1 : register(b1)
+cbuffer RootConstants1 : register(b0)
 {
     matrix viewProjectionMatrix;
 };
 
-cbuffer RootConstants2 : register(b2)
+cbuffer RootConstants2 : register(b1)
 {
     uint environmentBufferDescriptorIndex;
 };

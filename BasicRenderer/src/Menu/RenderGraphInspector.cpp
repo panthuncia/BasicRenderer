@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <tuple>
 #include <sstream>
+#include <rhi_helpers.h>
 
 #include "Render/QueueKind.h"
-#include "Resources/ResourceStates.h"
 
 struct BatchLayout {
     // Absolute X (plot coords) for this batch
@@ -343,9 +343,9 @@ namespace RGInspector {
                             ImGui::BulletText("Subresource: mip[%u..%u], array[%u..%u]",
                                 t.range.mipLower, t.range.mipUpper,
                                 t.range.sliceLower, t.range.sliceUpper);
-                            ImGui::BulletText("Layout : %s -> %s", BarrierLayoutToString(ResourceLayoutToD3D12(t.prevLayout)), BarrierLayoutToString(ResourceLayoutToD3D12(t.newLayout)));
-                            ImGui::BulletText("Access : %s -> %s", BarrierAccessToString(ResourceAccessTypeToD3D12(t.prevAccessType)), BarrierAccessToString(ResourceAccessTypeToD3D12(t.newAccessType)));
-                            ImGui::BulletText("Sync   : %s -> %s", BarrierSyncToString(ResourceSyncStateToD3D12(t.prevSyncState)), BarrierSyncToString(ResourceSyncStateToD3D12(t.newSyncState)));
+                            ImGui::BulletText("Layout : %s -> %s", rhi::helpers::ResourceLayoutToString(t.prevLayout), rhi::helpers::ResourceLayoutToString(t.newLayout));
+                            ImGui::BulletText("Access : %s -> %s", rhi::helpers::ResourceAccessMaskToString(t.prevAccessType), rhi::helpers::ResourceAccessMaskToString(t.newAccessType));
+                            ImGui::BulletText("Sync   : %s -> %s",rhi::helpers::ResourceSyncToString(t.prevSyncState), rhi::helpers::ResourceSyncToString(t.newSyncState));
                             ImGui::Separator();
                             };
 

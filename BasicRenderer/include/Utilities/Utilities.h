@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <directx/d3dx12.h>
 #include <DirectXTex.h>
+#include <cstdint>
+#include <cstring>
 
 #include "Import/MeshData.h"
 #include "Render/DescriptorHeap.h"
@@ -18,6 +20,7 @@
 #include "ShaderBuffers.h"
 #include "Import/Filetypes.h"
 #include "Scene/Components.h"
+#include "Resources/TextureDescription.h"
 
 #ifndef NDEBUG
 #define DEBUG_ONLY(x)   x
@@ -53,16 +56,36 @@ std::shared_ptr<Texture> LoadTextureFromFile(
 	const std::wstring& filePath,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	bool preferSRGB = false,
-	const LoadFlags& flags = {});
+	const LoadFlags& flags = {}, bool allowRTV = false, bool allowUAV = false);
 
 std::shared_ptr<Texture> LoadTextureFromMemory(
 	const void* bytes,
 	size_t byteCount,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	const LoadFlags& flags = {},
-	bool preferSRGB = false);
+	bool preferSRGB = false, bool allowRTV = false , bool allowUAV = false);
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
-std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false);
+std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false, bool allowUAV = false);
+
+#if __has_include(<bit>) && (__cpp_lib_bit_cast >= 201806L)
+#include <bit>
+inline uint32_t as_uint(float f) noexcept { return std::bit_cast<uint32_t>(f); }
+inline float    as_float(uint32_t u) noexcept { return std::bit_cast<float>(u); }
+#else
+inline uint32_t as_uint(float f) noexcept {
+	static_assert(sizeof(uint32_t) == sizeof(float), "sizes must match");
+	uint32_t u;
+	std::memcpy(&u, &f, sizeof(u));  // strict-aliasing safe
+	return u;
+}
+inline float as_float(uint32_t u) noexcept {
+	static_assert(sizeof(uint32_t) == sizeof(float), "sizes must match");
+	float f;
+	std::memcpy(&f, &u, sizeof(f));  // strict-aliasing safe
+	return f;
+}
+#endif
+
 template <typename T1, typename T2>
 bool mapHasKeyNotAsValue(std::unordered_map<T1, T2>& map, T1 key, T2 val) {
 	return map.contains(key) && map[key] != val;
@@ -103,46 +126,28 @@ std::vector<stbi_uc> ExpandImageData(const stbi_uc* image, int width, int height
 
 // Helper functions for creating resources
 
-CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
-	DXGI_FORMAT format,
-	int width,
-	int height,
-	int arraySize = 1,
-	uint16_t mipLevels = 1,
-	bool isCubemap = false,
-	bool allowRTV = false,
-	bool allowDSV = false,
-	bool allowUAV = false);
-
-Microsoft::WRL::ComPtr<ID3D12Resource> CreateCommittedTextureResource(
-	ID3D12Device10* device,
-	const CD3DX12_RESOURCE_DESC1& desc,
-	D3D12_CLEAR_VALUE* clearValue = nullptr,
-	D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_DEFAULT,
-	D3D12_BARRIER_LAYOUT initialState = D3D12_BARRIER_LAYOUT_COMMON);
-
-Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
-	ID3D12Device10* device,
-	const CD3DX12_RESOURCE_DESC1& desc,
-	D3D12_CLEAR_VALUE* clearValue,
-	D3D12_HEAP_TYPE heapType,
-	Microsoft::WRL::ComPtr<ID3D12Heap>& heap,
-	D3D12_BARRIER_LAYOUT initialLayout);
+//Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
+//	ID3D12Device10* device,
+//	const CD3DX12_RESOURCE_DESC1& desc,
+//	D3D12_CLEAR_VALUE* clearValue,
+//	D3D12_HEAP_TYPE heapType,
+//	Microsoft::WRL::ComPtr<ID3D12Heap>& heap,
+//	D3D12_BARRIER_LAYOUT initialLayout);
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT                  format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format       format,
 	DescriptorHeap* srvHeap,
-	int                          mipLevels,
-	bool                         isCubemap,
-	bool                         isArray,
-	int                          arraySize);
+	int               mipLevels,
+	bool              isCubemap,
+	bool              isArray,
+	int               arraySize);
 
 ShaderVisibleIndexInfo CreateUnorderedAccessView(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	bool isArray,
 	int arraySize,
@@ -151,9 +156,9 @@ ShaderVisibleIndexInfo CreateUnorderedAccessView(
 	int planeSlice = 0);
 
 NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	bool isArray,
 	int arraySize,
@@ -162,19 +167,20 @@ NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView(
 	int planeSlice = 0);
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMip(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT       format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	int               mipLevels,
 	bool              isArray,
 	int               arraySize,
-	int               planeSlice);	// for planar formats
+	int               planeSlice,
+	bool              isCubemap);
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorderedAccessViewsPerMip(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
-	DXGI_FORMAT        format,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format format,
 	DescriptorHeap* uavHeap,
 	int                mipLevels,
 	bool               isArray,
@@ -182,33 +188,26 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
 	int                planeSlice);
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
-	ID3D12Device*      device,
-	ID3D12Resource*    resource,
-	DXGI_FORMAT        format,
-	DescriptorHeap*    rtvHeap,
+	rhi::Device& device,
+	rhi::Resource& resource,
+	rhi::Format        format,
+	DescriptorHeap* rtvHea,
 	bool               isCubemap,
 	bool               isArray,
 	int                arraySize = 1,
 	int                mipLevels = 1);
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
-	ID3D12Device* device,
-	ID3D12Resource* resource,
+	rhi::Device& device,
+	rhi::Resource& resource,
 	DescriptorHeap* dsvHeap,
-	DXGI_FORMAT        format,
+	rhi::Format        format,
 	bool               isCubemap = false,
 	bool               isArray = false,
 	int                arraySize = 1,
 	int                mipLevels = 1);
 
-void UploadTextureData(
-	ID3D12Device* device,
-	ID3D12GraphicsCommandList* commandList,
-	ID3D12Resource* textureResource,
-	const void* data,
-	int width,
-	int height,
-	int channels);
+void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
 
 std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(DirectX::XMFLOAT3 pos);
 
@@ -261,3 +260,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 uint32_t NumMips(uint32_t width, uint32_t height);
 
 std::string GetDirectoryFromPath(const std::string& path);
+
+constexpr UINT CalcSubresource(UINT MipSlice, UINT ArraySlice, UINT PlaneSlice, UINT MipLevels, UINT ArraySize) noexcept {
+	return MipSlice + ArraySlice * MipLevels + PlaneSlice * MipLevels * ArraySize;
+}

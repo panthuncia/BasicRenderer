@@ -1,44 +1,58 @@
-cbuffer RootConstants1 : register(b1) {
-    matrix viewProjectionMatrix;
+cbuffer EnvToCubePC : register(b0, space0)
+{
+    uint SrcEnvSrvIndex; // SRV index in bindless CBV/SRV/UAV heap
+    uint dstCubeIndex; // UAV index for the DEST cubemap
+    uint Face; // 0..5
+    uint Size; // cubemap resolution (width=height)
 };
 
-Texture2D environmentTexture : register(t0);
-SamplerState environmentSamplerState : register(s0);
+SamplerState gLinearClamp : register(s0);
 
-struct VS_OUTPUT {
-    float4 position : SV_POSITION;
-    float3 direction : TEXCOORD1;
-};
-
-VS_OUTPUT VSMain(float3 pos : POSITION) {
-    VS_OUTPUT output;
-    output.direction = normalize(pos);
-    output.position = mul(viewProjectionMatrix, float4(pos, 1.0f));
-    output.position.z = output.position.w-0.00001;
-    return output;
-}
-
-static const float2 invAtan = float2(0.1591, 0.3183);
 static const float PI = 3.14159265359;
-// Converts a direction vector to u,v coordinates on an equirectangular map
-float2 CubeToSpherical(float3 dir) {
+float2 DirToEquirect(float3 dir)
+{
     dir = normalize(dir);
-
     float2 uv;
     uv.x = (atan2(dir.z, dir.x) / (2.0 * PI)) + 0.5;
-    uv.y = (asin(dir.y) / PI) + 0.5;
-    uv.y = 1.0 - uv.y;
+    uv.y = 0.5 - (asin(dir.y) / PI);
     return uv;
 }
 
-struct PS_OUTPUT {
-    float4 color : SV_Target0;
-};
+float3 FaceUVToDir(uint face, float2 uv)
+{
+    // uv in [-1,1], +X,-X,+Y,-Y,+Z,-Z
+    switch (face)
+    {
+        case 0:
+            return normalize(float3(1.0, uv.y, -uv.x)); // +X
+        case 1:
+            return normalize(float3(-1.0, uv.y, uv.x)); // -X
+        case 2:
+            return normalize(float3(uv.x, 1.0, -uv.y)); // +Y
+        case 3:
+            return normalize(float3(uv.x, -1.0, uv.y)); // -Y
+        case 4:
+            return normalize(float3(uv.x, uv.y, 1.0)); // +Z
+        default:
+            return normalize(float3(-uv.x, uv.y, -1.0)); // -Z
+    }
+}
 
-PS_OUTPUT PSMain(VS_OUTPUT input) {
-    float3 color = environmentTexture.Sample(environmentSamplerState, CubeToSpherical(input.direction.xyz)).xyz;
+[numthreads(8, 8, 1)]
+void CSMain(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x >= Size || tid.y >= Size)
+        return;
+
+    float2 uv = ((float2) tid.xy + 0.5) / float(Size); // [0,1]
+    uv = uv * 2.0 - 1.0; // [-1,1]
+    uv.y = -uv.y; // Invert for DirectX
+    float3 dir = FaceUVToDir(Face, uv);
+
+    float2 equirect = DirToEquirect(dir);
+    Texture2D<float4> srcTex = ResourceDescriptorHeap[SrcEnvSrvIndex];
+    float3 col = srcTex.Sample(gLinearClamp, equirect).xyz;
     
-    PS_OUTPUT output;
-    output.color = float4(color, 1.0);
-    return output;
+    RWTexture2DArray<float4> dstTex = ResourceDescriptorHeap[dstCubeIndex];
+    dstTex[uint3(tid.x, tid.y, Face)] = float4(col, 1.0);
 }

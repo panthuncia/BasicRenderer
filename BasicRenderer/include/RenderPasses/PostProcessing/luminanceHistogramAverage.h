@@ -28,15 +28,11 @@ public:
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
 
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap, // The texture descriptor heap
-            context.samplerDescriptorHeap, // The sampler descriptor heap
-        };
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         // Set the compute pipeline state
-        commandList->SetComputeRootSignature(psoManager.GetRootSignature().Get());
-        commandList->SetPipelineState(pso.Get());
+		commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
+		commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
 
         float passConstants[NumMiscFloatRootConstants] = {};
         passConstants[MIN_LOG_LUMINANCE] = 0.001f; // Minimum log luminance value
@@ -44,12 +40,13 @@ public:
         passConstants[TIME_COEFFICIENT] = context.deltaTime;
 		passConstants[NUM_PIXELS] = static_cast<float>(context.renderResolution.x * context.renderResolution.y);
 
-        commandList->SetComputeRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, passConstants, 0);
+        //commandList->SetComputeRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, passConstants, 0);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, passConstants);
 
-        BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
 		// Dispatch the compute shader
-        commandList->Dispatch(1, 1, 1);
+        commandList.Dispatch(1, 1, 1);
 
         return {};
     }
@@ -59,24 +56,15 @@ public:
     }
 
 private:
-    ComPtr<ID3D12PipelineState> pso;
-    PipelineResources m_resourceDescriptorBindings;
+    PipelineState m_pso;
 
     void CreateComputePSO()
     {
-        auto device = DeviceManager::GetInstance().GetDevice();
-
-        Microsoft::WRL::ComPtr<ID3DBlob> blob;
-        ShaderInfoBundle shaderInfoBundle;
-        shaderInfoBundle.computeShader = { L"shaders/PostProcessing/LuminanceHistogramAverage.hlsl", L"CSMain", L"cs_6_6" };
-        auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-        blob = compiledBundle.computeShader;
-        m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
-        D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-        psoDesc.CS = CD3DX12_SHADER_BYTECODE(blob.Get());
-        psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-        ThrowIfFailed(device->CreateComputePipelineState(
-            &psoDesc, IID_PPV_ARGS(&pso)));
+		m_pso = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/PostProcessing/LuminanceHistogramAverage.hlsl",
+			L"CSMain",
+			{},
+			"LuminanceHistogramAverageCS");
     }
 };

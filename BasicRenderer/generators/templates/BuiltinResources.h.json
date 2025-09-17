@@ -9,7 +9,6 @@
         "Opaque": {},
         "AlphaTest": {},
         "Blend": {},
-        "MeshletFrustrumCulling": {},
         "MeshletCulling": {},
         "MeshletCullingReset": {}
       }

@@ -1,7 +1,8 @@
 #include "Render/RenderGraph.h"
 
 #include <span>
-#include <ThirdParty/pix/pix3.h>
+#include <rhi_helpers.h>
+#include <rhi_debug.h>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -501,40 +502,24 @@ void RenderGraph::Setup() {
 			}
 		}
 	}
-	statisticsManager.RegisterQueue(manager.GetGraphicsQueue());
-	statisticsManager.RegisterQueue(manager.GetComputeQueue());
+	statisticsManager.RegisterQueue(manager.GetGraphicsQueue().GetKind());
+	statisticsManager.RegisterQueue(manager.GetComputeQueue().GetKind());
 	statisticsManager.SetupQueryHeap();
 
-	auto& device = DeviceManager::GetInstance().GetDevice();
+	auto device = DeviceManager::GetInstance().GetDevice();
 
-	m_graphicsCommandListPool = std::make_unique<CommandListPool>(device.Get(), D3D12_COMMAND_LIST_TYPE_DIRECT);
-	m_computeCommandListPool = std::make_unique<CommandListPool>(device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE);
-	m_copyCommandListPool = std::make_unique<CommandListPool>(device.Get(), D3D12_COMMAND_LIST_TYPE_COPY);
+	m_graphicsCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Graphics);
+	m_computeCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Compute);
+	m_copyCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Copy);
 
-	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_graphicsQueueFence));
-	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_computeQueueFence));
-	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copyQueueFence));
-	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_frameStartSyncFence));
+	m_graphicsQueueFence = device.CreateTimeline();
+	m_computeQueueFence = device.CreateTimeline();
+	m_copyQueueFence = device.CreateTimeline();
+	m_frameStartSyncFence = device.CreateTimeline();
 
-	bool useAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute")();
+	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
 
-	CommandRecordingManager::Init init{
-		.graphicsQ = manager.GetGraphicsQueue(),
-		.graphicsF = m_graphicsQueueFence.Get(),
-		.graphicsPool = m_graphicsCommandListPool.get(),
-
-		.computeQ = useAsyncCompute ? manager.GetComputeQueue() : manager.GetGraphicsQueue(),
-		.computeF = m_computeQueueFence.Get(),
-		.computePool = useAsyncCompute ? m_computeCommandListPool.get() : m_graphicsCommandListPool.get(),
-
-		.copyQ = manager.GetCopyQueue(),
-		.copyF = m_copyQueueFence.Get(),
-		.copyPool = m_copyCommandListPool.get(),
-		.computeMode = useAsyncCompute ? ComputeMode::Async : ComputeMode::AliasToGraphics
-	};
-	m_pCommandRecordingManager = std::make_unique<CommandRecordingManager>(init);
-
-	std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> emptyLists;
+	std::vector<rhi::CommandList> emptyLists;
 	for (auto& pass : passes) {
 		switch (pass.type) {
 		case PassType::Render: {
@@ -653,11 +638,8 @@ namespace {
 	void ExecuteTransitions(std::vector<ResourceTransition>& transitions,
 		CommandRecordingManager* crm,
 		QueueKind queueKind,
-		ID3D12GraphicsCommandList10* commandList,
-		UINT64 fenceOffset,
-		bool fenceSignal,
-		UINT64 fenceValue) {
-		std::vector<BarrierGroups> groups;
+		rhi::CommandList& commandList) {
+		rhi::helpers::OwnedBarrierBatch batch;
 		for (auto& transition : transitions) {
 			std::vector<ResourceTransition> dummy;
 			transition.pResource->GetStateTracker()->Apply(
@@ -667,31 +649,19 @@ namespace {
 				transition.range, transition.prevAccessType, transition.newAccessType,
 				transition.prevLayout, transition.newLayout,
 				transition.prevSyncState, transition.newSyncState);
-			groups.push_back(std::move(bg));
+			batch.Append(bg);
 		}
-		std::vector<D3D12_BARRIER_GROUP> barriers;
-		for (auto& g : groups) {
-			barriers.reserve(barriers.size() + g.bufferBarriers.size() +
-				g.textureBarriers.size() + g.globalBarriers.size());
-			barriers.insert(barriers.end(), g.bufferBarriers.begin(), g.bufferBarriers.end());
-			barriers.insert(barriers.end(), g.textureBarriers.begin(), g.textureBarriers.end());
-			barriers.insert(barriers.end(), g.globalBarriers.begin(), g.globalBarriers.end());
-		}
-		if (!barriers.empty()) {
-			commandList->Barrier(static_cast<UINT>(barriers.size()), barriers.data());
-		}
-		if (fenceSignal) {
-			UINT64 signalValue = fenceOffset + fenceValue;
-			crm->Flush(queueKind, { true, signalValue });
+		if (!batch.Empty()) {
+			commandList.Barriers(batch.View());
 		}
 	}
 
 	template<typename PassT>
 	void ExecutePasses(std::vector<PassT>& passes,
 		CommandRecordingManager* crm,
-		ID3D12CommandQueue* queue,
+		rhi::Queue& queue,
 		QueueKind queueKind,
-		ID3D12GraphicsCommandList10* commandList,
+		rhi::CommandList& commandList,
 		UINT64 fenceOffset,
 		bool fenceSignal,
 		UINT64 fenceValue,
@@ -700,46 +670,72 @@ namespace {
 		std::vector<PassReturn> externalFences;
 		context.commandList = commandList;
 		for (auto& pr : passes) {
+			if (pr.name == "OcclusionMeshletRemaindersCullingPass") {
+				spdlog::info("0");
+			}
 			if (pr.pass->IsInvalidated()) {
-				PIXBeginEvent(commandList, 0, pr.name.c_str());
+				rhi::debug::Scope scope(commandList, rhi::colors::Mint, pr.name.c_str());
 				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 				auto passReturn = pr.pass->Execute(context);
 				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
-				PIXEndEvent(commandList);
-				if (passReturn.fence != nullptr) {
+				if (passReturn.fence) {
 					externalFences.push_back(passReturn);
 				}
 			}
 		}
 		statisticsManager.ResolveQueries(context.frameIndex, queue, commandList);
-		if (externalFences.size() > 0 || fenceSignal) {
-			UINT64 signalValue = fenceOffset + fenceValue;
-			crm->Flush(queueKind, { fenceSignal, signalValue });
+		if (externalFences.size() > 0) {
 			for (auto& fr : externalFences) {
-				queue->Signal(fr.fence, fr.fenceValue);
+				if (!fr.fence.has_value()) {
+					spdlog::warn("Pass returned an external fence without a value. This should not happen.");
+				}
+				else {
+					queue.Signal({ fr.fence.value().GetHandle(), fr.fenceValue });
+				}
 			}
 		}
 	}
 } // namespace
 
 void RenderGraph::Execute(RenderContext& context) {
+
+	bool useAsyncCompute = m_getUseAsyncCompute();
+	auto& manager = DeviceManager::GetInstance();
+	CommandRecordingManager::Init init{
+		.graphicsQ = &manager.GetGraphicsQueue(),
+		.graphicsF = &m_graphicsQueueFence.Get(),
+		.graphicsPool = m_graphicsCommandListPool.get(),
+
+		.computeQ = useAsyncCompute ? &manager.GetComputeQueue() : &manager.GetGraphicsQueue(),
+		.computeF = useAsyncCompute ? &m_computeQueueFence.Get() : &m_graphicsQueueFence.Get(),
+		.computePool = useAsyncCompute ? m_computeCommandListPool.get() : m_graphicsCommandListPool.get(),
+
+		.copyQ = &manager.GetCopyQueue(),
+		.copyF = &m_copyQueueFence.Get(),
+		.copyPool = m_copyCommandListPool.get(),
+		.computeMode = useAsyncCompute ? ComputeMode::Async : ComputeMode::AliasToGraphics
+	};
+
+	m_pCommandRecordingManager = std::make_unique<CommandRecordingManager>(init);
 	auto crm = m_pCommandRecordingManager.get();
 
 	auto graphicsQueue = crm->Queue(QueueKind::Graphics);
 	auto computeQueue = crm->Queue(QueueKind::Compute);
 
 	const bool alias = (computeQueue == graphicsQueue);
-	auto WaitIfDistinct = [&](ID3D12CommandQueue* dstQ, ID3D12Fence* fence, UINT64 val) {
-		if (!alias) dstQ->Wait(fence, val);
+	auto WaitIfDistinct = [&](rhi::Queue* dstQ, rhi::Timeline& fence, UINT64 val) {
+		if (!alias) dstQ->Wait({ fence.GetHandle(), val});
 		};
 
 	UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue * context.frameFenceValue;
 	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue * context.frameFenceValue;
 
-	computeQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue);
-	graphicsQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue);
-	graphicsQueue->Signal(m_frameStartSyncFence.Get(), context.frameFenceValue);
-	computeQueue->Wait(m_frameStartSyncFence.Get(), context.frameFenceValue);
+	if (!alias) {
+		computeQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		graphicsQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		graphicsQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		computeQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+	}
 
 	auto& statisticsManager = StatisticsManager::GetInstance();
 
@@ -757,10 +753,7 @@ void RenderGraph::Execute(RenderContext& context) {
 		ExecuteTransitions(batch.computeTransitions,
 			crm,
 			QueueKind::Compute,
-			computeCommandList,
-			currentComputeQueueFenceOffset, 
-			batch.computeTransitionSignal,
-			batch.computeTransitionFenceValue);
+			computeCommandList);
 
 		if (batch.computeQueueWaitOnRenderQueueBeforeExecution) {
 			WaitIfDistinct(computeQueue, m_graphicsQueueFence.Get(),
@@ -768,9 +761,14 @@ void RenderGraph::Execute(RenderContext& context) {
 				batch.computeQueueWaitOnRenderQueueBeforeExecutionFenceValue);
 		}
 
+		if (batch.computeTransitionSignal && !alias) {
+			UINT64 signalValue = currentComputeQueueFenceOffset + batch.computeTransitionFenceValue;
+			crm->Flush(QueueKind::Compute, { true, signalValue });
+		}
+
 		ExecutePasses(batch.computePasses, 
 			crm,
-			computeQueue, 
+			*computeQueue, 
 			QueueKind::Compute,
 			computeCommandList,
 			currentComputeQueueFenceOffset,
@@ -778,6 +776,11 @@ void RenderGraph::Execute(RenderContext& context) {
 			batch.computeCompletionFenceValue,
 			context, 
 			statisticsManager);
+
+		if (batch.computeCompletionSignal && !alias) {
+			UINT64 signalValue = currentComputeQueueFenceOffset + batch.computeCompletionFenceValue;
+			crm->Flush(QueueKind::Compute, { true, signalValue });
+		}
 
 		if (batch.renderQueueWaitOnComputeQueueBeforeTransition) {
 			WaitIfDistinct(graphicsQueue, m_computeQueueFence.Get(),
@@ -790,10 +793,12 @@ void RenderGraph::Execute(RenderContext& context) {
 		ExecuteTransitions(batch.renderTransitions,
 			crm,
 			QueueKind::Graphics,
-			graphicsCommandList,
-			currentGraphicsQueueFenceOffset, 
-			batch.renderTransitionSignal,
-			batch.renderTransitionFenceValue);
+			graphicsCommandList);
+
+		if (batch.renderTransitionSignal && !alias) {
+			UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderTransitionFenceValue;
+			crm->Flush(QueueKind::Graphics, { true, signalValue });
+		}
 
 		if (batch.renderQueueWaitOnComputeQueueBeforeExecution) {
 			WaitIfDistinct(graphicsQueue, m_computeQueueFence.Get(),
@@ -805,7 +810,7 @@ void RenderGraph::Execute(RenderContext& context) {
 
 		ExecutePasses(batch.renderPasses, 
 			crm,
-			graphicsQueue, 
+			*graphicsQueue, 
 			QueueKind::Graphics,
 			graphicsCommandList,
 			currentGraphicsQueueFenceOffset, 
@@ -814,14 +819,21 @@ void RenderGraph::Execute(RenderContext& context) {
 			context, 
 			statisticsManager);
 
+		if (batch.renderCompletionSignal && signalNow && !alias) {
+			UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderCompletionFenceValue;
+			crm->Flush(QueueKind::Graphics, { true, signalValue });
+		}
+
 		if (batch.batchEndTransitions.size() > 0) {
 			ExecuteTransitions(batch.batchEndTransitions, 
 				crm,
 				QueueKind::Graphics,
-				graphicsCommandList,
-				currentGraphicsQueueFenceOffset,
-				true, 
-				batch.renderCompletionFenceValue);
+				graphicsCommandList);
+
+			if (!alias) {
+				UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderCompletionFenceValue;
+				crm->Flush(QueueKind::Graphics, { true, signalValue });
+			}
 		}
 		++batchIndex;
 	}
@@ -872,10 +884,10 @@ bool RenderGraph::IsNewBatchNeeded(
 		// first-use in this batch never forces a split.
 
 		// Cross-queue UAV hazard?
-		if ((r.state.access & ResourceAccessType::UNORDERED_ACCESS)
+		if ((r.state.access & rhi::ResourceAccessType::UnorderedAccess)
 			&& otherQueueUAVs.count(id))
 			return true;
-		if (r.state.layout == ResourceLayout::LAYOUT_UNORDERED_ACCESS
+		if (r.state.layout == rhi::ResourceLayout::UnorderedAccess
 			&& otherQueueUAVs.count(id))
 			return true;
 	}
@@ -889,9 +901,9 @@ void RenderGraph::ComputeResourceLoops() {
 	RangeSpec whole{};  
 
 	constexpr ResourceState flushState {
-		ResourceAccessType::COMMON,
-		ResourceLayout::LAYOUT_COMMON,
-		ResourceSyncState::ALL
+		rhi::ResourceAccessType::Common,
+		rhi::ResourceLayout::Common,
+		rhi::ResourceSyncState::All
 	};
 
 	for (auto& [id, tracker] : trackers) {

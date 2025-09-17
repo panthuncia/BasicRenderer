@@ -1,95 +1,115 @@
-cbuffer RootConstants1 : register(b1) {
-    matrix viewProjectionMatrix;
+cbuffer PrefilterPC : register(b0, space0)
+{
+    uint SrcCubeSrvIndex;
+    uint DstCubeUavIndex;
+    uint Face;
+    uint Size;
+    uint RoughnessBits; // asuint(roughness)
 };
 
-cbuffer RootConstants1 : register(b2) {
-    float roughness;
-};
+SamplerState gLinearClamp : register(s0);
 
-TextureCube environmentTexture : register(t0);
-SamplerState environmentSamplerState : register(s0);
-
-struct VS_OUTPUT {
-    float4 position : SV_POSITION;
-    float3 direction : TEXCOORD1;
-};
-
-VS_OUTPUT VSMain(float3 pos : POSITION) {
-    VS_OUTPUT output;
-    output.direction = normalize(pos);
-    output.position = mul(viewProjectionMatrix, float4(pos, 1.0f));
-    output.position.z = output.position.w - 0.00001;
-    return output;
-}
-
-static const float2 invAtan = float2(0.1591, 0.3183);
 static const float PI = 3.14159265359;
 
-struct PS_OUTPUT {
-    float4 prefilteredColor : SV_Target0;
-};
+// Face uv [-1,1] -> world dir
+float3 FaceUVToDir(uint face, float2 uv)
+{
+    switch (face)
+    {
+        case 0:
+            return normalize(float3(1.0, uv.y, -uv.x)); // +X
+        case 1:
+            return normalize(float3(-1.0, uv.y, uv.x)); // -X
+        case 2:
+            return normalize(float3(uv.x, 1.0, -uv.y)); // +Y
+        case 3:
+            return normalize(float3(uv.x, -1.0, uv.y)); // -Y
+        case 4:
+            return normalize(float3(uv.x, uv.y, 1.0)); // +Z
+        default:
+            return normalize(float3(-uv.x, uv.y, -1.0)); // -Z
+    }
+}
 
-//https://learnopengl.com/PBR/IBL/Specular-IBL
-float3 ImportanceSampleGGX(float2 Xi, float3 N, float roughness) {
+float3 ImportanceSampleGGX(float2 Xi, float3 N, float roughness)
+{
     float a = roughness * roughness;
-	
+
     float phi = 2.0 * PI * Xi.x;
     float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-	
-    // from spherical coordinates to cartesian coordinates
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+
     float3 H;
     H.x = cos(phi) * sinTheta;
     H.y = sin(phi) * sinTheta;
     H.z = cosTheta;
-	
-    // from tangent-space vector to world-space sample vector
+
     float3 up = abs(N.z) < 0.999 ? float3(0.0, 0.0, 1.0) : float3(1.0, 0.0, 0.0);
     float3 tangent = normalize(cross(up, N));
     float3 bitangent = cross(N, tangent);
-	
+
     float3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
     return normalize(sampleVec);
 }
 
-float RadicalInverse_VdC(uint bits) {
-    bits = (bits << 16u) | (bits >> 16u);
-    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-    return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+uint ReverseBits(uint bits)
+{
+    bits = (bits << 16) | (bits >> 16);
+    bits = ((bits & 0x55555555u) << 1) | ((bits & 0xAAAAAAAAu) >> 1);
+    bits = ((bits & 0x33333333u) << 2) | ((bits & 0xCCCCCCCCu) >> 2);
+    bits = ((bits & 0x0F0F0F0Fu) << 4) | ((bits & 0xF0F0F0F0u) >> 4);
+    bits = ((bits & 0x00FF00FFu) << 8) | ((bits & 0xFF00FF00u) >> 8);
+    return bits;
 }
 
-float2 Hammersley(uint i, uint N) {
+float RadicalInverse_VdC(uint bits)
+{
+    return float(ReverseBits(bits)) * 2.3283064365386963e-10;
+}
+
+float2 Hammersley(uint i, uint N)
+{
     return float2(float(i) / float(N), RadicalInverse_VdC(i));
 }
 
-PS_OUTPUT PSMain(VS_OUTPUT input) {
-    
-    float3 N = normalize(input.direction.xyz);
-    float3 R = N;
-    float3 V = R;
-    
+[numthreads(8, 8, 1)]
+void CSMain(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x >= Size || tid.y >= Size)
+        return;
+
+    float roughness = asfloat(RoughnessBits);
+
+    // Compute cube face direction for this pixel
+    float2 uv = (float2(tid.xy) + 0.5) / float(Size); // [0,1]
+    uv = uv * 2.0 - 1.0; // [-1,1]
+    uv.y = -uv.y; // Invert for DirectX
+    float3 N = normalize(FaceUVToDir(Face, uv));
+    float3 V = N;
+
+    TextureCube<float4> srcCube = ResourceDescriptorHeap[SrcCubeSrvIndex];
+    RWTexture2DArray<float4> dstCube = ResourceDescriptorHeap[DstCubeUavIndex];
+
     const uint SAMPLE_COUNT = 16u;
+    float3 prefiltered = 0.0;
     float totalWeight = 0.0;
-    float3 prefilteredColor = float3(0.0, 0.0, 0.0);
-    for (uint i = 0u; i < SAMPLE_COUNT; ++i) {
+
+    [loop]
+    for (uint i = 0; i < SAMPLE_COUNT; ++i)
+    {
         float2 Xi = Hammersley(i, SAMPLE_COUNT);
         float3 H = ImportanceSampleGGX(Xi, N, roughness);
         float3 L = normalize(2.0 * dot(V, H) * H - V);
-        
-        float ndotL = max(dot(N, L), 0.0);
-        if (ndotL > 0.0) {
-            prefilteredColor += environmentTexture.Sample(environmentSamplerState, normalize(L)).rgb * ndotL;
-            totalWeight += ndotL;
+        float ndotl = max(dot(N, L), 0.0);
+
+        if (ndotl > 0.0)
+        {
+            float3 c = srcCube.Sample(gLinearClamp, L).rgb;
+            prefiltered += c * ndotl;
+            totalWeight += ndotl;
         }
     }
-    
-    prefilteredColor = prefilteredColor / totalWeight;
-    
-    
-    PS_OUTPUT output;
-    output.prefilteredColor = float4(prefilteredColor, 1.0);
-    return output;
+
+    prefiltered = (totalWeight > 0.0) ? prefiltered / totalWeight : 0.0;
+    dstCube[uint3(tid.x, tid.y, Face)] = float4(prefiltered, 1.0);
 }

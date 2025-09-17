@@ -10,8 +10,10 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 .vs/
+.idea/
 out/
 vcpkg_installed/
 models/
 textures/
 ThirdParty/
+cmake-build-*

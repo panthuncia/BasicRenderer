@@ -5,6 +5,7 @@
 #include <DirectXMath.h>
 #include <filesystem>
 #include <vector>
+#include <rhi.h>
 
 #include "Materials/Material.h"
 #include "Materials/MaterialFlags.h"
@@ -21,12 +22,12 @@
 
 namespace AssimpLoader {
 
-    D3D12_TEXTURE_ADDRESS_MODE aiTextureMapModeToD3D12(aiTextureMapMode mode) {
+    rhi::AddressMode aiTextureMapModeToRHI(aiTextureMapMode mode) {
         switch (mode) {
-        case aiTextureMapMode_Wrap:   return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        case aiTextureMapMode_Clamp:  return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        case aiTextureMapMode_Mirror: return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-        default:                      return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        case aiTextureMapMode_Wrap:   return rhi::AddressMode::Wrap;
+        case aiTextureMapMode_Clamp:  return rhi::AddressMode::Clamp;
+        case aiTextureMapMode_Mirror: return rhi::AddressMode::Mirror;
+        default:                      return rhi::AddressMode::Wrap;
         }
     }
 
@@ -86,7 +87,7 @@ namespace AssimpLoader {
                 dims.slicePitch = width * height * 4;
                 desc.imageDimensions.push_back(dims);
                 desc.channels = static_cast<unsigned short>(channels);
-                desc.format = preferSRGB ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
+                desc.format = preferSRGB ? rhi::Format::R8G8B8A8_UNorm_sRGB : rhi::Format::R8G8B8A8_UNorm;
 
                 // aiTex->pcData is BGRA
                 std::vector<uint8_t> rawData(width * height * channels);
@@ -176,20 +177,21 @@ namespace AssimpLoader {
 
                         if (it == loadedTextures.end())
                         {
-                            D3D12_SAMPLER_DESC samplerDesc = {};
-                            samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-                            samplerDesc.AddressU = aiTextureMapModeToD3D12(mapmode[0]);
-                            samplerDesc.AddressV = aiTextureMapModeToD3D12(mapmode[1]);
-                            samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP; // 3D textures not supported
-                            samplerDesc.MipLODBias = 0;
-                            samplerDesc.MaxAnisotropy = 1;
-                            samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-                            samplerDesc.BorderColor[0] = 1.0f;
-                            samplerDesc.BorderColor[1] = 1.0f;
-                            samplerDesc.BorderColor[2] = 1.0f;
-                            samplerDesc.BorderColor[3] = 1.0f;
-                            samplerDesc.MinLOD = 0;
-                            samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+							rhi::SamplerDesc samplerDesc = {};
+							samplerDesc.magFilter = rhi::Filter::Linear;
+							samplerDesc.minFilter = rhi::Filter::Linear;
+							samplerDesc.mipFilter = rhi::MipFilter::Linear;
+							samplerDesc.addressU = aiTextureMapModeToRHI(mapmode[0]);
+							samplerDesc.addressV = aiTextureMapModeToRHI(mapmode[1]);
+							samplerDesc.addressW = rhi::AddressMode::Wrap; // 3D textures not supported
+							samplerDesc.mipLodBias = 0.0f;
+							samplerDesc.maxAnisotropy = 1;
+							samplerDesc.compareEnable = false;
+							samplerDesc.compareOp = rhi::CompareOp::Never;
+							samplerDesc.borderPreset = rhi::BorderPreset::OpaqueWhite;
+							samplerDesc.minLod = 0.0f;
+							samplerDesc.maxLod = FLT_MAX;
+
 
                             std::shared_ptr<Sampler> sampler = Sampler::CreateSampler(samplerDesc);
 
@@ -279,8 +281,6 @@ namespace AssimpLoader {
                 if (normalTexture->GetFileType() == ImageFiletype::DDS) {
                     negateNormals = true;
                 }
-                negateNormals = false;
-
             }
             if (materialTextures.find(aiTextureType_METALNESS) != materialTextures.end()) {
                 metallicTex = materialTextures[aiTextureType_METALNESS];
@@ -306,7 +306,7 @@ namespace AssimpLoader {
                 emissiveTexture = materialTextures[aiTextureType_EMISSIVE];
                 materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             }
-            //emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
+            emissive = aiColor3D(emissive[0] * 10.0f, emissive[1] * 10.0f, emissive[2] * 10.0f);
 
             if (materialTextures.find(aiTextureType_EMISSION_COLOR) != materialTextures.end()) {
                 if (emissiveTexture != nullptr) {

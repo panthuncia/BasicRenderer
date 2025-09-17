@@ -1,6 +1,10 @@
 #pragma once
 
+#include <rhi.h>
+#include <optional>
+#include <cstdint>
+
 struct PassReturn {
-	ID3D12Fence* fence = nullptr;
+	std::optional<rhi::Timeline> fence;
 	uint64_t fenceValue = 0;
 };

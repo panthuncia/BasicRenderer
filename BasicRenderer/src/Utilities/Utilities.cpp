@@ -12,9 +12,9 @@
 #include <math.h>
 #include <optional>
 #include <gsl/gsl>
+#include <rhi_helpers.h>
 
 #include "Render/PSOFlags.h"
-#include "DirectX/d3dx12.h"
 #include "DefaultDirection.h"
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
@@ -155,7 +155,7 @@ struct RawImage {
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t channels = 4;               // 1,2,3,4
-    DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rhi::Format format = rhi::Format::R8G8B8A8_UNorm;
     uint32_t rowPitch = 0;
     uint32_t slicePitch = 0;
     const uint8_t* pixels = nullptr;
@@ -166,7 +166,7 @@ struct RawImage {
 };
 
 static std::shared_ptr<Texture>
-CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler)
+CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool allowRTV, bool allowUAV)
 {
     ImageDimensions dim{};
     dim.width = img.width;
@@ -179,6 +179,8 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler)
     desc.channels = static_cast<unsigned short>(img.channels);
     desc.format = img.format;
     desc.generateMipMaps = false; // TODO: Allow mipmapping
+	desc.hasRTV = allowRTV;
+	desc.hasUAV = allowUAV;
 
     auto buffer = PixelBuffer::Create(desc, { img.pixels });
 
@@ -251,7 +253,7 @@ static RawImage RawFromDXT(
     out.width = static_cast<uint32_t>(meta.width);
     out.height = static_cast<uint32_t>(meta.height);
     out.channels = 4; // treat as 4-channel upload path
-    out.format = (overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat;
+    out.format = rhi::helpers::ToRHI((overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat);
     out.rowPitch = static_cast<uint32_t>(img0->rowPitch);
     out.slicePitch = static_cast<uint32_t>(img0->slicePitch);
     out.pixels = img0->pixels;
@@ -351,7 +353,7 @@ std::shared_ptr<Texture>
 LoadTextureFromMemory(const void* bytes, size_t byteCount,
     std::shared_ptr<Sampler> sampler,
     const LoadFlags& flags,
-    bool preferSRGB)
+    bool preferSRGB, bool allowRTV, bool allowUAV)
 {
     if (!bytes || !byteCount)
         throw std::runtime_error("LoadTextureFromMemory: null/empty buffer");
@@ -372,7 +374,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(hr)) throw std::runtime_error("Failed to load DDS from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
         auto raw = RawFromDXT(img, meta, "", ImageFiletype::DDS, chosen);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::HDR: {
         hr = DirectX::LoadFromHDRMemory(
@@ -380,7 +382,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(hr)) throw std::runtime_error("Failed to load HDR from memory");
         // HDR stays in float formats; do not force sRGB
         auto raw = RawFromDXT(img, meta, "", ImageFiletype::HDR, meta.format);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::TGA: {
         hr = DirectX::LoadFromTGAMemory(
@@ -388,7 +390,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(hr)) throw std::runtime_error("Failed to load TGA from memory");
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(meta.format) : ToLinearIfSRGB(meta.format);
         auto raw = RawFromDXT(img, meta, "", ImageFiletype::TGA, chosen);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     case ImageFiletype::WIC: {
         // WIC: let caller preference drive sRGB/linear
@@ -401,8 +403,9 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
         if (FAILED(wicHr)) throw std::runtime_error("Failed to load WIC image from memory");
 
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(wicMeta.format) : ToLinearIfSRGB(wicMeta.format);
+
         auto raw = RawFromDXT(wicImg, wicMeta, "", std::nullopt, chosen);
-        return CreateTextureFromRaw(raw, sampler);
+        return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     }
 
@@ -413,7 +416,8 @@ std::shared_ptr<Texture>
 LoadTextureFromFile(const std::wstring& filePath,
     std::shared_ptr<Sampler> sampler,
     bool preferSRGB,
-    const LoadFlags& flagsIn)
+    const LoadFlags& flagsIn,
+    bool allowRTV, bool allowUAV)
 {
     const std::string utf8 = ws2s(filePath);
 
@@ -422,7 +426,7 @@ LoadTextureFromFile(const std::wstring& filePath,
     localFlags.wic = preferSRGB ? DirectX::WIC_FLAGS_FORCE_SRGB : DirectX::WIC_FLAGS_FORCE_LINEAR;
 
     const auto data = detail::ReadFileBytes(filePath);
-    return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB);
+    return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
 }
 
 std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
@@ -443,7 +447,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bo
 	TextureDescription desc;
 	desc.imageDimensions.push_back(dim);
 	desc.channels = static_cast<unsigned short>(top.channels);
-	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.format = rhi::Format::R8G8B8A8_UNorm;
 	desc.isCubemap = true;
 
     auto buffer = PixelBuffer::Create(desc, {right.data, left.data, top.data, bottom.data, front.data, back.data });
@@ -451,7 +455,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bo
     return std::make_shared<Texture>(buffer, sampler);
 }
 
-std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV) {
+std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV, bool allowUAV) {
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
@@ -487,9 +491,10 @@ std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allo
         }
     }
 	desc.channels = 4;
-    desc.format = metadata.format;
+    desc.format = rhi::helpers::ToRHI(metadata.format);
 	desc.isCubemap = true;
 	desc.hasRTV = allowRTV;
+	desc.hasUAV = allowUAV;
     if (metadata.mipLevels != 1) {
 		desc.generateMipMaps = true;
     }
@@ -813,55 +818,6 @@ DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV) {
     }
 }
 
-CD3DX12_RESOURCE_DESC1 CreateTextureResourceDesc(
-    DXGI_FORMAT format,
-    int width,
-    int height,
-    int arraySize,
-    uint16_t mipLevels,
-    bool isCubemap,
-    bool allowRTV,
-    bool allowDSV,
-    bool allowUAV) {
-
-    CD3DX12_RESOURCE_DESC1 desc = CD3DX12_RESOURCE_DESC1::Tex2D(
-        format,
-        width,
-        height,
-        isCubemap ? 6 * arraySize : arraySize,
-        mipLevels);
-
-    if (allowRTV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-    if (allowDSV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-	if (allowUAV) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-    return desc;
-}
-
-Microsoft::WRL::ComPtr<ID3D12Resource> CreateCommittedTextureResource(
-    ID3D12Device10* device,
-    const CD3DX12_RESOURCE_DESC1& desc,
-    D3D12_CLEAR_VALUE* clearValue,
-    D3D12_HEAP_TYPE heapType,
-    D3D12_BARRIER_LAYOUT initialLayout) {
-
-    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(heapType);
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-
-    ThrowIfFailed(device->CreateCommittedResource3(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &desc,
-        initialLayout,
-        clearValue,
-        nullptr,
-        0,
-        nullptr,
-        IID_PPV_ARGS(&resource)));
-
-    return resource;
-}
-
 Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
     ID3D12Device10* device,
     const CD3DX12_RESOURCE_DESC1& desc,
@@ -897,57 +853,53 @@ Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
 
 
 ShaderVisibleIndexInfo CreateShaderResourceView(
-    ID3D12Device* device,
-    ID3D12Resource* resource,
-    DXGI_FORMAT format,
+    rhi::Device& device,
+    rhi::Resource& resource,
+    rhi::Format format,
     DescriptorHeap* srvHeap,
     int mipLevels,
     bool isCubemap,
     bool isArray,
     int arraySize) {
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Format = format;
-
+	rhi::SrvDesc desc = {};
+	desc.formatOverride = format;
     if (isCubemap) {
-        srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY : D3D12_SRV_DIMENSION_TEXTURECUBE;
+		desc.dimension = isArray ? rhi::SrvDim::TextureCubeArray : rhi::SrvDim::TextureCube;
         if (isArray) {
-            srvDesc.TextureCubeArray.MipLevels = mipLevels;
-            srvDesc.TextureCubeArray.NumCubes = arraySize;
+            desc.cubeArray.mipLevels = mipLevels;
+            desc.cubeArray.numCubes = arraySize;
         }
         else {
-            srvDesc.TextureCube.MipLevels = mipLevels;
+            desc.cube.mipLevels = mipLevels;
+		}
         }
-    }
-    else {
-        srvDesc.ViewDimension = isArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
+	else {
+        desc.dimension = isArray ? rhi::SrvDim::Texture2DArray : rhi::SrvDim::Texture2D;
         if (isArray) {
-            srvDesc.Texture2DArray.MipLevels = mipLevels;
-            srvDesc.Texture2DArray.ArraySize = arraySize;
+            desc.tex2DArray.mipLevels = mipLevels;
+            desc.tex2DArray.arraySize = arraySize;
         }
         else {
-            srvDesc.Texture2D.MipLevels = mipLevels;
-        }
+            desc.tex2D.mipLevels = mipLevels;
+		}
     }
 
     UINT descriptorIndex = srvHeap->AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = srvHeap->GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = srvHeap->GetGPUHandle(descriptorIndex);
 
-    device->CreateShaderResourceView(resource, &srvDesc, cpuHandle);
+    device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), desc);
 
     ShaderVisibleIndexInfo srvInfo;
-    srvInfo.index = descriptorIndex;
-    srvInfo.gpuHandle = gpuHandle;
+    srvInfo.slot.index = descriptorIndex;
+	srvInfo.slot.heap = srvHeap->GetHeap().GetHandle();
 
     return srvInfo;
 }
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip(
-    ID3D12Device*     device,
-    ID3D12Resource*   resource,
-    DXGI_FORMAT       format,
+    rhi::Device&     device,
+    rhi::Resource&   resource,
+    rhi::Format       format,
     DescriptorHeap*   srvHeap,
     int               mipLevels,
     bool              isCubemap,
@@ -966,52 +918,48 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip
         sliceSRVs.reserve(mipLevels);
 
         for (int mip = 0; mip < mipLevels; ++mip) {
-            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            srvDesc.Format                 = format;
-
+            rhi::SrvDesc srvDesc = {};
+            srvDesc.formatOverride = format;
             if (isCubemap) {
                 if (isArray) {
                     // One cubemap per slice
-                    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
-                    srvDesc.TextureCubeArray.MostDetailedMip  = mip;
-                    srvDesc.TextureCubeArray.MipLevels        = mipLevels - mip;
-                    srvDesc.TextureCubeArray.First2DArrayFace = slice * 6;
-                    srvDesc.TextureCubeArray.NumCubes         = arraySize - slice;
+                    srvDesc.dimension = rhi::SrvDim::TextureCubeArray;
+                    srvDesc.cubeArray.mostDetailedMip  = mip;
+                    srvDesc.cubeArray.mipLevels        = mipLevels - mip;
+                    srvDesc.cubeArray.first2DArrayFace = slice * 6;
+                    srvDesc.cubeArray.numCubes         = arraySize - slice;
                 } else {
                     // Single cubemap resource
-                    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-                    srvDesc.TextureCube.MostDetailedMip = mip;
-                    srvDesc.TextureCube.MipLevels       = mipLevels - mip;
+                    srvDesc.dimension = rhi::SrvDim::TextureCube;
+                    srvDesc.cube.mostDetailedMip = mip;
+                    srvDesc.cube.mipLevels       = mipLevels - mip;
                 }
             } else {
                 if (isArray) {
                     // One 2D slice per array index
-                    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-                    srvDesc.Texture2DArray.MostDetailedMip   = mip;
-                    srvDesc.Texture2DArray.MipLevels         = mipLevels - mip;
-                    srvDesc.Texture2DArray.FirstArraySlice   = slice;
-                    srvDesc.Texture2DArray.ArraySize         = arraySize - slice;
-                    srvDesc.Texture2DArray.PlaneSlice        = 0;
+                    srvDesc.dimension = rhi::SrvDim::Texture2DArray;
+                    srvDesc.tex2DArray.mostDetailedMip   = mip;
+                    srvDesc.tex2DArray.mipLevels         = mipLevels - mip;
+                    srvDesc.tex2DArray.firstArraySlice   = slice;
+                    srvDesc.tex2DArray.arraySize         = arraySize - slice;
+                    srvDesc.tex2DArray.planeSlice        = 0;
                 } else {
                     // Plain 2D texture
-                    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                    srvDesc.Texture2D.MostDetailedMip = mip;
-                    srvDesc.Texture2D.MipLevels       = mipLevels - mip;
-                    srvDesc.Texture2D.PlaneSlice      = 0;
+                    srvDesc.dimension = rhi::SrvDim::Texture2D;
+                    srvDesc.tex2D.mostDetailedMip = mip;
+                    srvDesc.tex2D.mipLevels       = mipLevels - mip;
+                    srvDesc.tex2D.planeSlice      = 0;
                 }
             }
 
             // allocate one descriptor for this (slice, mip)
             unsigned descriptorIndex = srvHeap->AllocateDescriptor();
-            auto cpu = srvHeap->GetCPUHandle(descriptorIndex);
-            auto gpu = srvHeap->GetGPUHandle(descriptorIndex);
 
-            device->CreateShaderResourceView(resource, &srvDesc, cpu);
+			device.CreateShaderResourceView({ srvHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), srvDesc);
 
             ShaderVisibleIndexInfo srvInfo;
-            srvInfo.index     = descriptorIndex;
-            srvInfo.gpuHandle = gpu;
+            srvInfo.slot.index = descriptorIndex;
+			srvInfo.slot.heap = srvHeap->GetHeap().GetHandle();
 
             sliceSRVs.push_back(srvInfo);
         }
@@ -1020,98 +968,94 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip
     return result;
 }
 ShaderVisibleIndexInfo CreateUnorderedAccessView(
-    ID3D12Device* device,
-    ID3D12Resource* resource,
-    DXGI_FORMAT format,
+    rhi::Device& device,
+    rhi::Resource& resource,
+    rhi::Format format,
     DescriptorHeap* uavHeap,
     bool isArray,
     int arraySize,
     int mipSlice,
     int firstArraySlice,
     int planeSlice) {
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format = format;
-
+    rhi::UavDesc uavDesc = {};
+	uavDesc.formatOverride = format;
     // For now, only support Texture2D or Texture2DArray.
     // TODO: consolidate other uav creation into this?
     if (isArray) {
-        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-        uavDesc.Texture2DArray.MipSlice = mipSlice;
-        uavDesc.Texture2DArray.FirstArraySlice = firstArraySlice;
-        uavDesc.Texture2DArray.ArraySize = arraySize;
-        uavDesc.Texture2DArray.PlaneSlice = planeSlice;
+        uavDesc.dimension = rhi::UavDim::Texture2DArray;
+        uavDesc.texture2DArray.mipSlice = mipSlice;
+        uavDesc.texture2DArray.firstArraySlice = firstArraySlice;
+        uavDesc.texture2DArray.arraySize = arraySize;
+        uavDesc.texture2DArray.planeSlice = planeSlice;
     }
     else {
-        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        uavDesc.Texture2D.MipSlice = mipSlice;
-        uavDesc.Texture2D.PlaneSlice = planeSlice;
+        uavDesc.dimension = rhi::UavDim::Texture2D;
+        uavDesc.texture2D.mipSlice = mipSlice;
+        uavDesc.texture2D.planeSlice = planeSlice;
     }
 
     UINT descriptorIndex = uavHeap->AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = uavHeap->GetCPUHandle(descriptorIndex);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = uavHeap->GetGPUHandle(descriptorIndex);
 
 	// No counter for texture UAVs
-    device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
+    device.CreateUnorderedAccessView({uavHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), uavDesc);
 
     ShaderVisibleIndexInfo uavInfo;
-    uavInfo.index = descriptorIndex;
-    uavInfo.gpuHandle = gpuHandle;
+    uavInfo.slot.index = descriptorIndex;
+	uavInfo.slot.heap = uavHeap->GetHeap().GetHandle();
 
     return uavInfo;
 }
 
 NonShaderVisibleIndexInfo CreateNonShaderVisibleUnorderedAccessView( // Clear operations need a non-shader visible UAV
-    ID3D12Device* device,
-    ID3D12Resource* resource,
-    DXGI_FORMAT format,
+    rhi::Device& device,
+    rhi::Resource& resource,
+    rhi::Format format,
     DescriptorHeap* uavHeap,
     bool isArray,
     int arraySize,
     int mipSlice,
     int firstArraySlice,
     int planeSlice) {
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format = format;
-
+    rhi::UavDesc uavDesc = {};
+    uavDesc.formatOverride = format;
     if (isArray) {
-        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-        uavDesc.Texture2DArray.MipSlice = mipSlice;
-        uavDesc.Texture2DArray.FirstArraySlice = firstArraySlice;
-        uavDesc.Texture2DArray.ArraySize = arraySize;
-        uavDesc.Texture2DArray.PlaneSlice = planeSlice;
+        uavDesc.dimension = rhi::UavDim::Texture2DArray;
+        uavDesc.texture2DArray.mipSlice = mipSlice;
+        uavDesc.texture2DArray.firstArraySlice = firstArraySlice;
+        uavDesc.texture2DArray.arraySize = arraySize;
+        uavDesc.texture2DArray.planeSlice = planeSlice;
     }
     else {
-        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        uavDesc.Texture2D.MipSlice = mipSlice;
-        uavDesc.Texture2D.PlaneSlice = planeSlice;
+        uavDesc.dimension = rhi::UavDim::Texture2D;
+        uavDesc.texture2D.mipSlice = mipSlice;
+        uavDesc.texture2D.planeSlice = planeSlice;
     }
 
     UINT descriptorIndex = uavHeap->AllocateDescriptor();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = uavHeap->GetCPUHandle(descriptorIndex);
 
     // No counter for texture UAVs
-    device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
+	device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex}, resource.GetHandle(), uavDesc);
 
     NonShaderVisibleIndexInfo uavInfo;
-    uavInfo.index = descriptorIndex;
-	uavInfo.cpuHandle = cpuHandle;
+    uavInfo.slot.index = descriptorIndex;
+	uavInfo.slot.heap = uavHeap->GetHeap().GetHandle();
 
     return uavInfo;
 }
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMip(
-    ID3D12Device*     device,
-    ID3D12Resource*   resource,
-    DXGI_FORMAT       format,
-    DescriptorHeap*   uavHeap,
-    int               mipLevels,
-    bool              isArray,
-    int               arraySize,
-    int               planeSlice)
+    rhi::Device& device,
+    rhi::Resource& resource,
+    rhi::Format      format,
+    DescriptorHeap* uavHeap,
+    int              mipLevels,
+    bool             isArray,
+    int              arraySize,
+    int              planeSlice,
+    bool             isCubemap)
 {
     // If not an array, treat as a single slice
-    int sliceCount = isArray ? arraySize : 1;
+    const int sliceCount = isArray ? arraySize : 1;
     std::vector<std::vector<ShaderVisibleIndexInfo>> result(sliceCount);
 
     for (int slice = 0; slice < sliceCount; ++slice) {
@@ -1119,28 +1063,39 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
         sliceUAVs.reserve(mipLevels);
 
         for (int mip = 0; mip < mipLevels; ++mip) {
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-            uavDesc.Format = format;
+            rhi::UavDesc uavDesc = {};
+            uavDesc.formatOverride = format;
 
-            if (isArray) {
-                uavDesc.ViewDimension                 = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                uavDesc.Texture2DArray.MipSlice       = mip;
-                uavDesc.Texture2DArray.FirstArraySlice= slice;
-                uavDesc.Texture2DArray.ArraySize      = arraySize - slice;
-                uavDesc.Texture2DArray.PlaneSlice     = planeSlice;
-            } else {
-                uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                uavDesc.Texture2D.MipSlice   = mip;
-                uavDesc.Texture2D.PlaneSlice = planeSlice;
+            if (isCubemap) {
+                // Map cube/cube-array UAVs to 2D array views:
+                // - 1 cube == 6 array slices
+                // - For a cube array, slice N starts at firstArraySlice = N*6
+                //   and (to mirror your SRV behavior) spans the remaining cubes.
+                uavDesc.dimension = rhi::UavDim::Texture2DArray;
+                uavDesc.texture2DArray.mipSlice = mip;
+                uavDesc.texture2DArray.firstArraySlice = isArray ? (slice * 6) : 0;
+                uavDesc.texture2DArray.arraySize = isArray ? ((arraySize - slice) * 6) : 6;
+                uavDesc.texture2DArray.planeSlice = 0; // planar formats: usually 0 for cubemaps
+            }
+            else {
+                if (isArray) {
+                    uavDesc.dimension = rhi::UavDim::Texture2DArray;
+                    uavDesc.texture2DArray.mipSlice = mip;
+                    uavDesc.texture2DArray.firstArraySlice = slice;
+                    uavDesc.texture2DArray.arraySize = arraySize - slice;
+                    uavDesc.texture2DArray.planeSlice = planeSlice;
+                }
+                else {
+                    uavDesc.dimension = rhi::UavDim::Texture2D;
+                    uavDesc.texture2D.mipSlice = mip;
+                    uavDesc.texture2D.planeSlice = planeSlice;
+                }
             }
 
-            UINT descriptorIndex = uavHeap->AllocateDescriptor();
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = uavHeap->GetCPUHandle(descriptorIndex);
-            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle = uavHeap->GetGPUHandle(descriptorIndex);
+            const UINT descriptorIndex = uavHeap->AllocateDescriptor();
+            device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), descriptorIndex }, resource.GetHandle(), uavDesc);
 
-            device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpuHandle);
-
-            ShaderVisibleIndexInfo uavInfo{ static_cast<int>(descriptorIndex), gpuHandle };
+            ShaderVisibleIndexInfo uavInfo{ { uavHeap->GetHeap().GetHandle(), descriptorIndex } };
             sliceUAVs.push_back(uavInfo);
         }
     }
@@ -1149,9 +1104,9 @@ std::vector<std::vector<ShaderVisibleIndexInfo>> CreateUnorderedAccessViewsPerMi
 }
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorderedAccessViewsPerMip(
-    ID3D12Device*      device,
-    ID3D12Resource*    resource,
-    DXGI_FORMAT        format,
+    rhi::Device&      device,
+    rhi::Resource&   resource,
+    rhi::Format        format,
     DescriptorHeap*    uavHeap,
     int                mipLevels,
     bool               isArray,
@@ -1167,30 +1122,28 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
         sliceUAVs.reserve(mipLevels);
 
         for (int mip = 0; mip < mipLevels; ++mip) {
-            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-            uavDesc.Format = format;
-
+            rhi::UavDesc uavDesc = {};
+            uavDesc.formatOverride = format;
             if (isArray) {
-                uavDesc.ViewDimension               = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                uavDesc.Texture2DArray.MipSlice     = mip;
-                uavDesc.Texture2DArray.FirstArraySlice = slice;
-                uavDesc.Texture2DArray.ArraySize    = 1;
-                uavDesc.Texture2DArray.PlaneSlice   = planeSlice;
+                uavDesc.dimension               = rhi::UavDim::Texture2DArray;
+                uavDesc.texture2DArray.mipSlice     = mip;
+                uavDesc.texture2DArray.firstArraySlice = slice;
+                uavDesc.texture2DArray.arraySize    = 1;
+                uavDesc.texture2DArray.planeSlice   = planeSlice;
             } else {
-                uavDesc.ViewDimension           = D3D12_UAV_DIMENSION_TEXTURE2D;
-                uavDesc.Texture2D.MipSlice      = mip;
-                uavDesc.Texture2D.PlaneSlice    = planeSlice;
+                uavDesc.dimension = rhi::UavDim::Texture2D;
+                uavDesc.texture2D.mipSlice      = mip;
+                uavDesc.texture2D.planeSlice    = planeSlice;
             }
 
             UINT    idx = uavHeap->AllocateDescriptor();
-            auto    cpu = uavHeap->GetCPUHandle(idx);
 
             // Create the UAV (no counter for texture UAVs)
-            device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, cpu);
+			device.CreateUnorderedAccessView({ uavHeap->GetHeap().GetHandle(), idx}, resource.GetHandle(), uavDesc);
 
             NonShaderVisibleIndexInfo info;
-            info.index     = idx;
-            info.cpuHandle = cpu;
+            info.slot.index = idx;
+			info.slot.heap = uavHeap->GetHeap().GetHandle();
             sliceUAVs.push_back(info);
         }
     }
@@ -1199,9 +1152,9 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateNonShaderVisibleUnorde
 }
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
-    ID3D12Device*      device,
-    ID3D12Resource*    resource,
-    DXGI_FORMAT        format,
+    rhi::Device&      device,
+    rhi::Resource&    resource,
+    rhi::Format        format,
     DescriptorHeap*    rtvHeap,
     bool               isCubemap,
     bool               isArray,
@@ -1217,30 +1170,27 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
     std::vector<std::vector<NonShaderVisibleIndexInfo>> result(sliceCount);
 
     // Common bits of the RTV description
-    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-    rtvDesc.Format        = format;
-    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-    rtvDesc.Texture2DArray.PlaneSlice     = 0;
-    rtvDesc.Texture2DArray.ArraySize      = 1;
+    rhi::RtvDesc rtvDesc = {};
+    rtvDesc.formatOverride        = format;
+    rtvDesc.dimension = rhi::RtvDim::Texture2DArray;
+	rtvDesc.range = { 0, 1, 0, 1 }; // Only one mip level and one array slice per RTV
 
-    for (int slice = 0; slice < sliceCount; ++slice) {
+    for ( int slice = 0; slice < sliceCount; ++slice) {
         auto& sliceRTVs = result[slice];
         sliceRTVs.reserve(mipLevels);
 
         for (int mip = 0; mip < mipLevels; ++mip) {
-            rtvDesc.Texture2DArray.MipSlice         = mip;
-            rtvDesc.Texture2DArray.FirstArraySlice  = slice;
+			rtvDesc.range = { static_cast<uint32_t>(mip), 1, static_cast<uint32_t>(slice), 1 };
 
             // Allocate one descriptor for this (slice, mip)
             UINT idx = rtvHeap->AllocateDescriptor();
-            auto cpu = rtvHeap->GetCPUHandle(idx);
 
             // Create the RTV
-            device->CreateRenderTargetView(resource, &rtvDesc, cpu);
+			device.CreateRenderTargetView({ rtvHeap->GetHeap().GetHandle(), idx}, resource.GetHandle(), rtvDesc);
 
             NonShaderVisibleIndexInfo info;
-            info.index     = idx;
-            info.cpuHandle = cpu;
+            info.slot.index = idx;
+			info.slot.heap = rtvHeap->GetHeap().GetHandle();
             sliceRTVs.push_back(info);
         }
     }
@@ -1249,10 +1199,10 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
 }
 
 std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
-    ID3D12Device*      device,
-    ID3D12Resource*    resource,
+    rhi::Device&      device,
+    rhi::Resource&    resource,
     DescriptorHeap*    dsvHeap,
-    DXGI_FORMAT        format,
+    rhi::Format        format,
     bool               isCubemap,
     bool               isArray,
     int                arraySize,
@@ -1263,29 +1213,28 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
     std::vector<std::vector<NonShaderVisibleIndexInfo>> result(sliceCount);
 
     // Base DSV descriptor
-    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-    dsvDesc.Format        = format;
-    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-    dsvDesc.Texture2DArray.ArraySize = 1;
+    rhi::DsvDesc dsvDesc = {};
+    dsvDesc.formatOverride        = format;
+    dsvDesc.dimension = rhi::DsvDim::Texture2DArray;
+    //dsvDesc.Texture2DArray.ArraySize = 1;
+	dsvDesc.range = { 0, 1, 0, 1 }; // One mip level, one array slice
 
     for (int slice = 0; slice < sliceCount; ++slice) {
         auto& sliceDSVs = result[slice];
         sliceDSVs.reserve(mipLevels);
 
         for (int mip = 0; mip < mipLevels; ++mip) {
-            dsvDesc.Texture2DArray.FirstArraySlice = slice;
-            dsvDesc.Texture2DArray.MipSlice        = mip;
+			dsvDesc.range = { static_cast<uint32_t>(mip), 1, static_cast<uint32_t>(slice), 1 };
 
             // allocate and get CPU handle
             UINT idx = dsvHeap->AllocateDescriptor();
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpu = dsvHeap->GetCPUHandle(idx);
 
             // create the DSV
-            device->CreateDepthStencilView(resource, &dsvDesc, cpu);
+			device.CreateDepthStencilView({ dsvHeap->GetHeap().GetHandle(), idx}, resource.GetHandle(), dsvDesc);
 
             NonShaderVisibleIndexInfo info;
-            info.index     = idx;
-            info.cpuHandle = cpu;
+            info.slot.index = idx;
+			info.slot.heap = dsvHeap->GetHeap().GetHandle();
             sliceDSVs.push_back(info);
         }
     }
@@ -1573,15 +1522,15 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	dims.width = xRes;
 	dims.height = yRes;
 	desc.imageDimensions.push_back(dims);
-	desc.format = DXGI_FORMAT_R32_TYPELESS;
+	desc.format = rhi::Format::R32_Typeless;
     desc.arraySize = arraySize;
 	desc.isArray = arraySize > 1;
 	desc.hasDSV = true;
 	desc.hasSRV = true;
 	desc.isCubemap = isCubemap;
 	desc.channels = 1;
-	desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-	desc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
+	desc.srvFormat = rhi::Format::R32_Float;
+	desc.dsvFormat = rhi::Format::D32_Float;
     desc.generateMipMaps = false;
 
 	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::Create(desc);
@@ -1592,7 +1541,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	dims.height = yRes;
 	dims.width = xRes;
 	downsampledDesc.imageDimensions.push_back(dims);
-	downsampledDesc.format = DXGI_FORMAT_R32_FLOAT;
+	downsampledDesc.format = rhi::Format::R32_Float;
 	downsampledDesc.arraySize = arraySize;
 	downsampledDesc.isArray = arraySize > 1;
 	downsampledDesc.hasDSV = false;
@@ -1600,11 +1549,11 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	downsampledDesc.hasUAV = true;
 	downsampledDesc.isCubemap = isCubemap;
 	downsampledDesc.channels = 1;
-	downsampledDesc.srvFormat = DXGI_FORMAT_R32_FLOAT;
-	downsampledDesc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+	downsampledDesc.srvFormat = rhi::Format::R32_Float;
+	downsampledDesc.uavFormat = rhi::Format::R32_Float;
 	downsampledDesc.generateMipMaps = true;
     downsampledDesc.hasRTV = true;
-	downsampledDesc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
+	downsampledDesc.rtvFormat = rhi::Format::R32_Float;
     downsampledDesc.clearColor[0] = std::numeric_limits<float>().max();
 	downsampledDesc.padInternalResolution = true;
 

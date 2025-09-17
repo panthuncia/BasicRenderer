@@ -92,7 +92,6 @@ struct Builtin {
       inline static constexpr std::string_view Blend = "Builtin::PrimaryCamera::IndirectCommandBuffers::Blend";
       inline static constexpr std::string_view MeshletCulling = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling";
       inline static constexpr std::string_view MeshletCullingReset = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset";
-      inline static constexpr std::string_view MeshletFrustrumCulling = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletFrustrumCulling";
       inline static constexpr std::string_view Opaque = "Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque";
     };
     inline static constexpr std::string_view LinearDepthMap = "Builtin::PrimaryCamera::LinearDepthMap";

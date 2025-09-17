@@ -1,6 +1,6 @@
 #include "include/structs.hlsli"
 
-cbuffer SphereParams : register(b1) {
+cbuffer SphereParams : register(b0) {
     float4 center;
     float radius;
     uint objectBufferIndex;

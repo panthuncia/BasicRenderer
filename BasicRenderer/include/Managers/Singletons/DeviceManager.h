@@ -1,33 +1,34 @@
 #pragma once
 
 #include <directx/d3d12.h>
-#include <wrl.h>
 #include <memory>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-using Microsoft::WRL::ComPtr;
+#include <rhi.h>
+#include <rhi_interop_dx12.h>
+
+#include "Managers/Singletons/SettingsManager.h"
 
 class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
-    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> device, Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue,  Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pCopyQueue);
-	void DiagnoseDeviceRemoval();
-    Microsoft::WRL::ComPtr<ID3D12Device10>& GetDevice() {
-        return device;
+    void Initialize();
+	rhi::Device GetDevice() {
+        return m_device.Get();
     }
 
-	ID3D12CommandQueue* GetGraphicsQueue() {
-		return graphicsQueue.Get();
+	rhi::Queue& GetGraphicsQueue() {
+		return m_graphicsQueue;
 	}
 
-	ID3D12CommandQueue* GetComputeQueue() {
-		return computeQueue.Get();
+	rhi::Queue& GetComputeQueue() {
+		return m_computeQueue;
 	}
 
-	ID3D12CommandQueue* GetCopyQueue() {
-		return copyQueue.Get();
+	rhi::Queue& GetCopyQueue() {
+		return m_copyQueue;
 	}
 
 	bool GetMeshShadersSupported() {
@@ -35,13 +36,12 @@ public:
 	}
 
 private:
-	ComPtr<ID3D12DeviceRemovedExtendedData> dred;
 
     DeviceManager() = default;
-    Microsoft::WRL::ComPtr<ID3D12Device10> device = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12CommandQueue> graphicsQueue = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12CommandQueue> computeQueue = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12CommandQueue> copyQueue = nullptr;
+	rhi::DevicePtr m_device;
+	rhi::Queue m_graphicsQueue;
+	rhi::Queue m_computeQueue;
+	rhi::Queue m_copyQueue;
 	bool m_meshShadersSupported = false;
 
     void CheckGPUFeatures();
@@ -53,23 +53,21 @@ inline DeviceManager& DeviceManager::GetInstance() {
     return instance;
 }
 
-inline void DeviceManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device10> pDevice, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pGraphicsQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pComputeQueue, Microsoft::WRL::ComPtr<ID3D12CommandQueue> pCopyQueue) {
-    this->device = pDevice;
-	this->graphicsQueue = pGraphicsQueue;
-	this->computeQueue = pComputeQueue;
-	this->copyQueue = pCopyQueue;
-
+inline void DeviceManager::Initialize() {
+	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+	bool enableDebug = false;
+#if BUILD_TYPE == BUILD_DEBUG
+	enableDebug = true;
+#endif
+	m_device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug });
+	m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
+	m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
+	m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);
 	CheckGPUFeatures();
-
-	if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dred)))) {
-	}
-	else {
-		spdlog::warn("Failed to get DRED interface");
-	}
 }
 
 inline void DeviceManager::CheckGPUFeatures() {
-	D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {};
-	device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
+	D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {}; // TODO: Query interface support in RHI
+	rhi::dx12::get_device(m_device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
 	m_meshShadersSupported = features.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
 }

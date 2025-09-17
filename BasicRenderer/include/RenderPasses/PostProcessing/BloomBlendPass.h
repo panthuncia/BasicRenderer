@@ -11,6 +11,7 @@
 #include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "../shaders/PerPassRootConstants/bloomBlendRootConstants.h"
+#include "Resources/PixelBuffer.h"
 
 class BloomBlendPass : public RenderPass {
 public:
@@ -32,48 +33,35 @@ public:
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
 
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap, // The texture descriptor heap
-            context.samplerDescriptorHeap, // The sampler descriptor heap
-        };
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		rhi::PassBeginInfo passInfo{};
+		passInfo.height = m_pHDRTarget->GetHeight();
+		passInfo.width = m_pHDRTarget->GetWidth();
+		commandList.BeginPass(passInfo);
 
-        commandList->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+        commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
 
-        // Calculate viewport from mip level
-        unsigned int width = m_pHDRTarget->GetWidth();
-        unsigned int height = m_pHDRTarget->GetHeight();
-
-        CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
-        CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, width, width);
-        commandList->RSSetViewports(1, &viewport);
-        commandList->RSSetScissorRects(1, &scissorRect);
-
-        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-        commandList->SetPipelineState(m_pso.Get());
-
-        auto rootSignature = psoManager.GetRootSignature();
-        commandList->SetGraphicsRootSignature(rootSignature.Get());
+		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+		commandList.BindPipeline(m_pso->GetHandle());
 
         BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
 
         unsigned int misc[NumMiscUintRootConstants] = {};
-		misc[HDR_TARGET_UAV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetUAVShaderVisibleInfo(0).index; // HDR target index
-		misc[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetSRVInfo(1).index; // Bloom texture index
+		misc[HDR_TARGET_UAV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetUAVShaderVisibleInfo(0).slot.index; // HDR target index
+		misc[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetSRVInfo(1).slot.index; // Bloom texture index
         misc[DST_WIDTH] = m_pHDRTarget->GetWidth();
         misc[DST_HEIGHT] = m_pHDRTarget->GetHeight();
-        commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
         float miscFloats[NumMiscFloatRootConstants] = {};
 
         miscFloats[FloatRootConstant0] = 0.001f; // Kernel size
         miscFloats[FloatRootConstant1] = misc[UintRootConstant2] / (float) misc[UintRootConstant3]; // Aspect ratio
 
-        commandList->SetGraphicsRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, &miscFloats, 0);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, &miscFloats);
 
-        commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
+        commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
         return {};
     }
 
@@ -86,84 +74,69 @@ private:
     unsigned int m_mipIndex;
     bool m_isUpsample = false;
 
-    ComPtr<ID3D12PipelineState> m_pso;
+    rhi::PipelinePtr m_pso;
 
 	std::shared_ptr<PixelBuffer> m_pHDRTarget;
 
 	PipelineResources m_resourceDescriptorBindings;
 
     void CreatePSO() {
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        //PSOManager::GetInstance().CompileShader(L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6", {}, vertexShader);
-        //PSOManager::GetInstance().CompileShader(L"shaders/PostProcessing/bloom.hlsl", L"blend", L"ps_6_6", {}, pixelShader);
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
-		shaderInfoBundle.pixelShader = { L"shaders/PostProcessing/bloomBlend.hlsl", L"blend", L"ps_6_6" };
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		vertexShader = compiledBundle.vertexShader;
-		pixelShader = compiledBundle.pixelShader;
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
+        auto dev = DeviceManager::GetInstance().GetDevice();
 
-        D3D12_INPUT_LAYOUT_DESC inputLayoutDesc = {};
-        inputLayoutDesc.pInputElementDescs = nullptr;
-        inputLayoutDesc.NumElements = 0;
+        // 1) Compile shaders (same as before)
+        ShaderInfoBundle sib;
+        sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSNoViewRayMain", L"vs_6_6" };
+        sib.pixelShader = { L"shaders/PostProcessing/bloomBlend.hlsl", L"blend", L"ps_6_6" };
 
-        D3D12_RASTERIZER_DESC rasterizerDesc = {};
-        rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-        rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE; // No culling for full-screen triangle
-        rasterizerDesc.FrontCounterClockwise = FALSE;
-        rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-        rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-        rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-        rasterizerDesc.DepthClipEnable = TRUE;
-        rasterizerDesc.MultisampleEnable = FALSE;
-        rasterizerDesc.AntialiasedLineEnable = FALSE;
-        rasterizerDesc.ForcedSampleCount = 0;
-        rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+        auto compiled = PSOManager::GetInstance().CompileShaders(sib);
+        m_resourceDescriptorBindings = compiled.resourceDescriptorSlots;
 
-        D3D12_BLEND_DESC blendDesc = {};
-        blendDesc.AlphaToCoverageEnable = FALSE;
-        blendDesc.IndependentBlendEnable = FALSE;
-        blendDesc.RenderTarget[0].BlendEnable = FALSE;
-        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
+        rhi::SubobjLayout soLayout{ layout.GetHandle() };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
 
-        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
-        depthStencilDesc.DepthEnable = false;
-        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
-        depthStencilDesc.StencilEnable = FALSE;
-        depthStencilDesc.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-        depthStencilDesc.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        depthStencilDesc.BackFace = depthStencilDesc.FrontFace;
+        rhi::RasterState rs{};
+        rs.fill = rhi::FillMode::Solid;
+        rs.cull = rhi::CullMode::None; // fullscreen triangle: no culling
+        rs.frontCCW = false;
+        rhi::SubobjRaster soRaster{ rs };
 
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = inputLayoutDesc;
-        psoDesc.pRootSignature = PSOManager::GetInstance().GetRootSignature().Get();
-        psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
-        psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
-        psoDesc.RasterizerState = rasterizerDesc;
-        psoDesc.BlendState = blendDesc;
-        psoDesc.DepthStencilState = depthStencilDesc;
-        psoDesc.SampleMask = UINT_MAX;
-        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 0;
-        psoDesc.SampleDesc.Count = 1;
-        psoDesc.SampleDesc.Quality = 0;
-        psoDesc.InputLayout = inputLayoutDesc;
+        rhi::BlendState bs{};
+        bs.alphaToCoverage = false;
+        bs.independentBlend = false;
+        bs.numAttachments = 0;
+        rhi::SubobjBlend soBlend{ bs };
 
-        auto& device = DeviceManager::GetInstance().GetDevice();
-        auto hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso));
-        if (FAILED(hr)) {
-            throw std::runtime_error("Failed to create upsample PSO");
+        rhi::DepthStencilState ds{};
+        ds.depthEnable = false;
+        ds.depthWrite = false;
+        rhi::SubobjDepth soDepth{ ds };
+
+        rhi::RenderTargets rts{};
+        rts.count = 0;
+        rhi::SubobjRTVs soRTVs{ rts };
+
+        rhi::SubobjDSV soDSV{ rhi::Format::Unknown }; // no DSV
+        rhi::SubobjSample soSample{ rhi::SampleDesc{1, 0} };
+
+        const rhi::PipelineStreamItem items[] = {
+            rhi::Make(soLayout),
+            rhi::Make(soVS),
+            rhi::Make(soPS),
+            rhi::Make(soRaster),
+            rhi::Make(soBlend),
+            rhi::Make(soDepth),
+            rhi::Make(soRTVs),
+            rhi::Make(soDSV),
+            rhi::Make(soSample),
+        };
+
+        // 3) Create PSO
+        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+        if (!m_pso || !m_pso->IsValid()) {
+            throw std::runtime_error("Failed to create upsample PSO (RHI)");
         }
+        m_pso->SetName("BloomBlend (RHI)");
     }
 };

@@ -37,23 +37,15 @@ public:
 		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			ResourceManager::GetInstance().GetSRVDescriptorHeap().Get(),
-			ResourceManager::GetInstance().GetSamplerDescriptorHeap().Get()
-		};
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
 
-		auto rootSignature = PSOManager::GetInstance().GetComputeRootSignature().Get();
-		commandList->SetComputeRootSignature(rootSignature);
-
-		// Set the compute pipeline state
-		commandList->SetPipelineState(m_PSO.Get());
-
-		BindResourceDescriptorIndices(commandList, m_resourceDescriptorBindings);
+		BindResourceDescriptorIndices(commandList, m_PSO.GetResourceDescriptorSlots());
 
 		auto clusterSize = getClusterSize();
-		commandList->Dispatch(clusterSize.x, clusterSize.y, clusterSize.z);
+		commandList.Dispatch(clusterSize.x, clusterSize.y, clusterSize.z);
 		return {};
 	}
 
@@ -62,37 +54,16 @@ public:
 	}
 
 private:
-	PipelineResources m_resourceDescriptorBindings;
 
 	void CreatePSO() {
-		// Compile the compute shader
-		Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
-		//PSOManager::GetInstance().CompileShader(L"shaders/clustering.hlsl", L"CSMain", L"cs_6_6", {}, computeShader);
-		ShaderInfoBundle shaderInfoBundle;
-		shaderInfoBundle.computeShader = { L"shaders/clustering.hlsl", L"CSMain", L"cs_6_6" };
-		auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
-		computeShader = compiledBundle.computeShader;
-		m_resourceDescriptorBindings = compiledBundle.resourceDescriptorSlots;
-
-		struct PipelineStateStream {
-			CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE RootSignature;
-			CD3DX12_PIPELINE_STATE_STREAM_CS CS;
-		};
-
-		PipelineStateStream pipelineStateStream = {};
-		pipelineStateStream.RootSignature = PSOManager::GetInstance().GetComputeRootSignature().Get();
-		pipelineStateStream.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-
-		D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
-		streamDesc.SizeInBytes = sizeof(PipelineStateStream);
-		streamDesc.pPipelineStateSubobjectStream = &pipelineStateStream;
-
-		auto& device = DeviceManager::GetInstance().GetDevice();
-		ID3D12Device2* device2 = nullptr;
-		ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&device2)));
-		ThrowIfFailed(device2->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&m_PSO)));
+		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/clustering.hlsl",
+			L"CSMain",
+			{},
+			"Light cluster generation CS");
 	}
 
 	std::function<DirectX::XMUINT3()> getClusterSize;
-	ComPtr<ID3D12PipelineState> m_PSO;
+	PipelineState m_PSO;
 };

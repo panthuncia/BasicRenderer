@@ -2,8 +2,6 @@
 
 #pragma once
 
-#include <directx/d3d12.h>
-#include <wrl.h>
 #include <vector>
 #include <functional>
 #include <typeinfo>
@@ -16,8 +14,6 @@
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
-
-using Microsoft::WRL::ComPtr;
 
 class BufferView;
 
@@ -49,13 +45,10 @@ public:
 		return m_mappedData;
 	}
 
-	ID3D12Resource* GetAPIResource() const override { return m_dataBuffer->GetAPIResource(); }
+	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
 protected:
-    BarrierGroups GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
-        m_subresourceAccessTypes[0] = newAccessType;
-        m_subresourceLayouts[0] = newLayout;
-        m_subresourceSyncStates[0] = newSyncState;
+    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
         return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
     }
 
@@ -64,9 +57,6 @@ private:
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_globalResizableBufferID(id), m_capacity(size), m_UAV(UAV), m_needsUpdate(false) {
         CreateBuffer(size);
         SetName(name);
-		m_subresourceAccessTypes.push_back(ResourceAccessType::COMMON);
-		m_subresourceLayouts.push_back(ResourceLayout::LAYOUT_COMMON);
-		m_subresourceSyncStates.push_back(ResourceSyncState::ALL);
     }
 
     void OnSetName() override {

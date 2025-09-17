@@ -41,6 +41,7 @@ public:
 			m_primaryViewType = SRVViewType::Buffer;
 		}
 		m_SRVViews[static_cast<unsigned int>(type)] = {heap, infos};
+		m_pSRVHeap = heap;
 	}
 
 	void SetUAVGPUDescriptors(std::shared_ptr<DescriptorHeap> pUAVHeap, const std::vector<std::vector<ShaderVisibleIndexInfo>>& uavInfos, size_t counterOffset = 0) {
@@ -110,6 +111,13 @@ public:
 	unsigned int GetNumDSVMipLevels() { return static_cast<unsigned int>(m_DSVInfos[0].size()); }
 	unsigned int GetNumDSVSlices() { return static_cast<unsigned int>(m_DSVInfos.size()); }
 
+	const bool HasSRV() const { return m_pSRVHeap != nullptr; }
+	const bool HasUAVShaderVisible() const { return m_pUAVShaderVisibleHeap != nullptr; }
+	const bool HasUAVNonShaderVisible() const { return m_pUAVNonShaderVisibleHeap != nullptr; }
+	const bool HasCBV() const { return m_pCBVHeap != nullptr; }
+	const bool HasRTV() const { return m_pRTVHeap != nullptr; }
+	const bool HasDSV() const { return m_pDSVHeap != nullptr; }
+
 	void SetDefaultSRVViewType(SRVViewType type) {
 		if (type >= SRVViewType::NumSRVViewTypes) {
 			spdlog::error("Invalid SRV view type specified.");
@@ -127,7 +135,7 @@ public:
 				}
 				for (auto& srvInfos : m_SRVViews[i].infos) {
 					for (auto& srvInfo : srvInfos) {
-						m_pSRVHeap->ReleaseDescriptor(srvInfo.index);
+						m_pSRVHeap->ReleaseDescriptor(srvInfo.slot.index);
 					}
 				}
 			}
@@ -135,7 +143,7 @@ public:
 		if (m_pUAVShaderVisibleHeap) {
 			for (auto& uavInfos : m_UAVShaderVisibleInfos) {
 				for (auto& uavInfo : uavInfos) {
-					m_pUAVShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
+					m_pUAVShaderVisibleHeap->ReleaseDescriptor(uavInfo.slot.index);
 				}
 			}
 		}
@@ -143,19 +151,19 @@ public:
 			for (auto& uavInfos : m_UAVNonShaderVisibleInfos) {
 				for (auto& uavInfo : uavInfos) {
 					// Release the non-shader visible UAVs
-					m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(uavInfo.index);
+					m_pUAVNonShaderVisibleHeap->ReleaseDescriptor(uavInfo.slot.index);
 				}
 			}
 		}
 		if (m_pCBVHeap) {
-			m_pCBVHeap->ReleaseDescriptor(m_CBVInfo.index);
+			m_pCBVHeap->ReleaseDescriptor(m_CBVInfo.slot.index);
 		}
 
 		// Release RTVs and DSVs
 		if (m_pRTVHeap) {
 			for (auto& rtvInfos : m_RTVInfos) {
 				for (auto& rtvInfo : rtvInfos) {
-					m_pRTVHeap->ReleaseDescriptor(rtvInfo.index);
+					m_pRTVHeap->ReleaseDescriptor(rtvInfo.slot.index);
 				}
 			}
 		}
@@ -163,7 +171,7 @@ public:
 		if (m_pDSVHeap) {
 			for (auto& dsvInfos : m_DSVInfos) {
 				for (auto& dsvInfo : dsvInfos) {
-					m_pDSVHeap->ReleaseDescriptor(dsvInfo.index);
+					m_pDSVHeap->ReleaseDescriptor(dsvInfo.slot.index);
 				}
 			}
 		}

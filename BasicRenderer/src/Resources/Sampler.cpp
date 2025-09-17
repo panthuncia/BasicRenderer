@@ -2,20 +2,26 @@
 
 std::shared_ptr<Sampler> Sampler::m_defaultSampler = nullptr;
 std::shared_ptr<Sampler> Sampler::m_defaultShadowSampler = nullptr;
-std::unordered_map<D3D12_SAMPLER_DESC, std::shared_ptr<Sampler>, SamplerDescHasher, SamplerDescComparator> Sampler::m_samplerCache;
+std::unordered_map<rhi::SamplerDesc, std::shared_ptr<Sampler>, rhi::SamplerDescHash, rhi::SamplerDescEq> Sampler::m_samplerCache;
 
 std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 	if (m_defaultSampler == nullptr) {
-		D3D12_SAMPLER_DESC samplerDesc = {};
-		samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-		samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-		samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-		samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-		samplerDesc.MinLOD = 0;
-		samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
-		samplerDesc.MipLODBias = 0;
-		samplerDesc.MaxAnisotropy = 1;
-		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+		rhi::SamplerDesc samplerDesc = {};
+		samplerDesc.minFilter = rhi::Filter::Linear;
+		samplerDesc.magFilter = rhi::Filter::Linear;
+		samplerDesc.mipFilter = rhi::MipFilter::Linear;
+		samplerDesc.addressU = rhi::AddressMode::Wrap;
+		samplerDesc.addressV = rhi::AddressMode::Wrap;
+		samplerDesc.addressW = rhi::AddressMode::Wrap;
+		samplerDesc.mipLodBias = 0.0f;
+		samplerDesc.minLod = 0.0f;
+		samplerDesc.maxLod = (std::numeric_limits<float>::max)();
+		samplerDesc.maxAnisotropy = 1;
+		samplerDesc.compareEnable = false;
+		samplerDesc.compareOp = rhi::CompareOp::Always;
+		samplerDesc.reduction = rhi::ReductionMode::Standard;
+		samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
+
 		m_defaultSampler = Sampler::CreateSampler(samplerDesc);
 	}
 	return m_defaultSampler;
@@ -23,20 +29,22 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 
 std::shared_ptr<Sampler> Sampler::GetDefaultShadowSampler() {
 	if (m_defaultShadowSampler == nullptr) {
-		D3D12_SAMPLER_DESC samplerDesc = {};
-		samplerDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
-		samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-		samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-		samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-		samplerDesc.BorderColor[0] = 1.0f;  // Set the border color for shadow maps, 1.0 = full depth, no shadow
-		samplerDesc.BorderColor[1] = 0.0f;
-		samplerDesc.BorderColor[2] = 0.0f;
-		samplerDesc.BorderColor[3] = 1.0f;
-		samplerDesc.MinLOD = 0;
-		samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
-		samplerDesc.MipLODBias = 0;
-		samplerDesc.MaxAnisotropy = 1;
-		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+		rhi::SamplerDesc samplerDesc = {};
+		samplerDesc.minFilter = rhi::Filter::Linear;
+		samplerDesc.magFilter = rhi::Filter::Linear;
+		samplerDesc.mipFilter = rhi::MipFilter::Linear;
+		samplerDesc.addressU = rhi::AddressMode::Border;
+		samplerDesc.addressV = rhi::AddressMode::Border;
+		samplerDesc.addressW = rhi::AddressMode::Border;
+		samplerDesc.mipLodBias = 0.0f;
+		samplerDesc.minLod = 0.0f;
+		samplerDesc.maxLod = (std::numeric_limits<float>::max)();
+		samplerDesc.maxAnisotropy = 1;
+		samplerDesc.compareEnable = true;
+		samplerDesc.compareOp = rhi::CompareOp::LessEqual;
+		samplerDesc.reduction = rhi::ReductionMode::Comparison;
+		samplerDesc.borderPreset = rhi::BorderPreset::OpaqueWhite;
+
 		m_defaultShadowSampler = Sampler::CreateSampler(samplerDesc);
 	}
 	return m_defaultShadowSampler;

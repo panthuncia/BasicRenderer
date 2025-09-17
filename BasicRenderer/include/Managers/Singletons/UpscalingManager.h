@@ -8,10 +8,12 @@
 #include <DirectXMath.h>
 #include <functional>
 
-#include <ThirdParty/Streamline/sl.h>
-#include <ThirdParty/Streamline/sl_consts.h>
-#include <ThirdParty/Streamline/sl_dlss.h>
-#include <ThirdParty/Streamline/sl_matrix_helpers.h>
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_dlss.h>
+#include <sl_matrix_helpers.h>
+
+#include <rhi.h>
 
 #include "ThirdParty/FFX/dx12/ffx_api_dx12.hpp"
 #include "ThirdParty/FFX/ffx_api_loader.h"
@@ -94,11 +96,10 @@ class RenderContext;
 class UpscalingManager {
 public:
     static UpscalingManager& GetInstance();
-    void InitializeAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1>& adapter);
-	ID3D12Device10* ProxyDevice(Microsoft::WRL::ComPtr<ID3D12Device10>& device);
-	IDXGIFactory7* ProxyFactory(Microsoft::WRL::ComPtr<IDXGIFactory7>& factory);
+    void InitializeAdapter();
+	void ProxyDevice();
     void Setup();
-    void Evaluate(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+    void Evaluate(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void Shutdown();
 
     bool InitSL();
@@ -112,17 +113,17 @@ public:
 
 private:
     UpscalingManager() = default;
-    void EvaluateDLSS(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-    void EvaluateFSR3(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-	void EvaluateNone(const RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-    Microsoft::WRL::ComPtr<IDXGIAdapter1> m_currentAdapter;
-	UpscalingMode m_upscalingMode = UpscalingMode::None;
+    void EvaluateDLSS(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+    void EvaluateFSR3(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+	void EvaluateNone(RenderContext& context, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+	UpscalingMode m_upscalingMode = UpscalingMode::DLSS;
     UpscaleQualityMode m_upscaleQualityMode = UpscaleQualityMode::DLAA;
     std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight
     uint8_t m_numFramesInFlight;
     std::function<DirectX::XMUINT2()> m_getRenderRes;
 	std::function<DirectX::XMUINT2()> m_getOutputRes;
     ffx::Context m_fsrUpscalingContext;
+	bool m_dlssSupported = false;
 };
 
 inline UpscalingManager& UpscalingManager::GetInstance() {

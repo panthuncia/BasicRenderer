@@ -4,14 +4,13 @@
 #include "../../generated/BuiltinResources.h"
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
-#include "RenderPasses/VisibilityPass.h"
 
 void BuildVisibilityPass(RenderGraph* graph) {
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 
     TextureDescription visibilityDesc;
     visibilityDesc.channels = 2;
-    visibilityDesc.format = DXGI_FORMAT_R32G32_UINT;
+    visibilityDesc.format = rhi::Format::R32G32_UInt;
     visibilityDesc.hasRTV = true;
     visibilityDesc.hasUAV = true;
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y);
@@ -32,12 +31,12 @@ void CreateGBufferResources(RenderGraph* graph) {
     normalsWorldSpaceDesc.arraySize = 1;
     normalsWorldSpaceDesc.channels = 3;
     normalsWorldSpaceDesc.isCubemap = false;
-    normalsWorldSpaceDesc.format = DXGI_FORMAT_R32G32B32A32_TYPELESS;
+    normalsWorldSpaceDesc.format = rhi::Format::R32G32B32A32_Typeless;
     normalsWorldSpaceDesc.hasRTV = true;
-	normalsWorldSpaceDesc.rtvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	normalsWorldSpaceDesc.rtvFormat = rhi::Format::R32G32B32A32_Float;
     normalsWorldSpaceDesc.generateMipMaps = false;
     normalsWorldSpaceDesc.hasSRV = true;
-    normalsWorldSpaceDesc.srvFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    normalsWorldSpaceDesc.srvFormat = rhi::Format::R32G32B32A32_Float;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
@@ -53,10 +52,10 @@ void CreateGBufferResources(RenderGraph* graph) {
         albedoDesc.channels = 4;
         albedoDesc.isCubemap = false;
         albedoDesc.hasRTV = true;
-        albedoDesc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        albedoDesc.format = rhi::Format::R8G8B8A8_UNorm;
         albedoDesc.generateMipMaps = false;
         albedoDesc.hasSRV = true;
-        albedoDesc.srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        albedoDesc.srvFormat = rhi::Format::R8G8B8A8_UNorm;
         ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
         albedoDesc.imageDimensions.push_back(albedoDims);
         albedo = PixelBuffer::Create(albedoDesc);
@@ -68,10 +67,10 @@ void CreateGBufferResources(RenderGraph* graph) {
         metallicRoughnessDesc.channels = 2;
         metallicRoughnessDesc.isCubemap = false;
         metallicRoughnessDesc.hasRTV = true;
-        metallicRoughnessDesc.format = DXGI_FORMAT_R8G8_UNORM;
+        metallicRoughnessDesc.format = rhi::Format::R8G8_UNorm;
         metallicRoughnessDesc.generateMipMaps = false;
         metallicRoughnessDesc.hasSRV = true;
-        metallicRoughnessDesc.srvFormat = DXGI_FORMAT_R8G8_UNORM;
+        metallicRoughnessDesc.srvFormat = rhi::Format::R8G8_UNorm;
         ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
         metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
         metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
@@ -83,10 +82,10 @@ void CreateGBufferResources(RenderGraph* graph) {
         emissiveDesc.channels = 4;
         emissiveDesc.isCubemap = false;
         emissiveDesc.hasRTV = true;
-        emissiveDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        emissiveDesc.format = rhi::Format::R16G16B16A16_Float;
         emissiveDesc.generateMipMaps = false;
         emissiveDesc.hasSRV = true;
-        emissiveDesc.srvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        emissiveDesc.srvFormat = rhi::Format::R16G16B16A16_Float;
         ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
         emissiveDesc.imageDimensions.push_back(emissiveDims);
         emissive = PixelBuffer::Create(emissiveDesc);
@@ -101,12 +100,12 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     brdfDesc.channels = 1;
     brdfDesc.isCubemap = false;
     brdfDesc.hasRTV = true;
-    brdfDesc.format = DXGI_FORMAT_R16G16_FLOAT;
+    brdfDesc.format = rhi::Format::R16G16_Float;
     brdfDesc.generateMipMaps = false;
     brdfDesc.hasSRV = true;
-    brdfDesc.srvFormat = DXGI_FORMAT_R16G16_FLOAT;
+    brdfDesc.srvFormat = rhi::Format::R16G16_Float;
 	brdfDesc.hasUAV = true;
-	brdfDesc.uavFormat = DXGI_FORMAT_R16G16_FLOAT;
+	brdfDesc.uavFormat = rhi::Format::R16G16_Float;
     ImageDimensions dims = { 512, 512, 0, 0 };
     brdfDesc.imageDimensions.push_back(dims);
     auto brdfIntegrationTexture = PixelBuffer::Create(brdfDesc);
@@ -203,6 +202,9 @@ void BuildZPrepass(RenderGraph* graph) {
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
+    if (!useMeshShaders) {
+        indirect = false; // Mesh shader pipelines are required for indirect draws
+	}
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
     bool clearRTVs = false;
@@ -224,9 +226,9 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingDepthsDesc.arraySize = 1;
     workingDepthsDesc.channels = 1;
     workingDepthsDesc.isCubemap = false;
-    workingDepthsDesc.hasRTV = false;
     workingDepthsDesc.hasUAV = true;
-    workingDepthsDesc.format = DXGI_FORMAT_R32_FLOAT;
+	workingDepthsDesc.hasSRV = true;
+    workingDepthsDesc.format = rhi::Format::R32_Float;
     workingDepthsDesc.generateMipMaps = true;
     ImageDimensions dims1 = { resolution.x, resolution.y, 0, 0 };
     workingDepthsDesc.imageDimensions.push_back(dims1);
@@ -237,9 +239,9 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingEdgesDesc.arraySize = 1;
     workingEdgesDesc.channels = 1;
     workingEdgesDesc.isCubemap = false;
-    workingEdgesDesc.hasRTV = false;
     workingEdgesDesc.hasUAV = true;
-    workingEdgesDesc.format = DXGI_FORMAT_R8_UNORM;
+	workingEdgesDesc.hasSRV = true;
+    workingEdgesDesc.format = rhi::Format::R8_UNorm;
     workingEdgesDesc.generateMipMaps = false;
     workingEdgesDesc.imageDimensions.push_back(dims1);
     auto workingEdges = PixelBuffer::Create(workingEdgesDesc);
@@ -249,9 +251,9 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingAOTermDesc.arraySize = 1;
     workingAOTermDesc.channels = 1;
     workingAOTermDesc.isCubemap = false;
-    workingAOTermDesc.hasRTV = false;
     workingAOTermDesc.hasUAV = true;
-    workingAOTermDesc.format = DXGI_FORMAT_R8_UINT;
+	workingAOTermDesc.hasSRV = true;
+    workingAOTermDesc.format = rhi::Format::R8_UInt;
     workingAOTermDesc.generateMipMaps = false;
     workingAOTermDesc.imageDimensions.push_back(dims1);
     auto workingAOTerm1 = PixelBuffer::Create(workingAOTermDesc);
@@ -273,14 +275,19 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 
     // Point-clamp sampler
-    D3D12_SAMPLER_DESC samplerDesc = {};
-    samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    samplerDesc.MipLODBias = 0.0f;
-    samplerDesc.MaxAnisotropy = 1;
-    //samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+	rhi::SamplerDesc samplerDesc;
+	samplerDesc.minFilter = rhi::Filter::Nearest;
+	samplerDesc.magFilter = rhi::Filter::Nearest;
+	samplerDesc.mipFilter = rhi::MipFilter::Nearest;
+	samplerDesc.addressU = rhi::AddressMode::Clamp;
+	samplerDesc.addressV = rhi::AddressMode::Clamp;
+	samplerDesc.addressW = rhi::AddressMode::Clamp;
+	samplerDesc.mipLodBias = 0.0f;
+	samplerDesc.maxAnisotropy = 1;
+	samplerDesc.compareEnable = false;
+	samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
+	samplerDesc.minLod = 0.0f;
+    samplerDesc.maxLod = 0.0f;
 
     auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
 
@@ -298,23 +305,23 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 	auto normalsWorldSpace = graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals);
 
     // Filter pass
-    gtaoInfo.g_srcRawDepthDescriptorIndex = graph->RequestResource<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).index;
-    gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(0).index;
-    gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(1).index;
-    gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(2).index;
-    gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(3).index;
-    gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(4).index;
+    gtaoInfo.g_srcRawDepthDescriptorIndex = graph->RequestResource<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).slot.index;
+    gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
+    gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(1).slot.index;
+    gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(2).slot.index;
+    gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
+    gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
 
     // Main pass
-    gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo(0).index;
-    gtaoInfo.g_srcNormalmapDescriptorIndex = graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals)->GetSRVInfo(0).index;
+    gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo(0).slot.index;
+    gtaoInfo.g_srcNormalmapDescriptorIndex = graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals)->GetSRVInfo(0).slot.index;
     // TODO: Hilbert lookup table
-    gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo(0).index;
-    gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo(0).index;
+    gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo(0).slot.index;
+    gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo(0).slot.index;
 
     // Denoise pass
-    gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).index;
-    gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).index;
+    gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).slot.index;
+    gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
 
     UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
 
@@ -325,12 +332,12 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
         .Build<GTAOMainPass>(GTAOConstantBuffer);
 
     graph->BuildComputePass("GTAODenoisePass") // Denoise pass
-        .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo(0).index);
+        .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo(0).slot.index);
 }
 
 void BuildLightClusteringPipeline(RenderGraph* graph) {
     // light pages counter
-    auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
+    auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
     lightPagesCounter->SetName(L"Light Pages Counter");
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
@@ -357,6 +364,8 @@ void BuildMainShadowPass(RenderGraph* graph) {
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
+	// TODO: Make a better way of evaluating dependencies between settings. Maybe a graph?
+	indirect = indirect && useMeshShaders; // Mesh shader pipelines are required for indirect draws
 
     bool clearRTVs = false;
     if (!occlusionCulling || !indirect) {
@@ -386,7 +395,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
             wireframe, 
             meshShaders, 
             indirect, 
-            gtaoEnabled ? graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).index : 0);
+            gtaoEnabled ? graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).slot.index : 0);
     }
 }
 
@@ -395,6 +404,9 @@ void BuildPPLLPipeline(RenderGraph* graph) {
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
+    if (!useMeshShaders) {
+        indirect = false; // Mesh shader pipelines are required for indirect draws
+	}
 
     static const size_t aveFragsPerPixel = 12;
     auto numPPLLNodes = resolution.x * resolution.y * aveFragsPerPixel;
@@ -407,15 +419,15 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     dimensions.slicePitch = dimensions.rowPitch * resolution.y;
     desc.imageDimensions.push_back(dimensions);
     desc.channels = 1;
-    desc.format = DXGI_FORMAT_R32_UINT;
+    desc.format = rhi::Format::R32_UInt;
     desc.hasRTV = false;
     desc.hasUAV = true;
     desc.hasNonShaderVisibleUAV = true;
     auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
     PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
-    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, false, true, false);
+    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
     PPLLBuffer->SetName(L"PPLLBuffer");
-    auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), false, true, false);
+	auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
     PPLLCounter->SetName(L"PPLLCounter");
 
     graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
@@ -467,12 +479,12 @@ void BuildSSRPasses(RenderGraph* graph) {
     ssrDesc.channels = 4;
     ssrDesc.isCubemap = false;
     ssrDesc.hasRTV = true;
-    ssrDesc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ssrDesc.format = rhi::Format::R16G16B16A16_Float;
     ssrDesc.generateMipMaps = false;
     ssrDesc.hasSRV = true;
-    ssrDesc.srvFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ssrDesc.srvFormat = rhi::Format::R16G16B16A16_Float;
 	ssrDesc.hasUAV = true;
-	ssrDesc.uavFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	ssrDesc.uavFormat = rhi::Format::R16G16B16A16_Float;
 	ssrDesc.hasNonShaderVisibleUAV = true; // For ClearUnorderedAccessView
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     ssrDesc.imageDimensions.push_back(dims);

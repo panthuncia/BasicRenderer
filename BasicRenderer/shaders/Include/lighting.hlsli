@@ -167,7 +167,8 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif // IMAGE_BASED_LIGHTING
     
     // Direct lighting
-    
+    LightingOutput output;
+        
     if (enablePunctualLights)
     {
         LightingParameters lightingParameters;
@@ -202,6 +203,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         
         uint clusterIndex = 0; // Which light cluster this fragment belongs to
         uint clusterLightCount = 0; // Number of lights in the cluster
+
 #if defined(PSO_CLUSTERED_LIGHTING)
         
         StructuredBuffer<Cluster> clusterBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ClusterBuffer)];
@@ -219,6 +221,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         clusterLightCount = activeCluster.numLights;
         // Loop through all pages of lights in the cluster
         uint pageIndex = activeCluster.ptrFirstPage;
+
         while (pageIndex != LIGHT_PAGE_ADDRESS_NULL) {
             for (uint i = 0; i < lightPagesBuffer[pageIndex].numLightsInPage; i++) {
                 unsigned int index = activeLightIndices[lightPagesBuffer[pageIndex].lightIndices[i]];
@@ -227,6 +230,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         {
             unsigned int index = activeLightIndices[i];
 #endif
+
             LightInfo light = lights[index];
             float shadow = 0.0;
             if (enableShadows)
@@ -277,7 +281,6 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
     
     lighting += fragmentInfo.emissive;
     
-    LightingOutput output;
     output.lighting = lighting;
     
 #if defined(PSO_IMAGE_BASED_LIGHTING)

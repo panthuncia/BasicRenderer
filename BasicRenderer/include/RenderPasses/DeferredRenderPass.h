@@ -86,29 +86,23 @@ public:
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = context.commandList;
 
-		ID3D12DescriptorHeap* descriptorHeaps[] = {
-			context.textureDescriptorHeap, // The texture descriptor heap
-			context.samplerDescriptorHeap, // The sampler descriptor heap
-		};
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		rhi::PassBeginInfo passInfo{};
+		rhi::ColorAttachment colorAttachment{};
+		colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(0).slot;
+		colorAttachment.loadOp = rhi::LoadOp::Clear;
+		colorAttachment.storeOp = rhi::StoreOp::Store;
+		colorAttachment.clear = m_pHDRTarget->GetClearColor();
+		passInfo.colors = { &colorAttachment };
+		passInfo.height = context.renderResolution.y;
+		passInfo.width = context.renderResolution.x;
 
-		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-		auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
-		auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
 
-		CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
-		CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.renderResolution.x, context.renderResolution.y);
-		commandList->RSSetViewports(1, &viewport);
-		commandList->RSSetScissorRects(1, &scissorRect);
-
-		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-		auto pso = PSOManager::GetInstance().GetDeferredPSO(context.globalPSOFlags);
-		commandList->SetPipelineState(pso.GetAPIPipelineState());
-		auto rootSignature = psoManager.GetRootSignature();
-		commandList->SetGraphicsRootSignature(rootSignature.Get());
+		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+		auto& pso = psoManager.GetDeferredPSO(context.globalPSOFlags);
+		commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
 		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 
@@ -116,9 +110,9 @@ public:
 		settings[EnableShadows] = getShadowsEnabled();
 		settings[EnablePunctualLights] = getPunctualLightingEnabled();
 		settings[EnableGTAO] = m_gtaoEnabled;
-		commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
 
-		commandList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
+		commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
 		return {};
 	}
 

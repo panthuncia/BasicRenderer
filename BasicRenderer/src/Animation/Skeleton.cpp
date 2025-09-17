@@ -166,11 +166,11 @@ void Skeleton::UpdateTransforms() {
 }
 
 uint32_t Skeleton::GetTransformsBufferIndex() {
-    return m_transformsBuffer->GetSRVInfo(0).index;
+    return m_transformsBuffer->GetSRVInfo(0).slot.index;
 }
 
 uint32_t Skeleton::GetInverseBindMatricesBufferIndex() {
-    return m_inverseBindMatricesBuffer->GetSRVInfo(0).index;
+    return m_inverseBindMatricesBuffer->GetSRVInfo(0).slot.index;
 }
 
 std::shared_ptr<Buffer>& Skeleton::GetInverseBindMatricesBuffer() {

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <directx/d3d12.h>
-#include "wrl/client.h"
+#include <rhi.h>
+
 #include "Scene/Components.h"
 
 class Scene;
@@ -23,12 +23,12 @@ public:
     LightManager* lightManager;
 	EnvironmentManager* environmentManager;
     Scene* currentScene;
-    ID3D12Device* device;
-    ID3D12GraphicsCommandList7* commandList;
-	ID3D12CommandQueue* commandQueue;
-    ID3D12DescriptorHeap* textureDescriptorHeap;
-    ID3D12DescriptorHeap* samplerDescriptorHeap;
-    ID3D12DescriptorHeap* rtvHeap;
+    rhi::Device device;
+    rhi::CommandList commandList;
+	rhi::Queue commandQueue;
+    rhi::DescriptorHeap textureDescriptorHeap;
+	rhi::DescriptorHeap samplerDescriptorHeap;
+	rhi::DescriptorHeap rtvHeap;
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;
     UINT frameIndex;

@@ -271,7 +271,7 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 }
 
 float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
-{
+{    
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
@@ -301,9 +301,8 @@ float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
     
     FragmentInfo fragmentInfo;
     GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
-    
+        
     LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::Environment::InfoBuffer), true);
-
     
     float3 lighting = lightingOutput.lighting;
     

@@ -5,6 +5,7 @@
 #include <string>
 #include <spdlog/spdlog.h>
 #include <limits>
+#include <rhi.h>
 
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ResourceGroup.h"
@@ -32,11 +33,11 @@ public:
 		dims.slicePitch = shadowResolution * shadowResolution * 4;
 		desc.imageDimensions.push_back(dims);
 		desc.hasDSV = true;
-		desc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
+		desc.dsvFormat = rhi::Format::D32_Float;
 		desc.channels = 1;
-		desc.format = DXGI_FORMAT_R32_TYPELESS;
+		desc.format = rhi::Format::R32_Typeless;
 		desc.hasSRV = true;
-		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.srvFormat = rhi::Format::R32_Float;
 		//desc.generateMipMaps = true; // Mips will only be used by aliased downsample maps
 		//desc.allowAlias = true; // We will alias the shadow maps to allow UAV downsampling
 		switch (light->type) {
@@ -90,14 +91,14 @@ public:
 		dims.width = res;
 		desc.imageDimensions.push_back(dims);
 		desc.channels = 1;
-		desc.format = DXGI_FORMAT_R32_FLOAT;
+		desc.format = rhi::Format::R32_Float;
 		desc.hasSRV = true;
-		desc.srvFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.srvFormat = rhi::Format::R32_Float;
 		desc.hasUAV = true;
-		desc.uavFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.uavFormat = rhi::Format::R32_Float;
 		desc.generateMipMaps = true;
 		desc.hasRTV = true;
-		desc.rtvFormat = DXGI_FORMAT_R32_FLOAT;
+		desc.rtvFormat = rhi::Format::R32_Float;
 		desc.clearColor[0] = std::numeric_limits<float>().max();
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap

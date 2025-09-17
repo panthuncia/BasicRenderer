@@ -130,11 +130,11 @@ public:
         if (m_meshShaders) {
             if (m_indirect) {
                 // Indirect drawing
-                ExecuteMeshShaderIndirect(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
+                ExecuteMeshShaderIndirect(context, commandList);
             }
             else {
                 // Regular mesh shader drawing
-                ExecuteMeshShader(context, static_cast<ID3D12GraphicsCommandList7*>(commandList));
+                ExecuteMeshShader(context, commandList);
             }
         }
         else {
@@ -149,44 +149,46 @@ public:
 
 private:
     // Common setup code that doesn't change between techniques
-    void SetupCommonState(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
-        ID3D12DescriptorHeap* descriptorHeaps[] = {
-            context.textureDescriptorHeap,
-            context.samplerDescriptorHeap,
-        };
-        commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+    void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
 
-        CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
-        CD3DX12_RECT scissorRect(0, 0, context.renderResolution.x, context.renderResolution.y);
-        commandList->RSSetViewports(1, &viewport);
-        commandList->RSSetScissorRects(1, &scissorRect);
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-        // Render targets
-        //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-        auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
-        auto dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+		rhi::PassBeginInfo passInfo{};
+		rhi::ColorAttachment colorAttachment{};
+		colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(0).slot;
+		colorAttachment.loadOp = rhi::LoadOp::Load;
+		colorAttachment.storeOp = rhi::StoreOp::Store;
+		colorAttachment.clear = m_pHDRTarget->GetClearColor();
+		passInfo.colors = { &colorAttachment, 1 };
+		rhi::DepthAttachment depthAttachment{};
+		depthAttachment.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
+		depthAttachment.depthLoad = rhi::LoadOp::Load;
+		depthAttachment.depthStore = rhi::StoreOp::Store;
+		depthAttachment.stencilLoad = rhi::LoadOp::DontCare;
+		depthAttachment.stencilStore = rhi::StoreOp::DontCare;
+		depthAttachment.clear = m_pPrimaryDepthBuffer->GetClearColor();
+		passInfo.depth = &depthAttachment;
+		passInfo.width = context.renderResolution.x;
+		passInfo.height = context.renderResolution.y;
+		passInfo.debugName = "Forward Render Pass";
+		commandList.BeginPass(passInfo);
 
-        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-        // Root signature
-        auto& psoManager = PSOManager::GetInstance();
-        auto rootSignature = psoManager.GetRootSignature();
-        commandList->SetGraphicsRootSignature(rootSignature.Get());
+        commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
+		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
     }
 
-    void SetCommonRootConstants(RenderContext& context, ID3D12GraphicsCommandList* commandList) {
+    void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
-        commandList->SetGraphicsRoot32BitConstants(SettingsRootSignatureIndex, NumSettingsRootConstants, &settings, 0);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
 
         if (m_meshShaders) {
             unsigned int misc[NumMiscUintRootConstants] = {};
-            misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).index;
-            commandList->SetGraphicsRoot32BitConstants(MiscUintRootSignatureIndex, NumMiscUintRootConstants, &misc, 0);
+            misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
         }
     }
 
-    void ExecuteRegular(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
 
@@ -194,22 +196,21 @@ private:
         m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
             auto& meshes = opaqueMeshes.meshInstances;
 
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
+                auto& pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList->SetPipelineState(pso.GetAPIPipelineState());
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-                commandList->IASetIndexBuffer(&indexBufferView);
-                commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				commandList.SetIndexBuffer(mesh.GetIndexBufferView());
+				commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
             }
             });
 
@@ -217,27 +218,26 @@ private:
         m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
             auto& meshes = alphaTestMeshes.meshInstances;
 
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
+                auto& pso = psoManager.GetPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList->SetPipelineState(pso.GetAPIPipelineState());
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                D3D12_INDEX_BUFFER_VIEW indexBufferView = mesh.GetIndexBufferView();
-                commandList->IASetIndexBuffer(&indexBufferView);
-                commandList->DrawIndexedInstanced(mesh.GetIndexCount(), 1, 0, 0, 0);
+				commandList.SetIndexBuffer(mesh.GetIndexBufferView());
+				commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
             }
             });
     }
 
-    void ExecuteMeshShader(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
 
@@ -246,21 +246,21 @@ private:
         m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
             auto& meshes = opaqueMeshes.meshInstances;
 
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
+                auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList->SetPipelineState(pso.GetAPIPipelineState());
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
                 // Mesh shaders use DispatchMesh
-                commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+                commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
             });
 
@@ -268,25 +268,25 @@ private:
         m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
             auto& meshes = alphaTestMeshes.meshInstances;
 
-            commandList->SetGraphicsRoot32BitConstants(PerObjectRootSignatureIndex, 1, &drawInfo.perObjectCBIndex, PerObjectBufferIndex);
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
+                auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList->SetPipelineState(pso.GetAPIPipelineState());
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
                 perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
                 perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                commandList->SetGraphicsRoot32BitConstants(PerMeshRootSignatureIndex, NumPerMeshRootConstants, perMeshIndices, 0);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-                commandList->DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+                commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
             });
     }
 
-    void ExecuteMeshShaderIndirect(RenderContext& context, ID3D12GraphicsCommandList7* commandList) {
+    void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading with ExecuteIndirect
         auto& psoManager = PSOManager::GetInstance();
 
@@ -297,18 +297,19 @@ private:
         if (numOpaque > 0) {
 
             auto opaqueIndirectBuffer = m_primaryCameraOpaqueIndirectCommandBuffer;
-            auto pso = psoManager.GetMeshPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
+            auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
             BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-            commandList->SetPipelineState(pso.GetAPIPipelineState());
+			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
             auto apiResource = opaqueIndirectBuffer->GetAPIResource();
-            commandList->ExecuteIndirect(
-                commandSignature,
-                numOpaque,
-                apiResource, 0,
-                apiResource,
-                opaqueIndirectBuffer->GetResource()->GetUAVCounterOffset()
-            );
+
+			commandList.ExecuteIndirect(
+				commandSignature.GetHandle(), 
+                apiResource.GetHandle(), 
+                0, 
+                apiResource.GetHandle(), 
+                opaqueIndirectBuffer->GetResource()->GetUAVCounterOffset(), 
+                numOpaque);
         }
 
         // Alpha test indirect draws
@@ -316,19 +317,20 @@ private:
         if (numAlphaTest > 0) {
 
             auto alphaTestIndirectBuffer = m_primaryCameraAlphaTestIndirectCommandBuffer;
-            auto pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
+            auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
                 BlendState::BLEND_STATE_MASK, m_wireframe);
             BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-            commandList->SetPipelineState(pso.GetAPIPipelineState());
+			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
             auto apiResource = alphaTestIndirectBuffer->GetAPIResource();
-            commandList->ExecuteIndirect(
-                commandSignature,
-                numAlphaTest,
-                apiResource, 0,
-                apiResource,
-                alphaTestIndirectBuffer->GetResource()->GetUAVCounterOffset()
-            );
+
+			commandList.ExecuteIndirect(
+                commandSignature.GetHandle(),
+                apiResource.GetHandle(),
+                0,
+                apiResource.GetHandle(),
+                alphaTestIndirectBuffer->GetResource()->GetUAVCounterOffset(),
+				numAlphaTest);
         }
     }
 

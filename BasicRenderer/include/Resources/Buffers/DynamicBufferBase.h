@@ -2,8 +2,9 @@
 
 #include <memory>
 
+#include <rhi.h>
+
 #include "Render/RenderContext.h"
-#include "Resources/ResourceStates.h"
 #include "Resources/GloballyIndexedResource.h"
 
 class Buffer;
@@ -16,9 +17,6 @@ public:
     DynamicBufferBase() {}
     std::shared_ptr<Buffer> m_dataBuffer = nullptr;
 
-    ResourceAccessType GetSubresourceAccessType(unsigned int subresourceIndex) const override { return m_dataBuffer->GetSubresourceAccessType(subresourceIndex); }
-    ResourceLayout GetSubresourceLayout(unsigned int subresourceIndex) const override { return m_dataBuffer->GetSubresourceLayout(subresourceIndex); }
-    ResourceSyncState GetSubresourceSyncState(unsigned int subresourceIndex) const override { return m_dataBuffer->GetSubresourceSyncState(subresourceIndex); }
 protected:
 };
 

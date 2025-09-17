@@ -272,7 +272,9 @@ GFSDK_AFTERMATH_DECLARE_ENUM(Client){
 GFSDK_AFTERMATH_DECLARE_ENUM(ResourceResidency){
     GFSDK_Aftermath_ResourceResidency_Unknown = 0,
     GFSDK_Aftermath_ResourceResidency_FullyResident,
-    GFSDK_Aftermath_ResourceResidency_Evicted,
+    GFSDK_Aftermath_ResourceResidency_Evicted,       // DX12 only
+    GFSDK_Aftermath_ResourceResidency_MemoryFreed,   // Vulkan only
+    GFSDK_Aftermath_ResourceResidency_MemoryUnbound, // Vulkan only
 };
 
 ////////////////////////////////////////////////////////////////////////
@@ -366,7 +368,7 @@ typedef struct GFSDK_Aftermath_GpuCrashDump_ShaderInfo
     // NOTE: This shader hash value is not necessarily the same as the GFSDK_Aftermath_ShaderBinaryHash
     // value for this shader info, which must be calculated with GFSDK_Aftermath_GetShaderHashForShaderInfo.
     uint64_t shaderHash;
-    uint64_t shaderInstance;
+    uint64_t shaderDebugInfoUid;
     GFSDK_AFTERMATH_DECLARE_BOOLEAN_MEMBER(isInternal);
     GFSDK_Aftermath_ShaderType shaderType;
 } GFSDK_Aftermath_GpuCrashDump_ShaderInfo;
@@ -1024,7 +1026,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetEventMarkersInfo(
 //              spirv-remap --map all --strip-all --input full/shader.spv --output ./stripped/
 //
 //         Then pass the content of ./full/shader.spv and ./stripped/shader.spv to
-//         'GFSDK_Aftermath_GetDebugNameSpirv' to generate the debug name to use with
+//         'GFSDK_Aftermath_GetShaderDebugNameSpirv' to generate the debug name to use with
 //         'shaderSourceDebugInfoLookupCb'.
 //
 // pUserData;
@@ -1118,7 +1120,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderDebugInfoIdentifier(
 //      the computed shader hash.
 //
 //// DESCRIPTION;
-//      Computes a shader hash uniquely identifying the provided DXBC shader binary.
+//      Computes a shader hash uniquely identifying the provided DXBC/DXIL shader binary.
 //      This is, for example, required for comparison in the shader binary lookup by
 //      'GFSDK_Aftermath_ShaderLookupCb' or for matching a
 //      'GFSDK_Aftermath_GpuCrashDump_ShaderInfo' with a shader binary using
@@ -1178,10 +1180,10 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderHashSpirv(
 //      the generated DebugName.
 //
 //// DESCRIPTION;
-//      Extracts the shader's DebugName (if available) from the provided DXBC shader
-//      binary. This is, for example, required for comparison in the shader debug
-//      data lookup by 'GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb'. For more
-//      information about shader debug names please read:
+//      Extracts the shader's DebugName (if available) from the provided DXBC/DXIL
+//      shader binary. This is, for example, required for comparison in the shader
+//      debug data lookup by 'GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb'.
+//      For more information about shader debug names please read:
 //      https://github.com/microsoft/DirectXShaderCompiler/blob/master/docs/SourceLevelDebuggingHLSL.rst#using-debug-names.
 //
 /////////////////////////////////////////////////////////////////////////

@@ -20,7 +20,7 @@ UINT Texture::GetSamplerDescriptorIndex() {
 	return m_sampler->GetDescriptorIndex();
 }
 
-BarrierGroups Texture::GetEnhancedBarrierGroup(RangeSpec range, ResourceAccessType prevAccessType, ResourceAccessType newAccessType, ResourceLayout prevLayout, ResourceLayout newLayout, ResourceSyncState prevSyncState, ResourceSyncState newSyncState) {
+rhi::BarrierBatch Texture::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
 	return m_image->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState); // Transition the underlying PixelBuffer
 }
 
@@ -29,7 +29,7 @@ void Texture::SetName(const std::wstring& name) {
 	m_image->SetName(name);
 }
 
-ID3D12Resource* Texture::GetAPIResource() const { return m_image->GetAPIResource(); }
+rhi::Resource Texture::GetAPIResource() { return m_image->GetAPIResource(); }
 
 void Texture::SetFilepath(const std::string& filepath) {
 	m_filePath = filepath;
@@ -42,10 +42,6 @@ void Texture::SetFilepath(const std::string& filepath) {
 uint64_t Texture::GetGlobalResourceID() const { 
 	return m_image->GetGlobalResourceID(); 
 }
-
-ResourceAccessType Texture::GetSubresourceAccessType(unsigned int subresourceIndex) const { return m_image->GetSubresourceAccessType(subresourceIndex); }
-ResourceLayout Texture::GetSubresourceLayout(unsigned int subresourceIndex) const { return m_image->GetSubresourceLayout(subresourceIndex); }
-ResourceSyncState Texture::GetSubresourceSyncState(unsigned int subresourceIndex) const { return m_image->GetSubresourceSyncState(subresourceIndex); }
 
 SymbolicTracker* Texture::GetStateTracker() {
 	return m_image->GetStateTracker();

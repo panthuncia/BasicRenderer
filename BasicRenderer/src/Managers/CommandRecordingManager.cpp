@@ -17,13 +17,13 @@ static D3D12_COMMAND_LIST_TYPE kListTypeFor(QueueKind qk) {
 
 CommandRecordingManager::CommandRecordingManager(const Init& init) {
     m_bind[static_cast<size_t>(QueueKind::Graphics)] =
-    { init.graphicsQ, init.graphicsF, init.graphicsPool, D3D12_COMMAND_LIST_TYPE_DIRECT };
+    { init.graphicsQ, init.graphicsF, init.graphicsPool, rhi::QueueKind::Graphics };
 
     m_bind[static_cast<size_t>(QueueKind::Compute)] =
-    { init.computeQ,  init.computeF,  init.computePool,  D3D12_COMMAND_LIST_TYPE_COMPUTE };
+    { init.computeQ,  init.computeF,  init.computePool,  rhi::QueueKind::Compute };
 
     m_bind[static_cast<size_t>(QueueKind::Copy)] =
-    { init.copyQ,     init.copyF,     init.copyPool,     D3D12_COMMAND_LIST_TYPE_COPY };
+    { init.copyQ,     init.copyF,     init.copyPool,     rhi::QueueKind::Copy };
 
     m_computeMode = init.computeMode;
 }
@@ -34,7 +34,7 @@ QueueKind CommandRecordingManager::resolve(QueueKind qk) const {
     return qk;
 }
 
-ID3D12GraphicsCommandList10* CommandRecordingManager::EnsureOpen(QueueKind requested, uint32_t frameEpoch) {
+rhi::CommandList CommandRecordingManager::EnsureOpen(QueueKind requested, uint32_t frameEpoch) {
     const QueueKind qk = resolve(requested);
     auto& bind = m_bind[static_cast<size_t>(qk)];
     assert(bind.valid() && "Queue/Fence/Pool not initialized for this QueueKind");
@@ -52,16 +52,6 @@ ID3D12GraphicsCommandList10* CommandRecordingManager::EnsureOpen(QueueKind reque
     if (!ctx.list) {
         // Acquire a fresh pair from the pool; Request() must return a reset & ready list
         CommandListPair pair = bind.pool->Request();
-
-        // Defensive
-#ifndef NDEBUG
-        auto qtype = bind.queue->GetDesc().Type;
-        auto& listIfc = pair.list; // ID3D12GraphicsCommandList10
-        ComPtr<ID3D12GraphicsCommandList> base;
-        listIfc.As(&base);
-        assert(kListTypeFor(qk) == qtype && "Queue type mismatch");
-        // We can't query the CL type directly, but Pool should have created with the right type.
-#endif
 
         ctx.alloc = std::move(pair.allocator);
         ctx.list = std::move(pair.list);
@@ -82,15 +72,14 @@ uint64_t CommandRecordingManager::Flush(QueueKind requested, Signal sig) {
     if (ctx.list) {
         if (ctx.dirty) {
             // Close + execute
-            ctx.list->Close();
-            ID3D12CommandList* lists[] = { ctx.list.Get() };
-            bind.queue->ExecuteCommandLists(1, lists);
+            ctx.list->End();
+			bind.queue->Submit({ &ctx.list.Get(), 1 }, {});
         }
 
         // Decide on signaling
         if (sig.enable) {
             signaled = sig.value;
-            bind.queue->Signal(bind.fence, signaled);
+            bind.queue->Signal({ bind.fence->GetHandle(), signaled});
         }
 
         // Return the pair to the pool tagged with the fence (0 = immediately reusable)
@@ -119,12 +108,12 @@ void CommandRecordingManager::EndFrame() {
     }
 }
 
-ID3D12Fence* CommandRecordingManager::Fence(QueueKind qk) const {
+rhi::Timeline* CommandRecordingManager::Fence(QueueKind qk) const {
     qk = const_cast<CommandRecordingManager*>(this)->resolve(qk);
     return m_bind[static_cast<size_t>(qk)].fence;
 }
 
-ID3D12CommandQueue* CommandRecordingManager::Queue(QueueKind qk) const {
+rhi::Queue* CommandRecordingManager::Queue(QueueKind qk) const {
     qk = const_cast<CommandRecordingManager*>(this)->resolve(qk);
     return m_bind[static_cast<size_t>(qk)].queue;
 }
