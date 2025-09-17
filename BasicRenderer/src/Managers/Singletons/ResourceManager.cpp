@@ -203,7 +203,11 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	auto device = DeviceManager::GetInstance().GetDevice();
 
 	size_t bufferSize = elementSize * numElements;
-	bufferSize += bufferSize % 4; // Align to 4 bytes
+	{
+		const size_t align = 4;
+		const size_t rem = bufferSize % align;
+		if (rem) bufferSize += (align - rem); // Align up to 4 bytes
+	}
 	// Create the dynamic structured buffer instance
 	UINT bufferID = GetNextResizableBufferID();
 	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name, UAV);
@@ -349,7 +353,7 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 		clearValue = &depthClearValue;
 	}
 	else if (desc.hasRTV) {
-		depthClearValue.type = rhi::ClearValueType::Color;
+		colorClearValue.type = rhi::ClearValueType::Color;
 		colorClearValue.format = desc.rtvFormat == rhi::Format::Unknown ? desc.format : desc.rtvFormat;
 		colorClearValue.rgba[0] = desc.clearColor[0];
 		colorClearValue.rgba[1] = desc.clearColor[1];
@@ -400,7 +404,7 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 
 	// effective array slices = arraySize * (isCubemap ? 6 : 1)
 	const uint32_t faces = desc.isCubemap ? 6u : 1u;
-	const uint32_t arraySlices = arraySize;//faces * static_cast<uint32_t>(arraySize);
+	const uint32_t arraySlices = faces * static_cast<uint32_t>(arraySize);
 	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
 
 	// Build a dense SubresourceData table (nullptr entries are allowed; they'll be skipped)

@@ -28,12 +28,19 @@ public:
 	}
 
 	void RemoveResource(Resource* resource) {
-		resources.erase(std::remove(resources.begin(), resources.end(), resourcesByID[resource->GetGlobalResourceID()]), resources.end());
-		resourcesByID.erase(resource->GetGlobalResourceID());
+		const auto id = resource->GetGlobalResourceID();
+		auto it = resourcesByID.find(id);
+		if (it != resourcesByID.end()) {
+			const auto& sp = it->second;
+			resources.erase(std::remove(resources.begin(), resources.end(), sp), resources.end());
+			resourcesByID.erase(it);
+		}
 	}
 
 	void ClearResources() {
+		resources.clear();
 		resourcesByID.clear();
+		standardTransitionResources.clear();
 	}
 
 	rhi::Resource GetAPIResource() override {
