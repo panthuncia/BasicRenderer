@@ -20,11 +20,11 @@
 using Microsoft::WRL::ComPtr;
 
 struct PSOKey {
-    UINT psoFlags;
+    uint64_t psoFlags;
     BlendState blendState;
 	bool wireframe;
 
-    PSOKey(UINT flags, BlendState blend, bool wireframe) : psoFlags(flags), blendState(blend), wireframe(wireframe) {}
+    PSOKey(uint64_t flags, BlendState blend, bool wireframe) : psoFlags(flags), blendState(blend), wireframe(wireframe) {}
 
     bool operator==(const PSOKey& other) const {
         return psoFlags == other.psoFlags && blendState == other.blendState && wireframe == other.wireframe;
@@ -36,7 +36,7 @@ namespace std {
     struct hash<PSOKey> {
         std::size_t operator()(const PSOKey& key) const noexcept {
             // Combine the hash of psoFlags, blendState, and wireframe
-            std::size_t h1 = std::hash<UINT>{}(key.psoFlags);
+            std::size_t h1 = std::hash<uint64_t>{}(key.psoFlags);
             std::size_t h2 = std::hash<int>{}(static_cast<int>(key.blendState)); // Cast to int for hashing
 			std::size_t h3 = std::hash<bool>{}(key.wireframe);
 

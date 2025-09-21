@@ -2,10 +2,14 @@
 
 #include <vector>
 
-enum class MaterialBuckets {
-	Opaque,
-	AlphaTest,
-	Blend
-};
+#include "Render/PipelineState.h"
+#include "Utilities/HashMix.h"
+#include "Render/RenderPhase.h"
 
-inline std::vector<MaterialBuckets> MaterialBucketTypes = {MaterialBuckets::Opaque, MaterialBuckets::AlphaTest, MaterialBuckets::Blend };
+struct MaterialKey {
+    RenderPhase phase;
+    PSOKey      pso;
+    // Optional: ViewId / ShadowSplit / StereoEye to segregate per-view workloads
+    bool operator==(const MaterialKey&) const = default;
+};
+struct MaterialKeyHash { size_t operator()(MaterialKey const& k) const noexcept { return util::hash_mix(k); } };

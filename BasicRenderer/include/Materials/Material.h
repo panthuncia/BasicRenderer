@@ -2,6 +2,7 @@
 
 #include <DirectXMath.h>
 #include <string>
+#include <array>
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Materials/BlendState.h"
@@ -9,7 +10,19 @@
 #include "Materials/MaterialFlags.h"
 #include "Materials/MaterialDescription.h"
 
-using Microsoft::WRL::ComPtr;
+
+struct TechniquePass {
+    RenderPhase  phase;
+    PSOKey       pso;
+    CommandSigId cmdSig;          // Draw/DispatchMesh/etc.
+    ResourceSlots slots;          // your bindless/material root layout
+    PhaseRequirements reqs;       // needsSceneColor, depth, oit buffers, etc.
+};
+
+struct TechniqueDescriptor {
+    std::vector<TechniquePass> passes;
+    // metadata: alphaMode, domain (Deferred/Forward), feature bits (aniso, parallax…), etc.
+};
 
 class Material {
 public:
@@ -97,6 +110,7 @@ public:
     MaterialFlags GetMaterialFlags() const { return static_cast<MaterialFlags>(m_materialData.materialFlags); }
     BlendState GetBlendState() const { return m_blendState; }
     static std::shared_ptr<Material> GetDefaultMaterial();
+    TechniqueDescriptor const& Technique() const { return m_technique; }
     static void DestroyDefaultMaterial() {
         defaultMaterial.reset();
     }
@@ -118,6 +132,7 @@ private:
     BlendState m_blendState;
     PerMaterialCB m_materialData = { 0 };
     PSOFlags m_psoFlags;
+    TechniqueDescriptor m_technique;
 
     Material(const std::string& name,
         MaterialFlags materialFlags, PSOFlags psoFlags);
