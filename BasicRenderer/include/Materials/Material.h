@@ -21,57 +21,57 @@ struct TechniquePass {
 
 struct TechniqueDescriptor {
     std::vector<TechniquePass> passes;
-    // metadata: alphaMode, domain (Deferred/Forward), feature bits (aniso, parallax…), etc.
+    // metadata: alphaMode, domain (Deferred/Forward), feature bits (aniso, parallax)?
 };
 
 class Material {
 public:
     static std::shared_ptr<Material> CreateShared(const MaterialDescription& desc) {
         uint32_t materialFlags = 0;
-		uint32_t psoFlags = 0;
+        uint32_t psoFlags = 0;
         materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
-		BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
+        BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
         if (desc.baseColor.texture) {
             if (!desc.baseColor.texture->AlphaIsAllOpaque()) {
                 materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
                 psoFlags |= PSOFlags::PSO_ALPHA_TEST;
-				blendState = BlendState::BLEND_STATE_MASK; // Use mask blending for alpha-tested materials
-			}
-			materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
+                blendState = BlendState::BLEND_STATE_MASK; // Use mask blending for alpha-tested materials
+            }
+            materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.metallic.texture) {
             materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
         }
         if (desc.roughness.texture) {
             materialFlags |= MaterialFlags::MATERIAL_PBR | MaterialFlags::MATERIAL_PBR_MAPS | MaterialFlags::MATERIAL_TEXTURED;
-		}
+        }
         if (desc.emissive.texture) {
             materialFlags |= MaterialFlags::MATERIAL_EMISSIVE_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
-		}
+        }
         if (desc.normal.texture) {
             materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
         }
-		auto diffuseColor = desc.diffuseColor;
-		if (desc.opacity.texture) { // TODO: How can we tell if this should be used as a mask or as a blend?
+        auto diffuseColor = desc.diffuseColor;
+        if (desc.opacity.texture) { // TODO: How can we tell if this should be used as a mask or as a blend?
             psoFlags |= PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_BLEND;
             materialFlags |= MaterialFlags::MATERIAL_OPACITY_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
-			blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
+            blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
         }
         if (desc.opacity.factor.Get() < 1.0f) {
             materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
             psoFlags |= PSOFlags::PSO_BLEND | PSOFlags::PSO_ALPHA_TEST;
-	        diffuseColor.w = desc.opacity.factor.Get(); // Use opacity factor as alpha
-			blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
-		}
+            diffuseColor.w = desc.opacity.factor.Get(); // Use opacity factor as alpha
+            blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
+        }
         if (desc.negateNormals) {
             materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;
-		}
+        }
         if (desc.invertNormalGreen) {
             materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN;
         }
         if (desc.blendState != BlendState::BLEND_STATE_UNKNOWN) {
             blendState = desc.blendState; // Use provided blend state
-		}
+        }
 
         return CreateShared(
             desc.name,
@@ -89,16 +89,16 @@ public:
             desc.roughness.factor.Get(),
             diffuseColor,
             desc.emissiveColor,
-			desc.baseColor.channels,
-			desc.normal.channels,
-			desc.aoMap.channels,
-			desc.heightMap.channels,
-			desc.metallic.channels,
-			desc.roughness.channels,
-			desc.emissive.channels,
+            desc.baseColor.channels,
+            desc.normal.channels,
+            desc.aoMap.channels,
+            desc.heightMap.channels,
+            desc.metallic.channels,
+            desc.roughness.channels,
+            desc.emissive.channels,
             blendState,
             desc.alphaCutoff
-		);
+        );
     }
     ~Material();
 
@@ -124,7 +124,7 @@ private:
     std::shared_ptr<Texture> m_roughnessTexture;
     std::shared_ptr<Texture> m_metallicTexture;
     std::shared_ptr<Texture> m_emissiveTexture;
-	std::shared_ptr<Texture> m_opacityTexture;
+    std::shared_ptr<Texture> m_opacityTexture;
     float m_metallicFactor;
     float m_roughnessFactor;
     DirectX::XMFLOAT4 m_baseColorFactor;
@@ -146,7 +146,7 @@ private:
         std::shared_ptr<Texture> metallicTexture,
         std::shared_ptr<Texture> m_roughnessTexture,
         std::shared_ptr<Texture> emissiveTexture,
-		std::shared_ptr<Texture> opacityTexture,
+        std::shared_ptr<Texture> opacityTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
@@ -170,7 +170,7 @@ private:
         std::shared_ptr<Texture> metallicTexture,
         std::shared_ptr<Texture> roughnessTexture,
         std::shared_ptr<Texture> emissiveTexture,
-		std::shared_ptr<Texture> opacityTexture,
+        std::shared_ptr<Texture> opacityTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
@@ -188,8 +188,8 @@ private:
             baseColorTexture, normalTexture, aoMap, heightMap,
             metallicTexture, roughnessTexture, emissiveTexture, opacityTexture,
             metallicFactor, roughnessFactor, baseColorFactor, emissiveFactor,
-			baseColorChannels, normalChannels, aoChannel, heightChannel,
-			metallicChannel, roughnessChannel, emissiveChannels,
+            baseColorChannels, normalChannels, aoChannel, heightChannel,
+            metallicChannel, roughnessChannel, emissiveChannels,
             blendState, alphaCutoff));
     }
 
