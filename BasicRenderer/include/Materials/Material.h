@@ -3,26 +3,51 @@
 #include <DirectXMath.h>
 #include <string>
 #include <array>
+#include <unordered_set>
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Materials/BlendState.h"
 #include "Render/PSOFlags.h"
+#include "Render/RenderPhase.h"
 #include "Materials/MaterialFlags.h"
 #include "Materials/MaterialDescription.h"
+#include "../generated/BuiltinRenderPasses.h"
+#include "Materials/TechniqueDescriptor.h"
 
+struct TransparencyPick { bool isTransparent = false; bool masked = false; };
 
-struct TechniquePass {
-    RenderPhase  phase;
-    PSOKey       pso;
-    CommandSigId cmdSig;          // Draw/DispatchMesh/etc.
-    ResourceSlots slots;          // your bindless/material root layout
-    PhaseRequirements reqs;       // needsSceneColor, depth, oit buffers, etc.
-};
+inline TransparencyPick PickTransparency(const MaterialDescription& d) {
+    TransparencyPick t{};
+    const bool hasOpacityTex = (d.opacity.texture != nullptr);
+    const bool explicitBlend = (d.blendState == BlendState::BLEND_STATE_BLEND);
+    const bool alphaFactor = (d.opacity.factor.Get() < 1.0f);
 
-struct TechniqueDescriptor {
-    std::vector<TechniquePass> passes;
-    // metadata: alphaMode, domain (Deferred/Forward), feature bits (aniso, parallax)?
-};
+    t.isTransparent = hasOpacityTex || explicitBlend || alphaFactor;
+    if (!t.isTransparent) return t;
+
+    // Heuristic: prefer masked if alphaCutoff provided and we have an alpha-carrying tex
+    const bool cutoff = (d.alphaCutoff > 0.0f);
+    const bool hasAlphaCandidate = hasOpacityTex || (d.baseColor.texture != nullptr);
+    t.masked = (!explicitBlend) && cutoff && hasAlphaCandidate;
+    return t;
+}
+
+inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
+    TechniqueDescriptor tech{};
+    const auto transparency = PickTransparency(d);
+	tech.passes.insert(Engine::Primary::ShadowMapsPass); // All materials cast shadows
+    if (transparency.isTransparent && !transparency.masked) { // OIT transparency
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileBlend;
+        tech.passes.insert(Engine::Primary::OITAccumulationPass);
+    }
+    else {
+        if (transparency.isTransparent) {
+			tech.compileFlags |= MaterialCompileFlags::MaterialCompileAlphaTest;
+        }
+		tech.passes.insert(Engine::Primary::GBufferPass);
+    }
+    return tech;
+}
 
 class Material {
 public:
@@ -108,7 +133,6 @@ public:
     void SetHeightmapScale(float scale);
     PSOFlags GetPSOFlags() const { return m_psoFlags; }
     MaterialFlags GetMaterialFlags() const { return static_cast<MaterialFlags>(m_materialData.materialFlags); }
-    BlendState GetBlendState() const { return m_blendState; }
     static std::shared_ptr<Material> GetDefaultMaterial();
     TechniqueDescriptor const& Technique() const { return m_technique; }
     static void DestroyDefaultMaterial() {
@@ -129,7 +153,6 @@ private:
     float m_roughnessFactor;
     DirectX::XMFLOAT4 m_baseColorFactor;
     DirectX::XMFLOAT4 m_emissiveFactor;
-    BlendState m_blendState;
     PerMaterialCB m_materialData = { 0 };
     PSOFlags m_psoFlags;
     TechniqueDescriptor m_technique;

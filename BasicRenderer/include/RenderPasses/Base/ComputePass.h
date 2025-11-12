@@ -38,6 +38,11 @@ public:
 		m_resourceRegistryView = resourceRegistryView;
 		m_resourceDescriptorIndexHelper = std::make_unique<ResourceDescriptorIndexHelper>(resourceRegistryView);
 	}
+
+	void RegisterECSRenderPhaseEntities(std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities) {
+		m_ecsPhaseEntities = phaseEntities;
+	}
+
 	virtual void Setup() = 0;
 	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 
@@ -83,5 +88,6 @@ protected:
 
 	std::unique_ptr<ResourceDescriptorIndexHelper> m_resourceDescriptorIndexHelper;
 	std::shared_ptr<ResourceRegistryView> m_resourceRegistryView;
+	std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher> m_ecsPhaseEntities;
 	friend class ComputePassBuilder;
 };

@@ -5,8 +5,6 @@
 #include <string_view>
 #include <vector>
 
-#include <refl.hpp>
-
 using json = nlohmann::json;
 
 // Recursively emit nested structs and collect every type for refl-cpp
@@ -61,7 +59,6 @@ int generate_cpp(json& data, const char* out_path) {
     std::string result;
     result += "#pragma once\n\n";
     result += "#include <string_view>\n";
-    result += "#include <refl.hpp>\n\n";
     result += "// GENERATED CODE — DO NOT EDIT\n\n";
 
     // for each top-level object in the JSON, emit a top-level struct
@@ -73,15 +70,6 @@ int generate_cpp(json& data, const char* out_path) {
         // recurse to fill in nested structs and members
         result += recurse_structs(nsObj, nsName, "  ", types);
         result += "};\n\n";
-    }
-
-    // emit one REFL_AUTO registering all grouping types
-    result += "// refl-cpp registration\n";
-    for (size_t i = 0; i < types.size(); ++i) {
-        result += "REFL_AUTO(\n";
-        result += "  type(" + types[i] + ")";
-        result += "\n";
-        result += ");\n";
     }
 
     // write out to the header file

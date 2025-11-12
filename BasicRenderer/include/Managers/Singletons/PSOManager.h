@@ -12,22 +12,22 @@
 #pragma warning(push, 0)   // Disable all warnings for dxc header
 #include "ThirdParty/DirectX/dxcapi.h"
 #pragma warning(pop)
-#include "Materials/BlendState.h"
 #include "Render/PSOFlags.h"
 #include "Render/PipelineState.h"
 #include "Resources/ResourceIdentifier.h"
+#include "Materials/TechniqueDescriptor.h"
 
 using Microsoft::WRL::ComPtr;
 
 struct PSOKey {
     uint64_t psoFlags;
-    BlendState blendState;
+    MaterialCompileFlags materialCompileFlags;
 	bool wireframe;
 
-    PSOKey(uint64_t flags, BlendState blend, bool wireframe) : psoFlags(flags), blendState(blend), wireframe(wireframe) {}
+    PSOKey(uint64_t flags, MaterialCompileFlags materialCompileFlags, bool wireframe) : psoFlags(flags), materialCompileFlags(materialCompileFlags), wireframe(wireframe) {}
 
     bool operator==(const PSOKey& other) const {
-        return psoFlags == other.psoFlags && blendState == other.blendState && wireframe == other.wireframe;
+        return psoFlags == other.psoFlags && materialCompileFlags == other.materialCompileFlags && wireframe == other.wireframe;
     }
 };
 
@@ -35,9 +35,9 @@ namespace std {
     template <>
     struct hash<PSOKey> {
         std::size_t operator()(const PSOKey& key) const noexcept {
-            // Combine the hash of psoFlags, blendState, and wireframe
+            // Combine the hash of psoFlags, materialCompileFlags, and wireframe
             std::size_t h1 = std::hash<uint64_t>{}(key.psoFlags);
-            std::size_t h2 = std::hash<int>{}(static_cast<int>(key.blendState)); // Cast to int for hashing
+            std::size_t h2 = std::hash<uint64_t>{}(key.materialCompileFlags);
 			std::size_t h3 = std::hash<bool>{}(key.wireframe);
 
             // Boost's hash_combine equivalent
@@ -88,17 +88,17 @@ public:
 
     void initialize();
 
-    const PipelineState& GetPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    const PipelineState& GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    const PipelineState& GetPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
-    const PipelineState& GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    const PipelineState& GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    const PipelineState& GetMeshPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
-    const PipelineState& GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    const PipelineState& GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    const PipelineState& GetMeshPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
-    const PipelineState& GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    const PipelineState& GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    const PipelineState& GetShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    const PipelineState& GetShadowMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
     const PipelineState& GetDeferredPSO(UINT psoFlags);
 
@@ -159,16 +159,16 @@ private:
 	ComPtr<ID3D12PipelineState> debugPSO;
     ComPtr<ID3D12PipelineState> environmentConversionPSO;
 
-    PipelineState CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState CreateMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState CreateMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    PipelineState CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    PipelineState CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    PipelineState CreateMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    PipelineState CreateMeshPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
-    PipelineState CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState CreateMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    PipelineState CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    PipelineState CreateMeshPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
-    PipelineState CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
-    PipelineState CreateShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe = false);
+    PipelineState CreateShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+    PipelineState CreateShadowMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
     PipelineState CreateDeferredPSO(UINT psoFlags);
 
@@ -185,7 +185,7 @@ private:
         Microsoft::WRL::ComPtr<ID3DBlob>& shaderBlob);
 
     void createRootSignature();
-    rhi::BlendState GetBlendDesc(BlendState blendState);
+    rhi::BlendState GetBlendDesc(MaterialCompileFlags materialCompileFlags);
 
     void LoadSource(const std::filesystem::path& path, PSOManager::SourceData& sd);
 

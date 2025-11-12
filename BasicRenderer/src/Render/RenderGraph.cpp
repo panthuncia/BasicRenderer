@@ -524,6 +524,7 @@ void RenderGraph::Setup() {
 		switch (pass.type) {
 		case PassType::Render: {
 			auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
+			renderPass.pass->RegisterECSRenderPhaseEntities(m_ecsPhaseEntities);
 			renderPass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, renderPass.resources.identifierSet));
 			renderPass.pass->Setup();
 			renderPass.pass->RegisterCommandLists(emptyLists);
@@ -531,6 +532,7 @@ void RenderGraph::Setup() {
 		}
 		case PassType::Compute: {
 			auto& computePass = std::get<ComputePassAndResources>(pass.pass);
+			computePass.pass->RegisterECSRenderPhaseEntities(m_ecsPhaseEntities);
 			computePass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, computePass.resources.identifierSet));
 			computePass.pass->Setup();
 			computePass.pass->RegisterCommandLists(emptyLists);
@@ -986,6 +988,10 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 		return nullptr;
 	}
 	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
+}
+
+void RenderGraph::RegisterECSRenderPhaseEntities(std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities) {
+	m_ecsPhaseEntities = phaseEntities;
 }
 
 ComputePassBuilder RenderGraph::BuildComputePass(std::string const& name) {

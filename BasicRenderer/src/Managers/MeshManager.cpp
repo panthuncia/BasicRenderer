@@ -33,7 +33,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
 }
 
-void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, bool useMeshletReorderedVertices) {
+void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
 	auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
 	auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();

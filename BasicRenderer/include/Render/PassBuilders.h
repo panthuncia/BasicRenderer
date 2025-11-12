@@ -8,6 +8,7 @@
 #include "ResourceRequirements.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
+#include "Interfaces/IResourceResolver.h"
 
 // Tag for a contiguous mip-range [first..first+count)
 struct Mip {
@@ -532,6 +533,100 @@ public:
         return std::move(*this);
     }
 
+	// LVALUE overloads for IResourceResolver
+    RenderPassBuilder& WithShaderResource(IResourceResolver r)& {
+        (addShaderResource(r.Resolve()));
+        return *this;
+    }
+
+    RenderPassBuilder& WithRenderTarget(IResourceResolver r)& {
+        (addRenderTarget(r.Resolve()));
+        return *this;
+	}
+
+    RenderPassBuilder& WithDepthReadWrite(IResourceResolver r)& {
+        (addDepthReadWrite(r.Resolve()));
+		return *this;
+    }
+
+    RenderPassBuilder& WithDepthRead(IResourceResolver r)& {
+		(addDepthRead(r.Resolve()));
+        return *this;
+    }
+
+	RenderPassBuilder& WithConstantBuffer(IResourceResolver r)& {
+        (addConstantBuffer(r.Resolve()));
+        return *this;
+	}
+
+    RenderPassBuilder& WithUnorderedAccess(IResourceResolver r)& {
+        (addUnorderedAccess(r.Resolve()));
+        return *this;
+	}
+
+    RenderPassBuilder& WithCopyDest(IResourceResolver r)& {
+        (addCopyDest(r.Resolve()));
+        return *this;
+    }
+
+    RenderPassBuilder& WithCopySource(IResourceResolver r)& {
+        (addCopySource(r.Resolve()));
+        return *this;
+    }
+
+    RenderPassBuilder& WithIndirectArguments(IResourceResolver r)& {
+        (addIndirectArguments(r.Resolve()));
+        return *this;
+	}
+
+    RenderPassBuilder& WithLegacyInterop(IResourceResolver r)& {
+        (addLegacyInterop(r.Resolve()));
+		return *this;
+	}
+
+	// RVALUE overloads for IResourceResolver
+
+    RenderPassBuilder WithShaderResource(IResourceResolver r)&& {
+        (addShaderResource(r.Resolve()));
+        return std::move(*this);
+	}
+    RenderPassBuilder WithRenderTarget(IResourceResolver r)&& {
+        (addRenderTarget(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithDepthReadWrite(IResourceResolver r)&& {
+        (addDepthReadWrite(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithDepthRead(IResourceResolver r)&& {
+        (addDepthRead(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithConstantBuffer(IResourceResolver r)&& {
+        (addConstantBuffer(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithUnorderedAccess(IResourceResolver r)&& {
+        (addUnorderedAccess(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithCopyDest(IResourceResolver r)&& {
+        (addCopyDest(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithCopySource(IResourceResolver r)&& {
+        (addCopySource(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithIndirectArguments(IResourceResolver r)&& {
+        (addIndirectArguments(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithLegacyInterop(IResourceResolver r)&& {
+        (addLegacyInterop(r.Resolve()));
+        return std::move(*this);
+	}
+
 	RenderPassBuilder& IsGeometryPass()& {
 		params.isGeometryPass = true;
 		return *this;
@@ -897,6 +992,55 @@ public:
         ResourceState exitState) &&
     {
 		addInternalTransition(rar, exitState);
+        return std::move(*this);
+    }
+
+    // LVALUE overloads for IResourceResolver
+    ComputePassBuilder& WithShaderResource(IResourceResolver r)& {
+        (addShaderResource(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithConstantBuffer(IResourceResolver r)& {
+        (addConstantBuffer(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithUnorderedAccess(IResourceResolver r)& {
+        (addUnorderedAccess(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithIndirectArguments(IResourceResolver r)& {
+        (addIndirectArguments(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithLegacyInterop(IResourceResolver r)& {
+        (addLegacyInterop(r.Resolve()));
+        return *this;
+    }
+
+    // RVALUE overloads for IResourceResolver
+
+    ComputePassBuilder WithShaderResource(IResourceResolver r)&& {
+        (addShaderResource(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithConstantBuffer(IResourceResolver r)&& {
+        (addConstantBuffer(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithUnorderedAccess(IResourceResolver r)&& {
+        (addUnorderedAccess(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithIndirectArguments(IResourceResolver r)&& {
+        (addIndirectArguments(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithLegacyInterop(IResourceResolver r)&& {
+        (addLegacyInterop(r.Resolve()));
         return std::move(*this);
     }
 

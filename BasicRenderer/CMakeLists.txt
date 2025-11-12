@@ -34,42 +34,6 @@ target_link_libraries(resource_codegen
     fmt::fmt
 )
 
-target_include_directories(resource_codegen
-    PRIVATE
-    refl-cpp::refl-cpp
-)
-
-set(GENERATED_DIR  "${CMAKE_SOURCE_DIR}/BasicRenderer/generated")
-set(GENERATED_SHADER_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated")
-set(GENERATED_HDR  "${GENERATED_DIR}/BuiltinResources.h")
-set(GENERATED_HLSL "${GENERATED_SHADER_DIR}/BuiltinResources.hlsli")
-
-# ensure the output directory exists
-file(MAKE_DIRECTORY "${GENERATED_DIR}")
-file(MAKE_DIRECTORY "${GENERATED_SHADER_DIR}")
-set(CMAKE_VERBOSE_MAKEFILE ON)
-add_custom_command(
-  OUTPUT "${GENERATED_HDR}"
-  COMMAND resource_codegen
-          "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
-          "${GENERATED_HDR}"
-          "${GENERATED_HLSL}"
-  DEPENDS resource_codegen
-          "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
-  COMMENT "Regenerating BuiltinResources.h from BuiltinResources.h.json"
-  VERBATIM
-  USES_TERMINAL
-)
-
-set_target_properties(resource_codegen PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-)
-
-add_custom_target(GenerateBuiltinResources
-  DEPENDS "${GENERATED_HDR}"
-)
-
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
@@ -77,12 +41,101 @@ if (CMAKE_VERSION VERSION_GREATER 3.14)
   set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 endif()
 
-# pend on the generated header in the BasicRenderer target
-add_dependencies(${PROJECT_NAME} GenerateBuiltinResources)
+# br_generate_header(
+#   TARGET <target to depend on>
+#   NAME   <BaseName>                      # e.g. BuiltinResources (no extension)
+#   JSON   <path/to/Generator.json>
+#   OUT_DIR            <dir for .h>        # default: ${CMAKE_SOURCE_DIR}/BasicRenderer/generated
+#   SHADER_OUT_DIR     <dir for .hlsli>    # default: ${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated
+#   CODEGEN_TARGET     <target name>       # default: resource_codegen
+#   NO_HLSL                                # optional: don't generate .hlsli
+# )
 
-target_include_directories(${PROJECT_NAME}
-  PRIVATE
-    "${GENERATED_DIR}"
+set_target_properties(resource_codegen PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON )
+
+function(br_generate_header)
+  set(options NO_HLSL)
+  set(oneValueArgs TARGET NAME JSON OUT_DIR SHADER_OUT_DIR CODEGEN_TARGET)
+  cmake_parse_arguments(BRG "${options}" "${oneValueArgs}" "" ${ARGV})
+
+  if(NOT BRG_TARGET) 
+  message(FATAL_ERROR "br_generate_header: TARGET is required") 
+  endif()
+  if(NOT BRG_NAME)   
+  message(FATAL_ERROR "br_generate_header: NAME is required")   
+  endif()
+  if(NOT BRG_JSON)   
+  message(FATAL_ERROR "br_generate_header: JSON is required")   
+  endif()
+
+  # Defaults (match your existing layout)
+  if(NOT BRG_OUT_DIR)
+    set(BRG_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/generated")
+  endif()
+  if(NOT BRG_SHADER_OUT_DIR)
+    set(BRG_SHADER_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated")
+  endif()
+  if(NOT BRG_CODEGEN_TARGET)
+    set(BRG_CODEGEN_TARGET resource_codegen)
+  endif()
+
+  # Paths
+  set(_hdr "${BRG_OUT_DIR}/${BRG_NAME}.h")
+  if(NOT BRG_NO_HLSL)
+    set(_hlsli "${BRG_SHADER_OUT_DIR}/${BRG_NAME}.hlsli")
+  endif()
+
+  # Ensure output dirs exist at configure time (nice when building in a fresh tree)
+  file(MAKE_DIRECTORY "${BRG_OUT_DIR}")
+  if(_hlsli)
+    file(MAKE_DIRECTORY "${BRG_SHADER_OUT_DIR}")
+  endif()
+
+  # Build the command and outputs
+  set(_outputs "${_hdr}")
+  if(_hlsli)
+    list(APPEND _outputs "${_hlsli}")
+  endif()
+
+  # Use the built codegen executable path; also depend on the target + json
+  add_custom_command(
+    OUTPUT ${_outputs}
+    COMMAND $<TARGET_FILE:${BRG_CODEGEN_TARGET}>
+            "${BRG_JSON}"
+            "${_hdr}"
+            "$<IF:$<BOOL:${_hlsli}>,${_hlsli},>"
+    DEPENDS ${BRG_CODEGEN_TARGET} "${BRG_JSON}"
+    COMMENT "Generating ${BRG_NAME} from ${BRG_JSON}"
+    VERBATIM
+    USES_TERMINAL
+  )
+
+  # A named custom target to group the generation step
+  set(_gen_target "Generate_${BRG_NAME}")
+  add_custom_target(${_gen_target} DEPENDS ${_outputs})
+
+  # Hook into the consuming target and include path
+  add_dependencies(${BRG_TARGET} ${_gen_target})
+  target_include_directories(${BRG_TARGET} PRIVATE "${BRG_OUT_DIR}")
+
+endfunction()
+
+br_generate_header(
+  TARGET ${PROJECT_NAME}
+  NAME   BuiltinResources
+  JSON   "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
+  OUT_DIR        "${CMAKE_SOURCE_DIR}/BasicRenderer/generated"
+  SHADER_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated"
+  NO_HLSL
+)
+
+br_generate_header(
+  TARGET ${PROJECT_NAME}
+  NAME   BuiltinRenderPasses
+  JSON   "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinRenderPasses.h.json"
+  OUT_DIR        "${CMAKE_SOURCE_DIR}/BasicRenderer/generated"
+  SHADER_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated"
+  NO_HLSL
 )
 
 #set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi") # For MSVC

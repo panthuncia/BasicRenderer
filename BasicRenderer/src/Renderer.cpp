@@ -39,7 +39,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "RenderPasses/ClusterGenerationPass.h"
 #include "RenderPasses/LightCullingPass.h"
-#include "RenderPasses/ZPrepass.h"
+#include "RenderPasses/GBuffer.h"
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
@@ -189,7 +189,12 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	world.add<Components::GlobalMeshLibrary>();
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
-	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
+    world.set<Components::DrawStats>({ 0, {} });
+
+	// Register render pass entities- for resource access queries, will be passed to render graph
+	// TODO: Is there a better way to do this? This creates a dependancy on flecs in RenderGraph and Render/Compute passes
+	m_renderPhaseEntities[Engine::Primary::ForwardPass] = world.entity(Engine::Primary::ForwardPass);
+
 	auto res = settingsManager.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
     m_hierarchySystem =
@@ -486,23 +491,7 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 	// Re-add them to the mesh manager
 	for (auto& meshPair : meshLibrary) {
 		auto& mesh = meshPair.second;
-        MaterialBuckets bucket = {};
-        switch (mesh->material->GetBlendState()) {
-        case BlendState::BLEND_STATE_OPAQUE:
-			bucket = MaterialBuckets::Opaque;
-			break;
-		case BlendState::BLEND_STATE_MASK:
-			bucket = MaterialBuckets::AlphaTest;
-			break;
-		case BlendState::BLEND_STATE_BLEND:
-			bucket = MaterialBuckets::Blend;
-			break;
-        case BlendState::BLEND_STATE_UNKNOWN:
-            spdlog::warn("Unknown blend state for mesh, defaulting to opaque");
-            bucket = MaterialBuckets::Opaque; // Default to opaque if unknown
-			break;
-        }
-        m_pMeshManager->AddMesh(mesh, bucket, useMeshShaders);
+        m_pMeshManager->AddMesh(mesh, useMeshShaders);
 	}
 
 	// Get all active objects with mesh instances by querying the ECS
@@ -511,24 +500,10 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 
     world.defer_begin();
     query.each([&](flecs::entity entity, const Components::RenderableObject& object, const Components::ObjectDrawInfo& drawInfo) {
-        auto opaqueMeshInstances = entity.try_get<Components::OpaqueMeshInstances>();
-        auto alphaTestMeshInstances = entity.try_get<Components::AlphaTestMeshInstances>();
-        auto blendMeshInstances = entity.try_get<Components::BlendMeshInstances>();
+        auto meshInstances = entity.try_get<Components::MeshInstances>();
 
-        if (opaqueMeshInstances) {
-            for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
-                m_pMeshManager->RemoveMeshInstance(meshInstance.get());
-                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
-            }
-        }
-        if (alphaTestMeshInstances) {
-            for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
-                m_pMeshManager->RemoveMeshInstance(meshInstance.get());
-                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
-            }
-        }
-        if (blendMeshInstances) {
-            for (auto& meshInstance : blendMeshInstances->meshInstances) {
+        if (meshInstances) {
+            for (auto& meshInstance : meshInstances->meshInstances) {
                 m_pMeshManager->RemoveMeshInstance(meshInstance.get());
                 m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
             }
@@ -536,7 +511,7 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 
 		// Remove and re-add all objects from the object manager to rebuild indirect draw info
 		m_pObjectManager->RemoveObject(&drawInfo);
-		auto newDrawInfo = m_pObjectManager->AddObject(object.perObjectCB, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
+		auto newDrawInfo = m_pObjectManager->AddObject(object.perObjectCB, meshInstances);
 		entity.set<Components::ObjectDrawInfo>(newDrawInfo);
             });
     world.defer_end();
@@ -1175,6 +1150,7 @@ void Renderer::CreateRenderGraph() {
 			.Build<DebugSpherePass>();
     }
 
+    newGraph->RegisterECSRenderPhaseEntities();
     newGraph->Compile();
     newGraph->Setup();
 

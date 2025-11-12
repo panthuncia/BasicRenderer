@@ -8,9 +8,11 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 #include "Resources/Buffers/BufferView.h"
 #include "ShaderBuffers.h"
+#include "Materials/TechniqueDescriptor.h"
 
 class MeshInstance;
 class DynamicGloballyIndexedResource;
@@ -117,12 +119,11 @@ namespace Components {
 	struct IndirectDrawInfo {
 		std::vector<unsigned int> indices;
 		std::vector<std::shared_ptr<BufferView>> views;
+		std::vector<MaterialCompileFlags> materialTechniques;
 	};
 
 	struct ObjectDrawInfo {
-		std::optional<IndirectDrawInfo> opaque;
-		std::optional<IndirectDrawInfo> alphaTest;
-		std::optional<IndirectDrawInfo> blend;
+		IndirectDrawInfo drawInfo;
 		std::shared_ptr<BufferView> perObjectCBView;
 		uint32_t perObjectCBIndex;
 		std::shared_ptr<BufferView> normalMatrixView;
@@ -174,9 +175,7 @@ namespace Components {
 
 	struct DrawStats {
 		uint32_t numDrawsInScene = 0;
-		uint32_t numOpaqueDraws = 0;
-		uint32_t numAlphaTestDraws = 0;
-		uint32_t numBlendDraws = 0;
+		std::unordered_map<MaterialCompileFlags, uint32_t> numDrawsPerTechnique;
 	};
 
 	struct Skinned {};
@@ -229,27 +228,12 @@ namespace Components {
 		std::vector<BufferView> drawSetCommandViews;
 	};
 
-	struct OpaqueMeshInstances {
-		OpaqueMeshInstances() = default;
-		OpaqueMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
+	struct MeshInstances {
+		MeshInstances() = default;
+		MeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
 			: meshInstances(std::move(meshInstances)) {
 		}
 		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
 	};
 
-	struct AlphaTestMeshInstances {
-		AlphaTestMeshInstances() = default;
-		AlphaTestMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
-			: meshInstances(std::move(meshInstances)) {
-		}
-		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
-	};
-
-	struct BlendMeshInstances {
-		BlendMeshInstances() = default;
-		BlendMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
-			: meshInstances(std::move(meshInstances)) {
-		}
-		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
-	};
 }; // namespace Components

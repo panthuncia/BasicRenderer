@@ -22,7 +22,7 @@ public:
 	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
-	void AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, bool useMeshletReorderedVertices);
+	void AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices);
 	void AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices);
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);

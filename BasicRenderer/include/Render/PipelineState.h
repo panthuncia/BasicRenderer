@@ -37,12 +37,3 @@ private:
 	std::unordered_map<std::string, unsigned int> m_resourceSlots;
 	PipelineResources m_pipelineResources; // Descriptor slots are always 0->n, mandatory first, then optional
 };
-
-struct PSOKey {
-	uint64_t rootSigId;
-	uint64_t shaderProgramId; // compiled with feature defines for this family variant
-	uint32_t rasterDepthBlendBits;
-	uint32_t rtFormatBits;
-	bool operator==(const PSOKey&) const = default;
-};
-struct PSOKeyHash { size_t operator()(PSOKey const& k) const noexcept { return util::hash_mix(k); } };

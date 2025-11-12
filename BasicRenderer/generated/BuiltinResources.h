@@ -1,16 +1,10 @@
 #pragma once
 
 #include <string_view>
-#include <refl.hpp>
-
 // GENERATED CODE — DO NOT EDIT
 
 struct Builtin {
-  struct ActiveDrawSetIndices {
-    inline static constexpr std::string_view AlphaTest = "Builtin::ActiveDrawSetIndices::AlphaTest";
-    inline static constexpr std::string_view Blend = "Builtin::ActiveDrawSetIndices::Blend";
-    inline static constexpr std::string_view Opaque = "Builtin::ActiveDrawSetIndices::Opaque";
-  };
+  inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
   inline static constexpr std::string_view CameraBuffer = "Builtin::CameraBuffer";
   struct Color {
@@ -41,11 +35,9 @@ struct Builtin {
     inline static constexpr std::string_view WorkingEdges = "Builtin::GTAO::WorkingEdges";
   };
   struct IndirectCommandBuffers {
-    inline static constexpr std::string_view AlphaTest = "Builtin::IndirectCommandBuffers::AlphaTest";
-    inline static constexpr std::string_view Blend = "Builtin::IndirectCommandBuffers::Blend";
     inline static constexpr std::string_view Master = "Builtin::IndirectCommandBuffers::Master";
     inline static constexpr std::string_view MeshletCulling = "Builtin::IndirectCommandBuffers::MeshletCulling";
-    inline static constexpr std::string_view Opaque = "Builtin::IndirectCommandBuffers::Opaque";
+    inline static constexpr std::string_view Primary = "Builtin::IndirectCommandBuffers::Primary";
   };
   struct Light {
     inline static constexpr std::string_view ActiveLightIndices = "Builtin::Light::ActiveLightIndices";
@@ -88,11 +80,9 @@ struct Builtin {
   struct PrimaryCamera {
     inline static constexpr std::string_view DepthTexture = "Builtin::PrimaryCamera::DepthTexture";
     struct IndirectCommandBuffers {
-      inline static constexpr std::string_view AlphaTest = "Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest";
-      inline static constexpr std::string_view Blend = "Builtin::PrimaryCamera::IndirectCommandBuffers::Blend";
       inline static constexpr std::string_view MeshletCulling = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling";
       inline static constexpr std::string_view MeshletCullingReset = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset";
-      inline static constexpr std::string_view Opaque = "Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque";
+      inline static constexpr std::string_view Primary = "Builtin::PrimaryCamera::IndirectCommandBuffers::Primary";
     };
     inline static constexpr std::string_view LinearDepthMap = "Builtin::PrimaryCamera::LinearDepthMap";
     inline static constexpr std::string_view MeshletBitfield = "Builtin::PrimaryCamera::MeshletBitfield";
@@ -104,46 +94,3 @@ struct Builtin {
   };
 };
 
-// refl-cpp registration
-REFL_AUTO(
-  type(Builtin)
-);
-REFL_AUTO(
-  type(Builtin::ActiveDrawSetIndices)
-);
-REFL_AUTO(
-  type(Builtin::Color)
-);
-REFL_AUTO(
-  type(Builtin::Environment)
-);
-REFL_AUTO(
-  type(Builtin::GBuffer)
-);
-REFL_AUTO(
-  type(Builtin::GTAO)
-);
-REFL_AUTO(
-  type(Builtin::IndirectCommandBuffers)
-);
-REFL_AUTO(
-  type(Builtin::Light)
-);
-REFL_AUTO(
-  type(Builtin::MeshResources)
-);
-REFL_AUTO(
-  type(Builtin::PPLL)
-);
-REFL_AUTO(
-  type(Builtin::PostProcessing)
-);
-REFL_AUTO(
-  type(Builtin::PrimaryCamera)
-);
-REFL_AUTO(
-  type(Builtin::PrimaryCamera::IndirectCommandBuffers)
-);
-REFL_AUTO(
-  type(Builtin::Shadows)
-);

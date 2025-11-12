@@ -18,7 +18,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
-class ZPrepass : public RenderPass {
+class GBufferPass : public RenderPass {
 public:
     ZPrepass(
         bool wireframe,
@@ -37,7 +37,7 @@ public:
         m_deferred = settingsManager.getSettingGetter<bool>("enableDeferredRendering")();
     }
 
-    ~ZPrepass() {
+    ~GBufferPass() {
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {

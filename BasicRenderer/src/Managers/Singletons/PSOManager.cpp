@@ -8,6 +8,7 @@
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "Materials/TechniqueDescriptor.h"
 
 #pragma comment(lib, "dxcompiler.lib")
 
@@ -35,66 +36,66 @@ void PSOManager::initialize() {
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(pCompiler.GetAddressOf()));
 }
 
-const PipelineState& PSOManager::GetPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_psoCache.find(key) == m_psoCache.end()) {
-        m_psoCache[key] = CreatePSO(psoFlags, blendState, wireframe);
+        m_psoCache[key] = CreatePSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_psoCache[key];
 }
 
-const PipelineState& PSOManager::GetShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_shadowPSOCache.find(key) == m_shadowPSOCache.end()) {
-        m_shadowPSOCache[key] = CreateShadowPSO(psoFlags, blendState, wireframe);
+        m_shadowPSOCache[key] = CreateShadowPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_shadowPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetShadowMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetShadowMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_shadowMeshPSOCache.find(key) == m_shadowMeshPSOCache.end()) {
-        m_shadowMeshPSOCache[key] = CreateShadowMeshPSO(psoFlags, blendState, wireframe);
+        m_shadowMeshPSOCache[key] = CreateShadowMeshPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_shadowMeshPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_prePassPSOCache.find(key) == m_prePassPSOCache.end()) {
-        m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, blendState, wireframe);
+        m_prePassPSOCache[key] = CreatePrePassPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_prePassPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetMeshPrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetMeshPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_meshPrePassPSOCache.find(key) == m_meshPrePassPSOCache.end()) {
-        m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, blendState, wireframe);
+        m_meshPrePassPSOCache[key] = CreateMeshPrePassPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_meshPrePassPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_PPLLPSOCache.find(key) == m_PPLLPSOCache.end()) {
-        m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, blendState, wireframe);
+        m_PPLLPSOCache[key] = CreatePPLLPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_PPLLPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetMeshPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_meshPSOCache.find(key) == m_meshPSOCache.end()) {
-        m_meshPSOCache[key] = CreateMeshPSO(psoFlags, blendState, wireframe);
+        m_meshPSOCache[key] = CreateMeshPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_meshPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetMeshPPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe) {
-    PSOKey key(psoFlags, blendState, wireframe);
+const PipelineState& PSOManager::GetMeshPPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_meshPPLLPSOCache.find(key) == m_meshPPLLPSOCache.end()) {
-        m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, blendState, wireframe);
+        m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_meshPPLLPSOCache[key];
 }
@@ -106,7 +107,7 @@ const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
     return m_deferredPSOCache[psoFlags];
 }
 
-PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool wireframe)
+PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags);
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
@@ -133,7 +134,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool w
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend soBlend{ rhiBlend };
 
     // Depth: Equal, no writes
@@ -177,7 +178,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, BlendState blendState, bool w
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
-PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, bool wireframe)
+PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags);
 
@@ -205,7 +206,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, 
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend soBlend{ rhiBlend };
 
     rhi::DepthStencilState ds{};
@@ -241,7 +242,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, BlendState blendState, 
 }
 
 
-PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState, bool wireframe)
+PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
@@ -269,7 +270,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState,
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend soBlend{ rhiBlend };
 
     rhi::DepthStencilState ds{}; // defaults: depth test on, write on, LessEqual
@@ -317,7 +318,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, BlendState blendState,
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
-PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bool wireframe)
+PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags);
 
@@ -345,7 +346,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bo
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend soBlend{ rhiBlend };
 
     rhi::DepthStencilState ds{};
@@ -385,7 +386,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, BlendState blendState, bo
 }
 
 PipelineState PSOManager::CreateMeshPSO(
-    UINT psoFlags, BlendState blendState, bool wireframe)
+    UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags);
 
@@ -417,7 +418,7 @@ PipelineState PSOManager::CreateMeshPSO(
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend soBlend{ rhiBlend };
 
     rhi::DepthStencilState ds{};
@@ -462,7 +463,7 @@ PipelineState PSOManager::CreateMeshPSO(
 }
 
 PipelineState PSOManager::CreateShadowMeshPSO(
-    UINT psoFlags, BlendState blendState, bool wireframe)
+    UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
     auto defines = GetShaderDefines(psoFlags);
 
@@ -494,7 +495,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend soBlend{ rhiBlend };
 
 
@@ -533,7 +534,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
 }
 
 PipelineState PSOManager::CreateMeshPrePassPSO(
-    UINT psoFlags, BlendState blendState, bool wireframe) {
+    UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
 
     Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
@@ -563,7 +564,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::BlendState rhiBlend = GetBlendDesc(blendState);
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend soBlend{ rhiBlend };
 
     rhi::DepthStencilState ds{};
@@ -613,7 +614,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
 }
 
 PipelineState PSOManager::CreateMeshPPLLPSO(
-    UINT psoFlags, BlendState blendState, bool wireframe) {
+    UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     // Define shader macros
     auto defines = GetShaderDefines(psoFlags);
 
@@ -645,7 +646,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     rs.frontCCW = true;
     rhi::SubobjRaster    soRaster{ rs };
 
-    rhi::BlendState      bs = GetBlendDesc(blendState); // trivial mapping helper
+    rhi::BlendState      bs = GetBlendDesc(materialCompileFlags);
     rhi::SubobjBlend     soBlend{ bs };
 
     rhi::DepthStencilState ds{};
@@ -657,7 +658,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     rhi::RenderTargets   rts{};
     if (psoFlags & PSO_DEFERRED) {
         rts.count = 6;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;       // map your DXGI formats
+        rts.formats[0] = rhi::Format::R32G32B32A32_Float;
         rts.formats[1] = rhi::Format::R16G16_Float;
         rts.formats[2] = rhi::Format::R32_Float;
         rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;
@@ -1861,9 +1862,9 @@ void PSOManager::ReloadShaders() {
     m_prePassPSOCache.clear();
 }
 
-rhi::BlendState PSOManager::GetBlendDesc(BlendState blendState) {
-    switch (blendState) {
-    case BlendState::BLEND_STATE_OPAQUE: {
+rhi::BlendState PSOManager::GetBlendDesc(MaterialCompileFlags materialCompileFlags) {
+
+    if (!materialCompileFlags & MaterialCompileAlphaTest && !materialCompileFlags & MaterialCompileBlend) {
         rhi::BlendState opaqueBlendDesc = {};
         opaqueBlendDesc.alphaToCoverage = FALSE;
         opaqueBlendDesc.independentBlend = FALSE;
@@ -1874,7 +1875,7 @@ rhi::BlendState PSOManager::GetBlendDesc(BlendState blendState) {
         }
         return opaqueBlendDesc;
     }
-    case BlendState::BLEND_STATE_MASK: {
+    if (materialCompileFlags & MaterialCompileAlphaTest) {
         rhi::BlendState maskBlendDesc = {};
         maskBlendDesc.alphaToCoverage = FALSE;
         maskBlendDesc.independentBlend = FALSE;
@@ -1885,7 +1886,7 @@ rhi::BlendState PSOManager::GetBlendDesc(BlendState blendState) {
         }
         return maskBlendDesc;
     }
-    case BlendState::BLEND_STATE_BLEND: {
+    if (materialCompileFlags & MaterialCompileBlend) {
         rhi::BlendState blendBlendDesc = {};
         blendBlendDesc.alphaToCoverage = FALSE;
         blendBlendDesc.independentBlend = FALSE;
@@ -1902,7 +1903,7 @@ rhi::BlendState PSOManager::GetBlendDesc(BlendState blendState) {
         }
         return blendBlendDesc;
     }
-    }
+
     spdlog::warn("Blend state not set, defaulting to opaque");
     rhi::BlendState opaqueBlendDesc = {};
     opaqueBlendDesc.alphaToCoverage = FALSE;
