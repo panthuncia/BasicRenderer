@@ -69,8 +69,8 @@ public:
         if (m_gtaoEnabled) {
             builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
         }
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         if (m_meshShaders) {
+            auto& ecsWorld = ECSManager::GetInstance().GetWorld();
             builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
 				auto forwardPassEntity = m_ecsPhaseEntities[Engine::Primary::ForwardPass];

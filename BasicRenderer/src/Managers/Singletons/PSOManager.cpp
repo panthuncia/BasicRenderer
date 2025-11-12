@@ -1864,7 +1864,7 @@ void PSOManager::ReloadShaders() {
 
 rhi::BlendState PSOManager::GetBlendDesc(MaterialCompileFlags materialCompileFlags) {
 
-    if (!materialCompileFlags & MaterialCompileAlphaTest && !materialCompileFlags & MaterialCompileBlend) {
+    if (!(materialCompileFlags & MaterialCompileAlphaTest) && !(materialCompileFlags & MaterialCompileBlend)) {
         rhi::BlendState opaqueBlendDesc = {};
         opaqueBlendDesc.alphaToCoverage = FALSE;
         opaqueBlendDesc.independentBlend = FALSE;

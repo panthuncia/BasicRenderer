@@ -131,11 +131,7 @@ namespace Components {
 	};
 
 	struct IndirectCommandBuffers {
-		std::shared_ptr<DynamicGloballyIndexedResource> opaqueIndirectCommandBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> alphaTestIndirectCommandBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> blendIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletCullingIndirectCommandBuffer;
-		//std::shared_ptr<DynamicGloballyIndexedResource> meshletOcclusionCullingIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletCullingResetIndirectCommandBuffer;
 	};
 	struct DepthMap {

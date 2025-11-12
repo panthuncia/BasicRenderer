@@ -194,6 +194,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	// Register render pass entities- for resource access queries, will be passed to render graph
 	// TODO: Is there a better way to do this? This creates a dependancy on flecs in RenderGraph and Render/Compute passes
 	m_renderPhaseEntities[Engine::Primary::ForwardPass] = world.entity(Engine::Primary::ForwardPass);
+	m_renderPhaseEntities[Engine::Primary::ShadowMapsPass] = world.entity(Engine::Primary::ShadowMapsPass);
 
 	auto res = settingsManager.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
