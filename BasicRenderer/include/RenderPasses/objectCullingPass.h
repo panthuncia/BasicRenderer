@@ -21,18 +21,23 @@ public:
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) {
+		auto ecsWorld = ECSManager::GetInstance().GetWorld();
+		flecs::query drawSetIndicesQuery = ecsWorld.query_builder<flecs::entity>()
+			.with<Components::IsActiveDrawSetIndices>()
+			.with<Components::ParticipatesInPass>(flecs::Wildcard)
+			.build();
+		flecs::query indirectCommandBuffersQuery = ecsWorld.query_builder<Components::IndirectCommandBuffers>()
+			.with<Components::IsIndirectArguments>()
+			.build();
 		builder->WithShaderResource(Builtin::PerObjectBuffer,
 				Builtin::PerMeshBuffer,
 				Builtin::CameraBuffer,
-				Builtin::IndirectCommandBuffers::Master,
-				Builtin::ActiveDrawSetIndices::Opaque,
-				Builtin::ActiveDrawSetIndices::AlphaTest,
-				Builtin::ActiveDrawSetIndices::Blend)
-			.WithUnorderedAccess(Builtin::IndirectCommandBuffers::Opaque,
-				Builtin::IndirectCommandBuffers::AlphaTest,
-				Builtin::IndirectCommandBuffers::MeshletCulling,
+				Builtin::IndirectCommandBuffers::Master)
+			.WithShaderResource(drawSetIndicesQuery)
+			.WithUnorderedAccess(Builtin::IndirectCommandBuffers::MeshletCulling,
 				Builtin::MeshInstanceMeshletCullingBitfieldGroup,
-				Builtin::MeshInstanceOcclusionCullingBitfieldGroup);
+				Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
+			.WithUnorderedAccess(indirectCommandBuffersQuery);
 	}
 
 	void Setup() override {
@@ -45,12 +50,6 @@ public:
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV(Builtin::PerMeshBuffer);
 		RegisterSRV(Builtin::IndirectCommandBuffers::Master);
-		//RegisterSRV(Builtin::ActiveDrawSetIndices::Opaque);
-		//RegisterSRV(Builtin::ActiveDrawSetIndices::AlphaTest);
-		//RegisterSRV(Builtin::ActiveDrawSetIndices::Blend);
-		m_activeOpaqueDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::Opaque)->GetSRVInfo(0).slot.index;
-		m_activeAlphaTestDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::AlphaTest)->GetSRVInfo(0).slot.index;
-		m_activeBlendDrawSetIndicesBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::ActiveDrawSetIndices::Blend)->GetSRVInfo(0).slot.index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -75,6 +74,21 @@ public:
 		unsigned int cameraIndex = primaryView.cameraBufferIndex;
 
 		bool shadows = getShadowsEnabled();
+		
+		context.indirectCommandBufferManager->ForEachIndirectBuffer([&](uint32_t view,
+			MaterialCompileFlags flags,
+			const IndirectWorkload& wl)
+			{
+				rhi::debug::Scope(commandList, rhi::colors::Cyan, "Opaque");
+				uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(wl.count / 64.0));
+
+				// Which camera are we processing for?
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &);
+
+				// How many draws are we processing?
+				drawRootConstants[MaxDrawIndex] = wl.count - 1;
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, DrawInfoRootSignatureIndex, 0, NumDrawInfoRootConstants, drawRootConstants);
+			});
 		// opaque buffer
 		auto numOpaqueDraws = context.drawStats.numOpaqueDraws;
 		if (numOpaqueDraws > 0) {
@@ -224,10 +238,6 @@ public:
 	}
 
 private:
-
-	int m_activeOpaqueDrawSetIndicesBufferSRVIndex = -1;
-	int m_activeAlphaTestDrawSetIndicesBufferSRVIndex = -1;
-	int m_activeBlendDrawSetIndicesBufferSRVIndex = -1;
 
 	void CreatePSO() {
 		// Compile the compute shader

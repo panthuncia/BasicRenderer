@@ -14,6 +14,35 @@
 class IndirectCommandBufferManager;
 class ResourceGroup;
 
+struct RenderView {
+	uint64_t viewID;
+
+	// Camera core
+	CameraInfo                  cameraInfo;          // authoritative copy
+	std::shared_ptr<BufferView> cameraBufferView;
+	uint32_t                    cameraBufferIndex;
+
+	// Culling / visibility
+	Components::IndirectCommandBuffers indirectCommandBuffers;
+	std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
+	std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
+
+	// Depth
+	std::shared_ptr<PixelBuffer> depthMap;          // optional
+	std::shared_ptr<PixelBuffer> linearDepthMap;    // optional
+
+	// Light / cascade metadata (optional)
+	Components::LightType lightType = Components::LightType::Directional;
+	int cascadeIndex = -1; // -1 for non-directional, 0..N-1 for cascades
+	uint64_t parentLightEntityID = 0; // 0 if primary camera
+
+	// Convenience indexes (avoid recomputation in passes)
+	uint32_t meshInstanceBitfieldSRVIndex = 0;
+	uint32_t occlusionBitfieldSRVIndex = 0;
+	uint32_t meshletBitfieldSRVIndex = 0;
+};
+
 class CameraManager : public IResourceProvider {
 public:
 	static std::unique_ptr<CameraManager> CreateUnique() {

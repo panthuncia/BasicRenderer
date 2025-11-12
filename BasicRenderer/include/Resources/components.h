@@ -14,8 +14,8 @@ namespace Components {
 	};
 	
 	struct IsIndirectArguments {};
+	struct IsActiveDrawSetIndices {};
 
-	struct BelongsToView { };
-
+	struct BelongsToView {};
 	struct ParticipatesInPass {};
 }

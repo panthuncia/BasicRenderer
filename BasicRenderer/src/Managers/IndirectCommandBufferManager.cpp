@@ -195,6 +195,66 @@ IndirectCommandBufferManager::GetBuffersForRenderPhase(uint64_t viewID, const Re
     return out;
 }
 
+std::vector<IndirectBufferEntry>
+IndirectCommandBufferManager::GetAllIndirectBuffers() const {
+    std::vector<IndirectBufferEntry> out;
+    size_t total = 0;
+    for (auto const& [_, perView] : m_viewIDToBuffers) total += perView.buffersByFlags.size();
+    out.reserve(total);
+
+    for (auto const& [viewID, perView] : m_viewIDToBuffers) {
+        for (auto const& [flags, wl] : perView.buffersByFlags) {
+            out.push_back(IndirectBufferEntry{ viewID, flags, wl });
+        }
+    }
+    return out;
+}
+
+std::vector<IndirectBufferEntry>
+IndirectCommandBufferManager::GetIndirectBuffersForRenderPhase(const RenderPhase& phase) const {
+    std::vector<IndirectBufferEntry> out;
+
+    auto pit = m_phaseToFlags.find(phase);
+    if (pit == m_phaseToFlags.end()) return out;
+
+    // Build a set for lookup of relevant flags
+    std::unordered_set<MaterialCompileFlags, MaterialCompileFlagsHash> include(
+        pit->second.begin(), pit->second.end());
+
+    out.reserve(m_viewIDToBuffers.size() * include.size());
+
+    for (auto const& [viewID, perView] : m_viewIDToBuffers) {
+        for (auto const& [flags, wl] : perView.buffersByFlags) {
+            if (include.count(flags)) {
+                out.push_back(IndirectBufferEntry{ viewID, flags, wl });
+            }
+        }
+    }
+    return out;
+}
+
+std::vector<IndirectBufferEntry>
+IndirectCommandBufferManager::GetViewIndirectBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase) const {
+    std::vector<IndirectBufferEntry> out;
+
+    auto vit = m_viewIDToBuffers.find(viewID);
+    if (vit == m_viewIDToBuffers.end()) return out;
+
+    auto pit = m_phaseToFlags.find(phase);
+    if (pit == m_phaseToFlags.end()) return out;
+
+    std::unordered_set<MaterialCompileFlags, MaterialCompileFlagsHash> include(
+        pit->second.begin(), pit->second.end());
+
+    auto const& perView = vit->second;
+    for (auto const& [flags, wl] : perView.buffersByFlags) {
+        if (include.count(flags)) {
+            out.push_back(IndirectBufferEntry{ viewID, flags, wl });
+        }
+    }
+    return out;
+}
+
 // -------------------- IResourceProvider --------------------
 
 std::shared_ptr<Resource> IndirectCommandBufferManager::ProvideResource(ResourceIdentifier const& key) {

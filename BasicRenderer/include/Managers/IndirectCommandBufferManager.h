@@ -31,6 +31,12 @@ struct IndirectWorkload {
     unsigned int count = 0;
 };
 
+struct IndirectBufferEntry {
+    uint64_t viewID;
+    MaterialCompileFlags flags;
+    IndirectWorkload workload;
+};
+
 class IndirectCommandBufferManager : public IResourceProvider {
 public:
     ~IndirectCommandBufferManager();
@@ -65,6 +71,44 @@ public:
     // Order is unspecified; returns empty if none registered.
     std::vector<std::pair<MaterialCompileFlags, IndirectWorkload>>
         GetBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase) const;
+
+    // Get every per-view indirect buffer (all views, all flags)
+    std::vector<IndirectBufferEntry> GetAllIndirectBuffers() const;
+
+    // Filtered: all buffers that participate in a phase (across all views)
+    std::vector<IndirectBufferEntry> GetIndirectBuffersForRenderPhase(const RenderPhase& phase) const;
+
+    // per-view version of phase query, but returning viewID too
+    std::vector<IndirectBufferEntry> GetViewIndirectBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase) const;
+
+	// Iterate over all indirect buffers (all views, all flags):
+    template<class F>
+    void ForEachIndirectBuffer(F&& f) const {
+        for (auto const& [viewID, perView] : m_viewIDToBuffers) {
+            for (auto const& [flags, wl] : perView.buffersByFlags) {
+                std::forward<F>(f)(viewID, flags, wl);
+            }
+        }
+    }
+
+    // Filtered across all views:
+    template<class F>
+    void ForEachIndirectBufferInPhase(const RenderPhase& phase, F&& f) const {
+        auto pit = m_phaseToFlags.find(phase);
+        if (pit == m_phaseToFlags.end()) return;
+
+        std::unordered_set<MaterialCompileFlags, MaterialCompileFlagsHash> include(
+            pit->second.begin(), pit->second.end());
+
+        for (auto const& [viewID, perView] : m_viewIDToBuffers) {
+            for (auto const& [flags, wl] : perView.buffersByFlags) {
+                if (include.count(flags)) {
+                    std::forward<F>(f)(viewID, flags, wl);
+                }
+            }
+        }
+    }
+
 
     // ---- IResourceProvider ---------------------------------------------------
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
@@ -102,7 +146,7 @@ private:
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 
     // ViewID -> buffers
-    std::unordered_map<uint64_t, PerViewBuffers> m_viewIDToBuffers;
+    std::unordered_map<uint32_t, PerViewBuffers> m_viewIDToBuffers;
 
     // Sum of capacities for all flags (used as size for meshlet buffers)
     unsigned int m_totalIndirectCommands = 0;
