@@ -694,17 +694,9 @@ inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
         // Display information specific to RenderableObject, if the node is of that type.
 		if (node.has<Components::RenderableObject>()) {
             // Display meshes
-			auto opaqueMeshInstances = node.try_get<Components::OpaqueMeshInstances>();
-			auto alphaTestMeshInstances = node.try_get<Components::AlphaTestMeshInstances>();
-			auto blendMeshInstances = node.try_get<Components::BlendMeshInstances>();
-			if (opaqueMeshInstances) {
-				ImGui::Text("Opaque Meshes: %d", opaqueMeshInstances->meshInstances.size());
-			}
-			if (alphaTestMeshInstances) {
-                ImGui::Text("Alpha Test Meshes: %d", alphaTestMeshInstances->meshInstances.size());
-			}
-			if (blendMeshInstances) {
-                ImGui::Text("Blend Meshes: %d", blendMeshInstances->meshInstances.size());
+			auto meshInstances = node.try_get<Components::MeshInstances>();
+			if (meshInstances) {
+				ImGui::Text("Meshes: %d", meshInstances->meshInstances.size());
 			}
 
             if (node.has<Components::OpaqueSkinned>() || node.has<Components::AlphaTestSkinned>() || node.has<Components::BlendSkinned>()) {

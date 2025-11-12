@@ -6,5 +6,5 @@
 class IResourceResolver {
 	public:
 	virtual ~IResourceResolver() = default;
-	virtual std::vector<std::shared_ptr<Resource>> Resolve() = 0;
+	virtual std::vector<std::shared_ptr<Resource>> Resolve() const = 0;
 };

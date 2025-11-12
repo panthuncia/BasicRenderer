@@ -12,7 +12,7 @@ public:
 		: m_query(query) {
 	}
 
-	virtual std::vector<std::shared_ptr<Resource>> Resolve() {
+	virtual std::vector<std::shared_ptr<Resource>> Resolve() const  {
 		std::vector<std::shared_ptr<Resource>> resources;
 		m_query.each([&](flecs::entity e) {
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
