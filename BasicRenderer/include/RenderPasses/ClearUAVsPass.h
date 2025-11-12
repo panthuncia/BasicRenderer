@@ -18,10 +18,19 @@ public:
 	ClearIndirectDrawCommandUAVsPass(bool clearBlend) : m_clearBlend(clearBlend) {}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithCopyDest(Builtin::IndirectCommandBuffers::Opaque, 
-			Builtin::IndirectCommandBuffers::AlphaTest);
+		auto ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto blendEntity = m_ecsPhaseEntities[Engine::Primary::OITAccumulationPass];
+		m_nonBlendQuery = ECSResourceResolver(ecsWorld.query_builder<flecs::entity>()
+			.with<Components::IsIndirectArguments>()
+			.without<Components::ParticipatesInPass>(blendEntity)
+			.build());
+		builder->WithCopyDest(m_nonBlendQuery);
 		if (m_clearBlend) {
-			builder->WithCopyDest(Builtin::IndirectCommandBuffers::Blend);
+			m_blendQuery = ECSResourceResolver(ecsWorld.query_builder<flecs::entity>()
+				.with<Components::IsIndirectArguments>()
+				.with<Components::ParticipatesInPass>(blendEntity)
+				.build());
+			builder->WithCopyDest(m_blendQuery);
 		}
 	}
   
@@ -29,10 +38,10 @@ public:
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
-		m_opaqueIndirectCommandBuffer = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::Opaque);
-		m_alphaTestIndirectCommandBuffer = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::AlphaTest);
-		if (m_clearBlend)
-		m_blendIndirectCommandBuffer = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::Blend);
+		m_nonBlendIndirectCommandBuffers = m_nonBlendQuery.ResolveAs<DynamicGloballyIndexedResource>();
+		if (m_clearBlend) {
+			m_blendIndirectCommandBuffers = m_blendQuery.ResolveAs<DynamicGloballyIndexedResource>();
+		}
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -42,30 +51,17 @@ public:
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 
 		// Opaque buffer
-		for (auto& child : m_opaqueIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!resource) continue;
-			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
-			auto apiResource = resource->GetAPIResource();
-			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
-		}
-
-		// Alpha test buffer
-		for (auto& child : m_alphaTestIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!resource) continue;
-			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
-			auto apiResource = resource->GetAPIResource();
+		for (auto& res : m_nonBlendIndirectCommandBuffers) {
+			auto counterOffset = res->GetResource()->GetUAVCounterOffset();
+			auto apiResource = res->GetAPIResource();
 			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
 		}
 
 		// Blend buffer
 		if (!m_clearBlend) return {};
-		for (auto& child : m_blendIndirectCommandBuffer->GetChildren()) {
-			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!resource) continue;
-			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
-			auto apiResource = resource->GetAPIResource();
+		for (auto& res : m_blendIndirectCommandBuffers) {
+			auto counterOffset = res->GetResource()->GetUAVCounterOffset();
+			auto apiResource = res->GetAPIResource();
 			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
 		}
 
@@ -81,9 +77,11 @@ private:
 	flecs::query<Components::LightViewInfo> lightQuery;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
-	std::shared_ptr<ResourceGroup> m_opaqueIndirectCommandBuffer;
-	std::shared_ptr<ResourceGroup> m_alphaTestIndirectCommandBuffer;
-	std::shared_ptr<ResourceGroup> m_blendIndirectCommandBuffer;
+	ECSResourceResolver m_nonBlendQuery;
+	ECSResourceResolver m_blendQuery;
+
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_nonBlendIndirectCommandBuffers;
+	std::vector<std::shared_ptr<DynamicGloballyIndexedResource>> m_blendIndirectCommandBuffers;
 };
 
 class ClearMeshletCullingCommandUAVsPass : public RenderPass {

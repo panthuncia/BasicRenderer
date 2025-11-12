@@ -7,7 +7,7 @@
 
 class ECSResourceResolver : public IResourceResolver {
 public:
-	
+	ECSResourceResolver() = default;
 	ECSResourceResolver(flecs::query<> query)
 		: m_query(query) {
 	}

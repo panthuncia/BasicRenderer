@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <functional>
 
+#include "Interfaces/IResourceResolver.h"
+
 class Resource;
 using OnResourceChangedFn = std::function<void(ResourceIdentifier, std::shared_ptr<Resource>)>;
 
