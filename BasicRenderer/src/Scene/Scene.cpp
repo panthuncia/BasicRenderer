@@ -224,8 +224,8 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 
 	entity.set<Components::Camera> (newCameraInfo);
 
-	auto renderView = m_managerInterface.GetCameraManager()->AddCamera(newCameraInfo.info);
-	entity.set<Components::RenderView>(renderView);
+	auto renderView = m_managerInterface.GetViewManager()->CreateView(newCameraInfo.info, ViewFlags::PrimaryCamera());
+	entity.set<Components::RenderViewRef>({renderView});
 	entity.set<Components::DepthMap>(depth);
 
 	entity.add<Components::PrimaryCamera>();
@@ -382,7 +382,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 
         m_managerInterface.GetIndirectCommandBufferManager()->UnregisterBuffers(m_primaryCamera.id());
 
-		m_managerInterface.GetCameraManager()->RemoveCamera(m_primaryCamera.get<Components::RenderView>());
+		m_managerInterface.GetViewManager()->DestroyView(m_primaryCamera.get<Components::RenderViewRef>().viewID);
     }
 
 	SettingsManager::GetInstance().getSettingSetter<float>("maxShadowDistance")(zFar);

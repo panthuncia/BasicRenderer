@@ -13,6 +13,7 @@
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Scene/Components.h"
 #include "ShaderBuffers.h"
+#include "Managers/IndirectCommandBufferManager.h"
 
 class IndirectCommandBufferManager;
 class ResourceGroup;

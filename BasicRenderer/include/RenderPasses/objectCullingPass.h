@@ -70,9 +70,7 @@ public:
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
 
-		auto& primaryView = context.currentScene->GetPrimaryCamera().get<Components::RenderView>();
 		auto& primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
-		unsigned int cameraIndex = primaryView.cameraBufferIndex;
 
 		bool shadows = getShadowsEnabled();
 		

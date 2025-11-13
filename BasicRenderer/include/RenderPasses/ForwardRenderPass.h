@@ -249,7 +249,7 @@ private:
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 		auto manager = context.indirectCommandBufferManager;
 
-        auto primaryViewID = context.currentScene->GetPrimaryCamera().get<Components::RenderView>().viewID; // TODO: Better way of accessing this?
+        auto primaryViewID = context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID; // TODO: Better way of accessing this?
         auto workloads = manager->GetBuffersForRenderPhase(primaryViewID, Engine::Primary::ForwardPass);
 
 		for (auto& workload : workloads) {

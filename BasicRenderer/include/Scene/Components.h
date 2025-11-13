@@ -142,18 +142,11 @@ namespace Components {
 		std::shared_ptr<PixelBuffer> depthMap;
 		std::shared_ptr<PixelBuffer> linearDepthMap;
 	};
-	struct RenderView {
-		uint32_t viewID;
-		std::shared_ptr<BufferView> cameraBufferView;;
-		uint32_t cameraBufferIndex;
-		IndirectCommandBuffers indirectCommandBuffers;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
-		//DepthMap depthMap;
+	struct RenderViewRef {
+		uint64_t viewID;
 	};
 	struct LightViewInfo {
-		std::vector<RenderView> renderViews;
+		std::vector<uint64_t> viewIDs;
 		std::shared_ptr<BufferView> lightBufferView;
 		uint32_t lightBufferIndex;
 		uint32_t viewInfoBufferIndex;

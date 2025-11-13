@@ -62,7 +62,7 @@ public:
 
 	PassReturn Execute(RenderContext& context) override {
 
-		unsigned int numDraws = context.drawStats.numOpaqueDraws + context.drawStats.numAlphaTestDraws + context.drawStats.numBlendDraws;
+		unsigned int numDraws = context.drawStats.numDrawsInScene;
 
 		if (numDraws == 0) {
 			return {};
@@ -85,7 +85,7 @@ public:
 
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
 
-		unsigned int cameraIndex = context.currentScene->GetPrimaryCamera().get<Components::RenderView>().cameraBufferIndex;
+		unsigned int cameraIndex = context.viewManager->Get(context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
 		// Culling for main camera
@@ -109,15 +109,16 @@ public:
 			commandList.BindPipeline(m_frustrumCullingPSO.GetAPIPipelineState().GetHandle());
 			lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
-				for (auto& view : lightViewInfo.renderViews) {
+				for (auto& viewID : lightViewInfo.viewIDs) {
+					auto view = context.viewManager->Get(viewID);
 
-					cameraIndex = view.cameraBufferIndex;
+					cameraIndex = view->gpu.cameraBufferIndex;
 					commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
-					miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+					miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view->gpu.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 					miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : lightDepth.linearDepthMap->GetSRVInfo(0).slot.index;
 					commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
-					meshletCullingBuffer = view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer;
+					meshletCullingBuffer = view->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer;
 
 					commandList.ExecuteIndirect(
 						commandSignature.GetHandle(),
@@ -137,14 +138,16 @@ public:
 				commandList.BindPipeline(m_clearPSO.GetAPIPipelineState().GetHandle());
 				lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap lightDepth) {
 
-					for (auto& view : lightViewInfo.renderViews) {
+					for (auto& viewID : lightViewInfo.viewIDs) {
 
-						cameraIndex = view.cameraBufferIndex;
+						auto view = context.viewManager->Get(viewID);
+
+						cameraIndex = view->gpu.cameraBufferIndex;
 						commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
-						miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+						miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view->gpu.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 						commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
-						auto meshletCullingClearBuffer = view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
+						auto meshletCullingClearBuffer = view->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
 
 						commandList.ExecuteIndirect(
 							commandSignature.GetHandle(),

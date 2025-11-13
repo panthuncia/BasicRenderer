@@ -140,7 +140,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	}
 
 	if (meshInstanceBufferSize != m_perMeshInstanceBuffers->Size()) {
-		m_pCameraManager->SetNumMeshInstances(static_cast<uint32_t>(m_perMeshInstanceBuffers->Size())); // All render views must be updated
+		m_pViewManager->ResizeInstanceBitfields(static_cast<uint32_t>(m_perMeshInstanceBuffers->Size())); // All render views must be updated
 	}
 
 	size_t meshletBitfieldSize = m_meshletBitfieldBuffer->Size();
@@ -150,7 +150,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 
 	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
-		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
+		m_pViewManager->ResizeMeshletBitfields(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
 	}
 	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
 }
