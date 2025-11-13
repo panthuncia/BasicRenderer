@@ -13,14 +13,13 @@
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
-#include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
 class GBufferPass : public RenderPass {
 public:
-    ZPrepass(
+    GBufferPass(
         bool wireframe,
         bool meshShaders,
         bool indirect,

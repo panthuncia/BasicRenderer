@@ -12,7 +12,7 @@ class MeshInstance;
 class DynamicBuffer;
 class ResourceGroup;
 class BufferView;
-class CameraManager;
+class ViewManager;
 
 // TODO: Find better way of batching these with namespaces
 #define MESH_RESOURCE_IDFENTIFIERS Builtin::MeshResources::MeshletBounds, Builtin::MeshResources::MeshletOffsets, Builtin::MeshResources::MeshletVertexIndices, Builtin::MeshResources::MeshletTriangles
@@ -29,7 +29,7 @@ public:
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
-	void SetCameraManager(CameraManager* cameraManager) { m_pCameraManager = cameraManager; }
+	void SetViewManager(ViewManager* viewManager) { m_pViewManager = viewManager; }
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
@@ -50,6 +50,6 @@ private:
 
 	// Skinned mesh instances
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;
-	
-	CameraManager* m_pCameraManager;
+
+	ViewManager* m_pViewManager;
 };

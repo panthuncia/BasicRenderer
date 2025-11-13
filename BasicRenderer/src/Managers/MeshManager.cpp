@@ -6,7 +6,7 @@
 #include "Resources/Buffers/BufferView.h"
 #include "Mesh/MeshInstance.h"
 #include "Resources/Buffers/DynamicBuffer.h"
-#include "Managers/CameraManager.h"
+#include "Managers/ViewManager.h"
 #include "../../generated/BuiltinResources.h"
 
 MeshManager::MeshManager() {

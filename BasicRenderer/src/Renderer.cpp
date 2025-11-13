@@ -175,14 +175,14 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pMeshManager = MeshManager::CreateUnique();
 	m_pObjectManager = ObjectManager::CreateUnique();
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
-	m_pCameraManager = CameraManager::CreateUnique();
+	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
-	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
-	m_pCameraManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Camera manager needs to make indirect command buffers
-    m_pMeshManager->SetCameraManager(m_pCameraManager.get());
+	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
+	//m_pViewManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
+    m_pMeshManager->SetViewManager(m_pViewManager.get());
 
-	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -264,7 +264,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
 
             auto renderView = entity.get_mut<Components::RenderView>();
-			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(renderView.cameraBufferView.get(), camera.info);
+            m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
         }
 
         if (entity.has<Components::Light>()) {
@@ -761,7 +761,7 @@ void Renderer::Render() {
     m_context.frameFenceValue = m_currentFrameFenceValue;
     m_context.renderResolution = { renderRes.x, renderRes.y };
 	m_context.outputResolution = { outputRes.x, outputRes.y };
-	m_context.cameraManager = m_pCameraManager.get();
+	m_context.viewManager = m_pViewManager.get();
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
@@ -888,7 +888,7 @@ void Renderer::Cleanup() {
     currentRenderGraph.reset();
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
-	m_pCameraManager.reset();
+	m_pViewManager.reset();
 	m_pLightManager.reset();
 	m_pMeshManager.reset();
 	m_pObjectManager.reset();
@@ -1031,7 +1031,7 @@ void Renderer::CreateRenderGraph() {
 	std::shared_ptr<RenderGraph> newGraph = std::make_shared<RenderGraph>();
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
-    newGraph->RegisterProvider(m_pCameraManager.get());
+    newGraph->RegisterProvider(m_pViewManager.get());
     newGraph->RegisterProvider(m_pLightManager.get());
     newGraph->RegisterProvider(m_pEnvironmentManager.get());
     newGraph->RegisterProvider(m_pIndirectCommandBufferManager.get());
@@ -1044,9 +1044,6 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
 
     auto& view = currentScene->GetPrimaryCamera().get<Components::RenderView>();
-    newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view.indirectCommandBuffers.opaqueIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view.indirectCommandBuffers.alphaTestIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view.indirectCommandBuffers.blendIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
     //newGraph->AddResource(depthTexture, false);
@@ -1151,7 +1148,7 @@ void Renderer::CreateRenderGraph() {
 			.Build<DebugSpherePass>();
     }
 
-    newGraph->RegisterECSRenderPhaseEntities();
+    newGraph->RegisterECSRenderPhaseEntities(m_renderPhaseEntities);
     newGraph->Compile();
     newGraph->Setup();
 

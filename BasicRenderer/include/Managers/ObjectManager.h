@@ -31,6 +31,14 @@ public:
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
+	std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(MaterialCompileFlags flags) {
+		auto it = m_activeDrawSetIndices.find(flags);
+		if (it != m_activeDrawSetIndices.end()) {
+			return it->second;
+		} else {
+			throw std::runtime_error("Active draw set indices for given flags not found");
+		}
+	}
 
 private:
 	ObjectManager();

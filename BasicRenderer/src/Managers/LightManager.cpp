@@ -8,7 +8,7 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Materials/MaterialBuckets.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "Managers/CameraManager.h"
+#include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Utilities/MathUtils.h"
 #include "ShaderBuffers.h"

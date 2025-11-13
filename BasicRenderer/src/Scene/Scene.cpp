@@ -7,7 +7,7 @@
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/CameraManager.h"
+#include "Managers/ViewManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Scene/Components.h"
 #include "Materials/Material.h"
