@@ -168,9 +168,6 @@ namespace Components {
 	};
 
 	struct Skinned {};
-	struct OpaqueSkinned {};
-	struct AlphaTestSkinned {};
-	struct BlendSkinned {};
 	struct SkeletonRoot {}; // Tags the root of a skeleton hierarchy
 
 	struct Active {}; // Represents an active entity in the scene
@@ -190,39 +187,16 @@ namespace Components {
 		std::string name;
 	}; // The name a bone is referenced by in animations that affect it
 
-	struct OpaqueIndirectDrawInfo {
-		OpaqueIndirectDrawInfo() = default;
-		OpaqueIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
-			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
-		}
-		std::vector<unsigned int> drawSetIndices;
-		std::vector<BufferView> drawSetCommandViews;
-	};
-
-	struct AlphaTestIndirectDrawInfo {
-		AlphaTestIndirectDrawInfo() = default;
-		AlphaTestIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
-			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
-		}
-		std::vector<unsigned int> drawSetIndices;
-		std::vector<BufferView> drawSetCommandViews;
-	};
-
-	struct BlendIndirectDrawInfo {
-		BlendIndirectDrawInfo() = default;
-		BlendIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
-			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
-		}
-		std::vector<unsigned int> drawSetIndices;
-		std::vector<BufferView> drawSetCommandViews;
-	};
-
 	struct MeshInstances {
 		MeshInstances() = default;
 		MeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
-			: meshInstances(std::move(meshInstances)) {
+			: meshInstances(std::move(instances)) {
 		}
 		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
+	};
+	struct PerPassMeshes {
+		// Keyed by RenderPhase id hash
+		std::unordered_map<uint64_t, std::vector<std::shared_ptr<MeshInstance>>> meshesByPass;
 	};
 
 }; // namespace Components

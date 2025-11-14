@@ -69,10 +69,10 @@ public:
             builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
         }
         if (m_meshShaders) {
-            auto& ecsWorld = ECSManager::GetInstance().GetWorld();
             builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-				auto forwardPassEntity = m_ecsPhaseEntities[Engine::Primary::ForwardPass];
+                auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+                auto forwardPassEntity = m_ecsPhaseEntities[Engine::Primary::ForwardPass];
 				flecs::query<> indirectQuery = ecsWorld.query_builder<flecs::entity>()
                     .with<Components::IsIndirectArguments>()
 					.with<Components::ParticipatesInPass>(forwardPassEntity) // Query for command lists that participate in this pass
@@ -85,7 +85,10 @@ public:
 
     void Setup() override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+			.with<Components::ParticipatesInPass>(m_ecsPhaseEntities[Engine::Primary::ForwardPass])
+            .cached().cache_kind(flecs::QueryCacheAll)
+            .build();
 
         // Setup resources
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
@@ -192,8 +195,8 @@ private:
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
 
-        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstancesComponent) {
-            auto& meshes = meshInstancesComponent.meshInstances;
+        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
+			auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash]; // Pull out only the meshes for this render phase
 
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
 
@@ -273,7 +276,7 @@ private:
     }
 
 private:
-    flecs::query<Components::ObjectDrawInfo, Components::MeshInstances> m_meshInstancesQuery;
+    flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
@@ -281,6 +284,8 @@ private:
     bool m_gtaoEnabled = true;
     bool m_clusteredLightingEnabled = true;
     bool m_deferred = false;
+
+	RenderPhase m_renderPhase = Engine::Primary::ForwardPass;
 
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;

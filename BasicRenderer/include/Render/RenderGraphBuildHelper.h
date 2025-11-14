@@ -139,7 +139,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     }
 
     graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-        .Build<ZPrepass>(
+        .Build<GBufferPass>(
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -163,7 +163,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     }
 
     graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-        .Build<ZPrepass>(
+        .Build<GBufferPass>(
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -212,7 +212,7 @@ void BuildZPrepass(RenderGraph* graph) {
         clearRTVs = true; // We will not run an earlier pass
     }
     graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-        .Build<ZPrepass>(
+        .Build<GBufferPass>(
         enableWireframe, 
         useMeshShaders,
         indirect, 

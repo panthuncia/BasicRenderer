@@ -267,7 +267,7 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 				}
 			}
 			if (addSkin) {
-				entity.add<Components::OpaqueSkinned>();
+				entity.add<Components::Skinned>();
 			}
 		}
 		});
@@ -300,7 +300,7 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 			auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
 			meshInstances.meshInstances.back()->SetSkeleton(skeleton);
 			AddSkeleton(skeleton);
-			entity.add<Components::OpaqueSkinned>();
+			entity.add<Components::Skinned>();
 		}
 		break;
     }

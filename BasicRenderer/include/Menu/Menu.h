@@ -699,7 +699,7 @@ inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
 				ImGui::Text("Meshes: %d", meshInstances->meshInstances.size());
 			}
 
-            if (node.has<Components::OpaqueSkinned>() || node.has<Components::AlphaTestSkinned>() || node.has<Components::BlendSkinned>()) {
+            if (node.has<Components::Skinned>()) {
                 ImGui::Text("Has Skinned: Yes");
             }
             else {

@@ -65,7 +65,9 @@ public:
     void Setup() override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+			.with<Components::ParticipatesInPass>(m_ecsPhaseEntities[Engine::Primary::ShadowMapsPass])
+            .cached().cache_kind(flecs::QueryCacheAll).build();
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
@@ -143,8 +145,8 @@ private:
 
             // Opaque objects
             
-            m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstancesComponent) {
-                auto& meshes = meshInstancesComponent.meshInstances;
+            m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
+                auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash];
 
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
@@ -264,8 +266,8 @@ private:
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
             // Opaque objects
-            m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstancesComponent) {
-                auto& meshes = meshInstancesComponent.meshInstances;
+            m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
+                auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash];
 
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
@@ -526,7 +528,7 @@ private:
 
 private:
     flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
-    flecs::query<Components::ObjectDrawInfo, Components::MeshInstances> m_meshInstancesQuery;
+    flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
@@ -534,6 +536,8 @@ private:
     bool m_clearDepths;
 
     float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
+
+    RenderPhase m_renderPhase = Engine::Primary::ShadowMapsPass;
 
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<uint16_t()> getShadowResolution;

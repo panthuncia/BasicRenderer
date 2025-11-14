@@ -231,7 +231,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo.normalMatrixView.get(), &normalMat);
         }
 
-        if (entity.has<Components::Camera>() && entity.has<Components::RenderView>()) {
+        if (entity.has<Components::Camera>() && entity.has<Components::RenderViewRef>()) {
             auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
 
             Components::Camera& camera = entity.get_mut<Components::Camera>();
@@ -263,7 +263,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
             camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
 
-            auto renderView = entity.get_mut<Components::RenderView>();
+            auto renderView = entity.get_mut<Components::RenderViewRef>();
             m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
         }
 
@@ -715,7 +715,7 @@ void Renderer::Update(float elapsedSeconds) {
 	world.progress();
 
     auto& camera = currentScene->GetPrimaryCamera();
-    unsigned int cameraIndex = camera.get<Components::RenderView>().cameraBufferIndex;
+    unsigned int cameraIndex = m_pViewManager->Get(camera.get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
 
@@ -1019,7 +1019,10 @@ void Renderer::CreateRenderGraph() {
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
-    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCamera().get<Components::RenderView>().meshletBitfieldBuffer;
+    // TODO: this access pattern is stupid
+    auto primaryCamera = m_pViewManager->Get(
+        currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID);
+    m_coreResourceProvider.m_primaryCameraMeshletBitfield = primaryCamera->gpu.meshletBitfieldBuffer;
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
     // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
@@ -1043,9 +1046,8 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
 
-    auto& view = currentScene->GetPrimaryCamera().get<Components::RenderView>();
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, primaryCamera->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, primaryCamera->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
     //newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();
