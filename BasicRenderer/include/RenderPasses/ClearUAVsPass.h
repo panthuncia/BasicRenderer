@@ -24,13 +24,13 @@ public:
 			.with<Components::IsIndirectArguments>()
 			.without<Components::ParticipatesInPass>(blendEntity)
 			.build());
-		builder->WithCopyDest(m_nonBlendQuery);
+		builder->WithCopyDest(ECSResourceResolver(m_nonBlendQuery));
 		if (m_clearBlend) {
 			m_blendQuery = ECSResourceResolver(ecsWorld.query_builder<flecs::entity>()
 				.with<Components::IsIndirectArguments>()
 				.with<Components::ParticipatesInPass>(blendEntity)
 				.build());
-			builder->WithCopyDest(m_blendQuery);
+			builder->WithCopyDest(ECSResourceResolver(m_blendQuery));
 		}
 	}
   

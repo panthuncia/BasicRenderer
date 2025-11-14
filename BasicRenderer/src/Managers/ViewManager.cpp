@@ -5,6 +5,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/ResourceGroup.h"
 #include "../../generated/BuiltinResources.h"
+#include "Resources/DynamicResource.h"
 
 ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();

@@ -146,7 +146,7 @@ private:
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 
     // ViewID -> buffers
-    std::unordered_map<uint32_t, PerViewBuffers> m_viewIDToBuffers;
+    std::unordered_map<uint64_t, PerViewBuffers> m_viewIDToBuffers;
 
     // Sum of capacities for all flags (used as size for meshlet buffers)
     unsigned int m_totalIndirectCommands = 0;

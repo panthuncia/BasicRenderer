@@ -70,7 +70,7 @@ public:
                     .with<Components::ParticipatesInPass>(gbufferPassEntity) // Query for command lists that participate in this pass
                     .cached().cache_kind(flecs::QueryCacheAll)
                     .build();
-                builder->WithIndirectArguments(indirectQuery);
+                builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
             }
         }
     }
@@ -314,9 +314,8 @@ private:
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
 
-        // Opaque objects
-        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::MeshInstances opaqueMeshes) {
-            auto& meshes = opaqueMeshes.meshInstances;
+        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes perPassMeshes) {
+            auto& meshes = perPassMeshes.meshesByPass[m_renderPhase.hash];
 
 			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 

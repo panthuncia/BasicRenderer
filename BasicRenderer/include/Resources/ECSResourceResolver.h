@@ -8,11 +8,17 @@
 class ECSResourceResolver : public IResourceResolver {
 public:
 	ECSResourceResolver() = default;
+
+	template<typename... Cs>
+	ECSResourceResolver(const flecs::query<Cs...>& query)
+		: m_query(query.c_ptr()) { // use pointer form to avoid ambiguous overload
+	}
+
 	ECSResourceResolver(flecs::query<> query)
 		: m_query(query) {
 	}
 
-	virtual std::vector<std::shared_ptr<Resource>> Resolve() const  {
+	virtual std::vector<std::shared_ptr<Resource>> Resolve() const {
 		std::vector<std::shared_ptr<Resource>> resources;
 		m_query.each([&](flecs::entity e) {
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
@@ -21,6 +27,7 @@ public:
 			auto& res = e.get<Components::Resource>();
 			resources.push_back(res.resource);
 			});
+		return resources;
 	}
 
 protected:

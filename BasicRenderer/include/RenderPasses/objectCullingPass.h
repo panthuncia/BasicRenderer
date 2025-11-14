@@ -34,11 +34,11 @@ public:
 				Builtin::PerMeshBuffer,
 				Builtin::CameraBuffer,
 				Builtin::IndirectCommandBuffers::Master)
-			.WithShaderResource(drawSetIndicesQuery)
+			.WithShaderResource(ECSResourceResolver(drawSetIndicesQuery))
 			.WithUnorderedAccess(Builtin::IndirectCommandBuffers::MeshletCulling,
 				Builtin::MeshInstanceMeshletCullingBitfieldGroup,
 				Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
-			.WithUnorderedAccess(indirectCommandBuffersQuery);
+			.WithUnorderedAccess(ECSResourceResolver(indirectCommandBuffersQuery));
 	}
 
 	void Setup() override {
@@ -74,7 +74,7 @@ public:
 
 		bool shadows = getShadowsEnabled();
 		
-		context.indirectCommandBufferManager->ForEachIndirectBuffer([&](uint32_t view,
+		context.indirectCommandBufferManager->ForEachIndirectBuffer([&](uint64_t view,
 			MaterialCompileFlags flags,
 			const IndirectWorkload& wl)
 			{
