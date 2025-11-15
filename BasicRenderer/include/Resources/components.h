@@ -10,7 +10,7 @@
 namespace Components {
 	
 	struct Resource {
-		std::shared_ptr<::Resource> resource;
+		std::weak_ptr<::Resource> resource;
 	};
 	
 	struct IsIndirectArguments {};

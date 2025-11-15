@@ -19,6 +19,7 @@
 #include "Animation/AnimationController.h"
 #include "Utilities/MathUtils.h"
 #include "Resources/Sampler.h"
+#include "Resources/components.h"
 
 std::atomic<uint64_t> Scene::globalSceneCount = 0;
 
@@ -170,16 +171,30 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 
 			// Update draw stats
-			auto materialCompileFlags = meshInstance->GetMesh()->material->Technique().compileFlags;
-			if (drawStats.numDrawsPerTechnique.find(materialCompileFlags) == drawStats.numDrawsPerTechnique.end()) {
-				drawStats.numDrawsPerTechnique[materialCompileFlags] = 0;
+			auto& technique = meshInstance->GetMesh()->material->Technique();
+			if (drawStats.numDrawsPerTechnique.find(technique.compileFlags) == drawStats.numDrawsPerTechnique.end()) {
+				drawStats.numDrawsPerTechnique[technique.compileFlags] = 0;
 			}
-			drawStats.numDrawsPerTechnique[materialCompileFlags]++; // TODO: Make a better system for managing things that depend on which material objects use, as they may change
+			drawStats.numDrawsPerTechnique[technique.compileFlags]++; // TODO: Make a better system for managing things that depend on which material objects use, as they may change
 			drawStats.numDrawsInScene++;
 
 			// Update indirect draw counts
-			m_managerInterface.GetIndirectCommandBufferManager()->RegisterTechnique(meshInstance->GetMesh()->material->Technique()); // Ensure technique is registered
-			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForFlags(materialCompileFlags, drawStats.numDrawsPerTechnique[materialCompileFlags]);
+			m_managerInterface.GetIndirectCommandBufferManager()->RegisterTechnique(technique); // Ensure technique is registered
+			if (m_ecsRenderPhaseEntities == nullptr) {
+				spdlog::error("No render phase entity map set when activating renderable entity {}", entity.name().c_str());
+				continue;
+			}
+			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForTechnique(technique, drawStats.numDrawsPerTechnique[technique.compileFlags], m_ecsRenderPhaseEntities);
+		
+			// Register material passes in ECS
+			for (auto& pass : technique.passes) {
+				if (!m_ecsRenderPhaseEntities->contains(pass)) {
+					spdlog::warn("Render phase {} not found when activating renderable entity {}", pass.ToString(), entity.name().c_str());
+					continue;
+				}
+				auto passEntity = m_ecsRenderPhaseEntities->at(pass);
+				entity.add<Components::ParticipatesInPass>(passEntity);
+			}
 		}
 	}
 

@@ -1,5 +1,7 @@
 #pragma once
 #include <flecs.h>
+#include <unordered_map>
+
 class ECSManager {
 public:
     static ECSManager& GetInstance();

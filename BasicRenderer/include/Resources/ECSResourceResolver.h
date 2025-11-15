@@ -25,7 +25,8 @@ public:
 			assert(e.has<Components::Resource>() && "Entity does not have Resource component");
 #endif
 			auto& res = e.get<Components::Resource>();
-			resources.push_back(res.resource);
+			auto shared = res.resource.lock();
+			resources.push_back(shared);
 			});
 		return resources;
 	}

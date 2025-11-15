@@ -47,8 +47,9 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	}
 
     // Upload initial data if any
-    if (!initialData.empty())
-        rm.UploadTextureData(m_texture.Get(), desc, initialData, m_arraySize, m_mipLevels);
+	if (!initialData.empty()) {
+		rm.UploadTextureData(m_texture.Get(), desc, initialData, m_mipLevels);
+	}
 
     size_t subCount = m_mipLevels * m_arraySize;
 

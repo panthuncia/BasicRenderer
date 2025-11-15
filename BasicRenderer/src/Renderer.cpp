@@ -179,7 +179,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
-	//m_pViewManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
+	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 
 	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
@@ -928,6 +928,7 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	}
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
+	currentScene->SetECSRenderPhaseEntitiesMap(&m_renderPhaseEntities);
     //currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;

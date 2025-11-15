@@ -1,5 +1,7 @@
 #include "Managers/IndirectCommandBufferManager.h"
 
+#include <algorithm>
+
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/ResourceGroup.h"
@@ -9,6 +11,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "../../generated/BuiltinResources.h"
+#include "Resources/Components.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_indirectCommandsResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
@@ -66,18 +69,17 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
     }
 
     // Meshlet culling buffers sized by total commands across all flags
-    if (m_totalIndirectCommands > 0) {
-        auto makeMeshlet = [&](const wchar_t* label) {
-            auto r = ResourceManager::GetInstance()
-                .CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), true, true);
-            r->SetName(std::wstring(label) + L" (view=" + std::to_wstring(viewID) + L")");
-            return std::make_shared<DynamicGloballyIndexedResource>(r);
-            };
-        perView.meshletCullingIndirectCommandBuffer = makeMeshlet(L"MeshletCullingIndirectCommandBuffer");
-        perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet(L"MeshletCullingResetIndirectCommandBuffer");
-        m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingIndirectCommandBuffer);
-        m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingResetIndirectCommandBuffer);
-    }
+
+    auto makeMeshlet = [&](const wchar_t* label) {
+        auto r = ResourceManager::GetInstance()
+            .CreateIndexedStructuredBuffer((std::max)(m_totalIndirectCommands, 1u), sizeof(DispatchIndirectCommand), true, true);
+        r->SetName(std::wstring(label) + L" (view=" + std::to_wstring(viewID) + L")");
+        return std::make_shared<DynamicGloballyIndexedResource>(r);
+        };
+    perView.meshletCullingIndirectCommandBuffer = makeMeshlet(L"MeshletCullingIndirectCommandBuffer");
+    perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet(L"MeshletCullingResetIndirectCommandBuffer");
+    m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingIndirectCommandBuffer);
+    m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingResetIndirectCommandBuffer);
 
     // Store
     m_viewIDToBuffers[viewID] = perView;
@@ -117,14 +119,14 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
     m_viewIDToBuffers.erase(it);
 }
 
-void IndirectCommandBufferManager::UpdateBuffersForFlags(MaterialCompileFlags flags, unsigned int numDraws) {
-    EnsureFlagsRegistered(flags);
+void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws, const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>* ecsPhaseEntities) {
+    EnsureFlagsRegistered(technique.compileFlags);
 
     unsigned int newSize = RoundUp(numDraws);
-    unsigned int& curr = m_flagsToCapacity[flags];
+    unsigned int& curr = m_flagsToCapacity[technique.compileFlags];
 	if (newSize <= curr) { // no grow, just update count
         for (auto& [viewID, perView] : m_viewIDToBuffers) {
-            auto it = perView.buffersByFlags.find(flags);
+            auto it = perView.buffersByFlags.find(technique.compileFlags);
             if (it != perView.buffersByFlags.end()) {
 				it->second.count = numDraws;
             }
@@ -142,13 +144,13 @@ void IndirectCommandBufferManager::UpdateBuffersForFlags(MaterialCompileFlags fl
 
     // Grow this flags buffer for every view
     for (auto& [viewID, perView] : m_viewIDToBuffers) {
-        auto it = perView.buffersByFlags.find(flags);
+        auto it = perView.buffersByFlags.find(technique.compileFlags);
         if (it != perView.buffersByFlags.end()) {
             // Replace existing
             deletion.MarkForDelete(it->second.buffer->GetResource());
             auto res = ResourceManager::GetInstance()
                 .CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-            res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(flags)) +
+            res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
                 L", view=" + std::to_wstring(viewID) + L")");
             it->second.buffer->SetResource(res);
 			it->second.count = numDraws;
@@ -157,12 +159,16 @@ void IndirectCommandBufferManager::UpdateBuffersForFlags(MaterialCompileFlags fl
             // Create new buffer for this view (this flags appeared after the view was created)
             auto res = ResourceManager::GetInstance()
                 .CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-            res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(flags)) +
+            res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
                 L", view=" + std::to_wstring(viewID) + L")");
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
-            perView.buffersByFlags.emplace(flags, dyn);
+            perView.buffersByFlags.emplace(technique.compileFlags, dyn);
             m_indirectCommandsResourceGroup->AddResource(dyn);
-			perView.buffersByFlags[flags].count = numDraws;
+            auto entity = m_indirectCommandsResourceGroup->GetECSEntity();
+            for (auto& pass : technique.passes) {
+				entity.add<Components::ParticipatesInPass>(ecsPhaseEntities->at(pass));
+            }
+			perView.buffersByFlags[technique.compileFlags].count = numDraws;
         }
     }
 
