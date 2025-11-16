@@ -990,7 +990,7 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
 }
 
-void RenderGraph::RegisterECSRenderPhaseEntities(std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities) {
+void RenderGraph::RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities) {
 	m_ecsPhaseEntities = phaseEntities;
 }
 

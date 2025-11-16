@@ -127,8 +127,6 @@ private:
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;
 
-	std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher> m_renderPhaseEntities;
-
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
     FrameTimer m_frameTimer;
 

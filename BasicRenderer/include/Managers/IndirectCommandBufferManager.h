@@ -62,7 +62,7 @@ public:
     // Update the buffer associated with 'flags' to accommodate numDraws.
     // Rounds up to increment size. Triggers per-view reallocation for that flags,
     // and resizes meshlet buffers (sum of all flags sizes).
-    void UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws, const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>* ecsPhaseEntities);
+    void UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws);
 
     // Set growth granularity
     void SetIncrementSize(unsigned int incrementSize);

@@ -143,7 +143,6 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
 }
 
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
-
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
@@ -190,11 +189,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
     world.set<Components::DrawStats>({ 0, {} });
-
-	// Register render pass entities- for resource access queries, will be passed to render graph
-	// TODO: Is there a better way to do this? This creates a dependancy on flecs in RenderGraph and Render/Compute passes
-	m_renderPhaseEntities[Engine::Primary::ForwardPass] = world.entity();
-	m_renderPhaseEntities[Engine::Primary::ShadowMapsPass] = world.entity();
 
 	auto res = settingsManager.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
@@ -928,7 +922,6 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	}
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
-	currentScene->SetECSRenderPhaseEntitiesMap(&m_renderPhaseEntities);
     //currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
 	rebuildRenderGraph = true;
@@ -1151,7 +1144,7 @@ void Renderer::CreateRenderGraph() {
 			.Build<DebugSpherePass>();
     }
 
-    newGraph->RegisterECSRenderPhaseEntities(m_renderPhaseEntities);
+    newGraph->RegisterECSRenderPhaseEntities(ECSManager::GetInstance().GetRenderPhaseEntities());
     newGraph->Compile();
     newGraph->Setup();
 

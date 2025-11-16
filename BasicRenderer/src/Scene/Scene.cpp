@@ -160,6 +160,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 	bool useMeshletReorderedVertices = getMeshShadersEnabled();
 
 	if (meshInstances) {
+		Components::PerPassMeshes perPassMeshes;
 		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
 		for (auto& meshInstance : meshInstances->meshInstances) {
 
@@ -180,21 +181,18 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 
 			// Update indirect draw counts
 			m_managerInterface.GetIndirectCommandBufferManager()->RegisterTechnique(technique); // Ensure technique is registered
-			if (m_ecsRenderPhaseEntities == nullptr) {
-				spdlog::error("No render phase entity map set when activating renderable entity {}", entity.name().c_str());
-				continue;
-			}
-			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForTechnique(technique, drawStats.numDrawsPerTechnique[technique.compileFlags], m_ecsRenderPhaseEntities);
+			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForTechnique(technique, drawStats.numDrawsPerTechnique[technique.compileFlags]);
 		
 			// Register material passes in ECS
 			for (auto& pass : technique.passes) {
-				if (!m_ecsRenderPhaseEntities->contains(pass)) {
-					spdlog::warn("Render phase {} not found when activating renderable entity {}", pass.ToString(), entity.name().c_str());
-					continue;
-				}
-				auto passEntity = m_ecsRenderPhaseEntities->at(pass);
+				auto passEntity = ECSManager::GetInstance().GetRenderPhaseEntity(pass);
 				entity.add<Components::ParticipatesInPass>(passEntity);
+				if (!perPassMeshes.meshesByPass.contains(pass.hash)) {
+					perPassMeshes.meshesByPass[pass.hash] = std::vector<std::shared_ptr<MeshInstance>>();
+				}
+				perPassMeshes.meshesByPass[pass.hash].push_back(meshInstance);
 			}
+			entity.set<Components::PerPassMeshes>(perPassMeshes);
 		}
 	}
 

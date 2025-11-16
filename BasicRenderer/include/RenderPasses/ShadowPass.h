@@ -58,7 +58,10 @@ public:
                 .with<Components::ParticipatesInPass>(shadowPassEntity) // Query for command lists that participate in this pass
                 .cached().cache_kind(flecs::QueryCacheAll)
                 .build();
-            builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
+            builder->WithIndirectArguments(ECSResourceResolver(indirectQuery))
+                .WithShaderResource(Builtin::MeshResources::MeshletOffsets,
+                    Builtin::MeshResources::MeshletVertexIndices,
+                    Builtin::MeshResources::MeshletTriangles);
         }
     }
 

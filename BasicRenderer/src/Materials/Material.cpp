@@ -38,7 +38,7 @@ Material::Material(const std::string& name,
 	std::vector<uint32_t> metallicChannel,
 	std::vector<uint32_t> roughnessChannel,
 	std::vector<uint32_t> emissiveChannels,
-    BlendState blendState,
+    TechniqueDescriptor technique,
     float alphaCutoff)
     : m_name(name),
     m_psoFlags(psoFlags),
@@ -53,7 +53,8 @@ Material::Material(const std::string& name,
     m_metallicFactor(metallicFactor),
     m_roughnessFactor(roughnessFactor),
     m_baseColorFactor(baseColorFactor),
-    m_emissiveFactor(emissiveFactor)
+    m_emissiveFactor(emissiveFactor),
+	m_technique(technique)
 {
     m_materialData.materialFlags = materialFlags;
     m_materialData.ambientStrength = 0.5f;

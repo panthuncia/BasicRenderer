@@ -94,9 +94,7 @@ public:
         if (desc.invertNormalGreen) {
             materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN;
         }
-        if (desc.blendState != BlendState::BLEND_STATE_UNKNOWN) {
-            blendState = desc.blendState; // Use provided blend state
-        }
+		TechniqueDescriptor technique = PickTechnique(desc);
 
         return CreateShared(
             desc.name,
@@ -121,7 +119,7 @@ public:
             desc.metallic.channels,
             desc.roughness.channels,
             desc.emissive.channels,
-            blendState,
+            technique,
             desc.alphaCutoff
         );
     }
@@ -181,7 +179,7 @@ private:
         std::vector<uint32_t> metallicChannel,
         std::vector<uint32_t> roughnessChannel,
         std::vector<uint32_t> emissiveChannels,
-        BlendState blendState,
+		TechniqueDescriptor technique,
         float alphaCutoff);
 
     static std::shared_ptr<Material> CreateShared(const std::string& name,
@@ -205,7 +203,7 @@ private:
         std::vector<uint32_t> metallicChannel,
         std::vector<uint32_t> roughnessChannel,
         std::vector<uint32_t> emissiveChannels,
-        BlendState blendState,
+        TechniqueDescriptor technique,
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
             baseColorTexture, normalTexture, aoMap, heightMap,
@@ -213,7 +211,8 @@ private:
             metallicFactor, roughnessFactor, baseColorFactor, emissiveFactor,
             baseColorChannels, normalChannels, aoChannel, heightChannel,
             metallicChannel, roughnessChannel, emissiveChannels,
-            blendState, alphaCutoff));
+			technique,
+            alphaCutoff));
     }
 
     std::shared_ptr<Buffer> m_perMaterialHandle;

@@ -38,9 +38,6 @@ public:
     void ProcessEntitySkins(bool overrideExistingSkins = false);
     std::shared_ptr<Scene> Clone() const;
 	void DisableShadows();
-    void SetECSRenderPhaseEntitiesMap(std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>* renderPhaseEntitiesMap) {
-        m_ecsRenderPhaseEntities = renderPhaseEntitiesMap;
-	}
 
 private:
     static std::atomic<uint64_t> globalSceneCount;
@@ -67,8 +64,6 @@ private:
 	std::function<bool()> getMeshShadersEnabled;
 
 	SettingsManager::Subscription m_renderResSubscription;
-
-    std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>* m_ecsRenderPhaseEntities = nullptr;
 
     void MakeResident();
 	void MakeNonResident();

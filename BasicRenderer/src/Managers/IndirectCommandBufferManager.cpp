@@ -119,7 +119,7 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
     m_viewIDToBuffers.erase(it);
 }
 
-void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws, const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>* ecsPhaseEntities) {
+void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws) {
     EnsureFlagsRegistered(technique.compileFlags);
 
     unsigned int newSize = RoundUp(numDraws);
@@ -166,7 +166,7 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
             m_indirectCommandsResourceGroup->AddResource(dyn);
             auto entity = m_indirectCommandsResourceGroup->GetECSEntity();
             for (auto& pass : technique.passes) {
-				entity.add<Components::ParticipatesInPass>(ecsPhaseEntities->at(pass));
+				entity.add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(pass));
             }
 			perView.buffersByFlags[technique.compileFlags].count = numDraws;
         }
