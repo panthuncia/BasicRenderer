@@ -72,11 +72,11 @@ public:
             builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
                 auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-                auto forwardPassEntity = m_ecsPhaseEntities[Engine::Primary::ForwardPass];
-				flecs::query<> indirectQuery = ecsWorld.query_builder<flecs::entity>()
+                auto forwardPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass);
+				flecs::query<> indirectQuery = ecsWorld.query_builder<>()
                     .with<Components::IsIndirectArguments>()
 					.with<Components::ParticipatesInPass>(forwardPassEntity) // Query for command lists that participate in this pass
-                    .cached().cache_kind(flecs::QueryCacheAll)
+                    //.cached().cache_kind(flecs::QueryCacheAll)
                     .build();
                 builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
             }
@@ -86,7 +86,7 @@ public:
     void Setup() override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(m_ecsPhaseEntities[Engine::Primary::ForwardPass])
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass))
             .cached().cache_kind(flecs::QueryCacheAll)
             .build();
 

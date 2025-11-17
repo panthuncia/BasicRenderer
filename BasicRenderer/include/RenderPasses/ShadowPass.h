@@ -52,11 +52,11 @@ public:
             .IsGeometryPass();
         if (m_meshShaders) {
             auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-            auto shadowPassEntity = m_ecsPhaseEntities[Engine::Primary::ShadowMapsPass];
-            flecs::query<> indirectQuery = ecsWorld.query_builder<flecs::entity>()
+            auto shadowPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass);
+            flecs::query<> indirectQuery = ecsWorld.query_builder<>()
                 .with<Components::IsIndirectArguments>()
                 .with<Components::ParticipatesInPass>(shadowPassEntity) // Query for command lists that participate in this pass
-                .cached().cache_kind(flecs::QueryCacheAll)
+                //.cached().cache_kind(flecs::QueryCacheAll)
                 .build();
             builder->WithIndirectArguments(ECSResourceResolver(indirectQuery))
                 .WithShaderResource(Builtin::MeshResources::MeshletOffsets,
@@ -69,7 +69,7 @@ public:
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(m_ecsPhaseEntities[Engine::Primary::ShadowMapsPass])
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
             .cached().cache_kind(flecs::QueryCacheAll).build();
 
         RegisterSRV(Builtin::NormalMatrixBuffer);

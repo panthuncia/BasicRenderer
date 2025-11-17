@@ -111,7 +111,7 @@ public:
     const rhi::PipelineLayout& GetRootSignature();
     const rhi::PipelineLayout& GetComputeRootSignature();
     void ReloadShaders();
-    std::vector<DxcDefine> GetShaderDefines(UINT psoFlags);
+    std::vector<DxcDefine> GetShaderDefines(UINT psoFlags, MaterialCompileFlags materialFlags);
 	ShaderBundle CompileShaders(const ShaderInfoBundle& shaderInfoBundle);
     void GetPreprocessedBlob(
         const std::wstring& filename,

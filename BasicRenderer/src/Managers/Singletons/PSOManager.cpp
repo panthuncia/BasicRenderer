@@ -109,7 +109,7 @@ const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
 
 PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
-    auto defines = GetShaderDefines(psoFlags);
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
@@ -130,7 +130,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
@@ -180,7 +180,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
 
 PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
-    auto defines = GetShaderDefines(psoFlags);
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -202,7 +202,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags ma
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
@@ -244,7 +244,7 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags ma
 
 PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
-    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
+    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS, materialCompileFlags);
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -266,7 +266,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
@@ -320,7 +320,7 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
 
 PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
-    auto defines = GetShaderDefines(psoFlags);
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -342,7 +342,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags mate
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
@@ -388,7 +388,7 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags mate
 PipelineState PSOManager::CreateMeshPSO(
     UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
-    auto defines = GetShaderDefines(psoFlags);
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
 
     Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
@@ -414,7 +414,7 @@ PipelineState PSOManager::CreateMeshPSO(
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
@@ -465,7 +465,7 @@ PipelineState PSOManager::CreateMeshPSO(
 PipelineState PSOManager::CreateShadowMeshPSO(
     UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
 {
-    auto defines = GetShaderDefines(psoFlags);
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
 
     Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
@@ -491,7 +491,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
@@ -535,7 +535,7 @@ PipelineState PSOManager::CreateShadowMeshPSO(
 
 PipelineState PSOManager::CreateMeshPrePassPSO(
     UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
-    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS);
+    auto defines = GetShaderDefines(psoFlags | PSO_PREPASS, materialCompileFlags);
 
     Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
@@ -560,7 +560,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
@@ -616,7 +616,7 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
 PipelineState PSOManager::CreateMeshPPLLPSO(
     UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     // Define shader macros
-    auto defines = GetShaderDefines(psoFlags);
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
 
     // Compile shaders
 	Microsoft::WRL::ComPtr<ID3DBlob> amplificationShader;
@@ -642,7 +642,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
 
     rhi::RasterState     rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (psoFlags & PSO_DOUBLE_SIDED) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster    soRaster{ rs };
 
@@ -690,7 +690,7 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
 
 PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
 {
-    auto defines = GetShaderDefines(psoFlags);
+    auto defines = GetShaderDefines(psoFlags, MaterialCompileFlags::MaterialCompileNone);
 
     Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
@@ -803,13 +803,25 @@ PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,
     return out;
 }
 
-std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
+std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompileFlags materialFlags) {
     std::vector<DxcDefine> defines = {};
-    if (psoFlags & PSOFlags::PSO_DOUBLE_SIDED) {
+    if (materialFlags & MaterialCompileFlags::MaterialCompileDoubleSided) {
 		DxcDefine macro;
 		macro.Value = L"1";
 		macro.Name = L"PSO_DOUBLE_SIDED";
 		defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileAlphaTest) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_ALPHA_TEST";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileBlend) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_BLEND";
+        defines.insert(defines.begin(), macro);
     }
     if (psoFlags & PSOFlags::PSO_SHADOW) {
         DxcDefine macro;
@@ -823,18 +835,6 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags) {
         macro.Name = L"PSO_IMAGE_BASED_LIGHTING";
         defines.insert(defines.begin(), macro);
     }
-	if (psoFlags & PSOFlags::PSO_ALPHA_TEST) {
-		DxcDefine macro;
-		macro.Value = L"1";
-		macro.Name = L"PSO_ALPHA_TEST";
-		defines.insert(defines.begin(), macro);
-	}
-	if (psoFlags & PSOFlags::PSO_BLEND) {
-		DxcDefine macro;
-		macro.Value = L"1";
-		macro.Name = L"PSO_BLEND";
-		defines.insert(defines.begin(), macro);
-	}
 	if (psoFlags & PSOFlags::PSO_CLUSTERED_LIGHTING) {
 		DxcDefine macro;
 		macro.Value = L"1";

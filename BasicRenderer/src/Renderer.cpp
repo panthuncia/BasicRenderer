@@ -1146,7 +1146,6 @@ void Renderer::CreateRenderGraph() {
 			.Build<DebugSpherePass>();
     }
 
-    newGraph->RegisterECSRenderPhaseEntities(ECSManager::GetInstance().GetRenderPhaseEntities());
     newGraph->Compile();
     newGraph->Setup();
 

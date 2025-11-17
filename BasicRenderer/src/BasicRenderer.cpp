@@ -279,9 +279,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
-    auto robot = LoadModel("models/robot.usdz");
+    //auto robot = LoadModel("models/robot.usdz");
 
-	auto sphereScene = LoadModel("models/sphere.glb");
+	//auto sphereScene = LoadModel("models/sphere.glb");
 
 
     renderer.SetCurrentScene(baseScene);
@@ -297,7 +297,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
-	renderer.GetCurrentScene()->AppendScene(robot->Clone());
+	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 

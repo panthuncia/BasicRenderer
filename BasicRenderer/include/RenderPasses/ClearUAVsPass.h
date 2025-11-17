@@ -19,14 +19,14 @@ public:
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
 		auto ecsWorld = ECSManager::GetInstance().GetWorld();
-		auto blendEntity = m_ecsPhaseEntities[Engine::Primary::OITAccumulationPass];
-		m_nonBlendQuery = ECSResourceResolver(ecsWorld.query_builder<flecs::entity>()
+		auto blendEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
+		m_nonBlendQuery = ECSResourceResolver(ecsWorld.query_builder<>()
 			.with<Components::IsIndirectArguments>()
 			.without<Components::ParticipatesInPass>(blendEntity)
 			.build());
 		builder->WithCopyDest(ECSResourceResolver(m_nonBlendQuery));
 		if (m_clearBlend) {
-			m_blendQuery = ECSResourceResolver(ecsWorld.query_builder<flecs::entity>()
+			m_blendQuery = ECSResourceResolver(ecsWorld.query_builder<>()
 				.with<Components::IsIndirectArguments>()
 				.with<Components::ParticipatesInPass>(blendEntity)
 				.build());

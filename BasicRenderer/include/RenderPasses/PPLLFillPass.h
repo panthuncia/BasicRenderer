@@ -64,11 +64,11 @@ public:
 			builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
 			if (m_indirect) {
 				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-				auto oitFillPassEntity = m_ecsPhaseEntities[Engine::Primary::OITAccumulationPass];
-				flecs::query<> indirectQuery = ecsWorld.query_builder<flecs::entity>()
+				auto oitFillPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
+				flecs::query<> indirectQuery = ecsWorld.query_builder<>()
 					.with<Components::IsIndirectArguments>()
 					.with<Components::ParticipatesInPass>(oitFillPassEntity) // Query for command lists that participate in this pass
-					.cached().cache_kind(flecs::QueryCacheAll)
+					//.cached().cache_kind(flecs::QueryCacheAll)
 					.build();
 			}
 		}
@@ -77,7 +77,7 @@ public:
 	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(m_ecsPhaseEntities[Engine::Primary::OITAccumulationPass])
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
 			.cached().cache_kind(flecs::QueryCacheAll)
 			.build();
 		
@@ -306,7 +306,7 @@ private:
 			Engine::Primary::OITAccumulationPass);
 
 		for (auto& workload : workloads) {
-			auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST, workload.first, m_wireframe);
+			auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags, workload.first, m_wireframe);
 			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
 			BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());

@@ -64,11 +64,10 @@ public:
             builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) {
 				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-                auto gbufferPassEntity = m_ecsPhaseEntities[Engine::Primary::GBufferPass];
-                flecs::query<> indirectQuery = ecsWorld.query_builder<flecs::entity>()
+                flecs::query<> indirectQuery = ecsWorld.query_builder<>()
                     .with<Components::IsIndirectArguments>()
-                    .with<Components::ParticipatesInPass>(gbufferPassEntity) // Query for command lists that participate in this pass
-                    .cached().cache_kind(flecs::QueryCacheAll)
+                    .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass)) // Query for command lists that participate in this pass
+                    //.cached().cache_kind(flecs::QueryCacheAll)
                     .build();
                 builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
             }
@@ -78,7 +77,7 @@ public:
     void Setup() override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-            .with<Components::ParticipatesInPass>(m_ecsPhaseEntities[Engine::Primary::GBufferPass])
+            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
             .cached().cache_kind(flecs::QueryCacheAll).build();
 
         m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);

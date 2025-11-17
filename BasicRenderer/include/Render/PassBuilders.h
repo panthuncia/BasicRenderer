@@ -366,9 +366,8 @@ processResourceArguments(T&& list, RenderGraph* graph)
 
 namespace detail {
     template<typename U>
-    inline void extractId(std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher>& out, std::shared_ptr<U> const&) {
-        // TODO
-        throw std::runtime_error("extractId not implemented for shared_ptr<Resource>");
+    inline void extractId(std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher>& out, std::shared_ptr<U> const& resource) {
+        out.insert(std::to_string(resource->GetGlobalResourceID()));
     }
     inline void extractId(auto& out, const ResourceAndRange& rar) {
 		extractId(out, rar.resource); // empty identifier
@@ -568,95 +567,173 @@ public:
 
 	// LVALUE overloads for IResourceResolver
     RenderPassBuilder& WithShaderResource(const IResourceResolver& r)& {
-        (addShaderResource(r.Resolve()));
+        auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+        addShaderResource(resources);
         return *this;
     }
 
     RenderPassBuilder& WithRenderTarget(const IResourceResolver& r)& {
-        (addRenderTarget(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addRenderTarget(r.Resolve()));
         return *this;
 	}
 
     RenderPassBuilder& WithDepthReadWrite(const IResourceResolver& r)& {
-        (addDepthReadWrite(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addDepthReadWrite(r.Resolve()));
 		return *this;
     }
 
     RenderPassBuilder& WithDepthRead(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
 		(addDepthRead(r.Resolve()));
         return *this;
     }
 
 	RenderPassBuilder& WithConstantBuffer(const IResourceResolver& r)& {
-        (addConstantBuffer(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
         return *this;
 	}
 
     RenderPassBuilder& WithUnorderedAccess(const IResourceResolver& r)& {
-        (addUnorderedAccess(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addUnorderedAccess(r.Resolve()));
         return *this;
 	}
 
     RenderPassBuilder& WithCopyDest(const IResourceResolver& r)& {
-        (addCopyDest(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addCopyDest(r.Resolve()));
         return *this;
     }
 
     RenderPassBuilder& WithCopySource(const IResourceResolver& r)& {
-        (addCopySource(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addCopySource(r.Resolve()));
         return *this;
     }
 
     RenderPassBuilder& WithIndirectArguments(const IResourceResolver& r)& {
-        (addIndirectArguments(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addIndirectArguments(r.Resolve()));
         return *this;
 	}
 
     RenderPassBuilder& WithLegacyInterop(const IResourceResolver& r)& {
-        (addLegacyInterop(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addLegacyInterop(r.Resolve()));
 		return *this;
 	}
 
 	// RVALUE overloads for IResourceResolver
 
     RenderPassBuilder WithShaderResource(const IResourceResolver& r)&& {
-        (addShaderResource(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addShaderResource(r.Resolve()));
         return std::move(*this);
 	}
     RenderPassBuilder WithRenderTarget(const IResourceResolver& r)&& {
-        (addRenderTarget(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addRenderTarget(r.Resolve()));
         return std::move(*this);
     }
     RenderPassBuilder WithDepthReadWrite(const IResourceResolver& r)&& {
-        (addDepthReadWrite(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addDepthReadWrite(r.Resolve()));
         return std::move(*this);
     }
     RenderPassBuilder WithDepthRead(const IResourceResolver& r)&& {
-        (addDepthRead(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addDepthRead(r.Resolve()));
         return std::move(*this);
     }
     RenderPassBuilder WithConstantBuffer(const IResourceResolver& r)&& {
-        (addConstantBuffer(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addConstantBuffer(r.Resolve()));
         return std::move(*this);
     }
     RenderPassBuilder WithUnorderedAccess(const IResourceResolver& r)&& {
-        (addUnorderedAccess(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addUnorderedAccess(r.Resolve()));
         return std::move(*this);
     }
     RenderPassBuilder WithCopyDest(const IResourceResolver& r)&& {
-        (addCopyDest(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addCopyDest(r.Resolve()));
         return std::move(*this);
     }
     RenderPassBuilder WithCopySource(const IResourceResolver& r)&& {
-        (addCopySource(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addCopySource(r.Resolve()));
         return std::move(*this);
     }
     RenderPassBuilder WithIndirectArguments(const IResourceResolver& r)&& {
-        (addIndirectArguments(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
         return std::move(*this);
     }
     RenderPassBuilder WithLegacyInterop(const IResourceResolver& r)&& {
-        (addLegacyInterop(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addLegacyInterop(r.Resolve()));
         return std::move(*this);
 	}
 
@@ -1149,50 +1226,90 @@ public:
 
     // LVALUE overloads for IResourceResolver
     ComputePassBuilder& WithShaderResource(const IResourceResolver& r)& {
-        (addShaderResource(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addShaderResource(r.Resolve()));
         return *this;
     }
 
     ComputePassBuilder& WithConstantBuffer(const IResourceResolver& r)& {
-        (addConstantBuffer(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addConstantBuffer(r.Resolve()));
         return *this;
     }
 
     ComputePassBuilder& WithUnorderedAccess(const IResourceResolver& r)& {
-        (addUnorderedAccess(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addUnorderedAccess(r.Resolve()));
         return *this;
     }
 
     ComputePassBuilder& WithIndirectArguments(const IResourceResolver& r)& {
-        (addIndirectArguments(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addIndirectArguments(r.Resolve()));
         return *this;
     }
 
     ComputePassBuilder& WithLegacyInterop(const IResourceResolver& r)& {
-        (addLegacyInterop(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addLegacyInterop(r.Resolve()));
         return *this;
     }
 
     // RVALUE overloads for IResourceResolver
 
     ComputePassBuilder WithShaderResource(const IResourceResolver& r)&& {
-        (addShaderResource(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addShaderResource(r.Resolve()));
         return std::move(*this);
     }
     ComputePassBuilder WithConstantBuffer(const IResourceResolver& r)&& {
-        (addConstantBuffer(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addConstantBuffer(r.Resolve()));
         return std::move(*this);
     }
     ComputePassBuilder WithUnorderedAccess(const IResourceResolver& r)&& {
-        (addUnorderedAccess(r.Resolve()));
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addUnorderedAccess(r.Resolve()));
         return std::move(*this);
     }
     ComputePassBuilder WithIndirectArguments(const IResourceResolver& r)&& {
-        (addIndirectArguments(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addIndirectArguments(r.Resolve()));
         return std::move(*this);
     }
     ComputePassBuilder WithLegacyInterop(const IResourceResolver& r)&& {
-        (addLegacyInterop(r.Resolve()));
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addLegacyInterop(r.Resolve()));
         return std::move(*this);
     }
 

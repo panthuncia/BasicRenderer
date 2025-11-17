@@ -12,6 +12,7 @@
 #include "../shaders/Common/defines.h"
 #include "../../generated/BuiltinResources.h"
 #include "Materials/Material.h"
+#include "Resources/components.h"
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -56,6 +57,12 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			auto materialFlags = meshInstance->GetMesh()->material->Technique().compileFlags;
 			if (!m_activeDrawSetIndices.contains(materialFlags)) {
 				m_activeDrawSetIndices[materialFlags] = ResourceManager::GetInstance().CreateIndexedSortedUnsignedIntBuffer(1, L"activeDrawSetIndices(flags=" + std::to_wstring(static_cast<uint64_t>(materialFlags)) + L")");
+				auto& buf = m_activeDrawSetIndices[materialFlags];
+				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
+				buf->GetECSEntity().set<Components::Resource>({buf});
+				for (auto& phase : meshInstance->GetMesh()->material->Technique().passes) {
+					buf->GetECSEntity().add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(phase));
+				}
 			}
 			m_activeDrawSetIndices[materialFlags]->Insert(index);
 			materialTechniques.push_back(materialFlags);

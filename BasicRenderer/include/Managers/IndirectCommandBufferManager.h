@@ -134,10 +134,10 @@ private:
         RenderPhase::Hasher> m_phaseToFlags;
 
     // Per-flags current capacity (rounded to increment)
-    std::unordered_map<MaterialCompileFlags, unsigned int, MaterialCompileFlagsHash> m_flagsToCapacity;
+    std::unordered_map<TechniqueDescriptor, unsigned int, TechniqueDescriptor::Hasher> m_flagsToCapacity;
 
     // Per-flags last known draw count (unrounded)
-    std::unordered_map<MaterialCompileFlags, unsigned int, MaterialCompileFlagsHash> m_flagsToLastCount;
+    std::unordered_map<TechniqueDescriptor, unsigned int, TechniqueDescriptor::Hasher> m_flagsToLastCount;
 
     // Single group that owns all indirect command buffers (regardless of flags)
     std::shared_ptr<ResourceGroup> m_indirectCommandsResourceGroup;
@@ -164,5 +164,5 @@ private:
     void RecomputeTotal();
     void RecreateMeshletBuffersForAllViews();
     void EnsurePerViewFlagsBuffers(uint64_t viewID);
-    void EnsureFlagsRegistered(MaterialCompileFlags flags);
+    void EnsureTechniqueRegistered(TechniqueDescriptor technique);
 };

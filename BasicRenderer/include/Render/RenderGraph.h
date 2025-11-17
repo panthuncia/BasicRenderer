@@ -207,7 +207,6 @@ private:
 	rhi::TimelinePtr m_copyQueueFence;
 
 	std::unique_ptr<CommandRecordingManager> m_pCommandRecordingManager;
-	std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher> m_ecsPhaseEntities;
 
 	UINT64 m_graphicsQueueFenceValue = 0;
 	UINT64 GetNextGraphicsQueueFenceValue() {

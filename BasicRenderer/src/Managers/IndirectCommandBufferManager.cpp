@@ -38,7 +38,7 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
 
 void IndirectCommandBufferManager::RegisterTechnique(const TechniqueDescriptor& tech) {
     // Record flags capacity entry (starts at 0 until UpdateBuffersForFlags is called)
-    EnsureFlagsRegistered(tech.compileFlags);
+    EnsureTechniqueRegistered(tech);
 
     // Build inverted index: phase -> flags
     for (auto const& phase : tech.passes) {
@@ -55,22 +55,33 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
     PerViewBuffers perView;
 
     // Create one buffer per flags value with current capacity (may be 0 if not yet sized)
-    for (auto const& [flags, cap] : m_flagsToCapacity) {
+    for (auto const& [technique, cap] : m_flagsToCapacity) {
         unsigned int size = cap;
         if (size == 0) continue; // not yet sized, will be created on first UpdateBuffersForFlags
 
         auto res = ResourceManager::GetInstance()
             .CreateIndexedStructuredBuffer(size, sizeof(DispatchMeshIndirectCommand), true, true);
-        res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(flags)) +
+        res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
             L", view=" + std::to_wstring(viewID) + L")");
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
+        auto entity = dyn->GetECSEntity();
+
+        // Provide ECS with a way back to the shared_ptr
+        entity.set<Components::Resource>({ dyn });
+
+        // Tag participation and kind
+        for (auto& pass : technique.passes) {
+            entity.add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(pass));
+        }
+        entity.add<Components::IsIndirectArguments>();
+
         m_indirectCommandsResourceGroup->AddResource(dyn);
-        perView.buffersByFlags.emplace(flags, dyn);
+        perView.buffersByFlags[technique.compileFlags] = { dyn, 0 };
 
         // Set the workload count to the last known value for this flags combo
-        auto itCount = m_flagsToLastCount.find(flags);
+        auto itCount = m_flagsToLastCount.find(technique);
         if (itCount != m_flagsToLastCount.end()) {
-            perView.buffersByFlags[flags].count = itCount->second;
+            perView.buffersByFlags[technique.compileFlags].count = itCount->second;
         }
     }
 
@@ -79,8 +90,9 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
         auto r = ResourceManager::GetInstance()
             .CreateIndexedStructuredBuffer((std::max)(m_totalIndirectCommands, 1u), sizeof(DispatchIndirectCommand), true, true);
         r->SetName(std::wstring(label) + L" (view=" + std::to_wstring(viewID) + L")");
-        return std::make_shared<DynamicGloballyIndexedResource>(r);
-    };
+        auto dyn = std::make_shared<DynamicGloballyIndexedResource>(r);
+        dyn->GetECSEntity().set<Components::Resource>({ dyn });
+        return dyn;    };
     perView.meshletCullingIndirectCommandBuffer = makeMeshlet(L"MeshletCullingIndirectCommandBuffer");
     perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet(L"MeshletCullingResetIndirectCommandBuffer");
     m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingIndirectCommandBuffer);
@@ -120,13 +132,13 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
 }
 
 void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws) {
-    EnsureFlagsRegistered(technique.compileFlags);
+    EnsureTechniqueRegistered(technique);
 
     // Remember the last exact draw count for this flags combo
-    m_flagsToLastCount[technique.compileFlags] = numDraws;
+    m_flagsToLastCount[technique] = numDraws;
 
     unsigned int newSize = RoundUp(numDraws);
-    unsigned int& curr = m_flagsToCapacity[technique.compileFlags];
+    unsigned int& curr = m_flagsToCapacity[technique];
     if (newSize <= curr) { // no grow, just update count
         for (auto& [viewID, perView] : m_viewIDToBuffers) {
             auto it = perView.buffersByFlags.find(technique.compileFlags);
@@ -167,10 +179,14 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
             perView.buffersByFlags.emplace(technique.compileFlags, dyn);
             m_indirectCommandsResourceGroup->AddResource(dyn);
-            auto entity = m_indirectCommandsResourceGroup->GetECSEntity();
+
+            auto entity = dyn->GetECSEntity();
+            entity.set<Components::Resource>({ dyn }); // <-- important
             for (auto& pass : technique.passes) {
                 entity.add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(pass));
             }
+            entity.add<Components::IsIndirectArguments>();
+
             perView.buffersByFlags[technique.compileFlags].count = numDraws;
         }
     }
@@ -322,31 +338,40 @@ void IndirectCommandBufferManager::EnsurePerViewFlagsBuffers(uint64_t viewID) {
     auto it = m_viewIDToBuffers.find(viewID);
     if (it == m_viewIDToBuffers.end()) return;
     auto& perView = it->second;
-    for (auto const& [flags, cap] : m_flagsToCapacity) {
+
+    for (auto const& [technique, cap] : m_flagsToCapacity) {
         if (cap == 0) continue;
-        if (perView.buffersByFlags.count(flags)) continue;
+        if (perView.buffersByFlags.count(technique.compileFlags)) continue;
 
         auto res = ResourceManager::GetInstance()
             .CreateIndexedStructuredBuffer(cap, sizeof(DispatchMeshIndirectCommand), true, true);
-        res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(flags)) +
+        res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
             L", view=" + std::to_wstring(viewID) + L")");
+
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
-        perView.buffersByFlags.emplace(flags, dyn);
+        perView.buffersByFlags.emplace(technique.compileFlags, dyn);
         m_indirectCommandsResourceGroup->AddResource(dyn);
 
+        auto entity = dyn->GetECSEntity();
+        entity.set<Components::Resource>({ dyn });
+        for (auto& pass : technique.passes) {
+            entity.add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(pass));
+        }
+        entity.add<Components::IsIndirectArguments>();
+
         // Initialize count from last known value
-        auto itCount = m_flagsToLastCount.find(flags);
+        auto itCount = m_flagsToLastCount.find(technique);
         if (itCount != m_flagsToLastCount.end()) {
-            perView.buffersByFlags[flags].count = itCount->second;
+            perView.buffersByFlags[technique.compileFlags].count = itCount->second;
         }
     }
 }
 
-void IndirectCommandBufferManager::EnsureFlagsRegistered(MaterialCompileFlags flags) {
-    if (!m_flagsToCapacity.count(flags)) {
-        m_flagsToCapacity.emplace(flags, 0);
+void IndirectCommandBufferManager::EnsureTechniqueRegistered(TechniqueDescriptor technique) {
+    if (!m_flagsToCapacity.count(technique)) {
+        m_flagsToCapacity[technique] = 0;
     }
-    if (!m_flagsToLastCount.count(flags)) {
-        m_flagsToLastCount.emplace(flags, 0);
+    if (!m_flagsToLastCount.count(technique)) {
+        m_flagsToLastCount[technique] = 0;
     }
 }

@@ -22,13 +22,13 @@ inline TransparencyPick PickTransparency(const MaterialDescription& d) {
     const bool explicitBlend = (d.blendState == BlendState::BLEND_STATE_BLEND);
     const bool alphaFactor = (d.opacity.factor.Get() < 1.0f);
 
-    t.isTransparent = hasOpacityTex || explicitBlend || alphaFactor;
+    t.isTransparent = hasOpacityTex || explicitBlend || alphaFactor || d.blendState == BlendState::BLEND_STATE_MASK;
     if (!t.isTransparent) return t;
 
     // Heuristic: prefer masked if alphaCutoff provided and we have an alpha-carrying tex
     const bool cutoff = (d.alphaCutoff > 0.0f);
     const bool hasAlphaCandidate = hasOpacityTex || (d.baseColor.texture != nullptr);
-    t.masked = (!explicitBlend) && cutoff && hasAlphaCandidate;
+    t.masked = ((!explicitBlend) && cutoff && hasAlphaCandidate) || d.blendState == BlendState::BLEND_STATE_MASK;
     return t;
 }
 
@@ -38,11 +38,13 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
 	tech.passes.insert(Engine::Primary::ShadowMapsPass); // All materials cast shadows
     if (transparency.isTransparent && !transparency.masked) { // OIT transparency
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileBlend;
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
         tech.passes.insert(Engine::Primary::OITAccumulationPass);
     }
     else {
         if (transparency.isTransparent) {
 			tech.compileFlags |= MaterialCompileFlags::MaterialCompileAlphaTest;
+			tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
         }
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }
@@ -59,7 +61,6 @@ public:
         if (desc.baseColor.texture) {
             if (!desc.baseColor.texture->AlphaIsAllOpaque()) {
                 materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
-                psoFlags |= PSOFlags::PSO_ALPHA_TEST;
                 blendState = BlendState::BLEND_STATE_MASK; // Use mask blending for alpha-tested materials
             }
             materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
@@ -78,13 +79,11 @@ public:
         }
         auto diffuseColor = desc.diffuseColor;
         if (desc.opacity.texture) { // TODO: How can we tell if this should be used as a mask or as a blend?
-            psoFlags |= PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_BLEND;
             materialFlags |= MaterialFlags::MATERIAL_OPACITY_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
         }
         if (desc.opacity.factor.Get() < 1.0f) {
             materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
-            psoFlags |= PSOFlags::PSO_BLEND | PSOFlags::PSO_ALPHA_TEST;
             diffuseColor.w = desc.opacity.factor.Get(); // Use opacity factor as alpha
             blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
         }

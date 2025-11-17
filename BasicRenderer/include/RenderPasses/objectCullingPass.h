@@ -23,11 +23,11 @@ public:
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) {
 		auto ecsWorld = ECSManager::GetInstance().GetWorld();
-		flecs::query drawSetIndicesQuery = ecsWorld.query_builder<flecs::entity>()
+		flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
 			.with<Components::IsActiveDrawSetIndices>()
 			.with<Components::ParticipatesInPass>(flecs::Wildcard)
 			.build();
-		flecs::query indirectCommandBuffersQuery = ecsWorld.query_builder<Components::IndirectCommandBuffers>()
+		flecs::query<> indirectCommandBuffersQuery = ecsWorld.query_builder<>()
 			.with<Components::IsIndirectArguments>()
 			.build();
 		builder->WithShaderResource(Builtin::PerObjectBuffer,

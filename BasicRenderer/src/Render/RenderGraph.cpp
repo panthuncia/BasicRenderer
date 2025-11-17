@@ -128,7 +128,7 @@ void RenderGraph::Compile() {
 	}
 
 	for (auto& v : m_passBuilders) {
-		std::visit([](auto& builder) {
+		std::visit([&](auto& builder) {
 			builder.Finalize();
 			}, v);
 	}
@@ -524,7 +524,6 @@ void RenderGraph::Setup() {
 		switch (pass.type) {
 		case PassType::Render: {
 			auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
-			renderPass.pass->RegisterECSRenderPhaseEntities(m_ecsPhaseEntities);
 			renderPass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, renderPass.resources.identifierSet));
 			renderPass.pass->Setup();
 			renderPass.pass->RegisterCommandLists(emptyLists);
@@ -532,7 +531,6 @@ void RenderGraph::Setup() {
 		}
 		case PassType::Compute: {
 			auto& computePass = std::get<ComputePassAndResources>(pass.pass);
-			computePass.pass->RegisterECSRenderPhaseEntities(m_ecsPhaseEntities);
 			computePass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, computePass.resources.identifierSet));
 			computePass.pass->Setup();
 			computePass.pass->RegisterCommandLists(emptyLists);
@@ -573,6 +571,9 @@ void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassP
 }
 
 void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transition) {
+	if (resourcesByID.contains(resource->GetGlobalResourceID())) {
+		return; // Resource already added
+	}
 	auto& name = resource->GetName();
 
 #ifdef _DEBUG
@@ -988,10 +989,6 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 		return nullptr;
 	}
 	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
-}
-
-void RenderGraph::RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities) {
-	m_ecsPhaseEntities = phaseEntities;
 }
 
 ComputePassBuilder RenderGraph::BuildComputePass(std::string const& name) {

@@ -257,7 +257,6 @@ namespace AssimpLoader {
                 baseColorTexture = materialTextures[aiTextureType_DIFFUSE];
                 if (!baseColorTexture->AlphaIsAllOpaque()) {
                     materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
-                    psoFlags |= PSOFlags::PSO_ALPHA_TEST;
                     blendMode = BlendState::BLEND_STATE_MASK;
                 }
                 materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
@@ -270,7 +269,6 @@ namespace AssimpLoader {
                 materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
                 if (!baseColorTexture->AlphaIsAllOpaque()) {
                     materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
-                    psoFlags |= PSOFlags::PSO_ALPHA_TEST;
                     blendMode = BlendState::BLEND_STATE_MASK;
                 }
             }
@@ -332,7 +330,6 @@ namespace AssimpLoader {
             bool twoSided = false;
             if (mat->Get(AI_MATKEY_TWOSIDED, twoSided) == AI_SUCCESS && twoSided) {
                 materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
-                psoFlags |= PSOFlags::PSO_DOUBLE_SIDED | PSO_ALPHA_TEST; // All double-sided materials are alpha-tested and vice-versa
                 blendMode = BlendState::BLEND_STATE_MASK;
             }
 
@@ -343,7 +340,6 @@ namespace AssimpLoader {
                 }
                 else {
                     blendMode = BlendState::BLEND_STATE_BLEND;
-                    psoFlags |= PSOFlags::PSO_BLEND;
                     diffuse.a *= opacity;
                 }
             }
@@ -351,7 +347,6 @@ namespace AssimpLoader {
             float transparencyFactor = 0.0f;
             if (mat->Get(AI_MATKEY_TRANSPARENCYFACTOR, transparencyFactor) == AI_SUCCESS && transparencyFactor > 0.0f) {
                 blendMode = BlendState::BLEND_STATE_BLEND;
-                psoFlags |= PSOFlags::PSO_BLEND;
             }
 
             aiString matName;
