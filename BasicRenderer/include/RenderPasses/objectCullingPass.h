@@ -78,6 +78,9 @@ public:
 			MaterialCompileFlags flags,
 			const IndirectWorkload& wl)
 			{
+				if (wl.count == 0) {
+					return;
+				}
 				uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(wl.count / 64.0));
 				auto viewInfo = context.viewManager->Get(view);
 

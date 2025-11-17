@@ -159,7 +159,7 @@ namespace Components {
 
 	struct SceneNode {}; // Represents a generic node in the scene graph
 	struct GlobalMeshLibrary {
-		std::unordered_map<uint64_t, std::shared_ptr<Mesh>> meshes;
+		std::unordered_map<uint64_t, std::weak_ptr<Mesh>> meshes;
 	};
 
 	struct DrawStats {

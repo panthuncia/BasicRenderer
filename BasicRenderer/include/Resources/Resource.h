@@ -19,7 +19,12 @@ public:
 		m_ecsEntity = ECSManager::GetInstance().GetWorld().entity();
     }
 	virtual ~Resource() {
-		m_ecsEntity.destruct();
+		if (!ECSManager::GetInstance().GetWorld()) { // TODO: Hacky way to avoid issues with desctruction order. Is there a better way?
+			return;
+		}
+		if (m_ecsEntity.is_alive()) {
+			m_ecsEntity.destruct();
+		}
 	}
 
 

@@ -481,12 +481,13 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 	// Remove all meshes from the mesh manager
 	for (auto& meshPair : meshLibrary) {
 		auto& mesh = meshPair.second;
-		m_pMeshManager->RemoveMesh(mesh.get());
+		m_pMeshManager->RemoveMesh(mesh.lock().get());
 	}
 	// Re-add them to the mesh manager
 	for (auto& meshPair : meshLibrary) {
 		auto& mesh = meshPair.second;
-        m_pMeshManager->AddMesh(mesh, useMeshShaders);
+        auto ptr = mesh.lock();
+        m_pMeshManager->AddMesh(ptr, useMeshShaders);
 	}
 
 	// Get all active objects with mesh instances by querying the ECS
@@ -889,6 +890,7 @@ void Renderer::Cleanup() {
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     Material::DestroyDefaultMaterial();
+    ECSManager::GetInstance().GetWorld().release();
     DeletionManager::GetInstance().Cleanup();
 }
 
