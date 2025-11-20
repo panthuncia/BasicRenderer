@@ -42,6 +42,10 @@ void RenderGraph::AddTransition(
 
 	currentBatch.passBatchTrackers[resource->GetGlobalResourceID()] = resource->GetStateTracker(); // We will need to chack subsequent passes against this
 
+	if (resource->GetName().contains(L"MeshletBitfield")) {
+		spdlog::info("1");
+	}
+
 	// Check if this is a resource group
 	//std::vector<ResourceTransition> independantlyManagedTransitions;
 	auto group = std::dynamic_pointer_cast<ResourceGroup>(resource);
@@ -65,8 +69,8 @@ void RenderGraph::AddTransition(
 		}
 	}
 	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to palce transitions on render queue
-		unsigned int gfxBatch = batchOfLastRenderQueueUsage[resource->GetGlobalResourceID()];
 		for (auto& transition : transitions) {
+			unsigned int gfxBatch = batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()];
 			batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()] = gfxBatch; // Can this cause transition overlaps?
 			batches[gfxBatch].batchEndTransitions.push_back(transition);
 		}

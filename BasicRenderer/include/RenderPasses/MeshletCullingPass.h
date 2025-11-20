@@ -53,7 +53,8 @@ public:
 			Builtin::CameraBuffer,
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Shadows::LinearShadowMaps)
-			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, Builtin::PrimaryCamera::MeshletBitfield)
+			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, 
+				Builtin::PrimaryCamera::MeshletBitfield)
 			.WithIndirectArguments(
 				Builtin::IndirectCommandBuffers::MeshletCulling, 
 				Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, 
