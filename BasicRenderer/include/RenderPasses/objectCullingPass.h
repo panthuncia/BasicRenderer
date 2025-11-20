@@ -61,11 +61,6 @@ public:
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-		// Set the compute pipeline state
-		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());
-
-		BindResourceDescriptorIndices(commandList, m_PSO.GetResourceDescriptorSlots());
-
 		unsigned int drawRootConstants[NumDrawInfoRootConstants] = {};
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
@@ -81,6 +76,15 @@ public:
 				if (wl.count == 0) {
 					return;
 				}
+
+				// Set the compute pipeline state
+
+				auto& pso = (flags & MaterialCompileBlend) ? m_blendPSO : m_PSO;
+
+				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+
+				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+
 				uint32_t numThreadGroups = static_cast<uint32_t>(std::ceil(wl.count / 64.0));
 				auto viewInfo = context.viewManager->Get(view);
 
