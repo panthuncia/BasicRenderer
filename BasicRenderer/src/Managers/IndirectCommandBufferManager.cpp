@@ -50,6 +50,16 @@ void IndirectCommandBufferManager::RegisterTechnique(const TechniqueDescriptor& 
     }
 }
 
+std::string GetDebugNameForTechnique(TechniqueDescriptor technique) {
+    std::string result;
+    if (technique.compileFlags & MaterialCompileBlend) result += "Blend|";
+    if (technique.compileFlags & MaterialCompileAlphaTest) result += "AlphaTest|";
+    if (technique.compileFlags & MaterialCompileDoubleSided) result += "DoubleSided|";
+    if (result.empty()) result = "None";
+    else result.pop_back(); // remove trailing '|'
+    return result;
+}
+
 Components::IndirectCommandBuffers
 IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
     PerViewBuffers perView;
@@ -61,7 +71,7 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
 
         auto res = ResourceManager::GetInstance()
             .CreateIndexedStructuredBuffer(size, sizeof(DispatchMeshIndirectCommand), true, true);
-        res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
+        res->SetName(L"IndirectCommandBuffer(flags=" + s2ws(GetDebugNameForTechnique(technique)) +
             L", view=" + std::to_wstring(viewID) + L")");
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
         auto entity = dyn->GetECSEntity();
@@ -165,7 +175,7 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
             deletion.MarkForDelete(it->second.buffer->GetResource());
             auto res = ResourceManager::GetInstance()
                 .CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-            res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
+            res->SetName(L"IndirectCommandBuffer(flags=" + s2ws(GetDebugNameForTechnique(technique)) +
                 L", view=" + std::to_wstring(viewID) + L")");
             it->second.buffer->SetResource(res);
             it->second.count = numDraws;
@@ -174,7 +184,8 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
             // Create new buffer for this view (this flags appeared after the view was created)
             auto res = ResourceManager::GetInstance()
                 .CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-            res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
+			std::wstring techniqueName = s2ws(GetDebugNameForTechnique(technique));
+            res->SetName(L"IndirectCommandBuffer(flags=" + techniqueName +
                 L", view=" + std::to_wstring(viewID) + L")");
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
             perView.buffersByFlags.emplace(technique.compileFlags, dyn);
