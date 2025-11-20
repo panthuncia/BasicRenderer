@@ -323,7 +323,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).slot.index;
     gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
 
-    UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
+    QUEUE_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
 
     graph->BuildComputePass("GTAOFilterPass") // Depth filter pass
         .Build<GTAOFilterPass>(GTAOConstantBuffer);

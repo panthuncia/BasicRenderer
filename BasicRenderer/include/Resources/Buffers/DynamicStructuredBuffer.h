@@ -33,7 +33,7 @@ public:
 
         unsigned int index = static_cast<uint32_t>(m_data.size()) - 1; // TODO: Fix buffer max sizes
 
-		UploadManager::GetInstance().UploadData(&element, sizeof(T), this, index * sizeof(T));
+        QUEUE_UPLOAD(&element, sizeof(T), this, index * sizeof(T));
 
         return index;
     }
@@ -62,7 +62,7 @@ public:
     }
 
     void UpdateAt(UINT index, const T& element) {
-		UploadManager::GetInstance().UploadData(&element, sizeof(T), this, index * sizeof(T));
+        QUEUE_UPLOAD(&element, sizeof(T), this, index * sizeof(T));
     }
 
     void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {

@@ -315,7 +315,6 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 			AddSkeleton(skeleton);
 			entity.add<Components::Skinned>();
 		}
-		break;
     }
 	if (!meshInstances.meshInstances.empty()) {
 		entity.set<Components::MeshInstances>(meshInstances);

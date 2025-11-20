@@ -44,7 +44,7 @@ public:
         // Upload the entire suffix so GPU content matches the CPU vector after the insertion shift
         const unsigned int* src = m_data.data() + index;
         const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-        UploadManager::GetInstance().UploadData(src, sizeof(unsigned int) * count, this, index * sizeof(unsigned int));
+        QUEUE_UPLOAD(src, sizeof(unsigned int) * count, this, index * sizeof(unsigned int));
     }
 
     // Remove an element (and shift the tail on GPU)
@@ -67,14 +67,14 @@ public:
             if (!m_data.empty() && index < m_data.size()) {
                 const unsigned int* src = m_data.data() + index;
                 const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-                UploadManager::GetInstance().UploadData(src, sizeof(unsigned int) * count, this, index * sizeof(unsigned int));
+                QUEUE_UPLOAD(src, sizeof(unsigned int) * count, this, index * sizeof(unsigned int));
             }
 
             // Optionally zero out the last stale slot (not strictly required if readers clamp to Size())
             if (m_data.size() < m_capacity) {
                 const unsigned int zero = 0u;
                 const uint32_t lastSlot = static_cast<uint32_t>(m_data.size());
-                UploadManager::GetInstance().UploadData(&zero, sizeof(unsigned int), this, lastSlot * sizeof(unsigned int));
+                QUEUE_UPLOAD(&zero, sizeof(unsigned int), this, lastSlot * sizeof(unsigned int));
             }
         }
     }

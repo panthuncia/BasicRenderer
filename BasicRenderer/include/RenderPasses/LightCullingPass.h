@@ -68,7 +68,7 @@ public:
 	virtual void Update() override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		UploadManager::GetInstance().UploadData(&zero, sizeof(uint32_t), m_pLightPagesCounter.get(), 0);
+		QUEUE_UPLOAD(&zero, sizeof(uint32_t), m_pLightPagesCounter.get(), 0);
 	}
 
 private:

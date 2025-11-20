@@ -77,7 +77,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
-	UploadManager::GetInstance().UploadData(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
+	QUEUE_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
 }
 
 void ResourceManager::WaitForCopyQueue() {
@@ -183,7 +183,7 @@ std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* p
 	auto device = DeviceManager::GetInstance().GetDevice();
 	auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
 	if (pInitialData) {
-		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, dataBuffer.get(), 0);
+		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}
 
 //	ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };

@@ -4,6 +4,7 @@
 #include <memory>
 #include <functional>
 #include <rhi.h>
+#include <thread>
 
 #include "Resources/Buffers/BufferView.h"
 #include "Resources/Buffers/MemoryBlock.h"
@@ -14,12 +15,29 @@ class Resource;
 class ResourceUpdate {
 public:
 	ResourceUpdate() = default;
-	size_t size;
-	Resource* resourceToUpdate;
+	size_t size{};
+	Resource* resourceToUpdate{};
 	std::shared_ptr<Resource> uploadBuffer;
-	size_t uploadBufferOffset;
-	size_t dataBufferOffset;
+	size_t uploadBufferOffset{};
+	size_t dataBufferOffset{};
+#ifdef _DEBUG
+	uint64_t resourceID{};
+	const char* file{};
+	int line{};
+	uint8_t frameIndex{};
+	std::thread::id threadID;
+	static constexpr int MaxStack = 8;
+	void* stack[MaxStack]{};
+	uint8_t stackSize{};
+#endif
 };
+#ifdef _DEBUG
+#define QUEUE_UPLOAD(data,size,res,offset) \
+    UploadManager::GetInstance().UploadData((data),(size),(res),(offset),__FILE__,__LINE__)
+#else
+#define QUEUE_UPLOAD(data,size,res,offset) \
+    UploadManager::GetInstance().UploadData((data),(size),(res),(offset))
+#endif
 
 struct ResourceCopy {
 	std::shared_ptr<Resource> source;
@@ -42,7 +60,11 @@ class UploadManager {
 public:
 	static UploadManager& GetInstance();
 	void Initialize();
+#ifdef _DEBUG
+	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
+#else
 	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset);
+#endif	
 	void ProcessUploads(uint8_t frameIndex, rhi::Queue queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
 	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);

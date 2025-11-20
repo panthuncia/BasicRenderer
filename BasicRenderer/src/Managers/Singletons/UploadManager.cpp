@@ -39,15 +39,19 @@ void UploadManager::Initialize() {
 	m_frameStart.resize(m_numFramesInFlight, 0);
 }
 
-void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset) {
-
+#ifdef _DEBUG
+void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset, const char* file, int line)
+#else
+void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset)
+#endif 
+{
 	if (size > kPageSize) {
 		// break it into multiple sub uploads
 		size_t done     = 0;
 		size_t dstOffset = dataBufferOffset;
 		while (done < size) {
 			size_t chunk = (std::min)(size - done, kPageSize);
-			UploadData(
+			QUEUE_UPLOAD(
 				reinterpret_cast<const uint8_t*>(data) + done,
 				chunk,
 				resourceToUpdate,
@@ -90,6 +94,19 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 	update.uploadBuffer = page->buffer;
 	update.uploadBufferOffset = uploadOffset;
 	update.dataBufferOffset = dataBufferOffset;
+#ifdef _DEBUG
+	update.resourceID = resourceToUpdate ? resourceToUpdate->GetGlobalResourceID() : ~0ull;
+	update.file = file;
+	update.line = line;
+	update.frameIndex = (m_numFramesInFlight ? (uint8_t)(GetInstance().getNumFramesInFlight()) : 0);
+	update.threadID = std::this_thread::get_id();
+#ifdef _WIN32
+	void* frames[ResourceUpdate::MaxStack];
+	USHORT captured = RtlCaptureStackBackTrace(1, ResourceUpdate::MaxStack, frames, nullptr);
+	update.stackSize = (uint8_t)captured;
+	for (USHORT i = 0; i < captured; i++) update.stack[i] = frames[i];
+#endif
+#endif
 	m_resourceUpdates.push_back(update);
 }
 
@@ -133,6 +150,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 	commandList->Recycle(commandAllocator.Get());
 	rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "UploadManager::ProcessUploads");
 	// TODO: Should we do any barriers here?
+	unsigned int i = 0;
 	for (auto& update : m_resourceUpdates) {
 		Resource* buffer = update.resourceToUpdate;
 		commandList->CopyBufferRegion(
@@ -142,6 +160,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 			update.uploadBufferOffset,
 			update.size
 		);
+		++i;
 	}
 	rhi::debug::End(commandList.Get());
 
