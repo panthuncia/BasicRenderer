@@ -169,6 +169,21 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     return output;
 }
 
+struct VisBufferOutput
+{
+    uint drawCallIDAndMeshletVertexIndex;
+    uint meshletIndex;
+};
+
+VisBufferOutput VisBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
+{
+    VisBufferOutput output;
+    // Pack draw call ID and meshlet vertex index into a single uint, max 256 vertices per meshlet, so 8 bits for vertex index and 24 bits for draw call ID
+    output.drawCallIDAndMeshletVertexIndex = (perObjectBufferIndex << 8) | (input.meshletVertexIndex & 0xFF);
+    output.meshletIndex = input.meshletIndex;
+    return output;
+}
+
 #if defined(PSO_SHADOW)
 float
 #else

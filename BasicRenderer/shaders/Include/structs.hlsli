@@ -14,6 +14,13 @@ struct PSInput {
     uint meshletIndex : TEXCOORD8; // For meshlet debug view
 };
 
+struct VisBufferPSInput
+{
+    float4 position : SV_POSITION; // Screen-space position, required for rasterization
+    uint meshletIndex : TEXCOORD0;
+    uint meshletVertexIndex : TEXCOORD1;
+};
+
 struct ClippingPlane {
     float4 plane;
 };

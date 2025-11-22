@@ -491,6 +491,7 @@ private:
             case Components::LightType::Directional: {
                 uint32_t lightViewIndex = static_cast<uint32_t>(lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades());
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
                     std::string name = "View " + std::to_string(i);
                     rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());

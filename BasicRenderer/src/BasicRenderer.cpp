@@ -258,24 +258,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    //auto dragonScene = LoadModel("models/dragon.glb");
-    //dragonScene->GetRoot().set<Components::Scale>({ 5, 5, 5 });
-    //dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
+    auto dragonScene = LoadModel("models/dragon.glb");
+    dragonScene->GetRoot().set<Components::Scale>({ 5, 5, 5 });
+    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
 
-    //auto carScene = LoadModel("models/porche.glb");
-    //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
-    //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
+    auto carScene = LoadModel("models/porche.glb");
+    carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
 
-    //auto mountainScene = LoadModel("models/terrain.glb");
-    //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-    //mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+    auto mountainScene = LoadModel("models/terrain.glb");
+    mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+    mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
-    //auto tigerScene = LoadModel("models/tiger.glb");
-    //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+    auto tigerScene = LoadModel("models/tiger.glb");
+    tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    auto bistro = LoadModel("models/bistroExterior.usdz");
+    //auto bistro = LoadModel("models/bistroExterior.usdz");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -289,12 +289,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(curtains->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
@@ -327,7 +327,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	auto light = renderer.GetCurrentScene()->CreateDirectionalLightECS(L"light1", XMFLOAT3(1, 1, 1), 10.0, XMFLOAT3(0, -6, -1));
     //auto light3 = renderer.GetCurrentScene()->CreateSpotLightECS(L"light3", XMFLOAT3(0, 10, 3), XMFLOAT3(1, 1, 1), 2000.0, {0, -1, 0}, .5, .8, 0.0, 0.0, 1.0);
-    //auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 1.0, 0.0, 0.0, 1.0);
+    //auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light1", XMFLOAT3(0, 1, 3), XMFLOAT3(1, 1, 1), 100.0, 0.0, 0.0, 1.0);
     
     for (int i = 0; i < 0; i++) {
 		auto point = getRandomPointInVolume(-20, 20, -2, 0, -20, 20);
@@ -335,7 +335,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light"+std::to_wstring(i), XMFLOAT3(point.x, point.y, point.z), color, 3.0, 0.0, 0.0, 1.0, false);
     }
 
-    renderer.SetDebugTexture(renderer.GetCurrentScene()->GetPrimaryCamera().get<Components::DepthMap>().linearDepthMap);
+    auto& depthMap = light.get<Components::DepthMap>();
+    renderer.SetDebugTexture(depthMap.linearDepthMap);
+
 
     MSG msg = {};
     unsigned int frameIndex = 0;
