@@ -4,6 +4,7 @@
 #include "../../generated/BuiltinResources.h"
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
+#include "RenderPasses/VisibilityBufferPass.h"
 
 void BuildVisibilityPass(RenderGraph* graph) {
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -42,6 +43,16 @@ void CreateGBufferResources(RenderGraph* graph) {
     auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
     normalsWorldSpace->SetName(L"Normals World Space");
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
+
+    TextureDescription visibilityDesc;
+    visibilityDesc.arraySize = 1;
+    visibilityDesc.channels = 2;
+    visibilityDesc.format = rhi::Format::R32G32_UInt;
+    visibilityDesc.hasRTV = true;
+    visibilityDesc.hasSRV = true;
+    visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
+    auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
+    graph->RegisterResource(Builtin::VisibilityBuffer, visibilityBuffer);
 
     std::shared_ptr<PixelBuffer> albedo;
     std::shared_ptr<PixelBuffer> metallicRoughness;
@@ -145,6 +156,13 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         true, 
         true);
 
+    graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+        .Build<VisibilityBufferPass>(
+            wireframeEnabled,
+            meshShadersEnabled,
+            true,
+            true);
+
     // Single-pass downsample on all occluder-only depth maps
     // TODO: Case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped), handled sub-optimally
     graph->BuildComputePass("DownsamplePass")
@@ -168,6 +186,13 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         meshShadersEnabled, 
         true, 
         false);
+
+    graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+        .Build<VisibilityBufferPass>(
+            wireframeEnabled,
+            meshShadersEnabled,
+            true,
+            false);
 
     // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
     //newGraph->BuildComputePass("OccludersMeshletCullingPass")
@@ -217,6 +242,13 @@ void BuildZPrepass(RenderGraph* graph) {
         useMeshShaders,
         indirect, 
         clearRTVs);
+
+	graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+        .Build<VisibilityBufferPass>(
+            enableWireframe,
+            useMeshShaders,
+            indirect,
+            clearRTVs);
 }
 
 void RegisterGTAOResources(RenderGraph* graph) {

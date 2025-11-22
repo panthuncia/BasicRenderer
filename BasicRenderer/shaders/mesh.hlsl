@@ -101,12 +101,21 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
 }
 
 
-VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID) {
+VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer)
+{
     uint byteOffset = blockByteOffset + index * vertexSize;
     Vertex vertex = LoadVertex(byteOffset, buffer, flags);
     
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+    
+    float4 pos = float4(vertex.position.xyz, 1.0f);
+    float4 worldPosition = mul(pos, objectBuffer.model);
+    float4 viewPosition = mul(worldPosition, mainCamera.view);
+    
     VisBufferPSInput result;
-    result.position = float4(vertex.position.xyz, 1.0f);
+    result.position = mul(viewPosition, mainCamera.projection);
     result.meshletIndex = vGroupID.x;
     result.meshletVertexIndex = index;
     
@@ -284,7 +293,8 @@ void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices 
             setup.vertOffset + i,
             setup.meshBuffer.vertexFlags,
             setup.meshBuffer.vertexByteSize,
-            setup.meshletIndex);
+            setup.meshletIndex,
+            setup.objectBuffer);
     }
 
     WriteTriangles(uGroupThreadID, setup, outputTriangles);
@@ -311,7 +321,7 @@ void MSMain(
 
 [outputtopology("triangle")]
 [numthreads(MS_THREAD_GROUP_SIZE, 1, 1)]
-void VisBufferMSMain(
+void VisibilityBufferMSMain(
     const uint uGroupThreadID : SV_GroupThreadID,
     const uint vGroupID : SV_GroupID,
     in payload Payload payload,

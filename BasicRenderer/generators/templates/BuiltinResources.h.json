@@ -48,10 +48,11 @@
       "CurrentPrefilteredCubemap": {}
     },
     "IndirectCommandBuffers": {
-      "Primary": {}, 
+      "Primary": {},
       "MeshletCulling": {},
       "Master": {}
     },
+    "VisibilityBuffer": {},
     "GBuffer": {
       "Normals": {},
       "MotionVectors": {},

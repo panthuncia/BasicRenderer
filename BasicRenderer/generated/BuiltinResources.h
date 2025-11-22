@@ -92,5 +92,6 @@ struct Builtin {
     inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";
     inline static constexpr std::string_view ShadowMaps = "Builtin::Shadows::ShadowMaps";
   };
+  inline static constexpr std::string_view VisibilityBuffer = "Builtin::VisibilityBuffer";
 };
 

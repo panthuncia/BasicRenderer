@@ -100,6 +100,9 @@ public:
     const PipelineState& GetShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
     const PipelineState& GetShadowMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
+	const PipelineState& GetVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+	const PipelineState& GetVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+
     const PipelineState& GetDeferredPSO(UINT psoFlags);
 
     PipelineState MakeComputePipeline(rhi::PipelineLayout layout,
@@ -152,6 +155,9 @@ private:
     std::unordered_map<PSOKey, PipelineState> m_shadowPSOCache;
 	std::unordered_map<PSOKey, PipelineState> m_shadowMeshPSOCache;
 
+    std::unordered_map<PSOKey, PipelineState> m_visibilityBufferPSOCache;
+    std::unordered_map<PSOKey, PipelineState> m_visibilityBufferMeshPSOCache;
+
 	std::unordered_map<unsigned int, PipelineState> m_deferredPSOCache;
 
     ComPtr<IDxcUtils> pUtils;
@@ -169,6 +175,9 @@ private:
 
     PipelineState CreateShadowPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
     PipelineState CreateShadowMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+
+	PipelineState CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+	PipelineState CreateVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
     PipelineState CreateDeferredPSO(UINT psoFlags);
 
