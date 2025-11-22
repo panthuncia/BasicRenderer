@@ -68,8 +68,7 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
-		auto& manager = UploadManager::GetInstance();
-		manager.UploadData(data, sizeof(T), this, view->GetOffset());
+        QUEUE_UPLOAD(data, sizeof(T), this, view->GetOffset());
     }
 
 

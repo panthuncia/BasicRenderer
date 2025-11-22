@@ -139,7 +139,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     }
 
     graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-        .Build<ZPrepass>(
+        .Build<GBufferPass>(
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -163,7 +163,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     }
 
     graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-        .Build<ZPrepass>(
+        .Build<GBufferPass>(
         wireframeEnabled, 
         meshShadersEnabled, 
         true, 
@@ -212,7 +212,7 @@ void BuildZPrepass(RenderGraph* graph) {
         clearRTVs = true; // We will not run an earlier pass
     }
     graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-        .Build<ZPrepass>(
+        .Build<GBufferPass>(
         enableWireframe, 
         useMeshShaders,
         indirect, 
@@ -323,7 +323,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).slot.index;
     gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
 
-    UploadManager::GetInstance().UploadData(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
+    QUEUE_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
 
     graph->BuildComputePass("GTAOFilterPass") // Depth filter pass
         .Build<GTAOFilterPass>(GTAOConstantBuffer);

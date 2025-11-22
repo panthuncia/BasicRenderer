@@ -344,7 +344,9 @@ namespace RGInspector {
                                 t.range.mipLower, t.range.mipUpper,
                                 t.range.sliceLower, t.range.sliceUpper);
                             ImGui::BulletText("Layout : %s -> %s", rhi::helpers::ResourceLayoutToString(t.prevLayout), rhi::helpers::ResourceLayoutToString(t.newLayout));
-                            ImGui::BulletText("Access : %s -> %s", rhi::helpers::ResourceAccessMaskToString(t.prevAccessType), rhi::helpers::ResourceAccessMaskToString(t.newAccessType));
+                            auto prevAccess = rhi::helpers::ResourceAccessMaskToString(t.prevAccessType);
+							auto newAccess = rhi::helpers::ResourceAccessMaskToString(t.newAccessType);
+                            ImGui::BulletText("Access : %s -> %s", prevAccess.c_str(), newAccess.c_str());
                             ImGui::BulletText("Sync   : %s -> %s",rhi::helpers::ResourceSyncToString(t.prevSyncState), rhi::helpers::ResourceSyncToString(t.newSyncState));
                             ImGui::Separator();
                             };

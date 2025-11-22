@@ -46,6 +46,13 @@ public:
         return resource != nullptr;
 	}
 
+    virtual uint64_t GetGlobalResourceID() const override {
+        if (resource) {
+            return resource->GetGlobalResourceID();
+        }
+        return m_globalResourceID;
+	}
+
 protected:
     void OnSetName() override {
         if (resource) {

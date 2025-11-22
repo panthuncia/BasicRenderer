@@ -8,7 +8,7 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Materials/MaterialBuckets.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "Managers/CameraManager.h"
+#include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Utilities/MathUtils.h"
 #include "ShaderBuffers.h"
@@ -143,9 +143,9 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 		camera.jitteredProjection = projection; // lights don't use jittering.
 		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.unjitteredProjection);
 
-		auto renderView = m_pCameraManager->AddCamera(camera);
-		m_pointViewInfo->Add(renderView.cameraBufferIndex);
-		viewInfo.renderViews.push_back(renderView);
+		auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace());
+		m_pointViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
+		viewInfo.viewIDs.push_back(renderView);
 	}	
 	
 	viewInfo.projectionMatrix = Components::Matrix(projection);
@@ -169,9 +169,9 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	camera.jitteredProjection = camera.unjitteredProjection; // lights don't use jittering.
 	camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, camera.unjitteredProjection);
 
-	auto renderView = m_pCameraManager->AddCamera(camera);
-	m_spotViewInfo->Add(renderView.cameraBufferIndex);
-	viewInfo.renderViews.push_back(renderView);
+	auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace());
+	m_spotViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
+	viewInfo.viewIDs.push_back(renderView);
 
 	viewInfo.projectionMatrix = Components::Matrix(camera.unjitteredProjection);
 	return { viewInfo, std::nullopt };
@@ -232,9 +232,9 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(cameraInfo.depthResX), static_cast<uint16_t>(cameraInfo.depthResY));
 		cameraInfo.isOrtho = true; // Directional lights use orthographic projection for shadows.
 		// TODO: Needs near and far for depth unprojection
-		auto renderView = m_pCameraManager->AddCamera(cameraInfo);
-		m_directionalViewInfo->Add(renderView.cameraBufferIndex);
-		viewInfo.renderViews.push_back(renderView);
+		auto renderView = m_pViewManager->CreateView(cameraInfo, ViewFlags::ShadowFace());
+		m_directionalViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
+		viewInfo.viewIDs.push_back(renderView);
 	}
 	return { viewInfo, cascadePlanes };
 }
@@ -243,7 +243,7 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	//auto projectionMatrix = light.get<Components::ProjectionMatrix>();
 	auto& viewInfo = light.get<Components::LightViewInfo>();
-	auto& renderViews = viewInfo.renderViews;
+	auto& renderViewIds = viewInfo.viewIDs;
 	auto& lightInfo = light.get<Components::Light>();
 	auto& lightMatrix = light.get<Components::Matrix>();
 	auto& planes = light.get<Components::FrustumPlanes>().frustumPlanes;
@@ -273,7 +273,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 				static_cast<float>(viewInfo.depthResY) / static_cast<float>(GetNextPowerOfTwo(viewInfo.depthResY))
 			};
 			info.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(info.depthResX), static_cast<uint16_t>(info.depthResY));
-			m_pCameraManager->UpdateCamera(renderViews[i], info);
+			m_pViewManager->UpdateCamera(renderViewIds[i], info);
 		}
 		break;
 	}
@@ -300,7 +300,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		};
 		camera.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(camera.depthResX), static_cast<uint16_t>(camera.depthResY));
 
-		m_pCameraManager->UpdateCamera(renderViews[0], camera);
+		m_pViewManager->UpdateCamera(renderViewIds[0], camera);
 		break;
 	}
 	case Components::LightType::Directional: {
@@ -338,7 +338,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			};
 			info.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(info.depthResX), static_cast<uint16_t>(info.depthResY));
 			info.isOrtho = true; // Directional lights use orthographic projection for shadows.
-			m_pCameraManager->UpdateCamera(renderViews[i], info);
+			m_pViewManager->UpdateCamera(renderViewIds[i], info);
 		}
 		break;
 	}
@@ -354,20 +354,20 @@ void LightManager::RemoveLightViewInfo(flecs::entity light) {
 	auto& viewInfo = light.get<Components::LightViewInfo>();
 	switch (lightInfo.type) {
 	case Components::LightType::Point: {
-		auto& views = viewInfo.renderViews;
+		auto& views = viewInfo.viewIDs;
 		for (int i = 0; i < 6; i++) {
-			m_pCameraManager->RemoveCamera(views[i]);
+			m_pViewManager->DestroyView(views[i]);
 		}
 		break;
 	}
 	case Components::LightType::Spot: {
-		m_pCameraManager->RemoveCamera(viewInfo.renderViews[0]);
+		m_pViewManager->DestroyView(viewInfo.viewIDs[0]);
 		break;
 	}
 	case Components::LightType::Directional: {
-		auto& views = viewInfo.renderViews;
+		auto& views = viewInfo.viewIDs;
 		for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
-			m_pCameraManager->RemoveCamera(views[i]);
+			m_pViewManager->DestroyView(views[i]);
 		}
 		break;
 	}
@@ -381,8 +381,8 @@ void LightManager::SetCurrentCamera(flecs::entity camera) {
 }
 
 
-void LightManager::SetCameraManager(CameraManager* cameraManager) {
-	m_pCameraManager = cameraManager;
+void LightManager::SetViewManager(ViewManager* viewManager) {
+	m_pViewManager = viewManager;
 }
 
 void LightManager::UpdateLightBufferView(BufferView* view, LightInfo& data) {

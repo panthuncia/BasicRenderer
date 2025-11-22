@@ -5,8 +5,10 @@
 
 #include <resource_states.h>
 #include <rhi.h>
+#include <flecs.h>
 
 #include "Resources/ResourceStateTracker.h"
+#include "Managers/Singletons/ECSManager.h"
 
 class RenderContext;
 
@@ -14,8 +16,16 @@ class Resource {
 public:
     Resource() {
         m_globalResourceID = globalResourceCount.fetch_add(1, std::memory_order_relaxed);
+		m_ecsEntity = ECSManager::GetInstance().GetWorld().entity();
     }
-	virtual ~Resource() = default;
+	virtual ~Resource() {
+		if (!ECSManager::GetInstance().GetWorld()) { // TODO: Hacky way to avoid issues with desctruction order. Is there a better way?
+			return;
+		}
+		if (m_ecsEntity.is_alive()) {
+			m_ecsEntity.destruct();
+		}
+	}
 
 
     const std::wstring& GetName() const { return name; }
@@ -44,6 +54,9 @@ public:
 	virtual SymbolicTracker* GetStateTracker() {
 		return &m_stateTracker;
 	}
+	flecs::entity& GetECSEntity() {
+		return m_ecsEntity;
+	}
 
 protected:
     virtual void OnSetName() {}
@@ -60,6 +73,7 @@ private:
     inline static std::atomic<uint64_t> globalResourceCount;
     uint64_t m_globalResourceID;
 	SymbolicTracker m_stateTracker;
+	flecs::entity m_ecsEntity; // For access through ECS queries
 
     //friend class RenderGraph;
     friend class ResourceGroup;

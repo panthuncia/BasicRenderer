@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <rhi.h>
+#include <flecs.h>
 
 #include "Resources/Resource.h"
 #include "Render/RenderContext.h"
@@ -45,6 +46,7 @@ public:
 		m_resourceRegistryView = resourceRegistryView;
 		m_resourceDescriptorIndexHelper = std::make_unique<ResourceDescriptorIndexHelper>(resourceRegistryView);
 	}
+
     virtual void Setup() = 0;
 	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 

@@ -14,7 +14,7 @@ Material::Material(const std::string& name,
     auto& resourceManager = ResourceManager::GetInstance();
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
     m_materialData.materialFlags = materialFlags;
-    UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 Material::Material(const std::string& name,
@@ -38,7 +38,7 @@ Material::Material(const std::string& name,
 	std::vector<uint32_t> metallicChannel,
 	std::vector<uint32_t> roughnessChannel,
 	std::vector<uint32_t> emissiveChannels,
-    BlendState blendState,
+    TechniqueDescriptor technique,
     float alphaCutoff)
     : m_name(name),
     m_psoFlags(psoFlags),
@@ -54,8 +54,8 @@ Material::Material(const std::string& name,
     m_roughnessFactor(roughnessFactor),
     m_baseColorFactor(baseColorFactor),
     m_emissiveFactor(emissiveFactor),
-    m_blendState(blendState) {
-
+	m_technique(technique)
+{
     m_materialData.materialFlags = materialFlags;
     m_materialData.ambientStrength = 0.5f;
     m_materialData.specularStrength = 2.0f;
@@ -123,7 +123,7 @@ Material::Material(const std::string& name,
     m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
     m_perMaterialHandle->SetName(L"PerMaterialCB (" + s2ws(name) + L")");
 
-    UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 Material::~Material() {
@@ -178,17 +178,17 @@ void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
     heightmap->GetBuffer()->SetName(L"HeightMap");
     m_materialData.heightMapIndex = heightmap->GetBuffer()->GetSRVInfo(0).slot.index;
     m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
-    UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 void Material::SetTextureScale(float scale) {
     m_materialData.textureScale = scale;
-    UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 void Material::SetHeightmapScale(float scale) {
     m_materialData.heightMapScale = scale;
-    UploadManager::GetInstance().UploadData(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 std::shared_ptr<Material> Material::GetDefaultMaterial() {

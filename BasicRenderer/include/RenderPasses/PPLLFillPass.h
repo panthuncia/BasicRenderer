@@ -63,22 +63,29 @@ public:
 			builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
 			builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
 			if (m_indirect) {
-				builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
+				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+				auto oitFillPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
+				flecs::query<> indirectQuery = ecsWorld.query_builder<>()
+					.with<Components::IsIndirectArguments>()
+					.with<Components::ParticipatesInPass>(oitFillPassEntity) // Query for command lists that participate in this pass
+					//.cached().cache_kind(flecs::QueryCacheAll)
+					.build();
 			}
 		}
 	}
 
 	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
+			.cached().cache_kind(flecs::QueryCacheAll)
+			.build();
 		
 		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_PPLLHeadPointerTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
 		
 		RegisterUAV(Builtin::PPLL::HeadPointerTexture);
-		if (m_indirect) {
-			m_primaryCameraBlendIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend);
-		}
+
 		if (m_meshShaders) {
 			m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		}
@@ -117,11 +124,6 @@ public:
 
 	PassReturn Execute(RenderContext& context) override {
 
-		auto numBlend = context.drawStats.numBlendDraws;
-		if (numBlend == 0) {
-			return {};
-		}
-
 		auto& commandList = context.commandList;
 
 		SetupCommonState(context, commandList);
@@ -147,7 +149,7 @@ public:
 	virtual void Update() override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		UploadManager::GetInstance().UploadData(&zero, sizeof(uint32_t), m_PPLLCounter.get(), 0);
+		QUEUE_UPLOAD(&zero, sizeof(uint32_t), m_PPLLCounter.get(), 0);
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -247,14 +249,14 @@ private:
 	void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
 		// Regular forward rendering using DrawIndexedInstanced
 		auto& psoManager = PSOManager::GetInstance();
-		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
-			auto& meshes = blendMeshes.meshInstances;
+		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes blendMeshes) {
+			auto& meshes = blendMeshes.meshesByPass[m_renderPhase.hash];
 
 			commandList.PushConstants(rhi::ShaderStage::Pixel, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto& pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
+				auto& pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
 				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -273,14 +275,14 @@ private:
 	void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
 		// Mesh shading path using DispatchMesh
 		auto& psoManager = PSOManager::GetInstance();
-		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
-			auto& meshes = blendMeshes.meshInstances;
+		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes blendMeshes) {
+			auto& meshes = blendMeshes.meshesByPass[m_renderPhase.hash];
 
 			commandList.PushConstants(rhi::ShaderStage::Pixel, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), BLEND_STATE_BLEND, m_wireframe);
+				auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
 				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -295,30 +297,32 @@ private:
 	}
 
 	void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
-		auto numBlend = context.drawStats.numBlendDraws;
-		if (numBlend == 0) {
-			return;
-		}
 		auto& psoManager = PSOManager::GetInstance();
-		auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST,  BLEND_STATE_BLEND, m_wireframe);
-		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-		commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
-		// Blended objects
-		auto indirectCommandBuffer = m_primaryCameraBlendIndirectCommandBuffer;
-		auto apiResource = indirectCommandBuffer->GetAPIResource();
-		commandList.ExecuteIndirect(
-			commandSignature.GetHandle(), 
-			apiResource.GetHandle(), 
-			0, 
-			apiResource.GetHandle(), 
-			indirectCommandBuffer->GetResource()->GetUAVCounterOffset(), 
-			numBlend);
+		auto workloads = context.indirectCommandBufferManager->GetBuffersForRenderPhase(
+			context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID,
+			Engine::Primary::OITAccumulationPass);
+
+		for (auto& workload : workloads) {
+			auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags, workload.first, m_wireframe);
+			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+
+			BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+
+			auto apiResource = workload.second.buffer->GetAPIResource();
+			commandList.ExecuteIndirect(
+				commandSignature.GetHandle(),
+				apiResource.GetHandle(),
+				0,
+				apiResource.GetHandle(),
+				workload.second.buffer->GetResource()->GetUAVCounterOffset(),
+				workload.second.count);
+		}
 	}
 
-	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_blendMeshInstancesQuery;
 	bool m_wireframe;
 	bool m_meshShaders;
 	bool m_indirect;
@@ -331,9 +335,10 @@ private:
 	std::shared_ptr<Buffer> m_PPLLCounter;
 
 	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraBlendIndirectCommandBuffer;
 	std::shared_ptr<DynamicGloballyIndexedResource> m_meshletCullingBitfieldBuffer;
 	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
+
+	RenderPhase m_renderPhase = Engine::Primary::OITAccumulationPass;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;

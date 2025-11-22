@@ -12,6 +12,7 @@
 #include "ShaderBuffers.h"
 #include "meshoptimizer.h"
 #include "Resources/Buffers/BufferView.h"
+#include "Managers/Singletons/DeletionManager.h"
 
 class Material;
 class MeshManager;
@@ -20,6 +21,12 @@ class Buffer;
 
 class Mesh {
 public:
+	~Mesh()
+	{
+		auto& deletionManager = DeletionManager::GetInstance();
+		deletionManager.MarkForDelete(m_vertexBufferHandle);
+		deletionManager.MarkForDelete(m_indexBufferHandle);
+	}
 	static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
 		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags));
     }

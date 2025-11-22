@@ -15,7 +15,6 @@
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
-#include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
@@ -52,21 +51,26 @@ public:
             .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
             .IsGeometryPass();
         if (m_meshShaders) {
-            builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::MeshletCullingBitfieldGroup)
-                .WithIndirectArguments(Builtin::IndirectCommandBuffers::Opaque,
-                    Builtin::IndirectCommandBuffers::AlphaTest);
-            if (m_drawBlendShadows) {
-                builder->WithIndirectArguments(Builtin::IndirectCommandBuffers::Blend);
-            }
+            auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+            auto shadowPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass);
+            flecs::query<> indirectQuery = ecsWorld.query_builder<>()
+                .with<Components::IsIndirectArguments>()
+                .with<Components::ParticipatesInPass>(shadowPassEntity) // Query for command lists that participate in this pass
+                //.cached().cache_kind(flecs::QueryCacheAll)
+                .build();
+            builder->WithIndirectArguments(ECSResourceResolver(indirectQuery))
+                .WithShaderResource(Builtin::MeshResources::MeshletOffsets,
+                    Builtin::MeshResources::MeshletVertexIndices,
+                    Builtin::MeshResources::MeshletTriangles);
         }
     }
 
     void Setup() override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
+            .cached().cache_kind(flecs::QueryCacheAll).build();
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
@@ -144,14 +148,14 @@ private:
 
             // Opaque objects
             
-            m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
-                auto& meshes = opaqueMeshes.meshInstances;
+            m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
+                auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash];
 
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto& pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                    auto& pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -165,52 +169,6 @@ private:
                     commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
                 }
                 });
-
-            // Alpha test objects
-            m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
-                auto& meshes = alphaTestMeshes.meshInstances;
-
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
-
-                for (auto& pMesh : meshes) {
-                    auto& mesh = *pMesh->GetMesh();
-                    auto& pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                    unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                    perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                    perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>((pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB)));
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
-
-					commandList.SetIndexBuffer(mesh.GetIndexBufferView());
-
-                    commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
-                }
-                });
-
-            // Blend objects
-            if (m_drawBlendShadows) {
-                m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
-                    auto& meshes = blendMeshes.meshInstances;
-
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
-
-                    for (auto& pMesh : meshes) {
-                        auto& mesh = *pMesh->GetMesh();
-                        auto& pso = psoManager.GetShadowPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
-                        BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-						commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                        auto perMeshIndex = mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB);
-						commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, 1, &perMeshIndex);
-
-						commandList.SetIndexBuffer(mesh.GetIndexBufferView());
-
-                        commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
-                    }
-                    });
-            }
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
@@ -311,56 +269,14 @@ private:
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
             // Opaque objects
-            m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
-                auto& meshes = opaqueMeshes.meshInstances;
+            m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
+                auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash];
 
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
                 for (auto& pMesh : meshes) {
                     auto& mesh = *pMesh->GetMesh();
-                    auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                    unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                    perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                    perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
-
-                    commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
-                }
-                });
-
-            // Alpha test objects
-            m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
-                auto& meshes = alphaTestMeshes.meshInstances;
-
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
-
-                for (auto& pMesh : meshes) {
-                    auto& mesh = *pMesh->GetMesh();
-                    auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
-                    BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                    unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                    perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                    perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
-
-                    commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
-                }
-                });
-
-            // Blend objects
-            m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
-                auto& meshes = blendMeshes.meshInstances;
-
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
-
-                for (auto& pMesh : meshes) {
-                    auto& mesh = *pMesh->GetMesh();
-                    auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->GetBlendState());
+                    auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
                     BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 					commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -401,7 +317,7 @@ private:
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
 
                 unsigned int misc[NumMiscUintRootConstants] = {};
-                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[0])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
                 drawObjects();
@@ -434,7 +350,7 @@ private:
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
                     lightViewIndex += 1;
@@ -469,7 +385,7 @@ private:
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
                     lightViewIndex += 1;
@@ -485,30 +401,15 @@ private:
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
         auto& psoManager = PSOManager::GetInstance();
 
-        auto drawObjects = [&](const rhi::ResourceHandle& opaqueIndirectCommandBuffer, const rhi::ResourceHandle& alphaTestIndirectCommandBuffer, const rhi::ResourceHandle& blendIndirectCommandBuffer, size_t opaqueCommandCounterOffset, size_t alphaTestCommandCounterOffset, size_t blendIndirectCommandCounterOffset) {
-            auto numOpaque = context.drawStats.numOpaqueDraws;
-            if (numOpaque != 0) {
-                auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW, BlendState::BLEND_STATE_OPAQUE, false);
+        auto drawObjects = [&](const rhi::ResourceHandle& indirectCommandBuffer, const MaterialCompileFlags flags, const uint32_t numDraws, const size_t indirectCommandCounterOffset) {
+
+            if (numDraws != 0) {
+                auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW, flags, false);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-                commandList.ExecuteIndirect(commandSignature.GetHandle(), opaqueIndirectCommandBuffer, 0, opaqueIndirectCommandBuffer, opaqueCommandCounterOffset, numOpaque);
+                commandList.ExecuteIndirect(commandSignature.GetHandle(), indirectCommandBuffer, 0, indirectCommandBuffer, indirectCommandCounterOffset, numDraws);
             }
 
-            auto numAlphaTest = context.drawStats.numAlphaTestDraws;
-            if (numAlphaTest != 0) {
-                auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_ALPHA_TEST | PSO_DOUBLE_SIDED, BlendState::BLEND_STATE_MASK, false);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-				commandList.ExecuteIndirect(commandSignature.GetHandle(), alphaTestIndirectCommandBuffer, 0, alphaTestIndirectCommandBuffer, alphaTestCommandCounterOffset, numAlphaTest);
-            }
-
-            auto numBlend = context.drawStats.numBlendDraws;
-            if (numBlend != 0) {
-                auto& pso = psoManager.GetShadowMeshPSO(PSOFlags::PSO_SHADOW | PSOFlags::PSO_BLEND, BlendState::BLEND_STATE_BLEND, false);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-				commandList.ExecuteIndirect(commandSignature.GetHandle(), blendIndirectCommandBuffer, 0, blendIndirectCommandBuffer, blendIndirectCommandCounterOffset, numBlend);
-            }
             };
 
         lightQuery.each([&](flecs::entity e, Components::Light light, Components::LightViewInfo& lightViewInfo, Components::DepthMap shadowMap) {
@@ -536,16 +437,16 @@ private:
                 
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewInfo.viewInfoBufferIndex };
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
-                auto& views = lightViewInfo.renderViews;
-                auto& opaque = views[0].indirectCommandBuffers.opaqueIndirectCommandBuffer;
-                auto& alphaTest = views[0].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
-                auto& blend = views[0].indirectCommandBuffers.blendIndirectCommandBuffer;
+                auto& views = lightViewInfo.viewIDs;
+                auto workloads = context.indirectCommandBufferManager->GetBuffersForRenderPhase(views[0], Engine::Primary::ShadowMapsPass);
 
                 unsigned int misc[NumMiscUintRootConstants] = {};
-                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[0].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[0])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
-                drawObjects(opaque->GetAPIResource().GetHandle(), alphaTest->GetAPIResource().GetHandle(), blend->GetAPIResource().GetHandle(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
+				for (auto& workload : workloads) {
+                    drawObjects(workload.second.buffer->GetAPIResource().GetHandle(), workload.first, workload.second.count, workload.second.buffer->GetResource()->GetUAVCounterOffset());
+                }
                 break;
             }
             case Components::LightType::Point: {
@@ -575,22 +476,22 @@ private:
 
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
                     lightViewIndex += 1;
-                    auto& views = lightViewInfo.renderViews;
-                    auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
-                    auto& alphaTest = views[i].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
-                    auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
+                    auto& views = lightViewInfo.viewIDs;
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(views[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
-                    drawObjects(opaque->GetAPIResource().GetHandle(), alphaTest->GetAPIResource().GetHandle(), blend->GetAPIResource().GetHandle(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
+                    for (auto& workload : context.indirectCommandBufferManager->GetBuffersForRenderPhase(views[i], Engine::Primary::ShadowMapsPass)) {
+                        drawObjects(workload.second.buffer->GetAPIResource().GetHandle(), workload.first, workload.second.count, workload.second.buffer->GetResource()->GetUAVCounterOffset());
+					}
                 }
                 break;
             }
             case Components::LightType::Directional: {
                 uint32_t lightViewIndex = static_cast<uint32_t>(lightViewInfo.viewInfoBufferIndex * getNumDirectionalLightCascades());
                 uint32_t lightInfo[2] = { lightViewInfo.lightBufferIndex, lightViewIndex };
+                commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
                 for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
                     std::string name = "View " + std::to_string(i);
                     rhi::debug::Scope scope(commandList, rhi::colors::Cyan, name.c_str());
@@ -614,16 +515,15 @@ private:
 
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
                     lightViewIndex += 1;
-                    auto& views = lightViewInfo.renderViews;
-                    auto& opaque = views[i].indirectCommandBuffers.opaqueIndirectCommandBuffer;
-                    auto& alphaTest = views[i].indirectCommandBuffers.alphaTestIndirectCommandBuffer;
-                    auto& blend = views[i].indirectCommandBuffers.blendIndirectCommandBuffer;
+                    auto& views = lightViewInfo.viewIDs;
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = lightViewInfo.renderViews[i].meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(views[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
 
-                    drawObjects(opaque->GetAPIResource().GetHandle(), alphaTest->GetAPIResource().GetHandle(), blend->GetAPIResource().GetHandle(), opaque->GetResource()->GetUAVCounterOffset(), alphaTest->GetResource()->GetUAVCounterOffset(), blend->GetResource()->GetUAVCounterOffset());
+                    for (auto& workload : context.indirectCommandBufferManager->GetBuffersForRenderPhase(views[i], Engine::Primary::ShadowMapsPass)) {
+                        drawObjects(workload.second.buffer->GetAPIResource().GetHandle(), workload.first, workload.second.count, workload.second.buffer->GetResource()->GetUAVCounterOffset());
+                    }
                 }
             }
             }
@@ -632,9 +532,7 @@ private:
 
 private:
     flecs::query<Components::Light, Components::LightViewInfo, Components::DepthMap> lightQuery;
-    flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
-    flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
-    flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
+    flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
@@ -642,6 +540,8 @@ private:
     bool m_clearDepths;
 
     float clear[4] = { 1.0, 0.0, 0.0, 0.0 };
+
+    RenderPhase m_renderPhase = Engine::Primary::ShadowMapsPass;
 
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<uint16_t()> getShadowResolution;

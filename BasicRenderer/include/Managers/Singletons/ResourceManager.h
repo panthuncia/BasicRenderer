@@ -434,7 +434,7 @@ public:
         const TextureDescription& desc,
         rhi::HeapHandle placedResourceHeap = {});
 
-    void UploadTextureData(rhi::Resource& pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
+    void UploadTextureData(rhi::Resource& pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels);
 
     UINT CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc);
 

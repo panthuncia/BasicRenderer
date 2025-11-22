@@ -25,7 +25,7 @@
 #include "Resources/ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
-#include "Managers/CameraManager.h"
+#include "Managers/ViewManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
@@ -121,7 +121,7 @@ private:
     std::unique_ptr<MeshManager> m_pMeshManager = nullptr;
     std::unique_ptr<ObjectManager> m_pObjectManager = nullptr;
     std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
-    std::unique_ptr<CameraManager> m_pCameraManager = nullptr;
+    std::unique_ptr<ViewManager> m_pViewManager = nullptr;
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 
 	ManagerInterface m_managerInterface;
@@ -168,7 +168,7 @@ private:
     bool m_bloom = true;
     bool m_jitter = true;
 	bool m_screenSpaceReflections = true;
-	bool m_useMeshShaders = false;
+	bool m_useMeshShaders = true;
 
     std::function<void(ShadowMaps*)> setShadowMaps;
     std::function<void(LinearShadowMaps*)> setLinearShadowMaps;

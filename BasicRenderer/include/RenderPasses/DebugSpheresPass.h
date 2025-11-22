@@ -29,9 +29,7 @@ public:
 
 	void Setup() override {
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
-		m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
-		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::BlendMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	
 		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
@@ -72,8 +70,8 @@ public:
 
 		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 8, &constants);
 
-		m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
-			auto& meshes = opaqueMeshes.meshInstances;
+		m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
+			auto& meshes = meshInstances.meshInstances;
 
 			for (auto& pMesh : meshes) {
 				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
@@ -87,35 +85,6 @@ public:
 			}
 			});
 
-		m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
-			auto& meshes = alphaTestMeshes.meshInstances;
-
-			for (auto& pMesh : meshes) {
-				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
-				constants.center[0] = meshData.boundingSphere.sphere.x;
-				constants.center[1] = meshData.boundingSphere.sphere.y;
-				constants.center[2] = meshData.boundingSphere.sphere.z;
-				constants.radius = meshData.boundingSphere.sphere.w;
-				constants.perObjectIndex = drawInfo.perObjectCBIndex;
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, &constants);
-				commandList.DispatchMesh(1, 1, 1);
-			}
-			});
-
-		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::BlendMeshInstances blendMeshes) {
-			auto& meshes = blendMeshes.meshInstances;
-
-			for (auto& pMesh : meshes) {
-				auto meshData = pMesh->GetMesh()->GetPerMeshCBData();
-				constants.center[0] = meshData.boundingSphere.sphere.x;
-				constants.center[1] = meshData.boundingSphere.sphere.y;
-				constants.center[2] = meshData.boundingSphere.sphere.z;
-				constants.radius = meshData.boundingSphere.sphere.w;
-				constants.perObjectIndex = drawInfo.perObjectCBIndex;
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, &constants);
-				commandList.DispatchMesh(1, 1, 1);
-			}
-			});
 		return {};
 	}
 
@@ -211,9 +180,7 @@ private:
 
 	}
 
-	flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
-	flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
-	flecs::query<Components::ObjectDrawInfo, Components::BlendMeshInstances> m_blendMeshInstancesQuery;
+	flecs::query<Components::ObjectDrawInfo, Components::MeshInstances> m_meshInstancesQuery;
 	rhi::PipelineLayoutPtr m_debugLayout;
 	rhi::PipelinePtr m_pso;
 	bool m_wireframe;

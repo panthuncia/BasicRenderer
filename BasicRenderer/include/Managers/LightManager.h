@@ -18,7 +18,7 @@
 class ShadowMaps;
 class LinearShadowMaps;
 class IndirectCommandBufferManager;
-class CameraManager;
+class ViewManager;
 class SortedUnsignedIntBuffer;
 
 struct AddLightReturn {
@@ -37,7 +37,7 @@ public:
     void RemoveLight(LightInfo* light);
     unsigned int GetNumLights();
     void SetCurrentCamera(flecs::entity camera);
-	void SetCameraManager(CameraManager* cameraManager);
+	void SetViewManager(ViewManager* viewManager);
 	void UpdateLightBufferView(BufferView* view, LightInfo& data);
     void UpdateLightViewInfo(flecs::entity light);
 	unsigned int GetLightPagePoolSize() { return m_lightPagePoolSize; }
@@ -72,7 +72,7 @@ private:
     std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
 	std::function<LinearShadowMaps*()> getCurrentLinearShadowMapResourceGroup;
     std::function<void(std::shared_ptr<void>)> markForDelete;
-    CameraManager* m_pCameraManager = nullptr;
+	ViewManager* m_pViewManager = nullptr;
 	unsigned int m_lightPagePoolSize = 0;
 
 	std::mutex m_lightUpdateMutex;

@@ -8,9 +8,11 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 #include "Resources/Buffers/BufferView.h"
 #include "ShaderBuffers.h"
+#include "Materials/TechniqueDescriptor.h"
 
 class MeshInstance;
 class DynamicGloballyIndexedResource;
@@ -117,12 +119,11 @@ namespace Components {
 	struct IndirectDrawInfo {
 		std::vector<unsigned int> indices;
 		std::vector<std::shared_ptr<BufferView>> views;
+		std::vector<MaterialCompileFlags> materialTechniques;
 	};
 
 	struct ObjectDrawInfo {
-		std::optional<IndirectDrawInfo> opaque;
-		std::optional<IndirectDrawInfo> alphaTest;
-		std::optional<IndirectDrawInfo> blend;
+		IndirectDrawInfo drawInfo;
 		std::shared_ptr<BufferView> perObjectCBView;
 		uint32_t perObjectCBIndex;
 		std::shared_ptr<BufferView> normalMatrixView;
@@ -130,11 +131,7 @@ namespace Components {
 	};
 
 	struct IndirectCommandBuffers {
-		std::shared_ptr<DynamicGloballyIndexedResource> opaqueIndirectCommandBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> alphaTestIndirectCommandBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> blendIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletCullingIndirectCommandBuffer;
-		//std::shared_ptr<DynamicGloballyIndexedResource> meshletOcclusionCullingIndirectCommandBuffer;
 		std::shared_ptr<DynamicGloballyIndexedResource> meshletCullingResetIndirectCommandBuffer;
 	};
 	struct DepthMap {
@@ -145,18 +142,11 @@ namespace Components {
 		std::shared_ptr<PixelBuffer> depthMap;
 		std::shared_ptr<PixelBuffer> linearDepthMap;
 	};
-	struct RenderView {
-		uint32_t viewID;
-		std::shared_ptr<BufferView> cameraBufferView;;
-		uint32_t cameraBufferIndex;
-		IndirectCommandBuffers indirectCommandBuffers;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
-		std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
-		//DepthMap depthMap;
+	struct RenderViewRef {
+		uint64_t viewID;
 	};
 	struct LightViewInfo {
-		std::vector<RenderView> renderViews;
+		std::vector<uint64_t> viewIDs;
 		std::shared_ptr<BufferView> lightBufferView;
 		uint32_t lightBufferIndex;
 		uint32_t viewInfoBufferIndex;
@@ -169,20 +159,15 @@ namespace Components {
 
 	struct SceneNode {}; // Represents a generic node in the scene graph
 	struct GlobalMeshLibrary {
-		std::unordered_map<uint64_t, std::shared_ptr<Mesh>> meshes;
+		std::unordered_map<uint64_t, std::weak_ptr<Mesh>> meshes;
 	};
 
 	struct DrawStats {
 		uint32_t numDrawsInScene = 0;
-		uint32_t numOpaqueDraws = 0;
-		uint32_t numAlphaTestDraws = 0;
-		uint32_t numBlendDraws = 0;
+		std::unordered_map<MaterialCompileFlags, uint32_t> numDrawsPerTechnique;
 	};
 
 	struct Skinned {};
-	struct OpaqueSkinned {};
-	struct AlphaTestSkinned {};
-	struct BlendSkinned {};
 	struct SkeletonRoot {}; // Tags the root of a skeleton hierarchy
 
 	struct Active {}; // Represents an active entity in the scene
@@ -202,54 +187,16 @@ namespace Components {
 		std::string name;
 	}; // The name a bone is referenced by in animations that affect it
 
-	struct OpaqueIndirectDrawInfo {
-		OpaqueIndirectDrawInfo() = default;
-		OpaqueIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
-			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
-		}
-		std::vector<unsigned int> drawSetIndices;
-		std::vector<BufferView> drawSetCommandViews;
-	};
-
-	struct AlphaTestIndirectDrawInfo {
-		AlphaTestIndirectDrawInfo() = default;
-		AlphaTestIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
-			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
-		}
-		std::vector<unsigned int> drawSetIndices;
-		std::vector<BufferView> drawSetCommandViews;
-	};
-
-	struct BlendIndirectDrawInfo {
-		BlendIndirectDrawInfo() = default;
-		BlendIndirectDrawInfo(std::vector<unsigned int> drawSetIndices, std::vector<BufferView> drawSetCommandViews)
-			: drawSetIndices(std::move(drawSetIndices)), drawSetCommandViews(std::move(drawSetCommandViews)) {
-		}
-		std::vector<unsigned int> drawSetIndices;
-		std::vector<BufferView> drawSetCommandViews;
-	};
-
-	struct OpaqueMeshInstances {
-		OpaqueMeshInstances() = default;
-		OpaqueMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
-			: meshInstances(std::move(meshInstances)) {
+	struct MeshInstances {
+		MeshInstances() = default;
+		MeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
+			: meshInstances(std::move(instances)) {
 		}
 		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
 	};
-
-	struct AlphaTestMeshInstances {
-		AlphaTestMeshInstances() = default;
-		AlphaTestMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
-			: meshInstances(std::move(meshInstances)) {
-		}
-		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
+	struct PerPassMeshes {
+		// Keyed by RenderPhase id hash
+		std::unordered_map<uint64_t, std::vector<std::shared_ptr<MeshInstance>>> meshesByPass;
 	};
 
-	struct BlendMeshInstances {
-		BlendMeshInstances() = default;
-		BlendMeshInstances(std::vector<std::shared_ptr<MeshInstance>> instances)
-			: meshInstances(std::move(meshInstances)) {
-		}
-		std::vector<std::shared_ptr<MeshInstance> > meshInstances;
-	};
 }; // namespace Components

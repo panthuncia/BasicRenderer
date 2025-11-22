@@ -39,7 +39,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "RenderPasses/ClusterGenerationPass.h"
 #include "RenderPasses/LightCullingPass.h"
-#include "RenderPasses/ZPrepass.h"
+#include "RenderPasses/GBuffer.h"
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
@@ -143,7 +143,6 @@ ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
 }
 
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
-
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
@@ -175,21 +174,22 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pMeshManager = MeshManager::CreateUnique();
 	m_pObjectManager = ObjectManager::CreateUnique();
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
-	m_pCameraManager = CameraManager::CreateUnique();
+	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
-	m_pLightManager->SetCameraManager(m_pCameraManager.get()); // Light manager needs access to camera manager for shadow cameras
-	m_pCameraManager->SetCommandBufferManager(m_pIndirectCommandBufferManager.get()); // Camera manager needs to make indirect command buffers
-    m_pMeshManager->SetCameraManager(m_pCameraManager.get());
+	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
+	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
+    m_pMeshManager->SetViewManager(m_pViewManager.get());
 
-	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
 	world.add<Components::GlobalMeshLibrary>();
     world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
-	world.set<Components::DrawStats>({ 0, 0, 0, 0 });
+    world.set<Components::DrawStats>({ 0, {} });
+
 	auto res = settingsManager.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
     m_hierarchySystem =
@@ -225,7 +225,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo.normalMatrixView.get(), &normalMat);
         }
 
-        if (entity.has<Components::Camera>() && entity.has<Components::RenderView>()) {
+        if (entity.has<Components::Camera>() && entity.has<Components::RenderViewRef>()) {
             auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
 
             Components::Camera& camera = entity.get_mut<Components::Camera>();
@@ -257,8 +257,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
             camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
 
-            auto renderView = entity.get_mut<Components::RenderView>();
-			m_managerInterface.GetCameraManager()->UpdatePerCameraBufferView(renderView.cameraBufferView.get(), camera.info);
+            auto renderView = entity.get_mut<Components::RenderViewRef>();
+            m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
         }
 
         if (entity.has<Components::Light>()) {
@@ -481,28 +481,13 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 	// Remove all meshes from the mesh manager
 	for (auto& meshPair : meshLibrary) {
 		auto& mesh = meshPair.second;
-		m_pMeshManager->RemoveMesh(mesh.get());
+		m_pMeshManager->RemoveMesh(mesh.lock().get());
 	}
 	// Re-add them to the mesh manager
 	for (auto& meshPair : meshLibrary) {
 		auto& mesh = meshPair.second;
-        MaterialBuckets bucket = {};
-        switch (mesh->material->GetBlendState()) {
-        case BlendState::BLEND_STATE_OPAQUE:
-			bucket = MaterialBuckets::Opaque;
-			break;
-		case BlendState::BLEND_STATE_MASK:
-			bucket = MaterialBuckets::AlphaTest;
-			break;
-		case BlendState::BLEND_STATE_BLEND:
-			bucket = MaterialBuckets::Blend;
-			break;
-        case BlendState::BLEND_STATE_UNKNOWN:
-            spdlog::warn("Unknown blend state for mesh, defaulting to opaque");
-            bucket = MaterialBuckets::Opaque; // Default to opaque if unknown
-			break;
-        }
-        m_pMeshManager->AddMesh(mesh, bucket, useMeshShaders);
+        auto ptr = mesh.lock();
+        m_pMeshManager->AddMesh(ptr, useMeshShaders);
 	}
 
 	// Get all active objects with mesh instances by querying the ECS
@@ -511,24 +496,10 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 
     world.defer_begin();
     query.each([&](flecs::entity entity, const Components::RenderableObject& object, const Components::ObjectDrawInfo& drawInfo) {
-        auto opaqueMeshInstances = entity.try_get<Components::OpaqueMeshInstances>();
-        auto alphaTestMeshInstances = entity.try_get<Components::AlphaTestMeshInstances>();
-        auto blendMeshInstances = entity.try_get<Components::BlendMeshInstances>();
+        auto meshInstances = entity.try_get<Components::MeshInstances>();
 
-        if (opaqueMeshInstances) {
-            for (auto& meshInstance : opaqueMeshInstances->meshInstances) {
-                m_pMeshManager->RemoveMeshInstance(meshInstance.get());
-                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
-            }
-        }
-        if (alphaTestMeshInstances) {
-            for (auto& meshInstance : alphaTestMeshInstances->meshInstances) {
-                m_pMeshManager->RemoveMeshInstance(meshInstance.get());
-                m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
-            }
-        }
-        if (blendMeshInstances) {
-            for (auto& meshInstance : blendMeshInstances->meshInstances) {
+        if (meshInstances) {
+            for (auto& meshInstance : meshInstances->meshInstances) {
                 m_pMeshManager->RemoveMeshInstance(meshInstance.get());
                 m_pMeshManager->AddMeshInstance(meshInstance.get(), useMeshShaders);
             }
@@ -536,7 +507,7 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 
 		// Remove and re-add all objects from the object manager to rebuild indirect draw info
 		m_pObjectManager->RemoveObject(&drawInfo);
-		auto newDrawInfo = m_pObjectManager->AddObject(object.perObjectCB, opaqueMeshInstances, alphaTestMeshInstances, blendMeshInstances);
+		auto newDrawInfo = m_pObjectManager->AddObject(object.perObjectCB, meshInstances);
 		entity.set<Components::ObjectDrawInfo>(newDrawInfo);
             });
     world.defer_end();
@@ -739,7 +710,7 @@ void Renderer::Update(float elapsedSeconds) {
 	world.progress();
 
     auto& camera = currentScene->GetPrimaryCamera();
-    unsigned int cameraIndex = camera.get<Components::RenderView>().cameraBufferIndex;
+    unsigned int cameraIndex = m_pViewManager->Get(camera.get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
 
@@ -785,7 +756,7 @@ void Renderer::Render() {
     m_context.frameFenceValue = m_currentFrameFenceValue;
     m_context.renderResolution = { renderRes.x, renderRes.y };
 	m_context.outputResolution = { outputRes.x, outputRes.y };
-	m_context.cameraManager = m_pCameraManager.get();
+	m_context.viewManager = m_pViewManager.get();
 	m_context.objectManager = m_pObjectManager.get();
 	m_context.meshManager = m_pMeshManager.get();
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
@@ -912,13 +883,14 @@ void Renderer::Cleanup() {
     currentRenderGraph.reset();
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
-	m_pCameraManager.reset();
+	m_pViewManager.reset();
 	m_pLightManager.reset();
 	m_pMeshManager.reset();
 	m_pObjectManager.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     Material::DestroyDefaultMaterial();
+    ECSManager::GetInstance().GetWorld().release();
     DeletionManager::GetInstance().Cleanup();
 }
 
@@ -1043,7 +1015,10 @@ void Renderer::CreateRenderGraph() {
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
-    m_coreResourceProvider.m_primaryCameraMeshletBitfield = currentScene->GetPrimaryCamera().get<Components::RenderView>().meshletBitfieldBuffer;
+    // TODO: this access pattern is stupid
+    auto primaryCamera = m_pViewManager->Get(
+        currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID);
+    m_coreResourceProvider.m_primaryCameraMeshletBitfield = primaryCamera->gpu.meshletBitfieldBuffer;
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
     // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
@@ -1055,7 +1030,7 @@ void Renderer::CreateRenderGraph() {
 	std::shared_ptr<RenderGraph> newGraph = std::make_shared<RenderGraph>();
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
-    newGraph->RegisterProvider(m_pCameraManager.get());
+    newGraph->RegisterProvider(m_pViewManager.get());
     newGraph->RegisterProvider(m_pLightManager.get());
     newGraph->RegisterProvider(m_pEnvironmentManager.get());
     newGraph->RegisterProvider(m_pIndirectCommandBufferManager.get());
@@ -1067,12 +1042,8 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
 
-    auto& view = currentScene->GetPrimaryCamera().get<Components::RenderView>();
-    newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque, view.indirectCommandBuffers.opaqueIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest, view.indirectCommandBuffers.alphaTestIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::Blend, view.indirectCommandBuffers.blendIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, view.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, view.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, primaryCamera->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
+	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, primaryCamera->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
     //newGraph->AddResource(depthTexture, false);
     //newGraph->AddResource(depth->linearDepthMap);
     bool useMeshShaders = getMeshShadersEnabled();

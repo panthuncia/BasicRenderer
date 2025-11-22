@@ -8,7 +8,7 @@ class Scene;
 class ObjectManager;
 class MeshManager;
 class IndirectCommandBufferManager;
-class CameraManager;
+class ViewManager;
 class LightManager;
 class EnvironmentManager;
 class PixelBuffer;
@@ -19,7 +19,7 @@ public:
 	ObjectManager* objectManager;
 	MeshManager* meshManager;
 	IndirectCommandBufferManager* indirectCommandBufferManager;
-	CameraManager* cameraManager;
+	ViewManager* viewManager;
     LightManager* lightManager;
 	EnvironmentManager* environmentManager;
     Scene* currentScene;

@@ -13,7 +13,6 @@
     "directx12-agility",
     "flecs",
     "nlohmann-json",
-    "refl-cpp",
     "tree-sitter",
     "assimp",
     "curl",

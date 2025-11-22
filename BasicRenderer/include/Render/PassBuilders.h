@@ -8,6 +8,8 @@
 #include "ResourceRequirements.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
+#include "Interfaces/IResourceResolver.h"
+#include "Resources/ECSResourceResolver.h"
 
 // Tag for a contiguous mip-range [first..first+count)
 struct Mip {
@@ -364,9 +366,8 @@ processResourceArguments(T&& list, RenderGraph* graph)
 
 namespace detail {
     template<typename U>
-    inline void extractId(std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher>& out, std::shared_ptr<U> const&) {
-        // TODO
-        throw std::runtime_error("extractId not implemented for shared_ptr<Resource>");
+    inline void extractId(std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher>& out, std::shared_ptr<U> const& resource) {
+        out.insert(std::to_string(resource->GetGlobalResourceID()));
     }
     inline void extractId(auto& out, const ResourceAndRange& rar) {
 		extractId(out, rar.resource); // empty identifier
@@ -387,6 +388,19 @@ namespace detail {
     }
 }
 
+template<class T>
+inline constexpr bool ResourceLike =
+std::is_same_v<std::decay_t<T>, std::shared_ptr<Resource>> ||
+std::is_same_v<std::decay_t<T>, ResourceIdentifier> ||
+std::is_same_v<std::decay_t<T>, ResourceAndRange> ||
+std::is_same_v<std::decay_t<T>, ResourceIdentifierAndRange> ||
+std::is_same_v<std::decay_t<T>, std::string_view> || // Can be cast to ResourceIdentifier
+std::is_same_v<std::decay_t<T>, const char*> || // Can be cast to ResourceIdentifier
+std::is_same_v<std::decay_t<T>, IResourceResolver>; // can be cast to ECSResourceResolver 
+
+template<typename T>
+concept NotIResourceResolver = !std::derived_from<std::decay_t<T>, IResourceResolver>; // annoying
+
 template<typename T>
 concept DerivedRenderPass = std::derived_from<T, RenderPass>;
 
@@ -396,60 +410,70 @@ public:
 
     //First set, callable on Lvalues
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithShaderResource(Args&&... args) & {
         (addShaderResource(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithRenderTarget(Args&&... args) & {
         (addRenderTarget(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithDepthRead(Args&&... args) & {
         (addDepthRead(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithDepthReadWrite(Args&&... args) & {
         (addDepthReadWrite(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithConstantBuffer(Args&&... args) & {
         (addConstantBuffer(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithUnorderedAccess(Args&&... args) & {
         (addUnorderedAccess(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithCopyDest(Args&&... args) & {
         (addCopyDest(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithCopySource(Args&&... args) & {
         (addCopySource(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithIndirectArguments(Args&&... args) & {
         (addIndirectArguments(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder& WithLegacyInterop(Args&&... args)& {
         (addLegacyInterop(std::forward<Args>(args)), ...);
         return *this;
@@ -465,36 +489,42 @@ public:
 
     // Second set, callable on temporaries
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithShaderResource(Args&&... args) && {
         (addShaderResource(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithRenderTarget(Args&&... args) && {
         (addRenderTarget(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithDepthReadWrite(Args&&... args) && {
         (addDepthReadWrite(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithDepthRead(Args&&... args) && {
         (addDepthRead(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithConstantBuffer(Args&&... args) && {
         (addConstantBuffer(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithUnorderedAccess(Args&&... args) && {
         (addUnorderedAccess(std::forward<Args>(args)), ...);
         return std::move(*this);
@@ -507,18 +537,21 @@ public:
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithCopySource(Args&&... args) && {
         (addCopySource(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithIndirectArguments(Args&&... args) && {
         (addIndirectArguments(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     RenderPassBuilder WithLegacyInterop(Args&&... args)&& {
         (addLegacyInterop(std::forward<Args>(args)), ...);
         return std::move(*this);
@@ -531,6 +564,178 @@ public:
         addInternalTransition(rar, exitState);
         return std::move(*this);
     }
+
+	// LVALUE overloads for IResourceResolver
+    RenderPassBuilder& WithShaderResource(const IResourceResolver& r)& {
+        auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+        addShaderResource(resources);
+        return *this;
+    }
+
+    RenderPassBuilder& WithRenderTarget(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addRenderTarget(r.Resolve()));
+        return *this;
+	}
+
+    RenderPassBuilder& WithDepthReadWrite(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addDepthReadWrite(r.Resolve()));
+		return *this;
+    }
+
+    RenderPassBuilder& WithDepthRead(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addDepthRead(r.Resolve()));
+        return *this;
+    }
+
+	RenderPassBuilder& WithConstantBuffer(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+        return *this;
+	}
+
+    RenderPassBuilder& WithUnorderedAccess(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addUnorderedAccess(r.Resolve()));
+        return *this;
+	}
+
+    RenderPassBuilder& WithCopyDest(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addCopyDest(r.Resolve()));
+        return *this;
+    }
+
+    RenderPassBuilder& WithCopySource(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addCopySource(r.Resolve()));
+        return *this;
+    }
+
+    RenderPassBuilder& WithIndirectArguments(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addIndirectArguments(r.Resolve()));
+        return *this;
+	}
+
+    RenderPassBuilder& WithLegacyInterop(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addLegacyInterop(r.Resolve()));
+		return *this;
+	}
+
+	// RVALUE overloads for IResourceResolver
+
+    RenderPassBuilder WithShaderResource(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addShaderResource(r.Resolve()));
+        return std::move(*this);
+	}
+    RenderPassBuilder WithRenderTarget(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addRenderTarget(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithDepthReadWrite(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addDepthReadWrite(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithDepthRead(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addDepthRead(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithConstantBuffer(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addConstantBuffer(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithUnorderedAccess(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addUnorderedAccess(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithCopyDest(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+		}
+		(addCopyDest(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithCopySource(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addCopySource(r.Resolve()));
+        return std::move(*this);
+    }
+    RenderPassBuilder WithIndirectArguments(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+        return std::move(*this);
+    }
+    RenderPassBuilder WithLegacyInterop(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addLegacyInterop(r.Resolve()));
+        return std::move(*this);
+	}
 
 	RenderPassBuilder& IsGeometryPass()& {
 		params.isGeometryPass = true;
@@ -585,6 +790,7 @@ private:
 
     // Shader Resource
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addShaderResource(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -594,9 +800,19 @@ private:
 		}
 		return *this;
 	}
+    template<class Range>
+        requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addShaderResource(Range&& xs) {
+        for (auto&& e : xs) {
+            addShaderResource(std::forward<decltype(e)>(e));
+        }
+        return *this;
+    }
 
     // Render target
     template<typename T>
+        requires ResourceLike<T>
     RenderPassBuilder& addRenderTarget(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -606,9 +822,19 @@ private:
 		}
 		return *this;
     }
+    template<class Range>
+		requires (std::ranges::range<Range>&&
+	ResourceLike<std::ranges::range_value_t<Range>>)
+		RenderPassBuilder& addRenderTarget(Range&& xs) {
+		for (auto&& e : xs) {
+			addRenderTarget(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Depth target
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addDepthReadWrite(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -618,8 +844,18 @@ private:
 		}
 		return *this;
 	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+	ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addDepthReadWrite(Range&& xs) {
+        for (auto&& e : xs) {
+            addDepthReadWrite(std::forward<decltype(e)>(e));
+        }
+        return *this;
+	}
 
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addDepthRead(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -629,9 +865,19 @@ private:
 		}
 		return *this;
 	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addDepthRead(Range&& xs) {
+        for (auto&& e : xs) {
+            addDepthRead(std::forward<decltype(e)>(e));
+        }
+		return *this;
+	}
 
     // Constant buffer
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addConstantBuffer(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -641,9 +887,19 @@ private:
 		}
 		return *this;
 	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addConstantBuffer(Range&& xs) {
+        for (auto&& e : xs) {
+            addConstantBuffer(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Unordered access
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addUnorderedAccess(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -653,9 +909,19 @@ private:
 		}
 		return *this;
 	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addUnorderedAccess(Range&& xs) {
+        for (auto&& e : xs) {
+            addUnorderedAccess(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Copy destination
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addCopyDest(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -665,9 +931,19 @@ private:
 		}
 		return *this;
 	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addCopyDest(Range&& xs) {
+        for (auto&& e : xs) {
+			addCopyDest(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Copy source
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addCopySource(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -677,9 +953,19 @@ private:
 		}
 		return *this;
 	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addCopySource(Range&& xs) {
+		for (auto&& e : xs) {
+			addCopySource(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Indirect arguments
 	template<typename T>
+        requires ResourceLike<T>
 	RenderPassBuilder& addIndirectArguments(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -689,9 +975,19 @@ private:
 		}
 		return *this;
 	}
+	template <class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addIndirectArguments(Range&& xs) {
+        for (auto&& e : xs) {
+			addIndirectArguments(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Legacy interop resources
     template<typename T>
+        requires ResourceLike<T>
     RenderPassBuilder& addLegacyInterop(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
         auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -701,6 +997,15 @@ private:
         }
         return *this;
     }
+    template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        RenderPassBuilder& addLegacyInterop(Range&& xs) {
+        for (auto&& e : xs) {
+            addLegacyInterop(std::forward<decltype(e)>(e));
+        }
+        return *this;
+	}
 
     RenderPassBuilder& addInternalTransition(
         ResourceIdentifierAndRange rar,
@@ -713,6 +1018,15 @@ private:
         }
         return *this;
     }
+	template <class Range>
+		requires (std::ranges::range<Range>&&
+    std::is_same_v<std::ranges::range_value_t<Range>, ResourceIdentifierAndRange>)
+        RenderPassBuilder& addInternalTransition(Range&& xs, ResourceState exitState) {
+        for (auto&& e : xs) {
+            addInternalTransition(std::forward<decltype(e)>(e), exitState);
+        }
+        return *this;
+	}
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
@@ -824,30 +1138,35 @@ public:
 
     //First set, callable on Lvalues
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder& WithShaderResource(Args&&... args) & {
         (addShaderResource(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder& WithConstantBuffer(Args&&... args) & {
         (addConstantBuffer(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder& WithUnorderedAccess(Args&&... args) & {
         (addUnorderedAccess(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder& WithIndirectArguments(Args&&... args) & {
         (addIndirectArguments(std::forward<Args>(args)), ...);
         return *this;
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder& WithLegacyInterop(Args&&... args)& {
         (addLegacyInterop(std::forward<Args>(args)), ...);
         return *this;
@@ -863,30 +1182,35 @@ public:
 
     // Second set, callable on temporaries
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder WithShaderResource(Args&&... args) && {
         (addShaderResource(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder WithConstantBuffer(Args&&... args) && {
         (addConstantBuffer(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder WithUnorderedAccess(Args&&... args) && {
         (addUnorderedAccess(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder WithIndirectArguments(Args&&... args) && {
         (addIndirectArguments(std::forward<Args>(args)), ...);
         return std::move(*this);
     }
 
     template<typename... Args>
+        requires ((NotIResourceResolver<Args>) && ...)
     ComputePassBuilder WithLegacyInterop(Args&&... args)&& {
         (addLegacyInterop(std::forward<Args>(args)), ...);
         return std::move(*this);
@@ -897,6 +1221,95 @@ public:
         ResourceState exitState) &&
     {
 		addInternalTransition(rar, exitState);
+        return std::move(*this);
+    }
+
+    // LVALUE overloads for IResourceResolver
+    ComputePassBuilder& WithShaderResource(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addShaderResource(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithConstantBuffer(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addConstantBuffer(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithUnorderedAccess(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addUnorderedAccess(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithIndirectArguments(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addIndirectArguments(r.Resolve()));
+        return *this;
+    }
+
+    ComputePassBuilder& WithLegacyInterop(const IResourceResolver& r)& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addLegacyInterop(r.Resolve()));
+        return *this;
+    }
+
+    // RVALUE overloads for IResourceResolver
+
+    ComputePassBuilder WithShaderResource(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addShaderResource(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithConstantBuffer(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addConstantBuffer(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithUnorderedAccess(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+		for (auto& res : resources) {
+			graph->AddResource(res);
+		}
+		(addUnorderedAccess(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithIndirectArguments(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addIndirectArguments(r.Resolve()));
+        return std::move(*this);
+    }
+    ComputePassBuilder WithLegacyInterop(const IResourceResolver& r)&& {
+		auto resources = r.Resolve();
+        for (auto& res : resources) {
+            graph->AddResource(res);
+        }
+		(addLegacyInterop(r.Resolve()));
         return std::move(*this);
     }
 
@@ -943,6 +1356,7 @@ private:
 
     // Shader resource
 	template<typename T>
+        requires ResourceLike<T>
 	ComputePassBuilder& addShaderResource(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -952,9 +1366,19 @@ private:
 		}
 		return *this;
 	}
+    template<class Range>
+        requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        ComputePassBuilder& addShaderResource(Range&& xs) {
+        for (auto&& e : xs) {
+            addShaderResource(std::forward<decltype(e)>(e));
+        }
+        return *this;
+    }
 
     // Constant buffer
 	template<typename T>
+        requires ResourceLike<T>
 	ComputePassBuilder& addConstantBuffer(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -964,9 +1388,19 @@ private:
 		}
 		return *this;
 	}
+    template<class Range>
+		requires (std::ranges::range<Range>&&
+	ResourceLike<std::ranges::range_value_t<Range>>)
+        ComputePassBuilder& addConstantBuffer(Range&& xs) {
+		for (auto&& e : xs) {
+			addConstantBuffer(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Unordered access
 	template<typename T>
+        requires ResourceLike<T>
 	ComputePassBuilder& addUnorderedAccess(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -976,9 +1410,19 @@ private:
 		}
 		return *this;
 	}
+    template<class Range>
+		requires (std::ranges::range<Range>&&
+	ResourceLike<std::ranges::range_value_t<Range>>)
+        ComputePassBuilder& addUnorderedAccess(Range&& xs) {
+        for (auto&& e : xs) {
+            addUnorderedAccess(std::forward<decltype(e)>(e));
+        }
+        return *this;
+	}
 
 	// Indirect arguments
 	template<typename T>
+        requires ResourceLike<T>
 	ComputePassBuilder& addIndirectArguments(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -988,9 +1432,19 @@ private:
 		}
 		return *this;
 	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+	ResourceLike<std::ranges::range_value_t<Range>>)
+        ComputePassBuilder& addIndirectArguments(Range&& xs) {
+		for (auto&& e : xs) {
+			addIndirectArguments(std::forward<decltype(e)>(e));
+		}
+		return *this;
+	}
 
     // Legacy interop resources
     template<typename T>
+        requires ResourceLike<T>
     ComputePassBuilder& addLegacyInterop(T&& x) {
         detail::extractId(_declaredIds, std::forward<T>(x));
         auto ranges = processResourceArguments(std::forward<T>(x), graph);
@@ -1000,6 +1454,15 @@ private:
         }
         return *this;
     }
+    template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        ComputePassBuilder& addLegacyInterop(Range&& xs) {
+        for (auto&& e : xs) {
+            addLegacyInterop(std::forward<decltype(e)>(e));
+        }
+		return *this;
+	}
 
     ComputePassBuilder& addInternalTransition(
         ResourceIdentifierAndRange rar,
@@ -1010,6 +1473,17 @@ private:
             if (!r.resource) continue;
             params.internalTransitions.emplace_back(r, exitState);
 		}
+        return *this;
+	}
+	template<class Range>
+		requires (std::ranges::range<Range>&&
+    ResourceLike<std::ranges::range_value_t<Range>>)
+        ComputePassBuilder& addInternalTransition(
+            Range&& xs,
+            ResourceState exitState) {
+        for (auto&& e : xs) {
+            addInternalTransition(std::forward<decltype(e)>(e), exitState);
+        }
         return *this;
 	}
 

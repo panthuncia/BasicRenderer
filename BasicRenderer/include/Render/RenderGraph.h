@@ -112,6 +112,7 @@ public:
 	void RegisterProvider(IResourceProvider* prov);
 	void RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource, IResourceProvider* provider = nullptr);
 	std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
+	void RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities);
 
 	template<DerivedResource T>
 	std::shared_ptr<T> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false) {

@@ -1,0 +1,39 @@
+{
+  "Engine": {
+    "Primary": {
+      "SkinningPass": {},
+      "ShadowMapsPass": {},
+      "ZPrepass": {},
+      "GBufferPass": {},
+      "DeferredShadingPass": {},
+      "ForwardPass": {},
+      "OITAccumulationPass": {},
+      "OITResolvePass": {},
+      "SkyboxPass": {}
+    },
+    "Culling": {
+      "ObjectCullingPass": {},
+      "MeshletCullingPass": {},
+      "LightClusterCreationPass": {},
+      "LightCullingPass": {}
+    },
+    "OnDemand": {
+      "EnvironmentConversionPass": {},
+      "EnvironmentFilterPass": {},
+      "EnvironmentSHPass": {}
+    },
+    "PostProcessing": {
+      "BloomSamplePass": {},
+      "BloomCompositePass": {},
+      "LuminanceHistogramPass": {},
+      "LuminanceHistogramAveragePass": {},
+      "ScreenSpaceReflectionsPass": {},
+      "SpecularIBLPass": {},
+      "UpscalePass": {},
+      "ToneMappingPass": {}
+    },
+    "Misc": {
+      "DebugPass": {}
+    }
+  }
+}

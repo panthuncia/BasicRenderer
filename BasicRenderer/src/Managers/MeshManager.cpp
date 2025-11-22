@@ -6,7 +6,7 @@
 #include "Resources/Buffers/BufferView.h"
 #include "Mesh/MeshInstance.h"
 #include "Resources/Buffers/DynamicBuffer.h"
-#include "Managers/CameraManager.h"
+#include "Managers/ViewManager.h"
 #include "../../generated/BuiltinResources.h"
 
 MeshManager::MeshManager() {
@@ -33,7 +33,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
 }
 
-void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, MaterialBuckets bucket, bool useMeshletReorderedVertices) {
+void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
 	auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
 	auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
@@ -129,7 +129,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	unsigned int meshInstanceBufferSize = static_cast<uint32_t>(m_perMeshInstanceBuffers->Size());
 	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
 		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize, numVertices * vertexSize * 2); // Allocate twice the size, since we need to ping-pong for motion vectors
-		UploadManager::GetInstance().UploadData(vertices.data(), numVertices * vertexSize, postSkinningView->GetBuffer(), postSkinningView->GetOffset() + numVertices * vertexSize);
+		QUEUE_UPLOAD(vertices.data(), numVertices * vertexSize, postSkinningView->GetBuffer(), postSkinningView->GetOffset() + numVertices * vertexSize);
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
 		auto meshletBoundsBufferView = m_meshletBoundsBuffer->AddData(mesh->GetMesh()->GetMeshletBounds().data(), mesh->GetMesh()->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
 		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView), std::move(meshletBoundsBufferView));
@@ -140,7 +140,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	}
 
 	if (meshInstanceBufferSize != m_perMeshInstanceBuffers->Size()) {
-		m_pCameraManager->SetNumMeshInstances(static_cast<uint32_t>(m_perMeshInstanceBuffers->Size())); // All render views must be updated
+		m_pViewManager->ResizeInstanceBitfields(static_cast<uint32_t>(m_perMeshInstanceBuffers->Size())); // All render views must be updated
 	}
 
 	size_t meshletBitfieldSize = m_meshletBitfieldBuffer->Size();
@@ -150,7 +150,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 
 	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
-		m_pCameraManager->SetMeshletBitfieldSize(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
+		m_pViewManager->ResizeMeshletBitfields(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
 	}
 	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
 }

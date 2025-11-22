@@ -38,6 +38,7 @@ public:
 		m_resourceRegistryView = resourceRegistryView;
 		m_resourceDescriptorIndexHelper = std::make_unique<ResourceDescriptorIndexHelper>(resourceRegistryView);
 	}
+
 	virtual void Setup() = 0;
 	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 

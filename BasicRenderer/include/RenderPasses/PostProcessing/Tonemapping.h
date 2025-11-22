@@ -59,7 +59,7 @@ public:
         
         // Rest will be filled in by the luminanceHistogramAverage shader
 
-		UploadManager::GetInstance().UploadData(&lpmConstants, sizeof(LPMConstants), m_pLPMConstants.get(), 0);
+        QUEUE_UPLOAD(&lpmConstants, sizeof(LPMConstants), m_pLPMConstants.get(), 0);
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);

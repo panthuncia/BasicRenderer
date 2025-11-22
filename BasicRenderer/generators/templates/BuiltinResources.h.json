@@ -6,9 +6,7 @@
       "VisibilityTexture": {},
       "MeshletBitfield": {},
       "IndirectCommandBuffers": {
-        "Opaque": {},
-        "AlphaTest": {},
-        "Blend": {},
+        "Primary": {},
         "MeshletCulling": {},
         "MeshletCullingReset": {}
       }
@@ -50,9 +48,7 @@
       "CurrentPrefilteredCubemap": {}
     },
     "IndirectCommandBuffers": {
-      "Opaque": {},
-      "AlphaTest": {},
-      "Blend": {},
+      "Primary": {}, 
       "MeshletCulling": {},
       "Master": {}
     },
@@ -89,11 +85,7 @@
       "HDRColorTarget": {},
       "SRGBColorTarget": {}
     },
-    "ActiveDrawSetIndices": {
-      "Opaque": {},
-      "AlphaTest": {},
-      "Blend": {}
-    },
+    "ActiveDrawSetIndices": {},
     "BRDFLUT": {},
     "DebugTexture": {}
   }

@@ -13,10 +13,10 @@
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
 #include "Managers/ObjectManager.h"
-#include "Managers/CameraManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
+#include "Resources/ECSResourceResolver.h"
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
 
 class ForwardRenderPass : public RenderPass {
@@ -68,20 +68,27 @@ public:
         if (m_gtaoEnabled) {
             builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
         }
-
         if (m_meshShaders) {
             builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-                builder->WithIndirectArguments(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque,
-                    Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
+                auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+                auto forwardPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass);
+				flecs::query<> indirectQuery = ecsWorld.query_builder<>()
+                    .with<Components::IsIndirectArguments>()
+					.with<Components::ParticipatesInPass>(forwardPassEntity) // Query for command lists that participate in this pass
+                    //.cached().cache_kind(flecs::QueryCacheAll)
+                    .build();
+                builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
             }
         }
     }
 
     void Setup() override {
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        m_opaqueMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::OpaqueMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
-        m_alphaTestMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass))
+            .cached().cache_kind(flecs::QueryCacheAll)
+            .build();
 
         // Setup resources
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
@@ -112,10 +119,6 @@ public:
         RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
         RegisterSRV(Builtin::Environment::InfoBuffer);
 
-        if (m_indirect) {
-            m_primaryCameraOpaqueIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::Opaque);
-            m_primaryCameraAlphaTestIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::AlphaTest);
-        }
         if (m_meshShaders)
             m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }
@@ -192,37 +195,14 @@ private:
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
 
-        // Opaque objects
-        m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
-            auto& meshes = opaqueMeshes.meshInstances;
+        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes meshInstancesComponent) {
+			auto& meshes = meshInstancesComponent.meshesByPass[m_renderPhase.hash]; // Pull out only the meshes for this render phase
 
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
-
-				commandList.SetIndexBuffer(mesh.GetIndexBufferView());
-				commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
-            }
-            });
-
-        // Alpha test objects
-        m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
-            auto& meshes = alphaTestMeshes.meshInstances;
-
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
-
-            for (auto& pMesh : meshes) {
-                auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
+                auto& pso = psoManager.GetPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -241,16 +221,14 @@ private:
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
 
-
-        // Opaque objects
-        m_opaqueMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::OpaqueMeshInstances opaqueMeshes) {
-            auto& meshes = opaqueMeshes.meshInstances;
+        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes perPassMeshes) {
+            auto& meshes = perPassMeshes.meshesByPass[m_renderPhase.hash];
 
 			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
+                auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -263,27 +241,6 @@ private:
                 commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
             });
-
-        // Alpha test objects
-        m_alphaTestMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::AlphaTestMeshInstances alphaTestMeshes) {
-            auto& meshes = alphaTestMeshes.meshInstances;
-
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, 0, 1, &drawInfo.perObjectCBIndex);
-
-            for (auto& pMesh : meshes) {
-                auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSO_DOUBLE_SIDED | mesh.material->GetPSOFlags(), mesh.material->GetBlendState(), m_wireframe);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = static_cast<uint32_t>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
-
-                commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
-            }
-            });
     }
 
     void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
@@ -291,52 +248,33 @@ private:
         auto& psoManager = PSOManager::GetInstance();
 
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
+		auto manager = context.indirectCommandBufferManager;
 
-        // Opaque indirect draws
-        auto numOpaque = context.drawStats.numOpaqueDraws;
-        if (numOpaque > 0) {
+        auto primaryViewID = context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID; // TODO: Better way of accessing this?
+        auto workloads = manager->GetBuffersForRenderPhase(primaryViewID, Engine::Primary::ForwardPass);
 
-            auto opaqueIndirectBuffer = m_primaryCameraOpaqueIndirectCommandBuffer;
-            auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags, BlendState::BLEND_STATE_OPAQUE, m_wireframe);
+		for (auto& workload : workloads) {
+
+            auto& indirectBuffer = workload.second;
+			auto materialCompileFlags = workload.first;
+            auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags, materialCompileFlags, m_wireframe);
             BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
-            auto apiResource = opaqueIndirectBuffer->GetAPIResource();
+            auto apiResource = workload.second.buffer->GetAPIResource();
 
 			commandList.ExecuteIndirect(
 				commandSignature.GetHandle(), 
                 apiResource.GetHandle(), 
                 0, 
                 apiResource.GetHandle(), 
-                opaqueIndirectBuffer->GetResource()->GetUAVCounterOffset(), 
-                numOpaque);
-        }
-
-        // Alpha test indirect draws
-        auto numAlphaTest = context.drawStats.numAlphaTestDraws;
-        if (numAlphaTest > 0) {
-
-            auto alphaTestIndirectBuffer = m_primaryCameraAlphaTestIndirectCommandBuffer;
-            auto& pso = psoManager.GetMeshPSO(context.globalPSOFlags | PSOFlags::PSO_ALPHA_TEST | PSOFlags::PSO_DOUBLE_SIDED,
-                BlendState::BLEND_STATE_MASK, m_wireframe);
-            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-            auto apiResource = alphaTestIndirectBuffer->GetAPIResource();
-
-			commandList.ExecuteIndirect(
-                commandSignature.GetHandle(),
-                apiResource.GetHandle(),
-                0,
-                apiResource.GetHandle(),
-                alphaTestIndirectBuffer->GetResource()->GetUAVCounterOffset(),
-				numAlphaTest);
+                workload.second.buffer->GetResource()->GetUAVCounterOffset(),
+                workload.second.count);
         }
     }
 
 private:
-    flecs::query<Components::ObjectDrawInfo, Components::OpaqueMeshInstances> m_opaqueMeshInstancesQuery;
-    flecs::query<Components::ObjectDrawInfo, Components::AlphaTestMeshInstances> m_alphaTestMeshInstancesQuery;
+    flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
@@ -345,10 +283,10 @@ private:
     bool m_clusteredLightingEnabled = true;
     bool m_deferred = false;
 
+	RenderPhase m_renderPhase = Engine::Primary::ForwardPass;
+
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
     std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraOpaqueIndirectCommandBuffer = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraAlphaTestIndirectCommandBuffer = nullptr;
     std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
     std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
 

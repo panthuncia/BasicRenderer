@@ -77,7 +77,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
-	UploadManager::GetInstance().UploadData(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
+	QUEUE_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
 }
 
 void ResourceManager::WaitForCopyQueue() {
@@ -183,7 +183,7 @@ std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* p
 	auto device = DeviceManager::GetInstance().GetDevice();
 	auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
 	if (pInitialData) {
-		UploadManager::GetInstance().UploadData(pInitialData, bufferSize, dataBuffer.get(), 0);
+		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}
 
 //	ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
@@ -398,13 +398,13 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 	return std::make_pair(std::move(textureResource), placedResourceHeap);
 }
 
-void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels) {
+void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
 
 	if (initialData.empty()) return;
 
 	// effective array slices = arraySize * (isCubemap ? 6 : 1)
 	const uint32_t faces = desc.isCubemap ? 6u : 1u;
-	const uint32_t arraySlices = faces * static_cast<uint32_t>(arraySize);
+	const uint32_t arraySlices = faces * static_cast<uint32_t>(desc.arraySize);
 	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
 
 	// Build a dense SubresourceData table (nullptr entries are allowed; they'll be skipped)

@@ -157,7 +157,7 @@ private:
         m_vertexBuffer = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
 		m_vertexBuffer->SetName(L"Skybox VB");
 
-        UploadManager::GetInstance().UploadData((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer.get(), 0);
+        QUEUE_UPLOAD((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer.get(), 0);
 
 		rhi::VertexBufferView vertexBufferView = {};
 		vertexBufferView.buffer = m_vertexBuffer->GetAPIResource().GetHandle();
