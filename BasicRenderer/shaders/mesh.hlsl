@@ -119,6 +119,10 @@ VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blo
     result.meshletIndex = vGroupID.x;
     result.meshletVertexIndex = index;
     
+#if defined(PSO_ALPHA_TEST)
+    result.texcoord = vertex.texcoord;
+#endif
+    
     return result;
 }
 

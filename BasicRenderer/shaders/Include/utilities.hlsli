@@ -93,6 +93,42 @@ struct MaterialInputs
     float ambientOcclusion;
 };
 
+void TestAlpha(in float2 texcoords)
+{
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    uint meshBufferIndex = perMeshBufferIndex;
+    PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
+    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+        
+    float4 baseColor = materialInfo.baseColorFactor;
+
+    if (materialFlags & MATERIAL_BASE_COLOR_TEXTURE)
+    {
+        Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
+        SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
+        float4 sampledColor = baseColorTexture.Sample(baseColorSamplerState, texcoords);
+#if defined(PSO_ALPHA_TEST) || defined (PSO_BLEND)
+        if (baseColor.a * sampledColor.a < materialInfo.alphaCutoff){
+            discard;
+        }
+#endif // PSO_ALPHA_TEST || PSO_BLEND
+    }
+    
+    if (materialFlags & MATERIAL_OPACITY_TEXTURE)
+    {
+        Texture2D<float4> opacityTexture = ResourceDescriptorHeap[materialInfo.opacityTextureIndex];
+        SamplerState opacitySamplerState = SamplerDescriptorHeap[materialInfo.opacitySamplerIndex];
+        float4 opacitySample = opacityTexture.Sample(opacitySamplerState, texcoords);
+        float opacity = opacitySample.a;
+        baseColor.a *= opacity;
+        if (baseColor.a < materialInfo.alphaCutoff)
+        {
+            discard;
+        }
+    }
+}
+
 void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
 {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];

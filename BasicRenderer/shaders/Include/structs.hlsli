@@ -19,6 +19,9 @@ struct VisBufferPSInput
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
     uint meshletIndex : TEXCOORD0;
     uint meshletVertexIndex : TEXCOORD1;
+#if defined (PSO_ALPHA_TEST)
+    float2 texcoord : TEXCOORD2;
+#endif
 };
 
 struct ClippingPlane {

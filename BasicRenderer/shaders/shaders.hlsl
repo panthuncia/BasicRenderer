@@ -176,6 +176,11 @@ struct VisBufferOutput
 
 VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 {
+    // Need to check alpha for alpha-tested materials
+#if defined(PSO_ALPHA_TEST)
+    TestAlpha(input.texcoord);
+#endif
+    
     VisBufferOutput output;
     // Pack draw call ID and meshlet vertex index into a single uint, max 256 vertices per meshlet, so 8 bits for vertex index and 24 bits for draw call ID
     output.visibility[0] = (perObjectBufferIndex << 8) | (input.meshletVertexIndex & 0xFF);
