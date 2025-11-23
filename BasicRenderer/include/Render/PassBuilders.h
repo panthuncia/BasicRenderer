@@ -1316,7 +1316,7 @@ public:
     // First build, callable on Lvalues
     template<DerivedComputePass PassT, typename... CtorArgs>
     void Build(CtorArgs&&... args) & {
-		if (built_) return *this;
+		if (built_) return;
 
         built_ = true;
 

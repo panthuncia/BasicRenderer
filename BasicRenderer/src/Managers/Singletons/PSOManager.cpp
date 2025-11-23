@@ -842,81 +842,14 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
 {
     auto defines = GetShaderDefines(psoFlags, MaterialCompileFlags::MaterialCompileNone);
 
-    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
-    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
-
-    ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",      L"PSMainDeferred",   L"ps_6_6" };
-    shaderInfoBundle.defines = defines;
-
-    auto compiledBundle = CompileShaders(shaderInfoBundle);
-    vsBlob = compiledBundle.vertexShader;
-    psBlob = compiledBundle.pixelShader;
-
-    auto& layout = GetRootSignature(); // PipelineLayoutHandle
-    rhi::SubobjLayout soLayout{ layout.GetHandle() };
-
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
-
-    rhi::RasterState rs{};
-    rs.fill = rhi::FillMode::Solid;
-    rs.cull = rhi::CullMode::None;
-    rs.frontCCW = false;
-    rhi::SubobjRaster soRaster{ rs };
-
-    rhi::BlendState bs{};
-    bs.alphaToCoverage = false;
-    bs.independentBlend = false;
-    bs.numAttachments = 1;
-    {
-        auto& a = bs.attachments[0];
-        a.enable = true;
-        a.srcColor = rhi::BlendFactor::SrcAlpha;
-        a.dstColor = rhi::BlendFactor::InvSrcAlpha;
-        a.colorOp = rhi::BlendOp::Add;
-        a.srcAlpha = rhi::BlendFactor::One;
-        a.dstAlpha = rhi::BlendFactor::InvSrcAlpha;
-        a.alphaOp = rhi::BlendOp::Add;
-        a.writeMask = rhi::ColorWriteEnable::All;
-    }
-    rhi::SubobjBlend soBlend{ bs };
-
-    // Depth: GREATER, writes disabled
-    rhi::DepthStencilState ds{};
-    ds.depthEnable = true;
-    ds.depthWrite = false;                    // D3D12_DEPTH_WRITE_MASK_ZERO
-    ds.depthFunc = rhi::CompareOp::Greater;  // D3D12_COMPARISON_FUNC_GREATER
-    rhi::SubobjDepth soDepth{ ds };
-
-    rhi::RenderTargets rts{};
-    rts.count = 1;
-    rts.formats[0] = rhi::Format::R16G16B16A16_Float; // DXGI_FORMAT_R16G16B16A16_FLOAT
-    rhi::SubobjRTVs soRTV{ rts };
-
-    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float }; // DXGI_FORMAT_D32_FLOAT
-    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
-
-    const rhi::PipelineStreamItem items[] = {
-        rhi::Make(soLayout),
-        rhi::Make(soVS),
-        rhi::Make(soPS),
-        rhi::Make(soRaster),
-        rhi::Make(soBlend),
-        rhi::Make(soDepth),
-        rhi::Make(soRTV),
-        rhi::Make(soDSV),
-        rhi::Make(soSmp),
-    };
-
-    auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
-        throw std::runtime_error("Failed to create Deferred PSO (RHI)");
-    }
-
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    PipelineState pso = MakeComputePipeline(
+        GetComputeRootSignature(),
+        L"shaders/deferred.hlsl",
+        L"DeferredCSMain",
+        defines,
+        "DeferredComputePSO"
+    );
+    return pso;
 }
 
 PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,

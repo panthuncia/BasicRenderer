@@ -6,23 +6,6 @@
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
 #include "RenderPasses/VisibilityBufferPass.h"
 
-void BuildVisibilityPass(RenderGraph* graph) {
-    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-
-    TextureDescription visibilityDesc;
-    visibilityDesc.channels = 2;
-    visibilityDesc.format = rhi::Format::R32G32_UInt;
-    visibilityDesc.hasRTV = true;
-    visibilityDesc.hasUAV = true;
-    visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y);
-    auto visibilityTexture = PixelBuffer::Create(visibilityDesc);
-    visibilityTexture->SetName(L"Visibility buffer");
-    graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityTexture);
-
-    /*graph->BuildRenderPass("Visibility pass")
-        .Build<VisibilityPass>();*/
-}
-
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -417,12 +400,13 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 
     std::string primaryPassName = deferredRendering ? "Deferred Pass" : "Forward Pass";
-    auto primaryPassBuilder = graph->BuildRenderPass(primaryPassName);
 
     if (deferredRendering) {
-        primaryPassBuilder.Build<DeferredRenderPass>();
+        auto primaryPassBuilder = graph->BuildComputePass(primaryPassName);
+        primaryPassBuilder.Build<DeferredShadingPass>();
     }
     else {
+        auto primaryPassBuilder = graph->BuildRenderPass(primaryPassName);
         primaryPassBuilder.Build<ForwardRenderPass>(
             wireframe, 
             meshShaders, 

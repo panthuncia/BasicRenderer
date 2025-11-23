@@ -2864,7 +2864,8 @@ namespace rhi {
 		if ((uint32_t)stages & (uint32_t)ShaderStage::Compute) {
 			impl->cl->SetComputeRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
-		else {
+		// If any graphics states are set, write there too
+		if ((uint32_t)stages & (uint32_t)(ShaderStage::AllGraphics)) {
 			impl->cl->SetGraphicsRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
 	}

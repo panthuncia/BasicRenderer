@@ -73,7 +73,7 @@ protected:
 			i++;
 		}
 		if (i > 0) {
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ResourceDescriptorIndicesRootSignatureIndex, 0, i, indices);
+			commandList.PushConstants(rhi::ShaderStage::All, 0, ResourceDescriptorIndicesRootSignatureIndex, 0, i, indices);
 		}
 	}
 

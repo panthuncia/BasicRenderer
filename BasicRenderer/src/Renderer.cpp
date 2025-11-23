@@ -43,7 +43,7 @@
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
-#include "RenderPasses/DeferredRenderPass.h"
+#include "RenderPasses/DeferredShadingPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
