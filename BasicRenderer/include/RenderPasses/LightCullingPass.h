@@ -1,7 +1,5 @@
 #pragma once
 
-#include <DirectX/d3dx12.h>
-
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"

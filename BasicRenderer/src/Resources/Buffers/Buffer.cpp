@@ -3,7 +3,6 @@
 #include <stdexcept>
 #include <rhi_helpers.h>
 
-#include "DirectX/d3dx12.h"
 #include "spdlog/spdlog.h"
 #include "Render/RenderContext.h"
 

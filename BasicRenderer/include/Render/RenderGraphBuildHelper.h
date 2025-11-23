@@ -5,6 +5,7 @@
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
 #include "RenderPasses/VisibilityBufferPass.h"
+#include "RenderPasses/GBufferConstructionPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources

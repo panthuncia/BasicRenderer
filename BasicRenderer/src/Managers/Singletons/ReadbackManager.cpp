@@ -86,7 +86,7 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
 
             for (UINT mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
                 for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex) {
-                    UINT subresourceIndex = D3D12CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, 6);
+                    UINT subresourceIndex = CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, 6);
 
                     DirectX::Image image;
                     image.width = fps[subresourceIndex].width;
@@ -211,7 +211,7 @@ void ReadbackManager::SaveTextureToDDS(
 
             for (uint32_t mipLevel = 0; mipLevel < numMipLevels; ++mipLevel)
             {
-                const uint32_t subresourceIndex = D3D12CalcSubresource(
+                const uint32_t subresourceIndex = CalcSubresource(
                     mipLevel, /*arraySlice*/0, /*plane*/0, numMipLevels, /*arraySize*/1);
 
                 DirectX::Image src{};

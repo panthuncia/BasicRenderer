@@ -818,40 +818,6 @@ DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV) {
     }
 }
 
-Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
-    ID3D12Device10* device,
-    const CD3DX12_RESOURCE_DESC1& desc,
-    D3D12_CLEAR_VALUE* clearValue,
-    D3D12_HEAP_TYPE heapType,
-    Microsoft::WRL::ComPtr<ID3D12Heap>& heap,
-    D3D12_BARRIER_LAYOUT initialLayout) {
-
-
-	if (!heap) {
-        D3D12_RESOURCE_ALLOCATION_INFO1 info1;
-		D3D12_RESOURCE_ALLOCATION_INFO allocInfo = device->GetResourceAllocationInfo2(0, 1, &desc, &info1);
-
-		CD3DX12_HEAP_DESC heapDesc(allocInfo.SizeInBytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_HEAP_FLAG_NONE);
-		ThrowIfFailed(device->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap)));
-	}
-    
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-
-    ThrowIfFailed(
-        device->CreatePlacedResource2(
-            heap.Get(), 
-            0,
-            &desc, 
-            initialLayout,
-            clearValue, 
-            0, 
-            nullptr, 
-            IID_PPV_ARGS(&resource)));
-    
-    return resource;
-}
-
-
 ShaderVisibleIndexInfo CreateShaderResourceView(
     rhi::Device& device,
     rhi::Resource& resource,

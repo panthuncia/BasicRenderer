@@ -1,5 +1,4 @@
-﻿#include <directx/d3dx12.h> // Included here to avoid conflicts with Windows SDK headers
-#include <iostream>
+﻿#include <iostream>
 #include <Windows.h>
 #include <windowsx.h>
 #include <iostream>

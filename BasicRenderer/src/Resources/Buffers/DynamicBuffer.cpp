@@ -2,7 +2,6 @@
 
 #include <spdlog/spdlog.h>
 
-#include "DirectX/d3dx12.h"
 #include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"

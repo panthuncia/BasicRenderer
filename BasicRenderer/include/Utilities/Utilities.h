@@ -3,13 +3,11 @@
 #include <windows.h>
 #include <iostream>
 #include <wrl/client.h>
-#include <d3dcompiler.h>
 #include <ThirdParty/stb/stb_image.h>
 #include <array>
 #include <memory>
 #include <DirectXMath.h>
 #include <unordered_map>
-#include <directx/d3dx12.h>
 #include <DirectXTex.h>
 #include <cstdint>
 #include <cstring>
@@ -125,14 +123,6 @@ DXGI_FORMAT DetermineTextureFormat(int channels, bool sRGB, bool isDSV);
 std::vector<stbi_uc> ExpandImageData(const stbi_uc* image, int width, int height);
 
 // Helper functions for creating resources
-
-//Microsoft::WRL::ComPtr<ID3D12Resource> CreatePlacedTextureResource(
-//	ID3D12Device10* device,
-//	const CD3DX12_RESOURCE_DESC1& desc,
-//	D3D12_CLEAR_VALUE* clearValue,
-//	D3D12_HEAP_TYPE heapType,
-//	Microsoft::WRL::ComPtr<ID3D12Heap>& heap,
-//	D3D12_BARRIER_LAYOUT initialLayout);
 
 std::vector<std::vector<ShaderVisibleIndexInfo>> CreateShaderResourceViewsPerMip(
 	rhi::Device& device,

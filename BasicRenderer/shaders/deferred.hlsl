@@ -17,8 +17,10 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint screenH = perFrameBuffer.screenResY;
 
     if (dispatchThreadId.x >= screenW || dispatchThreadId.y >= screenH)
+    {
         return;
-
+    }
+    
     uint2 pixel = dispatchThreadId.xy;
     float2 uv = (float2(pixel) + 0.5f) / float2(screenW, screenH);
     uv.y = 1.0f - uv.y;

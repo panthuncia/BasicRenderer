@@ -4,8 +4,6 @@
 #include <spdlog/spdlog.h>
 #include <tree_sitter/api.h>
 
-#include <directx/d3dx12.h>
-
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Materials/TechniqueDescriptor.h"
