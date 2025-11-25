@@ -18,7 +18,7 @@ struct VisBufferPSInput
 {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
     uint meshletIndex : TEXCOORD0;
-    uint meshletVertexIndex : TEXCOORD1;
+    uint meshletTriangleIndex : TEXCOORD1;
 #if defined (PSO_ALPHA_TEST)
     float2 texcoord : TEXCOORD2;
 #endif
@@ -160,13 +160,6 @@ struct SingleMatrix {
     row_major matrix value;
 };
 
-struct Meshlet {
-    uint VertOffset;
-    uint TriOffset;
-    uint VertCount;
-    uint TriCount;
-};
-
 struct PerObjectBuffer {
     row_major matrix model;
     row_major matrix prevModel;
@@ -193,10 +186,13 @@ struct PerMeshBuffer {
 };
 
 struct PerMeshInstanceBuffer {
+    uint perMeshBufferIndex;
+    uint perObjectBufferIndex;
     uint boneTransformBufferIndex;
     uint postSkinningVertexBufferOffset;
     uint meshletBoundsBufferStartIndex;
     uint meshletBitfieldStartIndex;
+    uint pad[2];
 };
 
 #define LIGHTS_PER_PAGE 12
@@ -314,6 +310,17 @@ struct LPMConstants
     uint displayMode;
     uint pad;
     float4x4 inputToOutputMatrix;
+};
+
+struct MaterialInputs
+{
+    float3 albedo;
+    float3 normalWS;
+    float3 emissive;
+    float metallic;
+    float roughness;
+    float opacity;
+    float ambientOcclusion;
 };
 
 #endif // __STRUCTS_HLSL__

@@ -18,7 +18,7 @@ ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, L"perObjectBuffers<PerObjectCB>");
 	m_masterIndirectCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, L"masterIndirectCommandsBuffer<IndirectCommand>");
-	
+
 	m_normalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(1, L"preSkinningNormalMatrixBuffer");
 
 	//m_activeDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeOpaqueDrawSetIndices");
@@ -31,10 +31,18 @@ ObjectManager::ObjectManager() {
 	//m_resources[Builtin::ActiveDrawSetIndices::Blend] = m_activeBlendDrawSetIndices;
 }
 Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObjectCB, const Components::MeshInstances* meshInstances) {
-	
+
 	Components::ObjectDrawInfo drawInfo;
 
 	std::shared_ptr<BufferView> perObjectCBview = m_perObjectBuffers->AddData(&perObjectCB, sizeof(PerObjectCB), sizeof(PerObjectCB));
+
+	// Patch all mesh instances with their perObject index
+	uint32_t perObjectIndex = static_cast<uint32_t>(perObjectCBview->GetOffset() / sizeof(PerObjectCB));
+	if (meshInstances) {
+		for (auto& inst : meshInstances->meshInstances) {
+			inst->SetPerObjectBufferIndex(perObjectIndex);
+		}
+	}
 
 	if (meshInstances != nullptr) {
 		std::vector<unsigned int> indices;
@@ -59,7 +67,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 				m_activeDrawSetIndices[materialFlags] = ResourceManager::GetInstance().CreateIndexedSortedUnsignedIntBuffer(1, L"activeDrawSetIndices(flags=" + std::to_wstring(static_cast<uint64_t>(materialFlags)) + L")");
 				auto& buf = m_activeDrawSetIndices[materialFlags];
 				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
-				buf->GetECSEntity().set<Components::Resource>({buf});
+				buf->GetECSEntity().set<Components::Resource>({ buf });
 				for (auto& phase : meshInstance->GetMesh()->material->Technique().passes) {
 					buf->GetECSEntity().add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(phase));
 				}

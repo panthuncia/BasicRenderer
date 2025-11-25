@@ -57,3 +57,16 @@ void MeshInstance::SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> mesh
 	m_perMeshInstanceBufferData.meshletBitfieldStartIndex = static_cast<uint32_t>(m_meshletBitfieldBufferView->GetOffset() * 8);
 	m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 }
+
+void MeshInstance::SetPerObjectBufferIndex(uint32_t index) {
+	m_perMeshInstanceBufferData.perObjectBufferIndex = index;
+	if (m_pCurrentMeshManager && m_perMeshInstanceBufferView) {
+		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
+	}
+}
+void MeshInstance::SetPerMeshBufferIndex(uint32_t index) {
+	m_perMeshInstanceBufferData.perMeshBufferIndex = index;
+	if (m_pCurrentMeshManager && m_perMeshInstanceBufferView) {
+		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
+	}
+}

@@ -182,8 +182,8 @@ VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace 
 #endif
     
     VisBufferOutput output;
-    // Pack draw call ID and meshlet vertex index into a single uint, max 256 vertices per meshlet, so 8 bits for vertex index and 24 bits for draw call ID
-    output.visibility[0] = (perObjectBufferIndex << 8) | (input.meshletVertexIndex & 0xFF);
+    // Pack draw call ID and meshlet vertex index into a single uint, max 256 triangles per meshlet, so 8 bits for triangle index and 24 bits for draw call ID
+    output.visibility[0] = (perObjectBufferIndex << 8) | (input.meshletTriangleIndex & 0xFF);
     output.visibility[1] = input.meshletIndex;
     return output;
 }

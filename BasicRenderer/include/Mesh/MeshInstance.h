@@ -72,6 +72,9 @@ public:
         return m_meshletBoundsBufferView.get();
     }
 
+    void SetPerObjectBufferIndex(uint32_t index);
+    void SetPerMeshBufferIndex(uint32_t index);
+
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {

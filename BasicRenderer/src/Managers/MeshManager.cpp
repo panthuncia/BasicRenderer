@@ -20,7 +20,7 @@ MeshManager::MeshManager() {
 	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
 
 	m_perMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"PerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
-	
+
 	m_perMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"perMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
@@ -38,10 +38,10 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
 	auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
 	auto numVertices = mesh->GetNumVertices(useMeshletReorderedVertices);
-    if (vertices.empty()) {
-        // Handle empty vertices case
+	if (vertices.empty()) {
+		// Handle empty vertices case
 		throw std::runtime_error("Mesh vertices are empty");
-    }
+	}
 
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
@@ -150,13 +150,17 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 
 	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
-		m_pViewManager->ResizeMeshletBitfields(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
+		m_pViewManager->ResizeMeshletBitfields(m_meshletBitfieldBuffer->Size() * 8); // All render views must be updated
 	}
 	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
+
+	uint32_t perMeshIndex = static_cast<uint32_t>(
+		mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+	mesh->SetPerMeshBufferIndex(perMeshIndex);
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
-	
+
 	// Things to remove:
 	// - Post-skinning vertices
 	// - Per-mesh instance buffer
@@ -196,4 +200,3 @@ std::vector<ResourceIdentifier> MeshManager::GetSupportedKeys() {
 
 	return keys;
 }
-

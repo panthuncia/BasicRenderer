@@ -99,10 +99,13 @@ struct PerMeshCB {
 };
 
 struct PerMeshInstanceCB {
+    unsigned int perMeshBufferIndex;
+    unsigned int perObjectBufferIndex;
     unsigned int boneTransformBufferIndex;
     unsigned int postSkinningVertexBufferOffset;
 	unsigned int meshletBoundsBufferStartIndex;
     unsigned int meshletBitfieldStartIndex;
+	unsigned int pad[2];
 };
 
 struct PerMaterialCB {
