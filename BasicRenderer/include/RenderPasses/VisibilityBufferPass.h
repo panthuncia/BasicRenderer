@@ -48,7 +48,7 @@ public:
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .IsGeometryPass();
             builder->WithRenderTarget(
-                Builtin::VisibilityBuffer);
+                Builtin::PrimaryCamera::VisibilityTexture);
 
         if (m_meshShaders) {
             builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
@@ -71,7 +71,7 @@ public:
             .cached().cache_kind(flecs::QueryCacheAll).build();
 
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pVisibilityBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::VisibilityBuffer);
+		m_pVisibilityBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
 
         if (m_meshShaders) {

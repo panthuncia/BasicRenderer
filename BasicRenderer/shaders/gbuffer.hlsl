@@ -2,6 +2,7 @@
 #include "include/structs.hlsli"
 #include "include/meshletCommon.hlsli"
 #include "include/vertex.hlsli"
+#include "include/utilities.hlsli"
 
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 struct BarycentricDeriv
@@ -81,8 +82,6 @@ void LoadTriangleVertices(
     v0 = LoadVertex(byteOffset0, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
     v1 = LoadVertex(byteOffset1, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
     v2 = LoadVertex(byteOffset2, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
-
-    return true;
 }
 
 [numthreads(8, 8, 1)]
@@ -99,7 +98,7 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     
     uint2 pixel = dispatchThreadId.xy;
-    // [0] = 8 bits for meshlet-local vertex index and 24 bits for draw call ID
+    // [0] = 8 bits for meshlet-local triangle index and 24 bits for draw call ID
     // [1] = drawcall-local meshlet index
     Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     uint2 visibilityData = visibilityTexture[pixel];
@@ -118,9 +117,12 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return; // Invalid; skip
     }
     
-    float2 pixelNdc = float2(
-        ((dispatchThreadId.x + 0.5f) / screenW) * 2.0f - 1.0f,
-        ((dispatchThreadId.y + 0.5f) / screenH) * 2.0f - 1.0f);
+    float2 pixelUv = (float2(dispatchThreadId.xy) + 0.5f) / float2(screenW, screenH);
+        // NDC: x in [-1,1], y in [-1,1] with Y up
+        float2 pixelNdc = float2(
+        pixelUv.x * 2.0f - 1.0f,
+        (1.0f - pixelUv.y) * 2.0f - 1.0f
+    );
     
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, float2(screenW, screenH));
     
@@ -143,23 +145,46 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 interpNormalY = InterpolateWithDeriv(bary, v0.normal.y, v1.normal.y, v2.normal.y);
     float3 interpNormalZ = InterpolateWithDeriv(bary, v0.normal.z, v1.normal.z, v2.normal.z);
     
-    // TODO: Benchmark against calculating from depth
-    float3 interpPositionX = InterpolateWithDeriv(bary, v0.position.x, v1.position.x, v2.position.x);
-    float3 interpPositionY = InterpolateWithDeriv(bary, v0.position.y, v1.position.y, v2.position.y);
-    float3 interpPositionZ = InterpolateWithDeriv(bary, v0.position.z, v1.position.z, v2.position.z);
-    
-    float2 interpTexcoord = float2(interpTexcoordX.x, interpTexcoordY.x);
-    float3 interpNormal = normalize(float3(interpNormalX.x, interpNormalY.x, interpNormalZ.x));
-    float3 interpPosition = float3(interpPositionX.x, interpPositionY.x, interpPositionZ.x);
-    
+    // World positions
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer objectBuffer = perObjectBuffer[instanceData.perObjectBufferIndex]; // TODO: Store earlier? Store in instance buffer?
     
-    float3 worldPosition = mul(float4(interpPosition, 1.0f), objectBuffer.model).xyz;
-    float3 worldNormal = mul(float4(interpNormal, 0.0f), objectBuffer.model).xyz;
+    float3 v0WorldPos = mul(float4(v0.position, 1.0f), objectBuffer.model).xyz;
+    float3 v1WorldPos = mul(float4(v1.position, 1.0f), objectBuffer.model).xyz;
+    float3 v2WorldPos = mul(float4(v2.position, 1.0f), objectBuffer.model).xyz;
+    
+    // TODO: Benchmark against calculating from depth
+    float3 interpPositionX = InterpolateWithDeriv(bary, v0WorldPos.x, v1WorldPos.x, v2WorldPos.x);
+    float3 interpPositionY = InterpolateWithDeriv(bary, v0WorldPos.y, v1WorldPos.y, v2WorldPos.y);
+    float3 interpPositionZ = InterpolateWithDeriv(bary, v0WorldPos.z, v1WorldPos.z, v2WorldPos.z);
+    
+    float2 interpTexcoord = float2(interpTexcoordX.x, interpTexcoordY.x);
+    float3 interpNormal = normalize(float3(interpNormalX.x, interpNormalY.x, interpNormalZ.x));
+    float3 worldPosition = float3(interpPositionX.x, interpPositionY.x, interpPositionZ.x);
+    
+    StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
+    float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
+    
+    float3 worldNormal = normalize(mul(interpNormal, normalMatrix)).xyz;
+    
+    // Get material info
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
+    
+    float3 dpdx = float3(interpPositionX.y, interpPositionY.y, interpPositionZ.y);
+    float3 dpdy = float3(interpPositionX.z, interpPositionY.z, interpPositionZ.z);
+    
+    float2 dudx = float2(interpTexcoordX.y, interpTexcoordY.y);
+    float2 dudy = float2(interpTexcoordX.z, interpTexcoordY.z);
     
     MaterialInputs materialInputs;
-    GetMaterialInfoForFragmentCS(interpTexcoord, worldNormal, worldPosition, materialInputs);
+    SampleMaterialCS(
+        interpTexcoord,
+        worldNormal,
+        worldPosition,
+        meshBuffer.materialDataIndex,
+        dpdx, dpdy, dudx, dudy,
+        materialInputs);
     
     // Write to G-buffer
     RWTexture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];

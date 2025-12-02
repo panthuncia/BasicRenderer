@@ -52,7 +52,6 @@
       "MeshletCulling": {},
       "Master": {}
     },
-    "VisibilityBuffer": {},
     "GBuffer": {
       "Normals": {},
       "MotionVectors": {},

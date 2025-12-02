@@ -174,7 +174,7 @@ struct VisBufferOutput
     uint2 visibility; // first element packed drawcall id and meshlet-local vertex index, second component per-drawcall meshlet index
 };
 
-VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
+VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET
 {
     // Need to check alpha for alpha-tested materials
 #if defined(PSO_ALPHA_TEST)
@@ -183,7 +183,7 @@ VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace 
     
     VisBufferOutput output;
     // Pack draw call ID and meshlet vertex index into a single uint, max 256 triangles per meshlet, so 8 bits for triangle index and 24 bits for draw call ID
-    output.visibility[0] = (perObjectBufferIndex << 8) | (input.meshletTriangleIndex & 0xFF);
+    output.visibility[0] = (perMeshInstanceBufferIndex << 8) | (primID & 0xFF);
     output.visibility[1] = input.meshletIndex;
     return output;
 }

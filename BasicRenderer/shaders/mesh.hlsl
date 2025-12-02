@@ -101,7 +101,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     return result;
 }
 
-VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer, uint triangleID)
+VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer)
 {
     uint byteOffset = blockByteOffset + index * vertexSize;
     Vertex vertex = LoadVertex(byteOffset, buffer, flags);
@@ -118,7 +118,6 @@ VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blo
     result.position = mul(viewPosition, mainCamera.projection);
     result.meshletIndex = vGroupID.x;
     // triangle index
-    result.meshletTriangleIndex = triangleID;
     
 #if defined(PSO_ALPHA_TEST)
     result.texcoord = vertex.texcoord;
@@ -160,7 +159,6 @@ void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices 
     for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
     {
         // Which meshlet-local triangle ID is this?
-        uint triangleID = i / 3;
         outputVertices[i] = GetVisBufferVertexAttributes(
             setup.vertexBuffer,
             setup.postSkinningBufferOffset,
@@ -168,11 +166,24 @@ void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices 
             setup.meshBuffer.vertexFlags,
             setup.meshBuffer.vertexByteSize,
             setup.meshletIndex,
-            setup.objectBuffer,
-            triangleID);
+            setup.objectBuffer
+        );
     }
 
     WriteTriangles(uGroupThreadID, setup, outputTriangles);
+}
+
+struct VisibilityPerPrimitive
+{
+    uint triangleIndex : SV_PrimitiveID;
+};
+
+void EmitPrimitiveIDs(uint uGroupThreadID, MeshletSetup setup, out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
+{
+    for (uint t = uGroupThreadID; t < setup.triCount; t += MS_THREAD_GROUP_SIZE)
+    {
+        primitiveInfo[t].triangleIndex = t;
+    }
 }
 
 [outputtopology("triangle")]
@@ -203,7 +214,8 @@ void VisibilityBufferMSMain(
     const uint vGroupID : SV_GroupID,
     in payload Payload payload,
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
-    out indices uint3 outputTriangles[MS_MESHLET_SIZE])
+    out indices uint3 outputTriangles[MS_MESHLET_SIZE],
+    out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
 {
     uint meshletIndex = payload.MeshletIndices[vGroupID];
     MeshletSetup setup;
@@ -214,4 +226,5 @@ void VisibilityBufferMSMain(
         return;
     }
     EmitMeshletVisBuffer(uGroupThreadID, setup, outputVertices, outputTriangles);
+    EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }

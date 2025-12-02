@@ -21,57 +21,37 @@ public:
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) override {
-		builder->WithShaderResource(Builtin::CameraBuffer,
-			Builtin::Environment::PrefilteredCubemapsGroup,
-			Builtin::Light::ActiveLightIndices,
-			Builtin::Light::InfoBuffer,
-			Builtin::Light::PointLightCubemapBuffer,
-			Builtin::Light::DirectionalLightCascadeBuffer,
-			Builtin::Light::SpotLightMatrixBuffer,
-			Builtin::Environment::InfoBuffer,
-			Builtin::GBuffer::Normals,
-			Builtin::GBuffer::Albedo,
-			Builtin::GBuffer::Emissive,
-			Builtin::GBuffer::MetallicRoughness,
-			Builtin::PrimaryCamera::DepthTexture,
-			Builtin::Environment::CurrentCubemap,
-			Builtin::Shadows::ShadowMaps)
-			.WithUnorderedAccess(Builtin::Color::HDRColorTarget);
-
-		if (m_clusteredLightingEnabled) {
-			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
-		}
-
-		if (m_gtaoEnabled) {
-			builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
-		}
+		builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
+			Builtin::PrimaryCamera::VisibilityTexture,
+			Builtin::PerMeshInstanceBuffer,
+			Builtin::PerObjectBuffer,
+			Builtin::PerMeshBuffer,
+			Builtin::CameraBuffer,
+			Builtin::PostSkinningVertices,
+			Builtin::NormalMatrixBuffer)
+			.WithUnorderedAccess(Builtin::GBuffer::Normals,
+				Builtin::GBuffer::Albedo,
+				Builtin::GBuffer::Emissive,
+				Builtin::GBuffer::MetallicRoughness);
 	}
 
 	void Setup() override {
 
-		if (m_clusteredLightingEnabled) {
-			RegisterSRV(Builtin::Light::ClusterBuffer);
-			RegisterSRV(Builtin::Light::PagesBuffer);
-		}
-
-		RegisterSRV(Builtin::Light::ActiveLightIndices);
-		RegisterSRV(Builtin::Light::InfoBuffer);
-		RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-		RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-		RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-		RegisterSRV(Builtin::Environment::InfoBuffer);
+		RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+		RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
+		RegisterSRV(Builtin::MeshResources::MeshletTriangles);
+		RegisterSRV(Builtin::PerMeshInstanceBuffer);
+		RegisterSRV(Builtin::PerObjectBuffer);
+		RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
 		RegisterSRV(Builtin::CameraBuffer);
+		RegisterSRV(Builtin::PostSkinningVertices);
+		RegisterSRV(Builtin::NormalMatrixBuffer);
 
-		if (m_gtaoEnabled)
-			RegisterSRV(Builtin::GTAO::OutputAOTerm);
-
-		RegisterSRV(Builtin::GBuffer::Normals);
-		RegisterSRV(Builtin::GBuffer::Albedo);
-		RegisterSRV(Builtin::GBuffer::Emissive);
-		RegisterSRV(Builtin::GBuffer::MetallicRoughness);
-		RegisterSRV(Builtin::PrimaryCamera::DepthTexture);
-
-		RegisterUAV(Builtin::Color::HDRColorTarget);
+		RegisterUAV(Builtin::GBuffer::Normals);
+		RegisterUAV(Builtin::GBuffer::Albedo);
+		RegisterUAV(Builtin::GBuffer::Emissive);
+		RegisterUAV(Builtin::GBuffer::MetallicRoughness);
 
 		CreatePSO();
 	}

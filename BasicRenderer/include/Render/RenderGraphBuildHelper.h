@@ -13,15 +13,14 @@ void CreateGBufferResources(RenderGraph* graph) {
 	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     TextureDescription normalsWorldSpaceDesc;
-    normalsWorldSpaceDesc.arraySize = 1;
     normalsWorldSpaceDesc.channels = 3;
-    normalsWorldSpaceDesc.isCubemap = false;
     normalsWorldSpaceDesc.format = rhi::Format::R32G32B32A32_Typeless;
     normalsWorldSpaceDesc.hasRTV = true;
 	normalsWorldSpaceDesc.rtvFormat = rhi::Format::R32G32B32A32_Float;
-    normalsWorldSpaceDesc.generateMipMaps = false;
     normalsWorldSpaceDesc.hasSRV = true;
     normalsWorldSpaceDesc.srvFormat = rhi::Format::R32G32B32A32_Float;
+    normalsWorldSpaceDesc.hasUAV = true;
+	normalsWorldSpaceDesc.uavFormat = rhi::Format::R32G32B32A32_Float;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
@@ -29,28 +28,24 @@ void CreateGBufferResources(RenderGraph* graph) {
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
     TextureDescription visibilityDesc;
-    visibilityDesc.arraySize = 1;
     visibilityDesc.channels = 2;
     visibilityDesc.format = rhi::Format::R32G32_UInt;
     visibilityDesc.hasRTV = true;
     visibilityDesc.hasSRV = true;
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
     auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
-    graph->RegisterResource(Builtin::VisibilityBuffer, visibilityBuffer);
+    graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
 
     std::shared_ptr<PixelBuffer> albedo;
     std::shared_ptr<PixelBuffer> metallicRoughness;
     std::shared_ptr<PixelBuffer> emissive;
     if (deferredRendering) {
         TextureDescription albedoDesc;
-        albedoDesc.arraySize = 1;
         albedoDesc.channels = 4;
-        albedoDesc.isCubemap = false;
         albedoDesc.hasRTV = true;
         albedoDesc.format = rhi::Format::R8G8B8A8_UNorm;
-        albedoDesc.generateMipMaps = false;
         albedoDesc.hasSRV = true;
-        albedoDesc.srvFormat = rhi::Format::R8G8B8A8_UNorm;
+		albedoDesc.hasUAV = true;
         ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
         albedoDesc.imageDimensions.push_back(albedoDims);
         albedo = PixelBuffer::Create(albedoDesc);
@@ -58,14 +53,11 @@ void CreateGBufferResources(RenderGraph* graph) {
         graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
         TextureDescription metallicRoughnessDesc;
-        metallicRoughnessDesc.arraySize = 1;
         metallicRoughnessDesc.channels = 2;
-        metallicRoughnessDesc.isCubemap = false;
         metallicRoughnessDesc.hasRTV = true;
         metallicRoughnessDesc.format = rhi::Format::R8G8_UNorm;
-        metallicRoughnessDesc.generateMipMaps = false;
         metallicRoughnessDesc.hasSRV = true;
-        metallicRoughnessDesc.srvFormat = rhi::Format::R8G8_UNorm;
+		metallicRoughnessDesc.hasUAV = true;
         ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
         metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
         metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
@@ -73,14 +65,11 @@ void CreateGBufferResources(RenderGraph* graph) {
         graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
 
         TextureDescription emissiveDesc;
-        emissiveDesc.arraySize = 1;
         emissiveDesc.channels = 4;
-        emissiveDesc.isCubemap = false;
         emissiveDesc.hasRTV = true;
         emissiveDesc.format = rhi::Format::R16G16B16A16_Float;
-        emissiveDesc.generateMipMaps = false;
         emissiveDesc.hasSRV = true;
-        emissiveDesc.srvFormat = rhi::Format::R16G16B16A16_Float;
+		emissiveDesc.hasUAV = true;
         ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
         emissiveDesc.imageDimensions.push_back(emissiveDims);
         emissive = PixelBuffer::Create(emissiveDesc);
@@ -403,12 +392,14 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     std::string primaryPassName = deferredRendering ? "Deferred Pass" : "Forward Pass";
 
     if (deferredRendering) {
-        auto primaryPassBuilder = graph->BuildComputePass(primaryPassName);
-        primaryPassBuilder.Build<DeferredShadingPass>();
+		// GBuffer construction pass
+        graph->BuildComputePass("GBuffer Construction Pass")
+            .Build<GBufferConstructionPass>();
+		// Deferred shading pass
+        graph->BuildComputePass(primaryPassName).Build<DeferredShadingPass>();
     }
     else {
-        auto primaryPassBuilder = graph->BuildRenderPass(primaryPassName);
-        primaryPassBuilder.Build<ForwardRenderPass>(
+        graph->BuildRenderPass(primaryPassName).Build<ForwardRenderPass>(
             wireframe, 
             meshShaders, 
             indirect, 

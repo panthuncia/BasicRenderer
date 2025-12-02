@@ -1131,8 +1131,11 @@ namespace rhi {
 				return Result::InvalidArg;
 			}
 			pResource = T->res.Get();
-
-			desc.Format = T->fmt;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			} else {
+				desc.Format = T->fmt;
+			}
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1D;
 			desc.Texture1D.MipSlice = dv.texture1D.mipSlice;
 
@@ -1149,7 +1152,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1DARRAY;
 			desc.Texture1DArray.MipSlice = dv.texture1DArray.mipSlice;
 			desc.Texture1DArray.FirstArraySlice = dv.texture1DArray.firstArraySlice;
@@ -1168,8 +1176,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
-			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 			desc.Texture2D.MipSlice = dv.texture2D.mipSlice;
 			desc.Texture2D.PlaneSlice = dv.texture2D.planeSlice;
 
@@ -1186,8 +1198,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
-			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
 			desc.Texture2DArray.MipSlice = dv.texture2DArray.mipSlice;
 			desc.Texture2DArray.FirstArraySlice = dv.texture2DArray.firstArraySlice;
 			desc.Texture2DArray.ArraySize = dv.texture2DArray.arraySize;
@@ -1206,8 +1222,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
-			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
 			desc.Texture3D.MipSlice = dv.texture3D.mipSlice;
 			desc.Texture3D.FirstWSlice = dv.texture3D.firstWSlice;
 			desc.Texture3D.WSize = (dv.texture3D.wSize == 0) ? UINT(-1) : dv.texture3D.wSize;
