@@ -106,6 +106,12 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 
+	// Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
+    // 2^25 visible clusters allowed due to index precision
+	// Will be used as an append buffer, so it needs a counter
+	auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(2 ^ 25, sizeof(UINT)*2, true, true);
+	graph->RegisterResource(Builtin::PrimaryCamera::MeshClusterIdBuffer, clusterIDBuffer);
+
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
         .Build<ClearIndirectDrawCommandUAVsPass>(false);
 

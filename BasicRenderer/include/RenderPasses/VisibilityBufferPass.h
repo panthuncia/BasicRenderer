@@ -73,7 +73,6 @@ public:
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_pVisibilityBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
-
         if (m_meshShaders) {
             m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }

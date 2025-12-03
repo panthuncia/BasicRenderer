@@ -61,7 +61,7 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
             return; // If the occluders pass will already render this, we don't need to render it in the remainders pass
         }
 #endif
-#if defined (OCCLUDERS_PASS1)
+#if defined (OCCLUDERS_PASS1) // TODO: What was this for?
         bool culledInRemainderPass = GetBit(meshletBitfieldBuffer, meshletBitfieldIndex);
         if (!culledInRemainderPass){ // If the remainder pass drew this, we don't need to cull it again
             return;

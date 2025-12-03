@@ -5,6 +5,7 @@
       "DepthTexture": {},
       "VisibilityTexture": {},
       "MeshletBitfield": {},
+      "MeshClusterIdBuffer": {},
       "IndirectCommandBuffers": {
         "Primary": {},
         "MeshletCulling": {},
