@@ -182,9 +182,9 @@ VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace 
 #endif
     
     VisBufferOutput output;
-    // Pack draw call ID and meshlet vertex index into a single uint, max 256 triangles per meshlet, so 8 bits for triangle index and 24 bits for draw call ID
-    output.visibility[0] = (perMeshInstanceBufferIndex << 8) | (primID & 0xFF);
-    output.visibility[1] = input.meshletIndex;
+    // 7 bits for meshlet-local triangle index, 25 bits for visible cluster index
+    output.visibility[0] = (primID << 25) | input.visibleClusterTableIndex;
+    output.visibility[1] = input.linearDepth;
     return output;
 }
 

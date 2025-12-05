@@ -36,6 +36,7 @@ public:
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
             Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
@@ -89,6 +90,7 @@ public:
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
     }
 
     PassReturn Execute(RenderContext& context) override {

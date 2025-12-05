@@ -105,7 +105,8 @@ struct PerMeshInstanceCB {
     unsigned int postSkinningVertexBufferOffset;
 	unsigned int meshletBoundsBufferStartIndex;
     unsigned int meshletBitfieldStartIndex;
-	unsigned int pad[2];
+	unsigned int clusterToVisibleClusterTableStartIndex;
+	unsigned int pad[1];
 };
 
 struct PerMaterialCB {

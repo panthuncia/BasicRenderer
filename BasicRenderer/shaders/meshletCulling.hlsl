@@ -9,7 +9,7 @@
 
 // Meshlet culling, one thread per meshlet, one dispatch per mesh, similar to mesh shader
 [numthreads(64, 1, 1)]
-void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
+void MeshletCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
 {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     
@@ -95,11 +95,28 @@ void MeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThr
     }
 //#if !defined (OCCLUDERS_PASS)
     ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
+
+#if defined (WRITE_VISIBILITY_UNPACK_DATA) // Only needed for primary camera view, when using visibility buffer. Used to allow visibility to pack into uint32.    
+    // uint2, .x = mesh instance index, .y = meshlet local index
+    RWStructuredBuffer<uint2> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    RWStructuredBuffer<uint> visibleClusterTableCounter = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTableCounter)];
+    
+    // Allocate cluster index
+    uint newAddress;
+    InterlockedAdd(visibleClusterTableCounter[0], 1, newAddress);
+    
+    visibleClusterTable[newAddress] = uint2(perMeshInstanceBufferIndex, vDispatchThreadID.x);
+    
+    // Update cluster index in mesh info
+    RWStructuredBuffer<uint> clusterToVisibleClusterIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)];
+    clusterToVisibleClusterIndexBuffer[meshInstanceBuffer.clusterToVisibleClusterTableStartIndex + vDispatchThreadID.x] = newAddress;
+#endif
+    
     //#endif
 }
 
 [numthreads(64, 1, 1)]
-void ClearMeshletFrustrumCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
+void ClearMeshletCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
 {
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     

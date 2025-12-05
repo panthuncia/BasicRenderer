@@ -101,7 +101,15 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     return result;
 }
 
-VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer)
+VisBufferPSInput GetVisBufferVertexAttributes(
+ByteAddressBuffer buffer, 
+uint blockByteOffset, 
+uint index, 
+uint flags, 
+uint vertexSize, 
+uint3 vGroupID, 
+PerObjectBuffer objectBuffer, 
+uint clusterToVisibleClusterTableStartIndex)
 {
     uint byteOffset = blockByteOffset + index * vertexSize;
     Vertex vertex = LoadVertex(byteOffset, buffer, flags);
@@ -114,10 +122,13 @@ VisBufferPSInput GetVisBufferVertexAttributes(ByteAddressBuffer buffer, uint blo
     float4 worldPosition = mul(pos, objectBuffer.model);
     float4 viewPosition = mul(worldPosition, mainCamera.view);
     
+    StructuredBuffer<uint> clusterToVisibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)];
+    uint clusterIndex = clusterToVisibleClusterTable[clusterToVisibleClusterTableStartIndex + vGroupID.x];
+    
     VisBufferPSInput result;
     result.position = mul(viewPosition, mainCamera.projection);
-    result.meshletIndex = vGroupID.x;
-    // triangle index
+    result.visibleClusterTableIndex = clusterIndex;
+    result.linearDepth = -viewPosition.z;
     
 #if defined(PSO_ALPHA_TEST)
     result.texcoord = vertex.texcoord;
@@ -166,7 +177,8 @@ void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices 
             setup.meshBuffer.vertexFlags,
             setup.meshBuffer.vertexByteSize,
             setup.meshletIndex,
-            setup.objectBuffer
+            setup.objectBuffer,
+            setup.meshInstanceBuffer.clusterToVisibleClusterTableStartIndex
         );
     }
 

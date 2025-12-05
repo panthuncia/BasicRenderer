@@ -58,6 +58,15 @@ void MeshInstance::SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> mesh
 	m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 }
 
+void MeshInstance::SetClusterToVisibleClusterIndicesBufferView(std::unique_ptr<BufferView> clusterIndicesBufferView) {
+	m_clusterToVisibleClusterIndicesBufferView = std::move(clusterIndicesBufferView);
+	if (m_clusterToVisibleClusterIndicesBufferView == nullptr) {
+		return; // no need to update
+	}
+	m_perMeshInstanceBufferData.clusterToVisibleClusterTableStartIndex = static_cast<uint32_t>(m_clusterToVisibleClusterIndicesBufferView->GetOffset() / sizeof(uint32_t));
+	m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
+}
+
 void MeshInstance::SetPerObjectBufferIndex(uint32_t index) {
 	m_perMeshInstanceBufferData.perObjectBufferIndex = index;
 	if (m_pCurrentMeshManager && m_perMeshInstanceBufferView) {

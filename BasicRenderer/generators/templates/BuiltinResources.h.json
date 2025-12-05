@@ -5,7 +5,8 @@
       "DepthTexture": {},
       "VisibilityTexture": {},
       "MeshletBitfield": {},
-      "MeshClusterIdBuffer": {},
+      "VisibleClusterTable": {},
+      "VisibleClusterTableCounter": {},
       "IndirectCommandBuffers": {
         "Primary": {},
         "MeshletCulling": {},
@@ -22,7 +23,8 @@
       "MeshletOffsets": {},
       "MeshletVertexIndices": {},
       "MeshletTriangles": {},
-      "MeshletBounds": {}
+      "MeshletBounds": {},
+      "ClusterToVisibleClusterTableIndexBuffer": {}
     },
     "MeshletCullingBitfieldGroup": {},
     "MeshInstanceMeshletCullingBitfieldGroup": {},

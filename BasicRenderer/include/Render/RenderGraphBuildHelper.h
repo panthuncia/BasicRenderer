@@ -108,9 +108,12 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 
 	// Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
     // 2^25 visible clusters allowed due to index precision
-	// Will be used as an append buffer, so it needs a counter
-	auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(2 ^ 25, sizeof(UINT)*2, true, true);
-	graph->RegisterResource(Builtin::PrimaryCamera::MeshClusterIdBuffer, clusterIDBuffer);
+	auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(UINT)*2, true, false);
+	clusterIDBuffer->SetName(L"Visible Cluster Table");
+	graph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
+	auto clusterIDBufferCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
+	clusterIDBufferCounter->SetName(L"Visible Cluster Table Counter");
+	graph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
 
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
         .Build<ClearIndirectDrawCommandUAVsPass>(false);
@@ -401,6 +404,11 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 		// GBuffer construction pass
         graph->BuildComputePass("GBuffer Construction Pass")
             .Build<GBufferConstructionPass>();
+
+		// Reset visible cluster table counter
+        graph->BuildRenderPass("VisibleClusterTableCounterResetPass")
+			.Build<VisibleClusterTableCounterResetPass>();
+
 		// Deferred shading pass
         graph->BuildComputePass(primaryPassName).Build<DeferredShadingPass>();
     }

@@ -18,6 +18,7 @@ MeshManager::MeshManager() {
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
 	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
 	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
+	m_clusterToVisibleClusterTableIndexBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"clusterIndicesBuffer", false, true);
 
 	m_perMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"PerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 
@@ -31,6 +32,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
 	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
 	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
+	m_resources[Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer] = m_clusterToVisibleClusterTableIndexBuffer;
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
@@ -157,6 +159,10 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	uint32_t perMeshIndex = static_cast<uint32_t>(
 		mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferIndex(perMeshIndex);
+
+	// This buffer is used for draw call indexing in the visibility buffer, to unpack uint25 visibility data
+	auto clusterIndicesView = m_clusterToVisibleClusterTableIndexBuffer->Allocate(mesh->GetMesh()->GetMeshletCount() * sizeof(unsigned int), sizeof(unsigned int));
+	mesh->SetClusterToVisibleClusterIndicesBufferView(std::move(clusterIndicesView));
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {

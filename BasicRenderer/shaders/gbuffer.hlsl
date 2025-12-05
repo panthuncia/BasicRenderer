@@ -98,13 +98,20 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     
     uint2 pixel = dispatchThreadId.xy;
-    // [0] = 8 bits for meshlet-local triangle index and 24 bits for draw call ID
-    // [1] = drawcall-local meshlet index
+    // .x = 7 bits for meshlet triangle index, 25 bits for visible cluster index
+    // .y = 32-bit depth
     Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     uint2 visibilityData = visibilityTexture[pixel];
-    uint drawCallMeshletIndex = visibilityData.y;
-    uint meshletTriangleIndex = visibilityData.x & 0xFF;
-    uint perMeshInstanceBufferIndex = visibilityData.x >> 8;
+    
+    uint meshletTriangleIndex = visibilityData.x & 0x7F;
+    uint clusterIndex = visibilityData.x >> 7;
+    
+    // .x = drawcall index, .y = meshlet-local triangle index
+    StructuredBuffer<uint2> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    uint2 clusterData = visibleClusterTable[clusterIndex];
+    
+    uint drawCallMeshletIndex = clusterData.x;
+    uint perMeshInstanceBufferIndex = clusterData.y;
     
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
