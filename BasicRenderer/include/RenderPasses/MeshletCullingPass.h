@@ -117,9 +117,12 @@ public:
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-		commandList.BindPipeline(m_cullingWithVisibilityDataPSO.GetAPIPipelineState().GetHandle());
 
-		BindResourceDescriptorIndices(commandList, m_cullingWithVisibilityDataPSO.GetResourceDescriptorSlots());
+		auto& pso = m_isRemaindersPass ? m_cullingPSO : m_cullingWithVisibilityDataPSO; // Only write visibility data for main culling pass
+
+		commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+
+		BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
 		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;

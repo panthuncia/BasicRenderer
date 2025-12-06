@@ -103,15 +103,15 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     uint2 visibilityData = visibilityTexture[pixel];
     
-    uint meshletTriangleIndex = visibilityData.x & 0x7F;
-    uint clusterIndex = visibilityData.x >> 7;
+    uint clusterIndex = visibilityData.x & 0x1FFFFFFu; // low 25 bits
+    uint meshletTriangleIndex = visibilityData.x >> 25; // high 7 bits
     
     // .x = drawcall index, .y = meshlet-local triangle index
-    StructuredBuffer<uint2> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
-    uint2 clusterData = visibleClusterTable[clusterIndex];
-    
-    uint drawCallMeshletIndex = clusterData.x;
-    uint perMeshInstanceBufferIndex = clusterData.y;
+    StructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    VisibleClusterInfo clusterData = visibleClusterTable[clusterIndex];
+
+    uint perMeshInstanceBufferIndex = clusterData.drawcallIndexAndMeshletIndex.x;    
+    uint drawCallMeshletIndex = clusterData.drawcallIndexAndMeshletIndex.y;
     
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
@@ -203,4 +203,27 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
     emissiveTexture[pixel] = float4(materialInputs.emissive, 0.0f);
     metallicRoughnessTexture[pixel] = float2(materialInputs.metallic, materialInputs.roughness);
+}
+
+[numthreads(8, 8, 1)]
+void PrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+
+    uint screenW = perFrameBuffer.screenResX;
+    uint screenH = perFrameBuffer.screenResY;
+
+    if (dispatchThreadId.x >= screenW || dispatchThreadId.y >= screenH)
+    {
+        return;
+    }
+    
+    uint2 pixel = dispatchThreadId.xy;
+    // .x = 7 bits for meshlet triangle index, 25 bits for visible cluster index
+    // .y = 32-bit depth
+    Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    float depth = asfloat(visibilityTexture[pixel].y);
+
+    RWTexture2D<float> linearDepthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
+    linearDepthTexture[pixel] = depth;
 }

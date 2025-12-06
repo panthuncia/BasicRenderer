@@ -56,6 +56,8 @@ public:
 		RegisterUAV(Builtin::GBuffer::MetallicRoughness);
 
 		CreatePSO();
+
+		m_table = m_resourceRegistryView->Request<Resource>(Builtin::PrimaryCamera::VisibleClusterTable);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -70,6 +72,19 @@ public:
 		commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
 
 		BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+
+		// Manual UAV barrier for the cluster table for testing
+		rhi::BufferBarrier barrier{};
+		barrier.beforeAccess = rhi::ResourceAccessType::ShaderResource;
+		barrier.afterAccess = rhi::ResourceAccessType::ShaderResource;
+		barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+		barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+		barrier.buffer = m_table->GetAPIResource().GetHandle();
+
+		rhi::BarrierBatch barrierBatch;
+		barrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
+		commandList.Barriers(barrierBatch);
+
 
 		uint32_t w = context.renderResolution.x;
 		uint32_t h = context.renderResolution.y;
@@ -106,4 +121,6 @@ private:
 			"GBufferConstructionPSO"
 		);
 	}
+
+	std::shared_ptr<Resource> m_table;
 };

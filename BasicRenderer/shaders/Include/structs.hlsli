@@ -324,4 +324,9 @@ struct MaterialInputs
     float ambientOcclusion;
 };
 
+struct VisibleClusterInfo {
+    uint2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
+    uint pad[2];
+};
+
 #endif // __STRUCTS_HLSL__

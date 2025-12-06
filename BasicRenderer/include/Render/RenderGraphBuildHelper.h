@@ -6,6 +6,7 @@
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
 #include "RenderPasses/VisibilityBufferPass.h"
 #include "RenderPasses/GBufferConstructionPass.h"
+#include "RenderPasses/PrimaryDepthCopyPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -34,6 +35,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     visibilityDesc.hasSRV = true;
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
     auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
+	visibilityBuffer->SetName(L"Visibility Buffer");
     graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
 
     std::shared_ptr<PixelBuffer> albedo;
@@ -108,7 +110,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 
 	// Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
     // 2^25 visible clusters allowed due to index precision
-	auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(UINT)*2, true, false);
+	auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
 	clusterIDBuffer->SetName(L"Visible Cluster Table");
 	graph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
 	auto clusterIDBufferCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
@@ -131,12 +133,12 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, true);
     }
 
-    graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-        .Build<GBufferPass>(
-        wireframeEnabled, 
-        meshShadersEnabled, 
-        true, 
-        true);
+    //graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
+    //    .Build<GBufferPass>(
+    //    wireframeEnabled, 
+    //    meshShadersEnabled, 
+    //    true, 
+    //    true);
 
     graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
         .Build<VisibilityBufferPass>(
@@ -162,12 +164,12 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, false);
     }
 
-    graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-        .Build<GBufferPass>(
-        wireframeEnabled, 
-        meshShadersEnabled, 
-        true, 
-        false);
+    //graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
+    //    .Build<GBufferPass>(
+    //    wireframeEnabled, 
+    //    meshShadersEnabled, 
+    //    true, 
+    //    false);
 
     graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
         .Build<VisibilityBufferPass>(
@@ -218,12 +220,12 @@ void BuildZPrepass(RenderGraph* graph) {
     if (!occlusionCulling || !indirect) {
         clearRTVs = true; // We will not run an earlier pass
     }
-    graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-        .Build<GBufferPass>(
-        enableWireframe, 
-        useMeshShaders,
-        indirect, 
-        clearRTVs);
+    //graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
+    //    .Build<GBufferPass>(
+    //    enableWireframe, 
+    //    useMeshShaders,
+    //    indirect, 
+    //    clearRTVs);
 
 	graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
         .Build<VisibilityBufferPass>(
@@ -231,6 +233,10 @@ void BuildZPrepass(RenderGraph* graph) {
             useMeshShaders,
             indirect,
             clearRTVs);
+
+	// Copy depth to a separate resource for post-processing use
+    graph->BuildComputePass("PrimaryDepthCopyPass")
+		.Build<PrimaryDepthCopyPass>();
 }
 
 void RegisterGTAOResources(RenderGraph* graph) {

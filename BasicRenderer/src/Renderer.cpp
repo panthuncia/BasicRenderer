@@ -338,7 +338,7 @@ void Renderer::SetSettings() {
     bool meshShaderSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShaderSupported && m_useMeshShaders);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
-	settingsManager.registerSetting<bool>("enableGTAO", true);
+	settingsManager.registerSetting<bool>("enableGTAO", false);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<bool>("enableBloom", m_bloom);

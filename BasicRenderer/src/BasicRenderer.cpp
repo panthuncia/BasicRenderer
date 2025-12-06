@@ -272,6 +272,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto tigerScene = LoadModel("models/tiger.glb");
     tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
+	auto shiba = LoadModel("models/shiba.glb");
+
     //auto usdScene = LoadModel("models/sponza.usdz");
     
     //auto bistro = LoadModel("models/bistroExterior.usdz");
@@ -288,10 +290,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(curtains->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(carScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+	renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());

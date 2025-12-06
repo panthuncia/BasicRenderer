@@ -274,6 +274,11 @@ struct LPMConstants {
     DirectX::XMMATRIX inputToOutputMatrix;
 };
 
+struct VisibleClusterInfo {
+    DirectX::XMUINT2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
+    unsigned int pad[2];
+};
+
 
 enum RootSignatureLayout {
     PerObjectRootSignatureIndex,

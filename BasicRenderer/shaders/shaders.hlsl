@@ -183,8 +183,9 @@ VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace 
     
     VisBufferOutput output;
     // 7 bits for meshlet-local triangle index, 25 bits for visible cluster index
-    output.visibility[0] = (primID << 25) | input.visibleClusterTableIndex;
-    output.visibility[1] = input.linearDepth;
+    output.visibility.x = (primID << 25) | input.visibleClusterTableIndex;
+    // store float in uint
+    output.visibility.y = asuint(input.linearDepth);
     return output;
 }
 
