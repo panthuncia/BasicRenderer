@@ -157,7 +157,10 @@ private:
                 ca.loadOp = rhi::LoadOp::Clear;
                 ca.clear.type = rhi::ClearValueType::Color;
                 ca.clear.format = rhi::Format::R32G32_UInt;
-                ca.clear.rgba[0] = 0.0f; ca.clear.rgba[1] = 0.0f; ca.clear.rgba[2] = 0.0f; ca.clear.rgba[3] = 1.0f;
+                ca.clear.rgba[0] = m_pVisibilityBuffer->GetClearColor().rgba[0];
+                ca.clear.rgba[1] = m_pVisibilityBuffer->GetClearColor().rgba[1];
+                ca.clear.rgba[2] = m_pVisibilityBuffer->GetClearColor().rgba[2];
+                ca.clear.rgba[3] = m_pVisibilityBuffer->GetClearColor().rgba[3];
             }
             else {
                 ca.loadOp = rhi::LoadOp::Load;

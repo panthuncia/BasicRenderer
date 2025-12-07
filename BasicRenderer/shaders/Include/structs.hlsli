@@ -145,7 +145,7 @@ struct MaterialInfo {
     uint4 baseColorChannels;
     
     uint3 normalChannels;
-    float pad0;
+    uint compileFlagsID;
     
     uint aoChannel;
     uint heightChannel;
@@ -153,7 +153,7 @@ struct MaterialInfo {
     uint roughnessChannel;
 
     uint3 emissiveChannels;
-    float pad1;
+    float pad0;
 };
 
 struct SingleMatrix {

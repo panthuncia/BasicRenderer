@@ -145,7 +145,7 @@ struct PerMaterialCB {
     DirectX::XMUINT4 baseColorChannels;
 
     DirectX::XMUINT3 normalChannels;
-    float pad0;
+    unsigned int compileFlagsID;
 
 	unsigned int aoChannel;
     unsigned int heightChannel;
@@ -153,7 +153,7 @@ struct PerMaterialCB {
     unsigned int roughnessChannel;
     
     DirectX::XMUINT3 emissiveChannels;
-	float pad1;
+	float pad0;
 };
 
 struct LightInfo {

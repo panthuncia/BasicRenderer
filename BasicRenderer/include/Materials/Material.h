@@ -48,6 +48,24 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
         }
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }
+	if (d.baseColor.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileBaseColorTexture;
+	}
+	if (d.normal.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileNormalMap;
+	}
+	if (d.aoMap.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileAOTexture;
+	}
+	if (d.metallic.texture || d.roughness.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompilePBRMaps;
+	}
+	if (d.emissive.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileEmissiveTexture;
+	}
+	if (d.heightMap.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileParallax;
+	}
     return tech;
 }
 

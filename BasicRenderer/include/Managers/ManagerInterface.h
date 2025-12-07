@@ -6,6 +6,7 @@ class IndirectCommandBufferManager;
 class ViewManager;
 class LightManager;
 class EnvironmentManager;
+class MaterialManager;
 
 class ManagerInterface {
 public:
@@ -16,13 +17,15 @@ public:
 		IndirectCommandBufferManager* indirectCommandBufferManager,
 		ViewManager* viewManager,
 		LightManager* lightManager,
-		EnvironmentManager*  environmentManager
+		EnvironmentManager*  environmentManager,
+		MaterialManager* materialManager
 	) : m_pMeshManager(meshManager),
 		m_pObjectManager(objectManager),
 		m_pIndirectCommandBufferManager(indirectCommandBufferManager),
 		m_pViewManager(viewManager),
 		m_pLightManager(lightManager), 
-		m_pEnvironmentManager(environmentManager){
+		m_pEnvironmentManager(environmentManager),
+		m_pMaterialManager(materialManager){
 	}
 
 	void SetManagers(MeshManager* meshManager,
@@ -30,13 +33,15 @@ public:
 		IndirectCommandBufferManager* indirectCommandBufferManager,
 		ViewManager* viewManager,
 		LightManager* lightManager,
-		EnvironmentManager* environmentManager) {
+		EnvironmentManager* environmentManager,
+		MaterialManager* materialManager) {
 		m_pMeshManager = meshManager;
 		m_pObjectManager = objectManager;
 		m_pIndirectCommandBufferManager = indirectCommandBufferManager;
 		m_pViewManager = viewManager;
 		m_pLightManager = lightManager;
 		m_pEnvironmentManager = environmentManager;
+		m_pMaterialManager = materialManager;
 	}
 
 	MeshManager* GetMeshManager() { return m_pMeshManager; }
@@ -45,6 +50,7 @@ public:
 	ViewManager* GetViewManager() { return m_pViewManager; }
 	LightManager* GetLightManager() { return m_pLightManager; }
 	EnvironmentManager* GetEnvironmentManager() { return m_pEnvironmentManager; }
+	MaterialManager* GetMaterialManager() { return m_pMaterialManager; }
 private:
 	MeshManager* m_pMeshManager = nullptr;
 	ObjectManager* m_pObjectManager = nullptr;
@@ -52,4 +58,5 @@ private:
 	ViewManager* m_pViewManager = nullptr;
 	LightManager* m_pLightManager = nullptr;
 	EnvironmentManager* m_pEnvironmentManager = nullptr;
+	MaterialManager* m_pMaterialManager = nullptr;
 };

@@ -15,6 +15,7 @@
 #include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
+#include "Managers/MaterialManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Animation/AnimationController.h"
 #include "Utilities/MathUtils.h"
@@ -192,6 +193,10 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 				}
 				perPassMeshes.meshesByPass[pass.hash].push_back(meshInstance);
 			}
+
+			// Increment material usage count
+			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(technique.compileFlags);
+
 			entity.set<Components::PerPassMeshes>(perPassMeshes);
 		}
 	}

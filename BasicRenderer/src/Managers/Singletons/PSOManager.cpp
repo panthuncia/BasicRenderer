@@ -904,6 +904,37 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_BLEND";
         defines.insert(defines.begin(), macro);
     }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileParallax) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_PARALLAX";
+        defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileNormalMap) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_NORMAL_MAP";
+        defines.insert(defines.begin(), macro);
+	}
+	if (materialFlags & MaterialCompileFlags::MaterialCompileEmissiveTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_EMISSIVE_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompilePBRMaps) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_PBR_MAPS";
+        defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileAOTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_AO_TEXTURE";
+        defines.insert(defines.begin(), macro);
+	}
+
     if (psoFlags & PSOFlags::PSO_SHADOW) {
         DxcDefine macro;
         macro.Value = L"1";

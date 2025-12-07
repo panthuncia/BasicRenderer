@@ -104,6 +104,10 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint2 visibilityData = visibilityTexture[pixel];
     
     uint clusterIndex = visibilityData.x & 0x1FFFFFFu; // low 25 bits
+    if (clusterIndex == 0x1FFFFFFu)
+    {
+        return; // No visible cluster
+    }
     uint meshletTriangleIndex = visibilityData.x >> 25; // high 7 bits
     
     // .x = drawcall index, .y = meshlet-local triangle index

@@ -7,6 +7,11 @@
 #include "RenderPasses/VisibilityBufferPass.h"
 #include "RenderPasses/GBufferConstructionPass.h"
 #include "RenderPasses/PrimaryDepthCopyPass.h"
+#include "RenderPasses/VisUtil/BuildPixelListPass.h"
+#include "RenderPasses/VisUtil/EvaluateMaterialGroupsPass.h"
+#include "RenderPasses/VisUtil/MaterialHistogramPass.h"
+#include "RenderPasses/VisUtil/MaterialPixelCounterResetPass.h"
+#include "RenderPasses/VisUtil/MaterialPrefixSumPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -34,6 +39,8 @@ void CreateGBufferResources(RenderGraph* graph) {
     visibilityDesc.hasRTV = true;
     visibilityDesc.hasSRV = true;
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
+	visibilityDesc.clearColor[0] = 0;
+	visibilityDesc.clearColor[1] = 0xFFFFFFFF;
     auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
 	visibilityBuffer->SetName(L"Visibility Buffer");
     graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
@@ -206,7 +213,44 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
     }
 }
 
-void BuildZPrepass(RenderGraph* graph) {
+inline void RegisterVisUtilResources(RenderGraph* graph)
+{
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    const uint32_t maxPixels = resolution.x * resolution.y;
+
+    auto& rm = ResourceManager::GetInstance();
+
+    // 1) Per-material pixel count buffer (uint[numMaterials])
+
+    // 2) Per-material prefix sum offsets (uint[numMaterials])
+
+    // 3) Total pixel count buffer (uint[1])
+    auto totalPixelCountBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), /*shaderVisible=*/true, /*cpuVisible=*/false);
+    totalPixelCountBuffer->SetName(L"VisUtil::TotalPixelCountBuffer");
+    graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
+
+    // 4) Per-material write cursors (uint[numMaterials]) used in pass 5
+
+    // 5) Pixel list buffer (PixelRef[maxPixels])
+    // PixelRef layout: uint2 pixelXY; uint dcElemIndex; uint primId; -> 4 uints (16 bytes) or 3 uints + 2 uint -> 20 bytes.
+    // We'll pack as 4 uints (16 bytes): pixelX, pixelY, dcElemIndex, primId to keep alignment simple.
+    struct PixelRefPOD { uint32_t a, b, c, d; };
+    auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), /*shaderVisible=*/true, /*cpuVisible=*/false);
+    pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
+    graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
+
+    // a single-element buffer storing NumMaterials
+    //auto numMaterialsBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), /*shaderVisible=*/true, /*cpuVisible=*/true);
+    //numMaterialsBuffer->SetName(L"VisUtil::NumMaterialsBuffer");
+    //graph->RegisterResource("Builtin::VisUtil::NumMaterialsBuffer", numMaterialsBuffer);
+
+    // Initialize NumMaterials on upload heap (for Clear pass)
+    //uint32_t numMaterialsValue = numMaterials;
+    //QUEUE_UPLOAD(&numMaterialsValue, sizeof(uint32_t), numMaterialsBuffer.get(), 0);
+}
+
+void BuildVisibilityPipeline(RenderGraph* graph) {
+    RegisterVisUtilResources(graph);
     bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();

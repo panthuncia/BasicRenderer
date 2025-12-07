@@ -176,12 +176,13 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
+	m_pMaterialManager = MaterialManager::CreateUnique();
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
 	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 
-	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get(), m_pMaterialManager.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -762,6 +763,7 @@ void Renderer::Render() {
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
+	m_context.materialManager = m_pMaterialManager.get();
 	m_context.drawStats = drawStats;
 	m_context.deltaTime = deltaTime;
 
@@ -1034,6 +1036,7 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterProvider(m_pLightManager.get());
     newGraph->RegisterProvider(m_pEnvironmentManager.get());
     newGraph->RegisterProvider(m_pIndirectCommandBufferManager.get());
+	newGraph->RegisterProvider(m_pMaterialManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
 
 	auto& depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
@@ -1073,7 +1076,7 @@ void Renderer::CreateRenderGraph() {
     }
 
     // Z prepass goes before light clustering for when active cluster determination is implemented
-    BuildZPrepass(newGraph.get());
+    BuildVisibilityPipeline(newGraph.get());
 
     // GTAO pass
     if (m_gtaoEnabled) {
